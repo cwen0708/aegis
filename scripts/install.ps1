@@ -340,12 +340,7 @@ function Start-Installation {
 
     Write-Step "安裝前端套件 (這可能需要幾分鐘)..."
     Push-Location $frontendDir
-    # Use npx pnpm (auto-downloads pnpm without global install / PATH issues)
-    $null = & npx -y pnpm install 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warn "pnpm install 失敗，嘗試使用 npm..."
-        $null = & npm install 2>&1
-    }
+    $null = & npm install 2>&1
     Pop-Location
     Write-OK "前端套件安裝完成"
 
