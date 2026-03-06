@@ -9,7 +9,8 @@
 
 param(
     [string]$RootDir = "",
-    [string]$InstallDir = ""
+    [string]$InstallDir = "",
+    [switch]$Force  # Skip "already installed" checks, force winget install
 )
 
 # ============================================================
@@ -102,17 +103,20 @@ function Install-WithWinget {
         [string]$PackageId,
         [string]$Name,
         [string]$TestCommand,
-        [string]$WingetExe
+        [string]$WingetExe,
+        [bool]$ForceInstall = $false
     )
 
-    if ($TestCommand -and (Test-CommandExists $TestCommand)) {
+    if (!$ForceInstall -and $TestCommand -and (Test-CommandExists $TestCommand)) {
         Write-OK "$Name 已安裝"
         return $true
     }
 
     Write-Step "正在安裝 $Name ..."
     try {
-        $result = & $WingetExe install --id $PackageId --accept-source-agreements --accept-package-agreements --silent 2>&1
+        $wingetArgs = @("install", "--id", $PackageId, "--accept-source-agreements", "--accept-package-agreements", "--silent")
+        if ($ForceInstall) { $wingetArgs += "--force" }
+        $result = & $WingetExe @wingetArgs 2>&1
         $exitCode = $LASTEXITCODE
 
         # Refresh PATH after install
@@ -123,8 +127,13 @@ function Install-WithWinget {
             Write-OK "$Name 安裝完成"
             return $true
         } else {
+            # Check if command is now available despite winget exit code
+            Refresh-Path
+            if ($TestCommand -and (Test-CommandExists $TestCommand)) {
+                Write-OK "$Name 已可用 (winget exit code: $exitCode)"
+                return $true
+            }
             Write-Warn "$Name 安裝可能有問題 (exit code: $exitCode)"
-            Write-Warn ($result | Out-String)
             return $false
         }
     } catch {
@@ -210,21 +219,21 @@ function Start-Installation {
     Write-Host "  [2/7] 安裝基礎工具 (Git, Python, Node.js)" -ForegroundColor White
     Write-Host "  ─────────────────────────────────" -ForegroundColor DarkGray
 
-    $gitOk = Install-WithWinget -PackageId "Git.Git" -Name "Git" -TestCommand "git" -WingetExe $wingetExe
+    $gitOk = Install-WithWinget -PackageId "Git.Git" -Name "Git" -TestCommand "git" -WingetExe $wingetExe -ForceInstall $Force
     if (!$gitOk) {
         Write-Err "Git 安裝失敗，無法繼續"
         return $false
     }
     Refresh-Path
 
-    $pythonOk = Install-WithWinget -PackageId "Python.Python.3.12" -Name "Python 3.12" -TestCommand "python" -WingetExe $wingetExe
+    $pythonOk = Install-WithWinget -PackageId "Python.Python.3.12" -Name "Python 3.12" -TestCommand "python" -WingetExe $wingetExe -ForceInstall $Force
     if (!$pythonOk) {
         Write-Err "Python 安裝失敗，無法繼續"
         return $false
     }
     Refresh-Path
 
-    $nodeOk = Install-WithWinget -PackageId "OpenJS.NodeJS.LTS" -Name "Node.js LTS" -TestCommand "node" -WingetExe $wingetExe
+    $nodeOk = Install-WithWinget -PackageId "OpenJS.NodeJS.LTS" -Name "Node.js LTS" -TestCommand "node" -WingetExe $wingetExe -ForceInstall $Force
     if (!$nodeOk) {
         Write-Err "Node.js 安裝失敗，無法繼續"
         return $false
@@ -329,19 +338,46 @@ function Start-Installation {
 
     $frontendDir = Join-Path $projectDir "frontend"
 
+    # Ensure npm global bin is in PATH (needed when running elevated as admin)
+    $npmPrefix = (& npm prefix -g 2>$null)
+    if ($npmPrefix) {
+        $npmPrefix = $npmPrefix.Trim()
+        if ($env:Path -notlike "*$npmPrefix*") {
+            $env:Path = "$npmPrefix;$env:Path"
+        }
+    }
+
     # Install pnpm if not available
+    $pnpmCmd = "pnpm"
     if (!(Test-CommandExists "pnpm")) {
         Write-Step "安裝 pnpm..."
-        & npm install -g pnpm 2>&1 | Out-Null
+        $null = & npm install -g pnpm 2>&1
         Refresh-Path
+        # npm global bin may not be in PATH yet; locate it directly
+        if (!(Test-CommandExists "pnpm")) {
+            $pnpmCandidate = Join-Path $npmPrefix "pnpm.cmd"
+            if ($npmPrefix -and (Test-Path $pnpmCandidate)) {
+                $pnpmCmd = $pnpmCandidate
+                Write-OK "pnpm 安裝完成 (使用完整路徑)"
+            } else {
+                Write-Warn "pnpm 安裝後找不到，將使用 npm 替代"
+                $pnpmCmd = ""
+            }
+        } else {
+            Write-OK "pnpm 安裝完成"
+        }
     }
 
     Write-Step "安裝前端套件 (這可能需要幾分鐘)..."
     Push-Location $frontendDir
-    & pnpm install 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warn "pnpm install 失敗，嘗試使用 npm..."
-        & npm install 2>&1
+    $frontendOk = $false
+    if ($pnpmCmd) {
+        $null = & $pnpmCmd install 2>&1
+        if ($LASTEXITCODE -eq 0) { $frontendOk = $true }
+    }
+    if (!$frontendOk) {
+        if ($pnpmCmd) { Write-Warn "pnpm install 失敗，嘗試使用 npm..." }
+        $null = & npm install 2>&1
     }
     Pop-Location
     Write-OK "前端套件安裝完成"
@@ -499,9 +535,33 @@ echo  Aegis stopped.
 }
 
 # ============================================================
+# Self-elevate to admin if needed
+# ============================================================
+# winget install (Git, Python, Node.js) requires admin privileges.
+# Re-launch this script as administrator so the user only sees
+# one UAC prompt at the very beginning.
+function Ensure-Admin {
+    $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator)
+    if ($isAdmin) { return }
+
+    Write-Host "  [*] 需要系統管理員權限，正在提權..." -ForegroundColor Yellow
+    # Build a command that runs the script then pauses so the user can see results.
+    # Using -Command instead of -File so we can append a pause.
+    $scriptCall = "& '$PSCommandPath'"
+    if ($RootDir)    { $scriptCall += " -RootDir '$RootDir'" }
+    if ($InstallDir) { $scriptCall += " -InstallDir '$InstallDir'" }
+    if ($Force)      { $scriptCall += " -Force" }
+    $argList = "-NoProfile -ExecutionPolicy Bypass -Command `"$scriptCall; Write-Host ''; Write-Host '  按任意鍵關閉...' -ForegroundColor Gray; `$null = `$Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')`""
+    Start-Process powershell.exe -Verb RunAs -ArgumentList $argList -Wait
+    exit $LASTEXITCODE
+}
+
+# ============================================================
 # Entry point
 # ============================================================
 try {
+    Ensure-Admin
     $result = Start-Installation
     if ($result) {
         exit 0
