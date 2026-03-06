@@ -1,0 +1,342 @@
+<script setup lang="ts">
+import { ref, provide, onMounted, computed } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+import { Monitor, ListTodo, Bot, Settings, Activity, Clock, FolderOpen, Wifi, WifiOff, Sun, Moon, Zap, Users, Building2, PanelLeftClose, PanelLeftOpen, Rocket } from 'lucide-vue-next'
+import { useWebSocket } from './composables/useWebSocket'
+import { useAegisStore } from './stores/aegis'
+import ToastNotification from './components/ToastNotification.vue'
+
+const router = useRouter()
+const route = useRoute()
+const store = useAegisStore()
+
+// 初始化 WebSocket
+useWebSocket()
+
+// 側邊欄模式（provide 給子頁面控制）
+const sidebarMode = ref<'menu' | 'projects'>('menu')
+provide('sidebarMode', sidebarMode)
+
+// 側邊欄收起
+const sidebarCollapsed = ref(localStorage.getItem('aegis-sidebar') === 'collapsed')
+function toggleSidebar() {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+  localStorage.setItem('aegis-sidebar', sidebarCollapsed.value ? 'collapsed' : 'expanded')
+}
+
+// 明暗主題
+const isDark = ref(localStorage.getItem('aegis-theme') !== 'light')
+
+function toggleTheme() {
+  isDark.value = !isDark.value
+  localStorage.setItem('aegis-theme', isDark.value ? 'dark' : 'light')
+  document.documentElement.classList.toggle('light', !isDark.value)
+}
+
+onMounted(() => {
+  if (!isDark.value) document.documentElement.classList.add('light')
+})
+
+// 專案列表（給專案模式用）
+const projects = ref<any[]>([])
+
+const fetchProjects = async () => {
+  try {
+    const res = await fetch('/api/v1/projects/')
+    projects.value = await res.json()
+  } catch (e) {
+    // silent
+  }
+}
+
+onMounted(async () => {
+  fetchProjects()
+  await store.fetchSettings()
+
+  // 檢查 onboarding 狀態，未完成則導向
+  if (store.settings.onboarding_completed !== 'true' && route.path !== '/onboarding') {
+    router.push('/onboarding')
+  }
+
+  // 定時更新專案列表
+  setInterval(fetchProjects, 30000)
+})
+
+function goToProject(projectId: number) {
+  router.push({ path: '/kanban', query: { project: String(projectId) } })
+}
+
+// 系統指標格式化
+const cpuBar = computed(() => Math.min(store.systemInfo.cpu_percent, 100))
+const memBar = computed(() => Math.min(store.systemInfo.mem_percent, 100))
+
+function barColor(val: number) {
+  if (val > 80) return 'bg-red-500'
+  if (val > 60) return 'bg-amber-500'
+  return 'bg-emerald-500'
+}
+
+function navClass(path: string) {
+  const active = route.path === path
+  return [
+    sidebarCollapsed.value ? 'justify-center px-2' : 'px-3',
+    active ? 'bg-emerald-500/10 text-emerald-400' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50',
+  ]
+}
+</script>
+
+<template>
+  <div class="h-screen bg-slate-900 text-slate-100 font-sans flex overflow-hidden">
+
+    <!-- Sidebar -->
+    <aside :class="sidebarCollapsed ? 'w-14' : 'w-64'" class="bg-slate-800 border-r border-slate-700 flex flex-col transition-all duration-200">
+      <!-- Logo Area -->
+      <div class="h-16 flex items-center border-b border-slate-700" :class="sidebarCollapsed ? 'justify-center px-2' : 'px-6'">
+        <div class="flex items-center gap-2 text-emerald-400">
+          <Monitor class="w-6 h-6 shrink-0" />
+          <span v-if="!sidebarCollapsed" class="font-bold text-xl tracking-tight">Aegis</span>
+        </div>
+      </div>
+
+      <!-- Pill Toggle -->
+      <div v-if="!sidebarCollapsed" class="px-4 pt-4 pb-2">
+        <div class="inline-flex rounded-lg bg-slate-900 p-0.5 w-full">
+          <button
+            @click="sidebarMode = 'menu'"
+            class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors text-center"
+            :class="sidebarMode === 'menu' ? 'bg-slate-700 text-slate-100 shadow-sm' : 'text-slate-500 hover:text-slate-300'"
+          >
+            選單
+          </button>
+          <button
+            @click="sidebarMode = 'projects'"
+            class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors text-center"
+            :class="sidebarMode === 'projects' ? 'bg-slate-700 text-emerald-400 shadow-sm' : 'text-slate-500 hover:text-slate-300'"
+          >
+            專案
+          </button>
+        </div>
+      </div>
+
+      <!-- Menu Mode -->
+      <nav v-if="sidebarMode === 'menu'" class="flex-1 py-4 text-nowrap overflow-y-auto" :class="sidebarCollapsed ? 'px-1.5' : 'px-4'">
+        <!-- 總覽 -->
+        <div class="space-y-1 mb-2">
+          <p v-if="!sidebarCollapsed" class="px-3 text-[10px] font-semibold text-slate-600 tracking-widest uppercase mb-1">總覽</p>
+          <router-link to="/dashboard" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/dashboard')">
+            <Activity class="w-5 h-5 shrink-0" />
+            <span v-if="!sidebarCollapsed">儀表板</span>
+          </router-link>
+          <router-link to="/office" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/office')">
+            <Building2 class="w-5 h-5 shrink-0" />
+            <span v-if="!sidebarCollapsed">辦公室</span>
+          </router-link>
+        </div>
+
+        <!-- 工作 -->
+        <div class="border-t border-slate-700/40 my-2"></div>
+        <div class="space-y-1 mb-2">
+          <p v-if="!sidebarCollapsed" class="px-3 text-[10px] font-semibold text-slate-600 tracking-widest uppercase mb-1">工作</p>
+          <router-link to="/kanban" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/kanban')">
+            <ListTodo class="w-5 h-5 shrink-0" />
+            <span v-if="!sidebarCollapsed">專案看板</span>
+          </router-link>
+          <router-link to="/cron" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/cron')">
+            <Clock class="w-5 h-5 shrink-0" />
+            <span v-if="!sidebarCollapsed">排程管理</span>
+          </router-link>
+          <router-link to="/tasks" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/tasks')">
+            <Zap class="w-5 h-5 shrink-0" />
+            <span v-if="!sidebarCollapsed">運行中任務</span>
+          </router-link>
+        </div>
+
+        <!-- 管理 -->
+        <div class="border-t border-slate-700/40 my-2"></div>
+        <div class="space-y-1">
+          <p v-if="!sidebarCollapsed" class="px-3 text-[10px] font-semibold text-slate-600 tracking-widest uppercase mb-1">管理</p>
+          <router-link to="/team" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/team')">
+            <Users class="w-5 h-5 shrink-0" />
+            <span v-if="!sidebarCollapsed">團隊管理</span>
+          </router-link>
+          <router-link to="/agents" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/agents')">
+            <Bot class="w-5 h-5 shrink-0" />
+            <span v-if="!sidebarCollapsed">AI 代理</span>
+          </router-link>
+          <router-link to="/settings" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/settings')">
+            <Settings class="w-5 h-5 shrink-0" />
+            <span v-if="!sidebarCollapsed">系統設定</span>
+          </router-link>
+          <router-link to="/onboarding" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/onboarding')">
+            <Rocket class="w-5 h-5 shrink-0" />
+            <span v-if="!sidebarCollapsed" class="flex items-center gap-2">
+              設定引導
+              <span
+                v-if="store.settings.onboarding_completed !== 'true'"
+                class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"
+              ></span>
+            </span>
+          </router-link>
+        </div>
+      </nav>
+
+      <!-- Projects Mode -->
+      <div v-else-if="!sidebarCollapsed" class="flex-1 px-4 py-4 space-y-1 overflow-y-auto custom-scrollbar">
+        <div
+          v-for="p in projects"
+          :key="p.id"
+          @click="goToProject(p.id)"
+          class="flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer transition-colors text-sm"
+          :class="[
+            route.query.project === String(p.id) ? 'bg-emerald-500/10 text-emerald-400' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50',
+            !p.is_active ? 'opacity-50' : ''
+          ]"
+        >
+          <div class="flex items-center gap-2 min-w-0">
+            <FolderOpen class="w-4 h-4 shrink-0" />
+            <span class="truncate font-medium">{{ p.name }}</span>
+          </div>
+          <span
+            v-if="store.runningCountByProject(p.name) > 0"
+            class="bg-emerald-500/20 text-emerald-400 text-[10px] font-bold px-1.5 py-0.5 rounded-full border border-emerald-500/30 shrink-0"
+          >
+            {{ store.runningCountByProject(p.name) }}
+          </span>
+        </div>
+        <div v-if="projects.length === 0" class="text-xs text-slate-600 text-center py-4">無專案</div>
+      </div>
+
+      <!-- Bottom Fixed: System Status + Collapse Toggle -->
+      <div class="border-t border-slate-700" :class="sidebarCollapsed ? 'p-2 pb-2 space-y-2' : 'p-4 pb-2 space-y-3'">
+        <template v-if="!sidebarCollapsed">
+          <!-- CPU -->
+          <div class="flex items-center gap-2">
+            <span class="text-[10px] text-slate-500 w-7 shrink-0">CPU</span>
+            <div class="flex-1 bg-slate-900 rounded-full h-1.5 overflow-hidden">
+              <div :class="barColor(cpuBar)" class="h-1.5 rounded-full transition-all duration-500" :style="{ width: `${cpuBar}%` }"></div>
+            </div>
+          </div>
+
+          <!-- Memory -->
+          <div class="flex items-center gap-2">
+            <span class="text-[10px] text-slate-500 w-7 shrink-0">MEM</span>
+            <div class="flex-1 bg-slate-900 rounded-full h-1.5 overflow-hidden">
+              <div :class="barColor(memBar)" class="h-1.5 rounded-full transition-all duration-500" :style="{ width: `${memBar}%` }"></div>
+            </div>
+          </div>
+
+          <!-- 工作台 + Theme + Connection + Collapse -->
+          <div class="flex items-center gap-1.5">
+            <div class="flex items-center gap-1.5 min-w-0 overflow-hidden">
+              <div
+                v-for="i in store.systemInfo.workstations_total"
+                :key="i"
+                class="w-5 h-5 shrink-0 rounded border flex items-center justify-center text-[10px] font-bold"
+                :class="i <= store.systemInfo.workstations_used
+                  ? 'bg-amber-500/20 border-amber-500/30 text-amber-400'
+                  : 'bg-slate-900 border-slate-700 text-slate-600'"
+              >
+                {{ i <= store.systemInfo.workstations_used ? '■' : '□' }}
+              </div>
+            </div>
+            <div class="ml-auto flex items-center gap-1 shrink-0">
+              <button
+                @click="toggleTheme"
+                class="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-700/50 transition-colors"
+                :title="isDark ? '切換到淺色模式' : '切換到深色模式'"
+              >
+                <Sun v-if="isDark" class="w-4 h-4" />
+                <Moon v-else class="w-4 h-4" />
+              </button>
+              <Wifi v-if="store.connected" class="w-4 h-4 text-emerald-400 shrink-0" title="已連線" />
+              <WifiOff v-else class="w-4 h-4 text-red-400 shrink-0" title="已斷線" />
+              <button
+                @click="toggleSidebar"
+                class="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-700/50 transition-colors"
+                title="收起選單"
+              >
+                <PanelLeftClose class="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </template>
+
+        <template v-else>
+          <!-- Collapsed: connection icon + expand (vertical) -->
+          <div class="flex flex-col items-center gap-2">
+            <Wifi v-if="store.connected" class="w-4 h-4 text-emerald-400" />
+            <WifiOff v-else class="w-4 h-4 text-red-400" />
+            <button
+              @click="toggleSidebar"
+              class="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-700/50 transition-colors"
+              title="展開選單"
+            >
+              <PanelLeftOpen class="w-4 h-4" />
+            </button>
+          </div>
+        </template>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col min-w-0 bg-slate-900 relative">
+      <!-- Workspace with Background Glow -->
+      <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-emerald-900/20 via-slate-900 to-slate-900 pointer-events-none"></div>
+
+      <div class="flex-1 overflow-hidden relative z-0">
+        <router-view></router-view>
+      </div>
+    </main>
+
+    <!-- Toast Notifications -->
+    <ToastNotification />
+  </div>
+</template>
+
+<style scoped>
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+</style>
+
+<!-- Global scrollbar styles -->
+<style>
+/* 全站捲軸：移除箭頭與底色，只保留滑塊 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+::-webkit-scrollbar-button {
+  display: none;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #475569 transparent;
+}
+</style>

@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>Room Builder Tile Viewer (16x16)</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #fff;
+    color: #333;
+    font-family: 'Courier New', monospace;
+    padding: 20px;
+  }
+  h1 { text-align: center; margin-bottom: 8px; font-size: 18px; color: #222; }
+  .subtitle { text-align: center; color: #999; font-size: 12px; margin-bottom: 12px; }
+  .toolbar {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .toolbar button {
+    padding: 6px 16px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: #f5f5f5;
+    color: #333;
+    font-family: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .toolbar button:hover { background: #e0e0e0; border-color: #999; }
+  .stats {
+    text-align: center;
+    font-size: 11px;
+    color: #666;
+    margin-bottom: 16px;
+  }
+  .stats span { margin: 0 8px; }
+  .stats .s-none { color: #bbb; }
+  .stats .s-wall { color: #b87333; }
+  .stats .s-floor { color: #4a8c3f; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(16, 1fr);
+    gap: 4px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  .tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 4px;
+    border: 2px solid #e0e0e0;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+    user-select: none;
+    background: #fafafa;
+  }
+  .tile:hover { background: #f0f0f0; }
+  .tile:active { transform: scale(0.95); }
+
+  /* Tag states */
+  .tile[data-tag="none"]  { border-color: #e0e0e0; background: #fafafa; }
+  .tile[data-tag="wall"]  { border-color: #b87333; background: #b8733312; }
+  .tile[data-tag="floor"] { border-color: #4a8c3f; background: #4a8c3f12; }
+
+  .tile-img {
+    width: 48px;
+    height: 48px;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    background-image: url('../public/assets/office/tiles/room_builder.png');
+    background-size: 768px 672px;
+    background-repeat: no-repeat;
+  }
+  .tile-id {
+    font-size: 9px;
+    color: #e6a817;
+    margin-top: 3px;
+  }
+  .tile-tag {
+    font-size: 10px;
+    font-weight: bold;
+    margin-top: 2px;
+    min-height: 14px;
+  }
+  .tile-tag.t-none  { color: #ccc; }
+  .tile-tag.t-wall  { color: #b87333; }
+  .tile-tag.t-floor { color: #4a8c3f; }
+
+  .tile-name {
+    font-size: 7px;
+    color: #999;
+    text-align: center;
+    word-break: break-all;
+    line-height: 1.2;
+    min-height: 10px;
+  }
+  .row-label {
+    grid-column: 1 / -1;
+    padding: 8px 0 2px;
+    font-size: 12px;
+    color: #555;
+    border-top: 1px solid #e0e0e0;
+  }
+  .hover-info {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    background: #222;
+    color: #ffd700;
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: bold;
+    z-index: 1000;
+    min-width: 180px;
+    text-align: center;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  }
+  .hover-info .frame { font-size: 24px; color: #fff; }
+  .hover-info .pos { font-size: 14px; color: #aaa; margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<h1>Room Builder Spritesheet — Tile Tagger</h1>
+<p class="subtitle">room_builder.png · 256×224 · 16×14 = 224 tiles · 點擊切換：無 → 牆 → 地 → 無</p>
+
+<div class="toolbar">
+  <button onclick="resetAll()">全部清除</button>
+  <button onclick="autoTag()">自動標記</button>
+  <button onclick="exportTxt()">匯出 .txt</button>
+  <button onclick="exportJson()">匯出 JSON</button>
+</div>
+
+<div class="hover-info" id="hoverInfo">
+  <div class="frame">--</div>
+  <div class="pos">hover to see</div>
+</div>
+<div class="stats" id="stats"></div>
+<div class="grid" id="grid"></div>
+
+<script>
+const COLS = 16;
+const ROWS = 14;
+const TOTAL = COLS * ROWS;
+const SCALE = 3;
+const STORAGE_KEY = 'tile-viewer-tags';
+const TAGS = ['none', 'wall', 'floor'];
+const TAG_LABELS = { none: '無', wall: '牆', floor: '地' };
+
+// Known floor names (from pixel comparison)
+const FLOOR_MAP = {
+  80:'marble_1',81:'marble_2',82:'marble_3',
+  90:'dark_gray_1',91:'dark_gray_2',92:'dark_gray_3',
+  93:'bamboo_1',94:'bamboo_2',95:'bamboo_3',
+  96:'gray_1',97:'gray_2',98:'stone_2',
+  108:'brick_1',109:'brick_2',
+  112:'gray_3',113:'gray_4',
+  116:'white_3',117:'white_4',
+  120:'stone_3',121:'stone_4',
+  122:'checker_1',123:'checker_2',124:'checker_3',
+  125:'wood_1',126:'wood_2',127:'wood_3',
+  128:'stone_7',129:'stone_8',
+  144:'beige_1',145:'beige_2',
+  154:'tan_1',155:'tan_2',156:'tan_3',
+  157:'tile_gray_1',158:'tile_gray_2',159:'tile_gray_3',
+  160:'beige_3',161:'beige_4',
+  176:'white_1',177:'white_2',
+  186:'carpet_1',187:'carpet_2',188:'carpet_3',
+  189:'carpet_4',190:'carpet_5',191:'carpet_6',
+  192:'pink_1',193:'pink_2',
+};
+
+// State: array of 224 tags
+let tags = new Array(TOTAL).fill('none');
+
+// Load from localStorage
+function load() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr) && arr.length === TOTAL) tags = arr;
+    }
+  } catch {}
+}
+
+function save() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(tags));
+  updateStats();
+}
+
+// Cycle tag
+function cycleTag(idx) {
+  const cur = TAGS.indexOf(tags[idx]);
+  tags[idx] = TAGS[(cur + 1) % TAGS.length];
+  save();
+  renderTile(idx);
+}
+
+// Update tile DOM
+function renderTile(idx) {
+  const tile = document.querySelector(`[data-idx="${idx}"]`);
+  if (!tile) return;
+  const tag = tags[idx];
+  tile.dataset.tag = tag;
+  const tagEl = tile.querySelector('.tile-tag');
+  tagEl.textContent = TAG_LABELS[tag];
+  tagEl.className = 'tile-tag t-' + tag;
+}
+
+function updateStats() {
+  const counts = { none: 0, wall: 0, floor: 0 };
+  tags.forEach(t => counts[t]++);
+  document.getElementById('stats').innerHTML =
+    `<span class="s-none">無 ${counts.none}</span>` +
+    `<span class="s-wall">牆 ${counts.wall}</span>` +
+    `<span class="s-floor">地 ${counts.floor}</span>`;
+}
+
+// Build grid
+function buildGrid() {
+  const grid = document.getElementById('grid');
+  grid.innerHTML = '';
+
+  for (let r = 0; r < ROWS; r++) {
+    const label = document.createElement('div');
+    label.className = 'row-label';
+    label.textContent = `Row ${r}  (frame ${r * COLS}–${r * COLS + COLS - 1})`;
+    grid.appendChild(label);
+
+    for (let c = 0; c < COLS; c++) {
+      const idx = r * COLS + c;
+      const tag = tags[idx];
+
+      const tile = document.createElement('div');
+      tile.className = 'tile';
+      tile.dataset.idx = idx;
+      tile.dataset.tag = tag;
+      tile.onclick = () => cycleTag(idx);
+      tile.onmouseenter = () => showHoverInfo(idx);
+      tile.onmouseleave = () => hideHoverInfo();
+
+      // Sprite
+      const img = document.createElement('div');
+      img.className = 'tile-img';
+      img.style.backgroundPosition = `-${c * 16 * SCALE}px -${r * 16 * SCALE}px`;
+      tile.appendChild(img);
+
+      // Frame ID
+      const idEl = document.createElement('div');
+      idEl.className = 'tile-id';
+      idEl.textContent = `#${idx}`;
+      tile.appendChild(idEl);
+
+      // Tag label
+      const tagEl = document.createElement('div');
+      tagEl.className = 'tile-tag t-' + tag;
+      tagEl.textContent = TAG_LABELS[tag];
+      tile.appendChild(tagEl);
+
+      // Known name
+      const nameEl = document.createElement('div');
+      nameEl.className = 'tile-name';
+      nameEl.textContent = FLOOR_MAP[idx] || '';
+      tile.appendChild(nameEl);
+
+      grid.appendChild(tile);
+    }
+  }
+  updateStats();
+}
+
+// ── Actions ──
+
+function resetAll() {
+  if (!confirm('確定要清除所有標記？')) return;
+  tags = new Array(TOTAL).fill('none');
+  save();
+  buildGrid();
+}
+
+function autoTag() {
+  // Auto: rows 0-4 → wall, known floor tiles → floor
+  for (let i = 0; i < TOTAL; i++) {
+    const r = Math.floor(i / COLS);
+    if (r <= 4) tags[i] = 'wall';
+    else if (FLOOR_MAP[i]) tags[i] = 'floor';
+    else tags[i] = 'none';
+  }
+  save();
+  buildGrid();
+}
+
+function exportTxt() {
+  const lines = [];
+  lines.push('# Room Builder Tile Tags');
+  lines.push('# frame_id | row,col | tag | name');
+  lines.push('#');
+  for (let i = 0; i < TOTAL; i++) {
+    const r = Math.floor(i / COLS);
+    const c = i % COLS;
+    const tag = tags[i];
+    const name = FLOOR_MAP[i] || '';
+    lines.push(`${String(i).padStart(3)} | ${r},${String(c).padStart(2)} | ${tag.padEnd(5)} | ${name}`);
+  }
+
+  // Summary
+  lines.push('');
+  lines.push('# === Wall frames ===');
+  const walls = tags.map((t, i) => t === 'wall' ? i : -1).filter(i => i >= 0);
+  lines.push('# ' + walls.join(', '));
+  lines.push('');
+  lines.push('# === Floor frames ===');
+  const floors = tags.map((t, i) => t === 'floor' ? i : -1).filter(i => i >= 0);
+  lines.push('# ' + floors.join(', '));
+
+  download('tile-tags.txt', lines.join('\n'));
+}
+
+function exportJson() {
+  const data = {};
+  for (let i = 0; i < TOTAL; i++) {
+    if (tags[i] !== 'none') {
+      data[i] = { tag: tags[i], name: FLOOR_MAP[i] || null, row: Math.floor(i / COLS), col: i % COLS };
+    }
+  }
+  download('tile-tags.json', JSON.stringify(data, null, 2));
+}
+
+function download(filename, content) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([content], { type: 'text/plain' }));
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ── Hover Info ──
+function showHoverInfo(idx) {
+  const r = Math.floor(idx / COLS);
+  const c = idx % COLS;
+  const info = document.getElementById('hoverInfo');
+  info.querySelector('.frame').textContent = `#${idx}`;
+  info.querySelector('.pos').textContent = `row=${r}, col=${c}`;
+}
+
+function hideHoverInfo() {
+  const info = document.getElementById('hoverInfo');
+  info.querySelector('.frame').textContent = '--';
+  info.querySelector('.pos').textContent = 'hover to see';
+}
+
+// ── Init ──
+load();
+buildGrid();
+</script>
+</body>
+</html>

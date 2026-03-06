@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+*.db
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+/references
+
+# Claude Code
+.claude/
+
+# Dev script outputs
+frontend/scripts/*.png
+frontend/pnpm-lock.yaml
+
+# Firebase hosting build
+hosting/
+
+# Private files
+private/
