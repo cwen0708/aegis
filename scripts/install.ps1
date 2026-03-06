@@ -247,18 +247,26 @@ function Start-Installation {
         Write-OK "已在專案目錄中，跳過 clone"
     } elseif (Test-Path (Join-Path $projectDir ".git")) {
         Write-OK "專案已存在，執行 git pull"
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
         Push-Location $projectDir
-        & git pull --ff-only 2>&1 | Out-Null
+        $null = & git pull --ff-only 2>&1
         Pop-Location
+        $ErrorActionPreference = $prevEAP
     } else {
         Write-Step "正在 clone 專案..."
         # If directory exists but is not a git repo (e.g. created for install.log),
         # clone into a temp dir then move contents
+        # git clone writes progress to stderr; temporarily allow errors
+        # so PowerShell doesn't treat it as a terminating exception.
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
         if (Test-Path $projectDir) {
             $tempClone = "$projectDir-clone-tmp"
             if (Test-Path $tempClone) { Remove-Item -Recurse -Force $tempClone }
-            & git clone $REPO_URL $tempClone 2>&1
+            $null = & git clone $REPO_URL $tempClone 2>&1
             if ($LASTEXITCODE -ne 0) {
+                $ErrorActionPreference = $prevEAP
                 Write-Err "git clone 失敗"
                 return $false
             }
@@ -266,12 +274,14 @@ function Start-Installation {
             Get-ChildItem -Path $tempClone -Force | Move-Item -Destination $projectDir -Force
             Remove-Item -Recurse -Force $tempClone
         } else {
-            & git clone $REPO_URL $projectDir 2>&1
+            $null = & git clone $REPO_URL $projectDir 2>&1
             if ($LASTEXITCODE -ne 0) {
+                $ErrorActionPreference = $prevEAP
                 Write-Err "git clone 失敗"
                 return $false
             }
         }
+        $ErrorActionPreference = $prevEAP
         Write-OK "Clone 完成"
     }
 
