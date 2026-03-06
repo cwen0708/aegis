@@ -15,7 +15,10 @@ param(
 # ============================================================
 # Configuration
 # ============================================================
-$ErrorActionPreference = "Stop"
+# Use "Continue" globally — external tools (git, pip, npm) write progress
+# to stderr which PowerShell would otherwise treat as terminating errors.
+# Actual failures are caught via $LASTEXITCODE and try/catch.
+$ErrorActionPreference = "Continue"
 $ProgressPreference = "SilentlyContinue"  # Speed up Invoke-WebRequest
 
 $REPO_URL = "https://github.com/cwen0708/aegis.git"
@@ -247,26 +250,18 @@ function Start-Installation {
         Write-OK "已在專案目錄中，跳過 clone"
     } elseif (Test-Path (Join-Path $projectDir ".git")) {
         Write-OK "專案已存在，執行 git pull"
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = "Continue"
         Push-Location $projectDir
         $null = & git pull --ff-only 2>&1
         Pop-Location
-        $ErrorActionPreference = $prevEAP
     } else {
         Write-Step "正在 clone 專案..."
         # If directory exists but is not a git repo (e.g. created for install.log),
         # clone into a temp dir then move contents
-        # git clone writes progress to stderr; temporarily allow errors
-        # so PowerShell doesn't treat it as a terminating exception.
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = "Continue"
         if (Test-Path $projectDir) {
             $tempClone = "$projectDir-clone-tmp"
             if (Test-Path $tempClone) { Remove-Item -Recurse -Force $tempClone }
             $null = & git clone $REPO_URL $tempClone 2>&1
             if ($LASTEXITCODE -ne 0) {
-                $ErrorActionPreference = $prevEAP
                 Write-Err "git clone 失敗"
                 return $false
             }
@@ -276,12 +271,10 @@ function Start-Installation {
         } else {
             $null = & git clone $REPO_URL $projectDir 2>&1
             if ($LASTEXITCODE -ne 0) {
-                $ErrorActionPreference = $prevEAP
                 Write-Err "git clone 失敗"
                 return $false
             }
         }
-        $ErrorActionPreference = $prevEAP
         Write-OK "Clone 完成"
     }
 
@@ -308,7 +301,7 @@ function Start-Installation {
     Write-OK "虛擬環境就緒"
 
     Write-Step "安裝 Python 套件..."
-    & $venvPip install -q -r (Join-Path $backendDir "requirements.txt") 2>&1
+    $null = & $venvPip install -q -r (Join-Path $backendDir "requirements.txt") 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Warn "部分 Python 套件安裝可能有問題，但嘗試繼續"
     } else {
