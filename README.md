@@ -21,28 +21,7 @@
 
 ## Architecture
 
-```
-┌──────────────────────────────────────────────────────────┐
-│                     Vue 3 Frontend                        │
-│  Office │ Dashboard │ Kanban │ CronJobs │ Team │ Settings │
-│  Phaser 3 (Pixel Art Office) ←── Pinia ──→ WebSocket     │
-└───────────────────────┬──────────────────────────────────┘
-                        │ HTTP / WS
-┌───────────────────────┴──────────────────────────────────┐
-│                   FastAPI Backend                          │
-│  REST API │ WebSocket Broadcast │ Task Poller             │
-│  ┌──────────────────────────────────────────────┐        │
-│  │             Agent Runner                      │        │
-│  │    asyncio.Semaphore (max 3 concurrent)      │        │
-│  │    Claude CLI ←→ subprocess ←→ Gemini CLI    │        │
-│  └──────────────────────────────────────────────┘        │
-│  ┌──────────────────────────────────────────────┐        │
-│  │         Portrait Generator                    │        │
-│  │    Gemini Flash (分析) → Imagen (生成) → rembg │        │
-│  └──────────────────────────────────────────────┘        │
-│  SQLite (local.db) │ psutil │ GitPython                   │
-└──────────────────────────────────────────────────────────┘
-```
+![Architecture](docs/screenshots/architecture.jpg)
 
 ## Features
 
