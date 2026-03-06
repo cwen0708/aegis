@@ -338,45 +338,12 @@ function Start-Installation {
 
     $frontendDir = Join-Path $projectDir "frontend"
 
-    # Ensure npm global bin is in PATH (needed when running elevated as admin)
-    $npmPrefix = (& npm prefix -g 2>$null)
-    if ($npmPrefix) {
-        $npmPrefix = $npmPrefix.Trim()
-        if ($env:Path -notlike "*$npmPrefix*") {
-            $env:Path = "$npmPrefix;$env:Path"
-        }
-    }
-
-    # Install pnpm if not available
-    $pnpmCmd = "pnpm"
-    if (!(Test-CommandExists "pnpm")) {
-        Write-Step "安裝 pnpm..."
-        $null = & npm install -g pnpm 2>&1
-        Refresh-Path
-        # npm global bin may not be in PATH yet; locate it directly
-        if (!(Test-CommandExists "pnpm")) {
-            $pnpmCandidate = Join-Path $npmPrefix "pnpm.cmd"
-            if ($npmPrefix -and (Test-Path $pnpmCandidate)) {
-                $pnpmCmd = $pnpmCandidate
-                Write-OK "pnpm 安裝完成 (使用完整路徑)"
-            } else {
-                Write-Warn "pnpm 安裝後找不到，將使用 npm 替代"
-                $pnpmCmd = ""
-            }
-        } else {
-            Write-OK "pnpm 安裝完成"
-        }
-    }
-
     Write-Step "安裝前端套件 (這可能需要幾分鐘)..."
     Push-Location $frontendDir
-    $frontendOk = $false
-    if ($pnpmCmd) {
-        $null = & $pnpmCmd install 2>&1
-        if ($LASTEXITCODE -eq 0) { $frontendOk = $true }
-    }
-    if (!$frontendOk) {
-        if ($pnpmCmd) { Write-Warn "pnpm install 失敗，嘗試使用 npm..." }
+    # Use npx pnpm (auto-downloads pnpm without global install / PATH issues)
+    $null = & npx -y pnpm install 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "pnpm install 失敗，嘗試使用 npm..."
         $null = & npm install 2>&1
     }
     Pop-Location
