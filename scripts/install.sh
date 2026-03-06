@@ -148,7 +148,13 @@ main() {
     else
         log_step "正在安裝 Python3..."
         case "$pkg_mgr" in
-            apt) $SUDO apt-get install -y -qq python3 python3-venv python3-pip > /dev/null 2>&1 ;;
+            apt)
+                $SUDO apt-get install -y -qq python3 python3-pip > /dev/null 2>&1
+                # python3-venv package name varies by version
+                local py_ver
+                py_ver=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || echo "3")
+                $SUDO apt-get install -y -qq "python${py_ver}-venv" python3-venv > /dev/null 2>&1 || true
+                ;;
             dnf) $SUDO dnf install -y -q python3 python3-pip > /dev/null 2>&1 ;;
             yum) $SUDO yum install -y -q python3 python3-pip > /dev/null 2>&1 ;;
         esac
