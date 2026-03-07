@@ -4,7 +4,7 @@ import { Users, Plus, Trash2, ChevronUp, ChevronDown, UserPlus, Save, X, Edit3, 
 import { useAegisStore } from '../stores/aegis'
 
 const store = useAegisStore()
-const API = ''
+const API = import.meta.env.DEV ? '' : 'http://localhost:8899'
 
 const modelOptions: Record<string, { value: string; label: string }[]> = {
   claude: [

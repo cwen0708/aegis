@@ -4,7 +4,7 @@ import { Bot, User, RefreshCw, Sparkles, Plus, Edit3 } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 
 const store = useAegisStore()
-const API = ''
+const API = import.meta.env.DEV ? '' : 'http://localhost:8899'
 
 onMounted(() => {
   fetchClaudeUsage()

@@ -19,7 +19,6 @@ const newJobForm = ref({
   name: '',
   description: '',
   cron_expression: '0 0 * * *',
-  system_instruction: '',
   prompt_template: ''
 })
 
@@ -42,7 +41,6 @@ const saveEditJob = async () => {
         name: editJobForm.value.name,
         description: editJobForm.value.description,
         cron_expression: editJobForm.value.cron_expression,
-        system_instruction: editJobForm.value.system_instruction,
         prompt_template: editJobForm.value.prompt_template,
       })
     })
@@ -86,7 +84,7 @@ const createCronJob = async () => {
     showAddModal.value = false
     store.addToast('排程已建立', 'success')
     await fetchCronJobs()
-    newJobForm.value = { project_id: null, name: '', description: '', cron_expression: '0 0 * * *', system_instruction: '', prompt_template: '' }
+    newJobForm.value = { project_id: null, name: '', description: '', cron_expression: '0 0 * * *', prompt_template: '' }
   } catch (e) {
     store.addToast('建立排程失敗', 'error')
   }
@@ -343,6 +341,7 @@ function visibleJobs(group: { project: any; jobs: any[] }) {
                   <Play v-else class="w-3.5 h-3.5" />
                 </button>
                 <button
+                  v-if="!job.is_system"
                   @click="requestDelete(job.id)"
                   class="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
                   title="刪除排程"
@@ -414,10 +413,6 @@ function visibleJobs(group: { project: any; jobs: any[] }) {
 
           <div class="space-y-4">
             <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1">系統指令（角色設定）</label>
-              <textarea v-model="newJobForm.system_instruction" rows="3" placeholder="定義 AI 的角色..." class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 font-mono text-sm focus:ring-2 focus:ring-emerald-500 outline-none"></textarea>
-            </div>
-            <div>
               <label class="block text-xs font-medium text-slate-400 mb-1">提示詞模板</label>
               <textarea v-model="newJobForm.prompt_template" rows="5" placeholder="定義 AI 的任務..." class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 font-mono text-sm focus:ring-2 focus:ring-emerald-500 outline-none"></textarea>
             </div>
@@ -468,10 +463,6 @@ function visibleJobs(group: { project: any; jobs: any[] }) {
           </div>
 
           <div class="space-y-4">
-            <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1">系統指令（角色設定）</label>
-              <textarea v-model="editJobForm.system_instruction" rows="3" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 font-mono text-sm focus:ring-2 focus:ring-emerald-500 outline-none"></textarea>
-            </div>
             <div>
               <label class="block text-xs font-medium text-slate-400 mb-1">提示詞模板</label>
               <textarea v-model="editJobForm.prompt_template" rows="5" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 font-mono text-sm focus:ring-2 focus:ring-emerald-500 outline-none"></textarea>

@@ -48,7 +48,7 @@ PROVIDERS = {
     "claude": {
         "cmd_base": ["claude"],
         "args": ["-p", "{prompt}", "--dangerously-skip-permissions", "--model", "opus", "--output-format", "json"],
-        "env": {"CLAUDECODE": "1"}
+        "env": {}
     }
 }
 
@@ -123,6 +123,7 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str, 
             cmd.append(arg)
 
     env = os.environ.copy()
+    env.pop("CLAUDECODE", None)  # 避免子程序偵測到巢狀 session 而拒絕啟動
     env.update(config.get("env", {}))
 
     logger.info(f"[Task {task_id}] Waiting for workstation... (Phase: {phase}, Provider: {provider_name})")
@@ -133,11 +134,11 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str, 
             busy_members.add(member_id)
 
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
+            proc = subprocess.Popen(
+                cmd,
                 cwd=project_path,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 env=env,
             )
 
@@ -160,29 +161,28 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str, 
                 "project": project_name, "provider": provider_name
             })
 
-            # 逐行讀取 stdout，廣播 task_log
-            output_lines = []
-            try:
-                async def read_stream():
-                    while True:
-                        line = await asyncio.wait_for(proc.stdout.readline(), timeout=2400)
-                        if not line:
-                            break
-                        text = line.decode("utf-8", errors="replace")
-                        output_lines.append(text)
-                        await broadcast_event("task_log", {"card_id": task_id, "line": text})
+            # 在 thread 裡讀取 stdout，避免阻塞 event loop
+            def _read_output():
+                lines = []
+                for raw_line in proc.stdout:
+                    lines.append(raw_line.decode("utf-8", errors="replace"))
+                proc.wait()
+                return lines
 
-                await read_stream()
-                await proc.wait()
+            try:
+                output_lines = await asyncio.wait_for(
+                    asyncio.to_thread(_read_output),
+                    timeout=2400,
+                )
             except asyncio.TimeoutError:
                 proc.kill()
-                await proc.wait()
+                proc.wait()
                 running_tasks.pop(task_id, None)
                 if member_id:
                     busy_members.discard(member_id)
                 await broadcast_event("task_failed", {"card_id": task_id, "reason": "timeout"})
                 _save_task_log(task_id, card_title, project_name, provider_name, member_id, "timeout", {})
-                return {"status": "timeout", "output": "".join(output_lines), "provider": provider_name}
+                return {"status": "timeout", "output": "", "provider": provider_name}
 
             output = "".join(output_lines)
             running_tasks.pop(task_id, None)

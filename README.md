@@ -21,7 +21,28 @@
 
 ## Architecture
 
-![Architecture](docs/screenshots/architecture.jpg)
+```
+┌──────────────────────────────────────────────────────────┐
+│                     Vue 3 Frontend                        │
+│  Office │ Dashboard │ Kanban │ CronJobs │ Team │ Settings │
+│  Phaser 3 (Pixel Art Office) ←── Pinia ──→ WebSocket     │
+└───────────────────────┬──────────────────────────────────┘
+                        │ HTTP / WS
+┌───────────────────────┴──────────────────────────────────┐
+│                   FastAPI Backend                          │
+│  REST API │ WebSocket Broadcast │ Task Poller             │
+│  ┌──────────────────────────────────────────────┐        │
+│  │             Agent Runner                      │        │
+│  │    asyncio.Semaphore (max 3 concurrent)      │        │
+│  │    Claude CLI ←→ subprocess ←→ Gemini CLI    │        │
+│  └──────────────────────────────────────────────┘        │
+│  ┌──────────────────────────────────────────────┐        │
+│  │         Portrait Generator                    │        │
+│  │    Gemini Flash (分析) → Imagen (生成) → rembg │        │
+│  └──────────────────────────────────────────────┘        │
+│  SQLite (local.db) │ psutil │ GitPython                   │
+└──────────────────────────────────────────────────────────┘
+```
 
 ## Features
 
@@ -53,18 +74,7 @@
 | Monitoring | psutil (CPU/RAM/Disk) |
 | Icons | lucide-vue-next |
 
-## Quick Install
-
-**One-click installer** (Windows 10/11):
-
-👉 **[https://ai-aegis.web.app](https://ai-aegis.web.app)**
-
-Or run in terminal:
-```powershell
-powershell -c "irm https://ai-aegis.web.app/scripts/install.ps1 | iex"
-```
-
-## Manual Setup
+## Getting Started
 
 ### Prerequisites
 
@@ -125,7 +135,8 @@ aegis/
 │   │       └── portrait_generator.py  # AI portrait generation (Gemini + rembg)
 │   ├── requirements.txt
 │   ├── seed.py
-│   └── seed.py
+│   ├── import_trello.py          # Migration: Trello → Aegis
+│   └── import_supabase_cron.py   # Migration: Supabase → Aegis
 ├── frontend/
 │   ├── src/
 │   │   ├── App.vue               # Layout + sidebar (menu/projects mode)

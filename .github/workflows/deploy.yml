@@ -1,0 +1,42 @@
+name: Deploy to GCP
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # 允許手動觸發
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy to VM
+        run: |
+          # SSH 進 VM 執行部署
+          gcloud compute ssh claude-pm-server \
+            --zone=us-central1-a \
+            --project=greenshepherdcomtw \
+            --command="
+              sudo -u cwen0 bash -c '
+                cd /home/cwen0/repos/Aegis &&
+                git pull &&
+                cd backend && source venv/bin/activate && pip install -q -r requirements.txt &&
+                cd ../frontend && npm install --force 2>/dev/null && npx vite build
+              ' &&
+              sudo systemctl restart aegis
+            "
+
+      - name: Verify deployment
+        run: |
+          gcloud compute ssh claude-pm-server \
+            --zone=us-central1-a \
+            --project=greenshepherdcomtw \
+            --command="systemctl is-active aegis"

@@ -35,8 +35,16 @@ Thumbs.db
 frontend/scripts/*.png
 frontend/pnpm-lock.yaml
 
-# Firebase hosting build
-hosting/
+# User data (portraits, uploads)
+backend/uploads/
+!backend/uploads/portraits/example_*.png
+backend/portraits/
 
-# Private files
-private/
+# Environment files
+.env
+.env.*
+*.env
+
+# Credentials (never commit these)
+*credentials*.json
+*-profiles/

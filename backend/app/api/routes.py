@@ -3,9 +3,9 @@ from fastapi.responses import FileResponse
 from sqlmodel import Session, select
 from typing import List, Optional
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, timezone
 from app.database import get_session
-from app.models.core import Project, Card, StageList, CronJob, SystemSetting, Account, Member, MemberAccount, TaskLog
+from app.models.core import Project, Card, StageList, CronJob, SystemSetting, Account, Member, MemberAccount, TaskLog, CardIndex
 from typing import Any
 from app.core.runner import running_tasks, abort_task
 import app.core.runner as runner_module
@@ -13,6 +13,9 @@ from app.core.usage_poller import get_cached_claude_usage, get_cached_gemini_usa
 import app.core.poller as poller_module
 import app.core.cron_poller as cron_module
 from app.core.ws_manager import websocket_clients
+from app.core.card_file import CardData, read_card as read_card_md, write_card, card_file_path
+from app.core.card_index import sync_card_to_index, remove_card_from_index, query_board, next_card_id, rebuild_index
+import asyncio
 import subprocess
 import time as time_module
 import json as json_module
@@ -25,6 +28,25 @@ UPLOAD_DIR = Path(__file__).parent.parent.parent / "uploads" / "portraits"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 router = APIRouter()
+
+# ==========================================
+# Per-card lock manager (for async endpoints)
+# ==========================================
+_card_locks: dict[int, asyncio.Lock] = {}
+
+def get_card_lock(card_id: int) -> asyncio.Lock:
+    return _card_locks.setdefault(card_id, asyncio.Lock())
+
+
+def _get_project_for_list(session: Session, list_id: int):
+    """Get Project from a list_id. Returns (project, stage_list) or raises 404."""
+    sl = session.get(StageList, list_id)
+    if not sl:
+        raise HTTPException(status_code=404, detail="List not found")
+    project = session.get(Project, sl.project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project, sl
 
 
 def _get_member_primary_provider(member_id: int, session: Session) -> str:
@@ -105,8 +127,7 @@ def update_project(project_id: int, update_data: ProjectUpdate, session: Session
 
 @router.get("/projects/{project_id}/board", response_model=List[StageListResponse])
 def read_project_board(project_id: int, session: Session = Depends(get_session)):
-    """一次抓取整個看板所需的資料：列表與其中的卡片"""
-    # 就算專案停用，看板資料還是可以抓，前端再決定怎麼顯示
+    """一次抓取整個看板所需的資料：列表與其中的卡片（MD-driven via CardIndex）"""
     project = session.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -114,17 +135,25 @@ def read_project_board(project_id: int, session: Session = Depends(get_session))
     lists = session.exec(
         select(StageList).where(StageList.project_id == project_id).order_by(StageList.position)
     ).all()
-    
+
+    # Query all cards for this project from the index
+    card_indices = query_board(session, project_id)
+    # Group by list_id
+    cards_by_list: dict[int, list[CardIndex]] = {}
+    for ci in card_indices:
+        cards_by_list.setdefault(ci.list_id, []).append(ci)
+    # Sort each group by created_at desc
+    for lst in cards_by_list.values():
+        lst.sort(key=lambda c: c.created_at, reverse=True)
+
     result = []
     for l in lists:
-        cards = session.exec(
-            select(Card).where(Card.list_id == l.id).order_by(Card.created_at.desc())
-        ).all()
         member_brief = None
         if l.member_id:
             m = session.get(Member, l.member_id)
             if m:
                 member_brief = MemberBrief(id=m.id, name=m.name, avatar=m.avatar, provider=_get_member_primary_provider(m.id, session))
+        list_cards = cards_by_list.get(l.id, [])
         result.append(StageListResponse(
             id=l.id,
             project_id=l.project_id,
@@ -133,9 +162,9 @@ def read_project_board(project_id: int, session: Session = Depends(get_session))
             member_id=l.member_id,
             member=member_brief,
             cards=[CardResponse(
-                id=c.id, list_id=c.list_id, title=c.title,
-                description=c.description, status=c.status, created_at=c.created_at
-            ) for c in cards]
+                id=ci.card_id, list_id=ci.list_id, title=ci.title,
+                description=ci.description, status=ci.status, created_at=ci.created_at
+            ) for ci in list_cards]
         ))
     return result
 
@@ -173,7 +202,18 @@ def read_cards(session: Session = Depends(get_session)):
     return cards
 
 @router.get("/cards/{card_id}", response_model=Card)
-def read_card(card_id: int, session: Session = Depends(get_session)):
+def read_card_endpoint(card_id: int, session: Session = Depends(get_session)):
+    # Primary: look up CardIndex -> read MD file
+    idx = session.get(CardIndex, card_id)
+    if idx and idx.file_path and Path(idx.file_path).exists():
+        cd = read_card_md(Path(idx.file_path))
+        # Return as Card-compatible dict (response_model=Card)
+        return Card(
+            id=cd.id, list_id=cd.list_id, title=cd.title,
+            description=cd.description, content=cd.content,
+            status=cd.status, created_at=cd.created_at, updated_at=cd.updated_at,
+        )
+    # Fallback: old Card table
     card = session.get(Card, card_id)
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
@@ -186,11 +226,42 @@ class CardCreateRequest(BaseModel):
 
 @router.post("/cards/", response_model=Card)
 def create_card(card_in: CardCreateRequest, session: Session = Depends(get_session)):
-    card = Card(list_id=card_in.list_id, title=card_in.title, description=card_in.description)
-    session.add(card)
+    # Resolve project from list_id
+    project, sl = _get_project_for_list(session, card_in.list_id)
+
+    # Get next card ID (max of both old Card table and CardIndex)
+    new_id = next_card_id(session)
+    # Also check old Card table max id
+    old_max = session.exec(select(Card)).all()
+    if old_max:
+        old_max_id = max(c.id for c in old_max if c.id is not None)
+        new_id = max(new_id, old_max_id + 1)
+
+    now = datetime.now(timezone.utc)
+    card_data = CardData(
+        id=new_id, list_id=card_in.list_id, title=card_in.title,
+        description=card_in.description, content="", status="idle",
+        tags=[], created_at=now, updated_at=now,
+    )
+
+    # Write MD file
+    fpath = card_file_path(project.path, new_id)
+    fpath.parent.mkdir(parents=True, exist_ok=True)
+    write_card(fpath, card_data)
+
+    # Sync to index
+    sync_card_to_index(session, card_data, project_id=project.id, file_path=str(fpath))
+
+    # Dual-write: also create old Card ORM record (transition)
+    orm_card = Card(
+        id=new_id, list_id=card_in.list_id, title=card_in.title,
+        description=card_in.description, status="idle",
+        created_at=now, updated_at=now,
+    )
+    session.add(orm_card)
     session.commit()
-    session.refresh(card)
-    return card
+    session.refresh(orm_card)
+    return orm_card
 
 class CardUpdateRequest(BaseModel):
     list_id: Optional[int] = None
@@ -201,28 +272,68 @@ class CardUpdateRequest(BaseModel):
 
 @router.patch("/cards/{card_id}", response_model=Card)
 def update_card(card_id: int, update_data: CardUpdateRequest, session: Session = Depends(get_session)):
-    card = session.get(Card, card_id)
-    if not card:
+    # Try MD-driven path first
+    idx = session.get(CardIndex, card_id)
+    now = datetime.now(timezone.utc)
+
+    if idx and idx.file_path and Path(idx.file_path).exists():
+        cd = read_card_md(Path(idx.file_path))
+
+        if update_data.list_id is not None:
+            cd.list_id = update_data.list_id
+            cd.status = "pending"
+        if update_data.status is not None:
+            cd.status = update_data.status
+        if update_data.title is not None:
+            cd.title = update_data.title
+        if update_data.description is not None:
+            cd.description = update_data.description
+        if update_data.content is not None:
+            cd.content = update_data.content
+        cd.updated_at = now
+
+        write_card(Path(idx.file_path), cd)
+
+        # Re-derive project_id from list_id for index sync
+        project_id = idx.project_id
+        if update_data.list_id is not None:
+            sl = session.get(StageList, cd.list_id)
+            if sl:
+                project_id = sl.project_id
+        sync_card_to_index(session, cd, project_id=project_id, file_path=idx.file_path)
+
+    # Dual-write: also update old Card ORM record
+    orm_card = session.get(Card, card_id)
+    if orm_card:
+        if update_data.list_id is not None:
+            orm_card.list_id = update_data.list_id
+            orm_card.status = "pending"
+        if update_data.status is not None:
+            orm_card.status = update_data.status
+        if update_data.title is not None:
+            orm_card.title = update_data.title
+        if update_data.description is not None:
+            orm_card.description = update_data.description
+        if update_data.content is not None:
+            orm_card.content = update_data.content
+        orm_card.updated_at = now
+        session.add(orm_card)
+
+    if not idx and not orm_card:
         raise HTTPException(status_code=404, detail="Card not found")
-    
-    if update_data.list_id is not None:
-        card.list_id = update_data.list_id
-        card.status = "pending"
-    
-    if update_data.status is not None:
-        card.status = update_data.status
-    if update_data.title is not None:
-        card.title = update_data.title
-    if update_data.description is not None:
-        card.description = update_data.description
-    if update_data.content is not None:
-        card.content = update_data.content
-        
-    card.updated_at = datetime.utcnow()
-    session.add(card)
+
     session.commit()
-    session.refresh(card)
-    return card
+    if orm_card:
+        session.refresh(orm_card)
+        return orm_card
+
+    # Return from MD data if no ORM card
+    cd_final = read_card_md(Path(idx.file_path))
+    return Card(
+        id=cd_final.id, list_id=cd_final.list_id, title=cd_final.title,
+        description=cd_final.description, content=cd_final.content,
+        status=cd_final.status, created_at=cd_final.created_at, updated_at=cd_final.updated_at,
+    )
 
 # ==========================================
 # CronJob Routes
@@ -294,13 +405,31 @@ def create_cron_job(data: CronJobCreateRequest, session: Session = Depends(get_s
 # ==========================================
 @router.delete("/cards/{card_id}")
 def delete_card(card_id: int, session: Session = Depends(get_session)):
-    card = session.get(Card, card_id)
-    if not card:
+    # Check status from index or ORM
+    idx = session.get(CardIndex, card_id)
+    orm_card = session.get(Card, card_id)
+
+    if not idx and not orm_card:
         raise HTTPException(status_code=404, detail="Card not found")
-    if card.status == "running":
+
+    status = idx.status if idx else (orm_card.status if orm_card else "idle")
+    if status == "running":
         raise HTTPException(status_code=409, detail="Cannot delete a running card")
-    session.delete(card)
+
+    # Delete MD file
+    if idx and idx.file_path:
+        md_path = Path(idx.file_path)
+        if md_path.exists():
+            md_path.unlink()
+        remove_card_from_index(session, card_id)
+
+    # Dual-write: also delete old Card ORM record
+    if orm_card:
+        session.delete(orm_card)
+
     session.commit()
+    # Clean up lock
+    _card_locks.pop(card_id, None)
     return {"ok": True}
 
 
@@ -309,6 +438,8 @@ def delete_cron_job(job_id: int, session: Session = Depends(get_session)):
     job = session.get(CronJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="CronJob not found")
+    if job.is_system:
+        raise HTTPException(status_code=403, detail="Cannot delete a system cron job")
     session.delete(job)
     session.commit()
     return {"ok": True}
@@ -320,14 +451,31 @@ def delete_cron_job(job_id: int, session: Session = Depends(get_session)):
 @router.post("/cards/{card_id}/trigger")
 def trigger_card(card_id: int, session: Session = Depends(get_session)):
     """手動觸發卡片執行（將 status 設為 pending）"""
-    card = session.get(Card, card_id)
-    if not card:
+    idx = session.get(CardIndex, card_id)
+    orm_card = session.get(Card, card_id)
+    if not idx and not orm_card:
         raise HTTPException(status_code=404, detail="Card not found")
-    if card.status == "running":
+
+    status = idx.status if idx else (orm_card.status if orm_card else "idle")
+    if status == "running":
         raise HTTPException(status_code=409, detail="Card is already running")
-    card.status = "pending"
-    card.updated_at = datetime.utcnow()
-    session.add(card)
+
+    now = datetime.now(timezone.utc)
+
+    # Update MD file + index
+    if idx and idx.file_path and Path(idx.file_path).exists():
+        cd = read_card_md(Path(idx.file_path))
+        cd.status = "pending"
+        cd.updated_at = now
+        write_card(Path(idx.file_path), cd)
+        sync_card_to_index(session, cd, project_id=idx.project_id, file_path=idx.file_path)
+
+    # Dual-write: old Card ORM
+    if orm_card:
+        orm_card.status = "pending"
+        orm_card.updated_at = now
+        session.add(orm_card)
+
     session.commit()
     return {"ok": True, "status": "pending"}
 
@@ -335,24 +483,86 @@ def trigger_card(card_id: int, session: Session = Depends(get_session)):
 @router.post("/cards/{card_id}/abort")
 def abort_card(card_id: int, session: Session = Depends(get_session)):
     """中止執行中的任務"""
-    card = session.get(Card, card_id)
-    if not card:
+    idx = session.get(CardIndex, card_id)
+    orm_card = session.get(Card, card_id)
+    if not idx and not orm_card:
         raise HTTPException(status_code=404, detail="Card not found")
+
     killed = abort_task(card_id)
+    now = datetime.now(timezone.utc)
+
     if killed:
-        card.status = "failed"
-        card.content = (card.content or "") + "\n\n### Aborted\n任務已被手動中止。"
-        card.updated_at = datetime.utcnow()
-        session.add(card)
+        # Update MD file + index
+        if idx and idx.file_path and Path(idx.file_path).exists():
+            cd = read_card_md(Path(idx.file_path))
+            cd.status = "failed"
+            cd.content = (cd.content or "") + "\n\n### Aborted\n任務已被手動中止。"
+            cd.updated_at = now
+            write_card(Path(idx.file_path), cd)
+            sync_card_to_index(session, cd, project_id=idx.project_id, file_path=idx.file_path)
+        # Dual-write: old Card ORM
+        if orm_card:
+            orm_card.status = "failed"
+            orm_card.content = (orm_card.content or "") + "\n\n### Aborted\n任務已被手動中止。"
+            orm_card.updated_at = now
+            session.add(orm_card)
         session.commit()
         return {"ok": True, "status": "aborted"}
+
     # 即使 process 不在 running_tasks，也重設狀態
-    if card.status == "running":
-        card.status = "failed"
-        card.updated_at = datetime.utcnow()
-        session.add(card)
+    status = idx.status if idx else (orm_card.status if orm_card else "idle")
+    if status == "running":
+        if idx and idx.file_path and Path(idx.file_path).exists():
+            cd = read_card_md(Path(idx.file_path))
+            cd.status = "failed"
+            cd.updated_at = now
+            write_card(Path(idx.file_path), cd)
+            sync_card_to_index(session, cd, project_id=idx.project_id, file_path=idx.file_path)
+        if orm_card:
+            orm_card.status = "failed"
+            orm_card.updated_at = now
+            session.add(orm_card)
         session.commit()
     return {"ok": True, "status": "reset"}
+
+
+# ==========================================
+# Project Delete (with is_system guard)
+# ==========================================
+@router.delete("/projects/{project_id}")
+def delete_project(project_id: int, session: Session = Depends(get_session)):
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.is_system:
+        raise HTTPException(status_code=403, detail="Cannot delete a system project")
+    # Delete associated stage lists (and their cards from index)
+    lists = session.exec(select(StageList).where(StageList.project_id == project_id)).all()
+    for l in lists:
+        session.delete(l)
+    # Remove card index entries for this project
+    card_indices = query_board(session, project_id)
+    for ci in card_indices:
+        if ci.file_path and Path(ci.file_path).exists():
+            Path(ci.file_path).unlink()
+        remove_card_from_index(session, ci.card_id)
+    session.delete(project)
+    session.commit()
+    return {"ok": True}
+
+
+# ==========================================
+# Project Reindex
+# ==========================================
+@router.post("/projects/{project_id}/reindex")
+def reindex_project(project_id: int, session: Session = Depends(get_session)):
+    """Rebuild CardIndex from MD files for a project."""
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    count = rebuild_index(session, project_id, project.path)
+    session.commit()
+    return {"ok": True, "cards_indexed": count}
 
 
 # ==========================================
@@ -925,11 +1135,15 @@ async def upload_portrait(member_id: int, file: UploadFile = File(...), session:
 
 @router.get("/portraits/{filename}")
 async def get_portrait(filename: str):
-    """取得立繪圖片"""
+    """取得立繪圖片（含快取標頭）"""
     filepath = UPLOAD_DIR / filename
     if not filepath.exists():
         raise HTTPException(status_code=404, detail="Portrait not found")
-    return FileResponse(filepath)
+    # 檔名含 hash，可長期快取（1 年）
+    return FileResponse(
+        filepath,
+        headers={"Cache-Control": "public, max-age=31536000, immutable"}
+    )
 
 
 # ==========================================
@@ -1130,20 +1344,20 @@ def get_cli_status():
     return result
 
 
-def _npm_install_global(package: str) -> subprocess.CompletedProcess:
-    """Cross-platform npm global install (no sudo on Windows)."""
-    if os.name == "nt":
-        cmd = f"npm install -g {package}"
-    else:
-        cmd = f"sudo -n npm install -g {package}"
-    return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=300)
-
-
 @router.post("/cli/claude/install")
 def install_claude_cli():
     """安裝 Claude CLI"""
+    import platform
     try:
-        result = _npm_install_global("@anthropic-ai/claude-code")
+        # Windows 不需要 sudo，Linux 需要
+        if platform.system() == "Windows":
+            cmd = "npm install -g @anthropic-ai/claude-code"
+        else:
+            cmd = "sudo -n npm install -g @anthropic-ai/claude-code"
+
+        result = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True, timeout=300
+        )
         if result.returncode == 0:
             return {"ok": True, "message": "Claude CLI 安裝成功", "output": result.stdout}
         else:
@@ -1157,8 +1371,17 @@ def install_claude_cli():
 @router.post("/cli/gemini/install")
 def install_gemini_cli():
     """安裝 Gemini CLI"""
+    import platform
     try:
-        result = _npm_install_global("@google/gemini-cli")
+        # Windows 不需要 sudo，Linux 需要
+        if platform.system() == "Windows":
+            cmd = "npm install -g @google/gemini-cli"
+        else:
+            cmd = "sudo -n npm install -g @google/gemini-cli"
+
+        result = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True, timeout=300
+        )
         if result.returncode == 0:
             return {"ok": True, "message": "Gemini CLI 安裝成功", "output": result.stdout}
         else:

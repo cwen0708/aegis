@@ -9,7 +9,7 @@ const store = useAegisStore()
 const currentStep = ref(0)
 const completing = ref(false)
 
-const API = import.meta.env.DEV ? 'http://127.0.0.1:8899' : ''
+const API = import.meta.env.DEV ? '' : 'http://localhost:8899'
 
 interface Step {
   id: string

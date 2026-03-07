@@ -19,6 +19,7 @@ class Project(SQLModel, table=True):
     deploy_type: Optional[str] = Field(default="none")
     default_provider: Optional[str] = Field(default="auto") # auto, gemini, claude
     is_active: bool = Field(default=True) # 用於完全隱藏
+    is_system: bool = Field(default=False) # 系統專案（AEGIS），前端禁止刪除/改名
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     lists: List["StageList"] = Relationship(back_populates="project")
@@ -54,6 +55,22 @@ class Card(SQLModel, table=True):
     stage_list: Optional[StageList] = Relationship(back_populates="cards")
     tags: List[Tag] = Relationship(back_populates="cards", link_model=CardTagLink)
 
+class CardIndex(SQLModel, table=True):
+    """SQLite cache index for MD card files — NOT source of truth."""
+    card_id: int = Field(primary_key=True)
+    project_id: int = Field(default=0, index=True)
+    file_path: str = ""
+    list_id: int = Field(default=0, index=True)
+    status: str = Field(default="idle", index=True)
+    title: str = ""
+    description: Optional[str] = None
+    tags_json: str = Field(default="[]")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    content_hash: str = ""
+    file_mtime: float = Field(default=0.0)
+
+
 class CronJob(SQLModel, table=True):
     """本地化的定時排程任務模板 (取代 Supabase 的 ai_prompts)"""
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -64,6 +81,7 @@ class CronJob(SQLModel, table=True):
     prompt_template: str = Field(default="")
     cron_expression: str
     is_enabled: bool = Field(default=True)
+    is_system: bool = Field(default=False)  # 系統排程，前端禁止刪除
     next_scheduled_at: Optional[datetime] = None
     
     # 存放原本 Supabase 裡的 metadata (field_id, event_type 等)，用 JSON 字串存

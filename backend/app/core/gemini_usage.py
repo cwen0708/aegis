@@ -11,11 +11,25 @@ logger = logging.getLogger(__name__)
 
 GEMINI_DIR = Path.home() / ".gemini"
 
-# Gemini CLI OAuth constants — read from ~/.gemini/oauth_creds.json at runtime,
-# or set via environment variables. These are the same public client credentials
-# embedded in the @google/gemini-cli npm package.
-OAUTH_CLIENT_ID = os.environ.get("GEMINI_OAUTH_CLIENT_ID", "")
-OAUTH_CLIENT_SECRET = os.environ.get("GEMINI_OAUTH_CLIENT_SECRET", "")
+# Gemini CLI OAuth — 優先從環境變數讀取，否則從 credential 檔案取得
+def _load_oauth_constants():
+    client_id = os.environ.get("GEMINI_OAUTH_CLIENT_ID", "")
+    client_secret = os.environ.get("GEMINI_OAUTH_CLIENT_SECRET", "")
+    if client_id and client_secret:
+        return client_id, client_secret
+    # Fallback: 從 ~/.gemini/oauth_creds.json 讀取
+    creds_file = GEMINI_DIR / "oauth_creds.json"
+    if creds_file.exists():
+        try:
+            with open(creds_file, encoding="utf-8") as f:
+                creds = json.load(f)
+            client_id = client_id or creds.get("client_id", "")
+            client_secret = client_secret or creds.get("client_secret", "")
+        except Exception:
+            pass
+    return client_id, client_secret
+
+OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET = _load_oauth_constants()
 QUOTA_API_URL = "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota"
 TOKEN_REFRESH_URL = "https://oauth2.googleapis.com/token"
 
@@ -54,16 +68,10 @@ def _get_access_token() -> Optional[str]:
     if not refresh_token:
         return creds.get("access_token")  # 沒有 refresh_token 就試試舊的
 
-    # Resolve client credentials: env vars > creds file > module-level defaults
-    client_id = OAUTH_CLIENT_ID or creds.get("client_id", "")
-    client_secret = OAUTH_CLIENT_SECRET or creds.get("client_secret", "")
-    if not client_id or not client_secret:
-        return creds.get("access_token")
-
     try:
         resp = http_requests.post(TOKEN_REFRESH_URL, data={
-            "client_id": client_id,
-            "client_secret": client_secret,
+            "client_id": OAUTH_CLIENT_ID,
+            "client_secret": OAUTH_CLIENT_SECRET,
             "refresh_token": refresh_token,
             "grant_type": "refresh_token",
         }, timeout=10)

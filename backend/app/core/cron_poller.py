@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from sqlmodel import Session, select
 from app.database import engine
 from app.models.core import Card, StageList, Project, Tag, CardTagLink, CronJob
+from app.core.card_file import CardData, write_card, card_file_path
+from app.core.card_index import sync_card_to_index, next_card_id
 from croniter import croniter
 
 logger = logging.getLogger(__name__)
@@ -79,21 +81,40 @@ async def poll_local_cron_jobs():
 
             full_content = f"## 營運排程元數據\n```json\n{json.dumps(metadata, ensure_ascii=False, indent=2)}\n```\n\n{content}"
 
-            # 建立卡片並設為 pending (等待 Agent Runner 接手)
-            card = Card(
+            # 取得專案路徑（MD 檔案需要）
+            project = session.get(Project, job.project_id)
+            if not project or not project.path:
+                logger.error(f"Cannot find project path for project {job.project_id}")
+                continue
+
+            # --- MD card file (primary) ---
+            card_id = next_card_id(session)
+            card_data = CardData(
+                id=card_id,
                 list_id=sched_list.id,
                 title=f"[排程] {job.name}",
                 description=job.description or 'Auto-generated from Aegis Cron',
                 content=full_content,
-                status="pending"
+                status="pending",
+                tags=["Ops"],
             )
-            session.add(card)
-            session.commit()
-            session.refresh(card)
+            fpath = card_file_path(project.path, card_id)
+            write_card(fpath, card_data)
+            sync_card_to_index(session, card_data, project_id=project.id, file_path=str(fpath))
 
-            # 綁定標籤
-            session.add(CardTagLink(card_id=card.id, tag_id=ops_tag.id))
-            
+            # --- Dual-write: also create old Card ORM record ---
+            old_card = Card(
+                list_id=sched_list.id,
+                title=card_data.title,
+                description=card_data.description,
+                content=full_content,
+                status="pending",
+            )
+            session.add(old_card)
+            session.commit()
+            session.refresh(old_card)
+            session.add(CardTagLink(card_id=old_card.id, tag_id=ops_tag.id))
+
             # 更新下次執行時間
             next_time = _calculate_next_time(job.cron_expression)
             if next_time:
@@ -103,7 +124,7 @@ async def poll_local_cron_jobs():
             session.add(job)
             
             session.commit()
-            logger.info(f" -> Created Card {card.id} for CronJob '{job.name}', next run at: {next_time}")
+            logger.info(f" -> Created MD Card {card_id} (ORM Card {old_card.id}) for CronJob '{job.name}', next run at: {next_time}")
 
 async def start_cron_poller():
     """獨立的排程迴圈，每 60 秒檢查一次本地資料庫"""

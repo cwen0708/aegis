@@ -11,6 +11,7 @@ const form = ref({
   timezone: 'Asia/Taipei',
   max_workstations: '3',
   gemini_api_key: '',
+  memory_short_term_days: '30',
 })
 
 // Gcloud 引導式登入狀態
@@ -35,7 +36,7 @@ const cliSuccess = ref('')
 // Gcloud 載入狀態
 const gcloudStatusLoading = ref(true)
 
-const API = import.meta.env.DEV ? 'http://127.0.0.1:8899' : ''
+const API = import.meta.env.DEV ? '' : 'http://localhost:8899'
 
 async function fetchGcloudStatus() {
   gcloudStatusLoading.value = true
@@ -171,6 +172,7 @@ onMounted(async () => {
   form.value.timezone = store.settings.timezone || 'Asia/Taipei'
   form.value.max_workstations = store.settings.max_workstations || '3'
   form.value.gemini_api_key = store.settings.gemini_api_key || ''
+  form.value.memory_short_term_days = store.settings.memory_short_term_days || '30'
   settingsLoading.value = false
 })
 
@@ -181,6 +183,7 @@ async function saveSettings() {
       timezone: form.value.timezone,
       max_workstations: form.value.max_workstations,
       gemini_api_key: form.value.gemini_api_key,
+      memory_short_term_days: form.value.memory_short_term_days,
     })
   } finally {
     saving.value = false
@@ -243,6 +246,17 @@ async function saveSettings() {
                 class="w-32 bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-mono"
               />
               <p class="text-[11px] text-slate-500 mt-1">同時間可使用的工作台數量</p>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1.5">短期記憶保留天數</label>
+              <input
+                v-model="form.memory_short_term_days"
+                type="number"
+                min="1"
+                max="365"
+                class="w-32 bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-mono"
+              />
+              <p class="text-[11px] text-slate-500 mt-1">AEGIS 系統短期記憶的保留天數，超過自動清理</p>
             </div>
           </div>
         </div>

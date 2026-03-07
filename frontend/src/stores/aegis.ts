@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 
-const API = import.meta.env.DEV ? '' : ''
+const API = import.meta.env.DEV ? '' : 'http://localhost:8899'
 
 export interface RunningTask {
   task_id: number
