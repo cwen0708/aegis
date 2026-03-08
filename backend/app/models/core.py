@@ -115,6 +115,7 @@ class Member(SQLModel, table=True):
     """AI 團隊成員（虛擬角色）"""
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str  # "財務小陳"
+    slug: str = ""  # 資料夾名稱，如 "xiao-jun"
     avatar: str = ""  # emoji
     role: str = ""  # "資深開發者"
     description: str = ""
