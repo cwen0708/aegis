@@ -2,8 +2,9 @@
 import json
 import os
 import logging
+import time
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 import urllib.request
 import ssl
 
@@ -12,12 +13,19 @@ logger = logging.getLogger(__name__)
 CREDS_FILE = Path.home() / ".claude" / ".credentials.json"
 PROFILES_DIR = Path.home() / ".claude-profiles"
 
-# per-account 快取：429 時保留上次成功的結果
-_usage_cache: Dict[str, Dict[str, Any]] = {}
+# per-account 快取：{ cache_key: (timestamp, data) }
+_usage_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+CACHE_TTL = 120  # 秒：同一帳號 120 秒內不重複查詢
 
 
 def _fetch_usage(token: str, cache_key: str = "") -> Optional[Dict[str, Any]]:
-    """用 OAuth token 查詢 Anthropic usage API，429 時回傳快取"""
+    """用 OAuth token 查詢 Anthropic usage API，帶 TTL 快取避免 429"""
+    # TTL 快取：最近查過就直接回傳
+    if cache_key and cache_key in _usage_cache:
+        ts, cached = _usage_cache[cache_key]
+        if time.time() - ts < CACHE_TTL:
+            return cached
+
     try:
         req = urllib.request.Request(
             "https://api.anthropic.com/api/oauth/usage",
@@ -31,12 +39,12 @@ def _fetch_usage(token: str, cache_key: str = "") -> Optional[Dict[str, Any]]:
         resp = urllib.request.urlopen(req, context=ctx, timeout=10)
         result = json.loads(resp.read())
         if cache_key:
-            _usage_cache[cache_key] = result
+            _usage_cache[cache_key] = (time.time(), result)
         return result
     except urllib.error.HTTPError as e:
         if e.code == 429 and cache_key and cache_key in _usage_cache:
             logger.info(f"[Claude Usage] 429 for {cache_key}, using cached data")
-            return _usage_cache[cache_key]
+            return _usage_cache[cache_key][1]
         logger.warning(f"[Claude Usage] API query failed: {e}")
         return None
     except Exception as e:
