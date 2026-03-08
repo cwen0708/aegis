@@ -1,5 +1,5 @@
 # Aegis Windows Installation Script
-# Usage: irm https://raw.githubusercontent.com/cwen0708/aegis/main/scripts/install-windows.ps1 | iex
+# Usage: irm https://raw.githubusercontent.com/cwen0708/aegis/refs/heads/main/scripts/install-windows.ps1 | iex
 # Or: .\install-windows.ps1 [-InstallDir "C:\Aegis"] [-SkipCLI] [-Dev]
 
 param(
@@ -152,11 +152,19 @@ if ($Dev) {
     Write-Host "  Extracting..."
     Expand-Archive -Path $zipPath -DestinationPath $env:TEMP -Force
 
-    # Move contents from extracted folder
-    Get-ChildItem "$env:TEMP\Aegis-main\*" | Move-Item -Destination $InstallDir -Force
+    # Move contents from extracted folder (GitHub uses lowercase repo name)
+    $extractedDir = Get-ChildItem "$env:TEMP" -Directory -Filter "aegis-*" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if (-not $extractedDir) {
+        $extractedDir = Get-ChildItem "$env:TEMP" -Directory -Filter "Aegis-*" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    }
+    if (-not $extractedDir) {
+        Write-Err "Failed to find extracted Aegis folder"
+        exit 1
+    }
+    Get-ChildItem "$($extractedDir.FullName)\*" | Move-Item -Destination $InstallDir -Force
 
     Remove-Item $zipPath -Force
-    Remove-Item "$env:TEMP\Aegis-main" -Force -Recurse -ErrorAction SilentlyContinue
+    Remove-Item $extractedDir.FullName -Force -Recurse -ErrorAction SilentlyContinue
 }
 
 Write-Success "Aegis downloaded"
@@ -186,10 +194,19 @@ Write-Step "Setting up frontend..."
 Set-Location "$InstallDir\frontend"
 
 Write-Host "  Installing npm dependencies..."
-npm install --force 2>$null
+npm install --force
+if ($LASTEXITCODE -ne 0) {
+    Write-Warn "npm install had issues, retrying with clean install..."
+    Remove-Item -Recurse -Force node_modules -ErrorAction SilentlyContinue
+    npm install --force
+}
 
 Write-Host "  Building frontend..."
-npx vite build
+npm run build
+if ($LASTEXITCODE -ne 0) {
+    Write-Err "Frontend build failed. You can retry later with: cd frontend && npm run build"
+    Write-Warn "Continuing installation..."
+}
 
 Write-Success "Frontend ready"
 
