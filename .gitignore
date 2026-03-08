@@ -39,7 +39,9 @@ frontend/pnpm-lock.yaml
 .aegis/
 backend/.aegis/
 projects/
-backend/uploads/
+backend/uploads/*
+!backend/uploads/portraits/
+backend/uploads/portraits/*
 !backend/uploads/portraits/example_*.png
 backend/portraits/
 
