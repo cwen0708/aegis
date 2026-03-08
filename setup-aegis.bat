@@ -18,12 +18,18 @@ if exist "%PS_SCRIPT%" (
     goto :run_installer
 )
 
-:: Download install.ps1 from web (suppress PowerShell output, show our own message)
+:: Download install.ps1 from web
 echo  [*] 下載安裝腳本...
 set "PS_SCRIPT=%TEMP%\aegis-install.ps1"
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ^
-    "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%DOWNLOAD_URL%' -OutFile '%PS_SCRIPT%' -UseBasicParsing" >nul 2>&1
+:: Use curl (built-in on Windows 10+), fallback to PowerShell WebClient
+where curl >nul 2>&1
+if %ERRORLEVEL% EQU 0 (
+    curl -fsSL -o "%PS_SCRIPT%" "%DOWNLOAD_URL%" >nul 2>&1
+) else (
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ^
+        "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; (New-Object System.Net.WebClient).DownloadFile('%DOWNLOAD_URL%', '%PS_SCRIPT%')" >nul 2>&1
+)
 
 if not exist "%PS_SCRIPT%" (
     echo.
