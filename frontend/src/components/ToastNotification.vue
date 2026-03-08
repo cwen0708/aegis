@@ -5,7 +5,7 @@ import { CheckCircle2, AlertCircle, Info, X } from 'lucide-vue-next'
 const store = useAegisStore()
 
 function removeToast(id: number) {
-  store.toasts = store.toasts.filter(t => t.id !== id)
+  store.removeToast(id)
 }
 </script>
 

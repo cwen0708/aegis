@@ -1137,6 +1137,9 @@ async def upload_portrait(member_id: int, file: UploadFile = File(...), session:
 async def get_portrait(filename: str):
     """取得立繪圖片（含快取標頭）"""
     filepath = UPLOAD_DIR / filename
+    # 防止路徑穿越攻擊
+    if not filepath.resolve().is_relative_to(UPLOAD_DIR.resolve()):
+        raise HTTPException(status_code=400, detail="Invalid filename")
     if not filepath.exists():
         raise HTTPException(status_code=404, detail="Portrait not found")
     # 檔名含 hash，可長期快取（1 年）

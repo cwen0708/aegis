@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, provide, onMounted, computed } from 'vue'
+import { ref, provide, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { Monitor, ListTodo, Bot, Settings, Activity, Clock, FolderOpen, Wifi, WifiOff, Sun, Moon, Zap, Users, Building2, PanelLeftClose, PanelLeftOpen, Rocket } from 'lucide-vue-next'
 import { useWebSocket } from './composables/useWebSocket'
@@ -49,6 +49,8 @@ const fetchProjects = async () => {
   }
 }
 
+let projectInterval: ReturnType<typeof setInterval>
+
 onMounted(async () => {
   fetchProjects()
   await store.fetchSettings()
@@ -59,8 +61,10 @@ onMounted(async () => {
   }
 
   // 定時更新專案列表
-  setInterval(fetchProjects, 30000)
+  projectInterval = setInterval(fetchProjects, 30000)
 })
+
+onUnmounted(() => clearInterval(projectInterval))
 
 function goToProject(projectId: number) {
   router.push({ path: '/kanban', query: { project: String(projectId) } })

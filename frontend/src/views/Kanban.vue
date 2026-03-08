@@ -196,11 +196,12 @@ function requestDeleteCard(cardId: number) {
 
 async function confirmDeleteCard() {
   if (!deleteTargetCardId.value) return
+  const targetId = deleteTargetCardId.value
   try {
-    await store.deleteCard(deleteTargetCardId.value)
+    await store.deleteCard(targetId)
     confirmDelete.value = false
     deleteTargetCardId.value = null
-    if (selectedCard.value?.id === deleteTargetCardId.value) {
+    if (selectedCard.value?.id === targetId) {
       selectedCard.value = null
     }
     await fetchBoard()
