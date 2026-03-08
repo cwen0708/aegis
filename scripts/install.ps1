@@ -339,11 +339,14 @@ function Start-Installation {
 
     Write-Step "安裝前端套件 (這可能需要幾分鐘)..."
     Push-Location $frontendDir
-    # Use npx pnpm (auto-downloads pnpm without global install / PATH issues)
-    $null = & npx -y pnpm install 2>&1
+    # Override os/cpu to match current platform (user .npmrc may have os=linux for deployment)
+    $npmPlatformArgs = @("install", "--os=$(node -e `"console.log(process.platform)`")", "--cpu=$(node -e `"console.log(process.arch)`")")
+    $null = & npm @npmPlatformArgs 2>&1
     if ($LASTEXITCODE -ne 0) {
-        Write-Warn "pnpm install 失敗，嘗試使用 npm..."
-        $null = & npm install 2>&1
+        Write-Warn "npm install 有問題，嘗試清除後重裝..."
+        Remove-Item -Force package-lock.json -ErrorAction SilentlyContinue
+        Remove-Item -Recurse -Force node_modules -ErrorAction SilentlyContinue
+        $null = & npm @npmPlatformArgs 2>&1
     }
     Write-OK "前端套件安裝完成"
 
