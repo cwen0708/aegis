@@ -178,11 +178,20 @@ Set-Location "$InstallDir\backend"
 
 # Create virtual environment
 Write-Host "  Creating Python virtual environment..."
-& $pythonCmd -m venv venv
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+& $pythonCmd -m venv venv 2>&1 | ForEach-Object { "$_" }
+$ErrorActionPreference = $prevEAP
+if (-not (Test-Path ".\venv\Scripts\python.exe")) { throw "venv creation failed" }
 
 # Activate and install dependencies
+# pip emits warnings to stderr; prevent PowerShell from treating them as errors
 Write-Host "  Installing Python dependencies..."
-& ".\venv\Scripts\pip.exe" install -q -r requirements.txt
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+& ".\venv\Scripts\pip.exe" install -q -r requirements.txt 2>&1 | ForEach-Object { "$_" }
+$ErrorActionPreference = $prevEAP
+if (-not (Test-Path ".\venv\Scripts\pip.exe")) { throw "pip install failed" }
 
 Write-Success "Backend ready"
 
