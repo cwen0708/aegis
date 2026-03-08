@@ -1,388 +1,553 @@
-# Aegis Windows Installation Script
-# Usage: irm https://raw.githubusercontent.com/cwen0708/aegis/main/scripts/install.ps1 | iex
-# Or: .\install.ps1 [-InstallDir "C:\Aegis"] [-SkipCLI] [-Dev]
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+    Aegis One-Click Installer for Windows
+.DESCRIPTION
+    Installs all dependencies (Git, Python, Node.js, AI CLIs) and sets up the Aegis project.
+    Designed for non-technical users on Windows 10/11.
+#>
 
 param(
-    [string]$InstallDir = "$env:LOCALAPPDATA\Aegis",
-    [switch]$SkipCLI,
-    [switch]$Dev,
-    [switch]$Help
+    [string]$RootDir = "",
+    [string]$InstallDir = "",
+    [switch]$Force  # Skip "already installed" checks, force winget install
 )
 
-$ErrorActionPreference = "Stop"
-$ProgressPreference = "SilentlyContinue"
+# ============================================================
+# Configuration
+# ============================================================
+# Use "Continue" globally — external tools (git, pip, npm) write progress
+# to stderr which PowerShell would otherwise treat as terminating errors.
+# Actual failures are caught via $LASTEXITCODE and try/catch.
+$ErrorActionPreference = "Continue"
+$ProgressPreference = "SilentlyContinue"  # Speed up Invoke-WebRequest
 
-# Colors
-function Write-Step { param($msg) Write-Host "`n[*] $msg" -ForegroundColor Cyan }
-function Write-Success { param($msg) Write-Host "[+] $msg" -ForegroundColor Green }
-function Write-Warn { param($msg) Write-Host "[!] $msg" -ForegroundColor Yellow }
-function Write-Err { param($msg) Write-Host "[-] $msg" -ForegroundColor Red }
+$REPO_URL = "https://github.com/cwen0708/aegis.git"
+$SERVER_PORT = 8899
 
-if ($Help) {
-    Write-Host @"
-Aegis Installation Script for Windows
+# ============================================================
+# Helpers
+# ============================================================
+$LogFile = ""
 
-Usage:
-    .\install-windows.ps1 [options]
-
-Options:
-    -InstallDir <path>   Installation directory (default: %LOCALAPPDATA%\Aegis)
-    -SkipCLI             Skip Claude CLI and Gemini CLI installation
-    -Dev                 Clone with git instead of downloading release
-    -Help                Show this help message
-
-Examples:
-    .\install-windows.ps1
-    .\install-windows.ps1 -InstallDir "D:\Tools\Aegis"
-    .\install-windows.ps1 -SkipCLI -Dev
-"@
-    exit 0
+function Write-Step {
+    param([string]$Message, [string]$Status = "...")
+    $timestamp = Get-Date -Format "HH:mm:ss"
+    $line = "[$timestamp] $Message"
+    Write-Host "  $line" -ForegroundColor Cyan
+    if ($LogFile) { Add-Content -Path $LogFile -Value $line -Encoding UTF8 }
 }
 
-Write-Host @"
-
-    _    _____ ____ ___ ____
-   / \  | ____/ ___|_ _/ ___|
-  / _ \ |  _|| |  _ | |\___ \
- / ___ \| |__| |_| || | ___) |
-/_/   \_\_____\____|___|____/
-
-  AI Agent Management Dashboard
-
-"@ -ForegroundColor Cyan
-
-# ============================================
-# Check Prerequisites
-# ============================================
-Write-Step "Checking prerequisites..."
-
-# Check Node.js
-$nodeVersion = $null
-try {
-    $nodeVersion = (node --version 2>$null)
-} catch {}
-
-if (-not $nodeVersion) {
-    Write-Err "Node.js not found. Please install Node.js 18+ from https://nodejs.org/"
-    Write-Host "  Or use winget: winget install OpenJS.NodeJS.LTS"
-    exit 1
+function Write-OK {
+    param([string]$Message)
+    Write-Host "  [OK] $Message" -ForegroundColor Green
+    if ($LogFile) { Add-Content -Path $LogFile -Value "[OK] $Message" -Encoding UTF8 }
 }
-Write-Success "Node.js: $nodeVersion"
 
-# Check npm
-$npmVersion = (npm --version 2>$null)
-if (-not $npmVersion) {
-    Write-Err "npm not found"
-    exit 1
+function Write-Warn {
+    param([string]$Message)
+    Write-Host "  [!] $Message" -ForegroundColor Yellow
+    if ($LogFile) { Add-Content -Path $LogFile -Value "[WARN] $Message" -Encoding UTF8 }
 }
-Write-Success "npm: $npmVersion"
 
-# Check Python
-$pythonCmd = $null
-foreach ($cmd in @("python", "python3", "py")) {
+function Write-Err {
+    param([string]$Message)
+    Write-Host "  [X] $Message" -ForegroundColor Red
+    if ($LogFile) { Add-Content -Path $LogFile -Value "[ERROR] $Message" -Encoding UTF8 }
+}
+
+function Write-Banner {
+    Write-Host ""
+    Write-Host "  ============================================" -ForegroundColor Magenta
+    Write-Host "       Aegis Installer v1.1" -ForegroundColor Magenta
+    Write-Host "       AI Engineering Grid & Intelligence" -ForegroundColor Magenta
+    Write-Host "  ============================================" -ForegroundColor Magenta
+    Write-Host ""
+}
+
+function Refresh-Path {
+    $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    $env:Path = "$machinePath;$userPath"
+}
+
+function Test-CommandExists {
+    param([string]$Command)
+    $null = Get-Command $Command -ErrorAction SilentlyContinue
+    return $?
+}
+
+function Get-WingetPath {
+    # winget might not be in PATH in some contexts; search common locations
+    $candidates = @(
+        "winget",
+        "$env:LOCALAPPDATA\Microsoft\WindowsApps\winget.exe",
+        "C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_*\winget.exe"
+    )
+    foreach ($c in $candidates) {
+        if ($c -like "*`**") {
+            $resolved = Get-Item $c -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($resolved) { return $resolved.FullName }
+        } elseif (Test-CommandExists $c) {
+            return $c
+        } elseif (Test-Path $c) {
+            return $c
+        }
+    }
+    return $null
+}
+
+function Install-WithWinget {
+    param(
+        [string]$PackageId,
+        [string]$Name,
+        [string]$TestCommand,
+        [string]$WingetExe,
+        [bool]$ForceInstall = $false
+    )
+
+    if (!$ForceInstall -and $TestCommand -and (Test-CommandExists $TestCommand)) {
+        Write-OK "$Name 已安裝"
+        return $true
+    }
+
+    Write-Step "正在安裝 $Name ..."
     try {
-        $ver = & $cmd --version 2>$null
-        if ($ver -match "Python 3\.(\d+)") {
-            $minor = [int]$Matches[1]
-            if ($minor -ge 10) {
-                $pythonCmd = $cmd
-                Write-Success "Python: $ver"
-                break
+        $wingetArgs = @("install", "--id", $PackageId, "--accept-source-agreements", "--accept-package-agreements", "--silent")
+        if ($ForceInstall) { $wingetArgs += "--force" }
+        $result = & $WingetExe @wingetArgs 2>&1
+        $exitCode = $LASTEXITCODE
+
+        # Refresh PATH after install
+        Refresh-Path
+
+        if ($exitCode -eq 0 -or $exitCode -eq -1978335189) {
+            # -1978335189 = already installed
+            Write-OK "$Name 安裝完成"
+            return $true
+        } else {
+            # Check if command is now available despite winget exit code
+            Refresh-Path
+            if ($TestCommand -and (Test-CommandExists $TestCommand)) {
+                Write-OK "$Name 已可用 (winget exit code: $exitCode)"
+                return $true
             }
+            Write-Warn "$Name 安裝可能有問題 (exit code: $exitCode)"
+            return $false
         }
+    } catch {
+        Write-Err "安裝 $Name 失敗: $_"
+        return $false
+    }
+}
+
+# ============================================================
+# Main Installation
+# ============================================================
+function Start-Installation {
+    Write-Banner
+
+    # ----------------------------------------------------------
+    # Step 0: Determine install directory
+    # ----------------------------------------------------------
+    $isInsideRepo = $false
+    if ($RootDir -and (Test-Path (Join-Path $RootDir ".git"))) {
+        $isInsideRepo = $true
+        $projectDir = (Resolve-Path $RootDir).Path.TrimEnd('\')
+    } elseif ($InstallDir) {
+        $projectDir = $InstallDir
+    } else {
+        $defaultDir = Join-Path $env:USERPROFILE "Aegis"
+        Write-Host "  安裝目錄 (直接 Enter 使用預設):" -ForegroundColor White
+        Write-Host "  預設: $defaultDir" -ForegroundColor Gray
+        $userInput = Read-Host "  路徑"
+        if ([string]::IsNullOrWhiteSpace($userInput)) {
+            $projectDir = $defaultDir
+        } else {
+            $projectDir = $userInput
+        }
+    }
+
+    # Set up log file
+    $script:LogFile = Join-Path $projectDir "install.log"
+    if (!(Test-Path $projectDir)) {
+        New-Item -ItemType Directory -Path $projectDir -Force | Out-Null
+    }
+    "" | Set-Content -Path $LogFile -Encoding UTF8
+    Write-Step "安裝目錄: $projectDir"
+    Write-Step "記錄檔: $LogFile"
+
+    # ----------------------------------------------------------
+    # Step 1: Check Windows version & winget
+    # ----------------------------------------------------------
+    Write-Host ""
+    Write-Host "  [1/7] 檢查系統環境" -ForegroundColor White
+    Write-Host "  ─────────────────────────────────" -ForegroundColor DarkGray
+
+    $osVersion = [System.Environment]::OSVersion.Version
+    Write-Step "Windows 版本: $($osVersion.Major).$($osVersion.Minor).$($osVersion.Build)"
+
+    if ($osVersion.Build -lt 17763) {
+        Write-Err "需要 Windows 10 1809 或更新版本"
+        return $false
+    }
+
+    # Check network
+    try {
+        $null = Invoke-WebRequest -Uri "https://www.google.com" -UseBasicParsing -TimeoutSec 5
+        Write-OK "網路連線正常"
+    } catch {
+        Write-Err "無法連線到網路，請檢查網路設定"
+        return $false
+    }
+
+    # Check winget
+    $wingetExe = Get-WingetPath
+    if (!$wingetExe) {
+        Write-Err "找不到 winget。"
+        Write-Err "Windows 11 應該已內建。Windows 10 請從 Microsoft Store 安裝「應用程式安裝程式」"
+        Write-Host "  https://aka.ms/getwinget" -ForegroundColor Yellow
+        return $false
+    }
+    Write-OK "winget 可用"
+
+    # ----------------------------------------------------------
+    # Step 2: Install Git, Python, Node.js via winget
+    # ----------------------------------------------------------
+    Write-Host ""
+    Write-Host "  [2/7] 安裝基礎工具 (Git, Python, Node.js)" -ForegroundColor White
+    Write-Host "  ─────────────────────────────────" -ForegroundColor DarkGray
+
+    $gitOk = Install-WithWinget -PackageId "Git.Git" -Name "Git" -TestCommand "git" -WingetExe $wingetExe -ForceInstall $Force
+    if (!$gitOk) {
+        Write-Err "Git 安裝失敗，無法繼續"
+        return $false
+    }
+    Refresh-Path
+
+    $pythonOk = Install-WithWinget -PackageId "Python.Python.3.12" -Name "Python 3.12" -TestCommand "python" -WingetExe $wingetExe -ForceInstall $Force
+    if (!$pythonOk) {
+        Write-Err "Python 安裝失敗，無法繼續"
+        return $false
+    }
+    Refresh-Path
+
+    $nodeOk = Install-WithWinget -PackageId "OpenJS.NodeJS.LTS" -Name "Node.js LTS" -TestCommand "node" -WingetExe $wingetExe -ForceInstall $Force
+    if (!$nodeOk) {
+        Write-Err "Node.js 安裝失敗，無法繼續"
+        return $false
+    }
+    Refresh-Path
+
+    # Show versions
+    try {
+        $gitVer = & git --version 2>&1
+        $pyVer = & python --version 2>&1
+        $nodeVer = & node --version 2>&1
+        Write-Step "版本: $gitVer | $pyVer | Node $nodeVer"
     } catch {}
-}
 
-if (-not $pythonCmd) {
-    Write-Err "Python 3.10+ not found. Please install Python from https://python.org/"
-    Write-Host "  Or use winget: winget install Python.Python.3.12"
-    exit 1
-}
+    # ----------------------------------------------------------
+    # Step 3: Clone repository
+    # ----------------------------------------------------------
+    Write-Host ""
+    Write-Host "  [3/7] 取得 Aegis 原始碼" -ForegroundColor White
+    Write-Host "  ─────────────────────────────────" -ForegroundColor DarkGray
 
-# Check Git (only for Dev mode)
-if ($Dev) {
-    $gitVersion = (git --version 2>$null)
-    if (-not $gitVersion) {
-        Write-Err "Git not found. Required for -Dev mode."
-        Write-Host "  Install from https://git-scm.com/ or: winget install Git.Git"
-        exit 1
-    }
-    Write-Success "Git: $gitVersion"
-}
-
-# ============================================
-# Create Installation Directory
-# ============================================
-Write-Step "Setting up installation directory..."
-
-$isUpdate = $false
-if (Test-Path $InstallDir) {
-    # Check if this looks like an existing Aegis installation
-    if ((Test-Path "$InstallDir\backend") -and (Test-Path "$InstallDir\frontend")) {
-        Write-Warn "Existing Aegis installation found: $InstallDir"
-        Write-Host "  [U] Update - keep data, update code & dependencies (recommended)"
-        Write-Host "  [C] Clean  - delete everything and reinstall from scratch"
-        Write-Host "  [Q] Quit   - cancel installation"
-        $choice = Read-Host "Choose [U/c/q]"
-        switch ($choice.ToLower()) {
-            "c" {
-                Write-Warn "Removing existing installation..."
-                Remove-Item -Recurse -Force $InstallDir
-            }
-            "q" {
-                Write-Host "Aborted."
-                exit 0
-            }
-            default {
-                $isUpdate = $true
-                Write-Success "Updating existing installation..."
-            }
-        }
+    if ($isInsideRepo) {
+        Write-OK "已在專案目錄中，跳過 clone"
+    } elseif (Test-Path (Join-Path $projectDir ".git")) {
+        Write-OK "專案已存在，執行 git pull"
+        Push-Location $projectDir
+        $null = & git pull --ff-only 2>&1
+        Pop-Location
     } else {
-        Write-Warn "Directory exists but is not an Aegis installation: $InstallDir"
-        $confirm = Read-Host "Overwrite? (y/N)"
-        if ($confirm -ne "y" -and $confirm -ne "Y") {
-            Write-Host "Aborted."
-            exit 0
-        }
-        Remove-Item -Recurse -Force $InstallDir
-    }
-}
-
-if (-not (Test-Path $InstallDir)) {
-    New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-}
-Set-Location $InstallDir
-Write-Success "Install directory: $InstallDir"
-
-# ============================================
-# Download or Clone Aegis
-# ============================================
-if ($isUpdate -and -not $Dev) {
-    Write-Step "Skipping download (update mode)..."
-    Write-Success "Using existing files"
-} elseif ($isUpdate -and $Dev) {
-    Write-Step "Pulling latest changes..."
-    git pull
-    Write-Success "Aegis updated"
-} else {
-Write-Step "Downloading Aegis..."
-}
-
-if (-not $isUpdate -and $Dev) {
-    # Clone from GitHub
-    if (Test-Path ".git") {
-        Write-Host "  Updating existing repository..."
-        git pull
-    } else {
-        git clone https://github.com/cwen0708/aegis.git .
-    }
-} elseif (-not $isUpdate) {
-    # Download latest release
-    $releaseUrl = "https://github.com/cwen0708/aegis/archive/refs/heads/main.zip"
-    $zipPath = "$env:TEMP\aegis-main.zip"
-
-    Write-Host "  Downloading from GitHub..."
-    Invoke-WebRequest -Uri $releaseUrl -OutFile $zipPath
-
-    Write-Host "  Extracting..."
-    Expand-Archive -Path $zipPath -DestinationPath $env:TEMP -Force
-
-    # Move contents from extracted folder (GitHub uses lowercase repo name)
-    $extractedDir = Get-ChildItem "$env:TEMP" -Directory -Filter "aegis-*" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    if (-not $extractedDir) {
-        $extractedDir = Get-ChildItem "$env:TEMP" -Directory -Filter "Aegis-*" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    }
-    if (-not $extractedDir) {
-        Write-Err "Failed to find extracted Aegis folder"
-        exit 1
-    }
-    Get-ChildItem "$($extractedDir.FullName)\*" | Move-Item -Destination $InstallDir -Force
-
-    Remove-Item $zipPath -Force
-    Remove-Item $extractedDir.FullName -Force -Recurse -ErrorAction SilentlyContinue
-    Write-Success "Aegis downloaded"
-}
-
-# ============================================
-# Setup Backend (Python)
-# ============================================
-Write-Step "Setting up backend..."
-
-Set-Location "$InstallDir\backend"
-
-# Create virtual environment
-Write-Host "  Creating Python virtual environment..."
-$prevEAP = $ErrorActionPreference
-$ErrorActionPreference = "Continue"
-& $pythonCmd -m venv venv 2>&1 | ForEach-Object { "$_" }
-$ErrorActionPreference = $prevEAP
-if (-not (Test-Path ".\venv\Scripts\python.exe")) { throw "venv creation failed" }
-
-# Activate and install dependencies
-# pip emits warnings to stderr; prevent PowerShell from treating them as errors
-Write-Host "  Installing Python dependencies..."
-$prevEAP = $ErrorActionPreference
-$ErrorActionPreference = "Continue"
-& ".\venv\Scripts\pip.exe" install -q -r requirements.txt 2>&1 | ForEach-Object { "$_" }
-$ErrorActionPreference = $prevEAP
-if (-not (Test-Path ".\venv\Scripts\pip.exe")) { throw "pip install failed" }
-
-# Seed initial data (tags, members, demo project; skips if already seeded)
-Write-Host "  Seeding initial data..."
-$prevEAP = $ErrorActionPreference
-$ErrorActionPreference = "Continue"
-& ".\venv\Scripts\python.exe" seed.py 2>&1 | ForEach-Object { "$_" }
-$ErrorActionPreference = $prevEAP
-
-Write-Success "Backend ready"
-
-# ============================================
-# Setup Frontend (Node.js)
-# ============================================
-Write-Step "Setting up frontend..."
-
-Set-Location "$InstallDir\frontend"
-
-# npm commands emit warnings to stderr; prevent PowerShell from treating them as errors
-$prevEAP = $ErrorActionPreference
-$ErrorActionPreference = "Continue"
-
-Write-Host "  Installing npm dependencies..."
-# Remove stale lockfile/node_modules to avoid optional-dep bugs with --force
-Remove-Item -Force package-lock.json -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force node_modules -ErrorAction SilentlyContinue
-npm install 2>$null
-if ($LASTEXITCODE -ne 0) {
-    Write-Warn "npm install had issues, retrying..."
-    Remove-Item -Force package-lock.json -ErrorAction SilentlyContinue
-    Remove-Item -Recurse -Force node_modules -ErrorAction SilentlyContinue
-    npm install 2>$null
-}
-
-Write-Host "  Building frontend..."
-npm run build 2>$null
-if ($LASTEXITCODE -ne 0) {
-    Write-Err "Frontend build failed. You can retry later with: cd frontend && npm run build"
-    Write-Warn "Continuing installation..."
-}
-
-$ErrorActionPreference = $prevEAP
-
-Write-Success "Frontend ready"
-
-# ============================================
-# Install CLI Tools (Optional)
-# ============================================
-if (-not $SkipCLI) {
-    Write-Step "Installing AI CLI tools..."
-
-    # npm global installs emit deprecation warnings to stderr which
-    # PowerShell treats as terminating errors under $ErrorActionPreference=Stop
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-
-    # Check if Claude CLI is already installed (skip to avoid killing running sessions)
-    $claudeInstalled = Get-Command claude -ErrorAction SilentlyContinue
-    if ($claudeInstalled) {
-        Write-Success "Claude CLI already installed (skipping to avoid interrupting running sessions)"
-    } else {
-        Write-Host "  Installing Claude CLI..."
-        npm install -g @anthropic-ai/claude-code 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            Write-Success "Claude CLI installed"
+        Write-Step "正在 clone 專案..."
+        # If directory exists but is not a git repo (e.g. created for install.log),
+        # clone into a temp dir then move contents
+        if (Test-Path $projectDir) {
+            $tempClone = "$projectDir-clone-tmp"
+            if (Test-Path $tempClone) { Remove-Item -Recurse -Force $tempClone }
+            $null = & git clone $REPO_URL $tempClone 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                Write-Err "git clone 失敗"
+                return $false
+            }
+            # Move everything from temp into project dir
+            Get-ChildItem -Path $tempClone -Force | Move-Item -Destination $projectDir -Force
+            Remove-Item -Recurse -Force $tempClone
         } else {
-            Write-Warn "Claude CLI installation failed (you can install it later)"
+            $null = & git clone $REPO_URL $projectDir 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                Write-Err "git clone 失敗"
+                return $false
+            }
         }
+        Write-OK "Clone 完成"
     }
 
-    # Check if Gemini CLI is already installed
-    $geminiInstalled = Get-Command gemini -ErrorAction SilentlyContinue
-    if ($geminiInstalled) {
-        Write-Success "Gemini CLI already installed (skipping)"
+    # ----------------------------------------------------------
+    # Step 4: Backend setup
+    # ----------------------------------------------------------
+    Write-Host ""
+    Write-Host "  [4/7] 設定後端 (Python + FastAPI)" -ForegroundColor White
+    Write-Host "  ─────────────────────────────────" -ForegroundColor DarkGray
+
+    $backendDir = Join-Path $projectDir "backend"
+    $venvDir = Join-Path $backendDir "venv"
+    $venvPython = Join-Path $venvDir "Scripts\python.exe"
+    $venvPip = Join-Path $venvDir "Scripts\pip.exe"
+
+    if (!(Test-Path $venvDir)) {
+        Write-Step "建立 Python 虛擬環境..."
+        & python -m venv $venvDir 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err "建立 venv 失敗"
+            return $false
+        }
+    }
+    Write-OK "虛擬環境就緒"
+
+    Write-Step "安裝 Python 套件..."
+    $null = & $venvPip install -q -r (Join-Path $backendDir "requirements.txt") 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "部分 Python 套件安裝可能有問題，但嘗試繼續"
     } else {
-        Write-Host "  Installing Gemini CLI..."
-        npm install -g @google/gemini-cli 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            Write-Success "Gemini CLI installed"
-        } else {
-            Write-Warn "Gemini CLI installation failed (you can install it later)"
+        Write-OK "Python 套件安裝完成"
+    }
+
+    # Seed database if no local.db exists
+    $dbPath = Join-Path $backendDir "local.db"
+    if (!(Test-Path $dbPath)) {
+        Write-Step "初始化資料庫..."
+        Push-Location $backendDir
+        & $venvPython seed.py 2>&1
+        Pop-Location
+        Write-OK "資料庫初始化完成"
+    } else {
+        Write-OK "資料庫已存在"
+    }
+
+    # ----------------------------------------------------------
+    # Step 5: Frontend setup (build for production)
+    # ----------------------------------------------------------
+    Write-Host ""
+    Write-Host "  [5/7] 設定前端 (Vue 3 + Vite)" -ForegroundColor White
+    Write-Host "  ─────────────────────────────────" -ForegroundColor DarkGray
+
+    $frontendDir = Join-Path $projectDir "frontend"
+
+    Write-Step "安裝前端套件 (這可能需要幾分鐘)..."
+    Push-Location $frontendDir
+    # Use npx pnpm (auto-downloads pnpm without global install / PATH issues)
+    $null = & npx -y pnpm install 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "pnpm install 失敗，嘗試使用 npm..."
+        $null = & npm install 2>&1
+    }
+    Write-OK "前端套件安裝完成"
+
+    Write-Step "編譯前端..."
+    $null = & npm run build 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "前端編譯失敗，可稍後手動執行: cd frontend && npm run build"
+    } else {
+        Write-OK "前端編譯完成"
+    }
+    Pop-Location
+
+    # ----------------------------------------------------------
+    # Step 6: AI CLIs (optional)
+    # ----------------------------------------------------------
+    Write-Host ""
+    Write-Host "  [6/7] 安裝 AI 工具 (選用，失敗不影響)" -ForegroundColor White
+    Write-Host "  ─────────────────────────────────" -ForegroundColor DarkGray
+
+    # Claude Code CLI
+    if (Test-CommandExists "claude") {
+        Write-OK "Claude Code CLI 已安裝"
+    } else {
+        Write-Step "安裝 Claude Code CLI..."
+        try {
+            & npm install -g @anthropic-ai/claude-code 2>&1
+            Refresh-Path
+            if (Test-CommandExists "claude") {
+                Write-OK "Claude Code CLI 安裝完成"
+            } else {
+                Write-Warn "Claude Code CLI 安裝完成但無法在 PATH 中找到，請重新開啟終端機"
+            }
+        } catch {
+            Write-Warn "Claude Code CLI 安裝失敗（不影響核心功能）"
         }
     }
 
-    $ErrorActionPreference = $prevEAP
-}
+    # Gemini CLI
+    if (Test-CommandExists "gemini") {
+        Write-OK "Gemini CLI 已安裝"
+    } else {
+        Write-Step "安裝 Gemini CLI..."
+        try {
+            & npm install -g @google/gemini-cli 2>&1
+            Refresh-Path
+            if (Test-CommandExists "gemini") {
+                Write-OK "Gemini CLI 安裝完成"
+            } else {
+                Write-Warn "Gemini CLI 安裝完成但無法在 PATH 中找到，請重新開啟終端機"
+            }
+        } catch {
+            Write-Warn "Gemini CLI 安裝失敗（不影響核心功能）"
+        }
+    }
 
-# ============================================
-# Create Startup Script
-# ============================================
-Write-Step "Creating startup scripts..."
+    # ----------------------------------------------------------
+    # Step 7: Create launcher & shortcuts
+    # ----------------------------------------------------------
+    Write-Host ""
+    Write-Host "  [7/7] 建立啟動捷徑" -ForegroundColor White
+    Write-Host "  ─────────────────────────────────" -ForegroundColor DarkGray
 
-Set-Location $InstallDir
-
-# Create start script (builds frontend, starts backend which serves everything)
-$startScript = @"
+    # Create start-aegis.bat in project root
+    $startScript = Join-Path $projectDir "start-aegis.bat"
+    $startContent = @"
 @echo off
+chcp 65001 >nul 2>&1
 title Aegis
-
-echo Building frontend...
-cd /d "$InstallDir\frontend"
-echo y | call npm run build
-
-echo Starting Aegis...
-start "Aegis" /min cmd /c "cd /d $InstallDir\backend && venv\Scripts\activate.bat && python -m uvicorn app.main:app --host 127.0.0.1 --port 8899"
-
-timeout /t 3 >nul
 echo.
-echo Aegis is running!
-echo   Open: http://localhost:8899
-start http://localhost:8899
+echo  Starting Aegis...
+echo.
+
+set "PROJECT_DIR=%~dp0"
+
+:: Build frontend (served by backend as static files)
+echo  [1/2] Building frontend...
+cd /d "%PROJECT_DIR%frontend"
+call npm run build >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    echo  [!] Frontend build failed, using existing build if available
+) else (
+    echo  [OK] Frontend built
+)
+
+:: Start server (backend serves both API and frontend)
+echo  [2/2] Starting server...
+start "Aegis Server" /min cmd /c "cd /d "%PROJECT_DIR%backend" && venv\Scripts\activate && python -m uvicorn app.main:app --host 127.0.0.1 --port $SERVER_PORT"
+
+:: Wait for server to be ready
+echo  Waiting for server...
+:wait_server
+timeout /t 2 /nobreak >nul
+powershell -Command "try { `$r = Invoke-WebRequest -Uri 'http://127.0.0.1:$SERVER_PORT/health' -UseBasicParsing -TimeoutSec 2; if (`$r.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }"
+if %ERRORLEVEL% NEQ 0 goto wait_server
+echo  [OK] Server is ready
+
+:: Open browser
+start http://localhost:$SERVER_PORT
+
+echo.
+echo  ╔══════════════════════════════════════╗
+echo  ║  Aegis is running!                   ║
+echo  ║                                      ║
+echo  ║  http://localhost:$SERVER_PORT              ║
+echo  ║                                      ║
+echo  ║  Close this window to stop Aegis.    ║
+echo  ╚══════════════════════════════════════╝
+echo.
+echo  Press any key to stop all services...
+pause >nul
+
+:: Kill background processes
+taskkill /fi "WINDOWTITLE eq Aegis Server" /f >nul 2>&1
+echo  Aegis stopped.
 "@
-Set-Content -Path "start-aegis.bat" -Value $startScript
+    Set-Content -Path $startScript -Value $startContent -Encoding UTF8
+    Write-OK "啟動腳本已建立: start-aegis.bat"
 
-# Create desktop shortcut
-$WshShell = New-Object -ComObject WScript.Shell
-$Shortcut = $WshShell.CreateShortcut("$env:USERPROFILE\Desktop\Aegis.lnk")
-$Shortcut.TargetPath = "$InstallDir\start-aegis.bat"
-$Shortcut.WorkingDirectory = $InstallDir
-$Shortcut.Description = "Start Aegis Server"
-$Shortcut.Save()
+    # Create desktop shortcut
+    try {
+        $desktopPath = [Environment]::GetFolderPath("Desktop")
+        $shortcutPath = Join-Path $desktopPath "Aegis.lnk"
 
-Write-Success "Created start-aegis.bat"
-Write-Success "Created desktop shortcut"
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut($shortcutPath)
+        $shortcut.TargetPath = $startScript
+        $shortcut.WorkingDirectory = $projectDir
+        $shortcut.Description = "Launch Aegis - AI Engineering Grid & Intelligence System"
+        $shortcut.WindowStyle = 1  # Normal window
 
-# ============================================
-# Done!
-# ============================================
-Write-Host ("`n" + "=" * 50) -ForegroundColor Green
-Write-Host "  Installation Complete!" -ForegroundColor Green
-Write-Host ("=" * 50) -ForegroundColor Green
+        # Use a custom icon if available, otherwise use default
+        $iconPath = Join-Path $projectDir "frontend\public\favicon.ico"
+        if (Test-Path $iconPath) {
+            $shortcut.IconLocation = $iconPath
+        }
 
-Write-Host @"
+        $shortcut.Save()
+        Write-OK "桌面捷徑已建立: Aegis.lnk"
+    } catch {
+        Write-Warn "建立桌面捷徑失敗: $_"
+        Write-Warn "你可以手動執行 $startScript 來啟動 Aegis"
+    }
 
-To start Aegis:
-  1. Double-click the 'Aegis' shortcut on your desktop
-  2. Or run: $InstallDir\start-aegis.bat
-  3. Open http://localhost:8899 in your browser
+    # ----------------------------------------------------------
+    # Done!
+    # ----------------------------------------------------------
+    Write-Host ""
+    Write-Host "  ============================================" -ForegroundColor Green
+    Write-Host "       安裝完成！" -ForegroundColor Green
+    Write-Host "  ============================================" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  啟動方式:" -ForegroundColor White
+    Write-Host "    1. 雙擊桌面上的「Aegis」捷徑" -ForegroundColor Gray
+    Write-Host "    2. 或執行 $startScript" -ForegroundColor Gray
+    Write-Host "    3. 瀏覽器開啟 http://localhost:$SERVER_PORT" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  首次使用提示:" -ForegroundColor White
+    Write-Host "    - Gemini API Key 可在 Settings 頁面設定" -ForegroundColor Gray
+    Write-Host "    - Claude / Gemini CLI 登入請在終端機執行:" -ForegroundColor Gray
+    Write-Host "      claude login" -ForegroundColor Yellow
+    Write-Host "      gemini auth login" -ForegroundColor Yellow
+    Write-Host ""
 
-Configuration:
-  - Install directory: $InstallDir
-  - Backend: $InstallDir\backend
-  - Frontend: $InstallDir\frontend
-  - Database: $InstallDir\backend\local.db
+    return $true
+}
 
-Next steps:
-  1. Start the server
-  2. Complete the onboarding wizard
-  3. Add your AI accounts (Claude/Gemini)
-  4. Create projects and start automating!
+# ============================================================
+# Self-elevate to admin if needed
+# ============================================================
+# winget install (Git, Python, Node.js) requires admin privileges.
+# Re-launch this script as administrator so the user only sees
+# one UAC prompt at the very beginning.
+function Ensure-Admin {
+    $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator)
+    if ($isAdmin) { return }
 
-"@ -ForegroundColor White
+    Write-Host "  [*] 需要系統管理員權限，正在提權..." -ForegroundColor Yellow
+    # Build a command that runs the script then pauses so the user can see results.
+    # Using -Command instead of -File so we can append a pause.
+    $scriptCall = "& '$PSCommandPath'"
+    if ($RootDir)    { $scriptCall += " -RootDir '$RootDir'" }
+    if ($InstallDir) { $scriptCall += " -InstallDir '$InstallDir'" }
+    if ($Force)      { $scriptCall += " -Force" }
+    $argList = "-NoProfile -ExecutionPolicy Bypass -Command `"$scriptCall; Write-Host ''; Write-Host '  按任意鍵關閉...' -ForegroundColor Gray; `$null = `$Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')`""
+    Start-Process powershell.exe -Verb RunAs -ArgumentList $argList -Wait
+    exit $LASTEXITCODE
+}
 
-# Ask if user wants to start now
-$startNow = Read-Host "Start Aegis now? (Y/n)"
-if ($startNow -ne "n" -and $startNow -ne "N") {
-    Start-Process "$InstallDir\start-aegis.bat"
-    Start-Sleep -Seconds 3
-    Start-Process "http://localhost:8899"
+# ============================================================
+# Entry point
+# ============================================================
+try {
+    Ensure-Admin
+    $result = Start-Installation
+    if ($result) {
+        exit 0
+    } else {
+        Write-Host ""
+        Write-Err "安裝失敗，請查看上方錯誤訊息或 install.log"
+        exit 1
+    }
+} catch {
+    Write-Err "未預期的錯誤: $_"
+    Write-Err $_.ScriptStackTrace
+    exit 1
 }
