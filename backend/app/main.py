@@ -43,79 +43,99 @@ async def _register_channels_from_config():
                 except:
                     pass
 
+    # 每個頻道獨立 try/except，缺少依賴不影響其他頻道和啟動
+
     # Telegram: DB 優先，env 備援
-    tg_config = channel_configs.get("channel_telegram", {})
-    tg_token = tg_config.get("bot_token") or os.getenv("TELEGRAM_BOT_TOKEN")
-    if tg_config.get("enabled") or (not tg_config and tg_token):
-        if tg_token:
-            from app.channels.adapters.telegram import TelegramChannel
-            channel_manager.register(TelegramChannel(tg_token))
-            logger.info("Telegram channel registered")
+    try:
+        tg_config = channel_configs.get("channel_telegram", {})
+        tg_token = tg_config.get("bot_token") or os.getenv("TELEGRAM_BOT_TOKEN")
+        if tg_config.get("enabled") or (not tg_config and tg_token):
+            if tg_token:
+                from app.channels.adapters.telegram import TelegramChannel
+                channel_manager.register(TelegramChannel(tg_token))
+                logger.info("Telegram channel registered")
+    except ImportError as e:
+        logger.warning(f"Telegram adapter unavailable: {e}")
 
     # LINE: DB 優先，env 備援
-    line_config = channel_configs.get("channel_line", {})
-    line_secret = line_config.get("channel_secret") or os.getenv("LINE_CHANNEL_SECRET")
-    line_token = line_config.get("access_token") or os.getenv("LINE_ACCESS_TOKEN")
-    if line_config.get("enabled") or (not line_config and line_secret and line_token):
-        if line_secret and line_token:
-            from app.channels.adapters.line import LineChannel
-            channel_manager.register(LineChannel(
-                channel_secret=line_secret,
-                access_token=line_token,
-            ))
-            logger.info("LINE channel registered")
+    try:
+        line_config = channel_configs.get("channel_line", {})
+        line_secret = line_config.get("channel_secret") or os.getenv("LINE_CHANNEL_SECRET")
+        line_token = line_config.get("access_token") or os.getenv("LINE_ACCESS_TOKEN")
+        if line_config.get("enabled") or (not line_config and line_secret and line_token):
+            if line_secret and line_token:
+                from app.channels.adapters.line import LineChannel
+                channel_manager.register(LineChannel(
+                    channel_secret=line_secret,
+                    access_token=line_token,
+                ))
+                logger.info("LINE channel registered")
+    except ImportError as e:
+        logger.warning(f"LINE adapter unavailable: {e}")
 
     # Discord: DB 優先，env 備援
-    discord_config = channel_configs.get("channel_discord", {})
-    discord_token = discord_config.get("bot_token") or os.getenv("DISCORD_BOT_TOKEN")
-    if discord_config.get("enabled") or (not discord_config and discord_token):
-        if discord_token:
-            from app.channels.adapters.discord import DiscordChannel
-            channel_manager.register(DiscordChannel(discord_token))
-            logger.info("Discord channel registered")
+    try:
+        discord_config = channel_configs.get("channel_discord", {})
+        discord_token = discord_config.get("bot_token") or os.getenv("DISCORD_BOT_TOKEN")
+        if discord_config.get("enabled") or (not discord_config and discord_token):
+            if discord_token:
+                from app.channels.adapters.discord import DiscordChannel
+                channel_manager.register(DiscordChannel(discord_token))
+                logger.info("Discord channel registered")
+    except ImportError as e:
+        logger.warning(f"Discord adapter unavailable: {e}")
 
     # Slack: DB 優先，env 備援
-    slack_config = channel_configs.get("channel_slack", {})
-    slack_bot = slack_config.get("bot_token") or os.getenv("SLACK_BOT_TOKEN")
-    slack_app = slack_config.get("app_token") or os.getenv("SLACK_APP_TOKEN")
-    if slack_config.get("enabled") or (not slack_config and slack_bot and slack_app):
-        if slack_bot and slack_app:
-            from app.channels.adapters.slack import SlackChannel
-            channel_manager.register(SlackChannel(
-                bot_token=slack_bot,
-                app_token=slack_app,
-            ))
-            logger.info("Slack channel registered")
+    try:
+        slack_config = channel_configs.get("channel_slack", {})
+        slack_bot = slack_config.get("bot_token") or os.getenv("SLACK_BOT_TOKEN")
+        slack_app = slack_config.get("app_token") or os.getenv("SLACK_APP_TOKEN")
+        if slack_config.get("enabled") or (not slack_config and slack_bot and slack_app):
+            if slack_bot and slack_app:
+                from app.channels.adapters.slack import SlackChannel
+                channel_manager.register(SlackChannel(
+                    bot_token=slack_bot,
+                    app_token=slack_app,
+                ))
+                logger.info("Slack channel registered")
+    except ImportError as e:
+        logger.warning(f"Slack adapter unavailable: {e}")
 
     # WeCom: DB 優先，env 備援
-    wecom_config = channel_configs.get("channel_wecom", {})
-    wecom_id = wecom_config.get("corp_id") or os.getenv("WECOM_CORP_ID")
-    wecom_secret = wecom_config.get("corp_secret") or os.getenv("WECOM_CORP_SECRET")
-    wecom_agent = wecom_config.get("agent_id") or os.getenv("WECOM_AGENT_ID", "0")
-    if wecom_config.get("enabled") or (not wecom_config and wecom_id and wecom_secret):
-        if wecom_id and wecom_secret:
-            from app.channels.adapters.wecom import WeComChannel
-            channel_manager.register(WeComChannel(
-                corp_id=wecom_id,
-                corp_secret=wecom_secret,
-                agent_id=int(wecom_agent) if wecom_agent else 0,
-            ))
-            logger.info("WeCom channel registered")
+    try:
+        wecom_config = channel_configs.get("channel_wecom", {})
+        wecom_id = wecom_config.get("corp_id") or os.getenv("WECOM_CORP_ID")
+        wecom_secret = wecom_config.get("corp_secret") or os.getenv("WECOM_CORP_SECRET")
+        wecom_agent = wecom_config.get("agent_id") or os.getenv("WECOM_AGENT_ID", "0")
+        if wecom_config.get("enabled") or (not wecom_config and wecom_id and wecom_secret):
+            if wecom_id and wecom_secret:
+                from app.channels.adapters.wecom import WeComChannel
+                channel_manager.register(WeComChannel(
+                    corp_id=wecom_id,
+                    corp_secret=wecom_secret,
+                    agent_id=int(wecom_agent) if wecom_agent else 0,
+                ))
+                logger.info("WeCom channel registered")
+    except ImportError as e:
+        logger.warning(f"WeCom adapter unavailable: {e}")
 
     # Feishu: DB 優先，env 備援
-    feishu_config = channel_configs.get("channel_feishu", {})
-    feishu_id = feishu_config.get("app_id") or os.getenv("FEISHU_APP_ID")
-    feishu_secret = feishu_config.get("app_secret") or os.getenv("FEISHU_APP_SECRET")
-    feishu_lark = feishu_config.get("is_lark") or os.getenv("FEISHU_IS_LARK", "").lower() == "true"
-    if feishu_config.get("enabled") or (not feishu_config and feishu_id and feishu_secret):
-        if feishu_id and feishu_secret:
-            from app.channels.adapters.feishu import FeishuChannel
-            channel_manager.register(FeishuChannel(
-                app_id=feishu_id,
-                app_secret=feishu_secret,
-                is_lark=bool(feishu_lark),
-            ))
-            logger.info("Feishu channel registered")
+    try:
+        feishu_config = channel_configs.get("channel_feishu", {})
+        feishu_id = feishu_config.get("app_id") or os.getenv("FEISHU_APP_ID")
+        feishu_secret = feishu_config.get("app_secret") or os.getenv("FEISHU_APP_SECRET")
+        feishu_lark = feishu_config.get("is_lark") or os.getenv("FEISHU_IS_LARK", "").lower() == "true"
+        if feishu_config.get("enabled") or (not feishu_config and feishu_id and feishu_secret):
+            if feishu_id and feishu_secret:
+                from app.channels.adapters.feishu import FeishuChannel
+                channel_manager.register(FeishuChannel(
+                    app_id=feishu_id,
+                    app_secret=feishu_secret,
+                    is_lark=bool(feishu_lark),
+                ))
+                logger.info("Feishu channel registered")
+    except ImportError as e:
+        logger.warning(f"Feishu adapter unavailable: {e}")
 
 
 @asynccontextmanager
@@ -249,7 +269,7 @@ async def lifespan(app: FastAPI):
     # 啟動 WebSocket 定期廣播
     ws_broadcast_task = asyncio.create_task(periodic_broadcast())
 
-    # 啟動用量排程器（每 120 秒更新一次帳號用量）
+    # 啟動用量排程器（每 300 秒更新一次帳號用量）
     usage_poller_task = asyncio.create_task(start_usage_poller())
 
     # 啟動 MD 卡片檔案監視器（偵測外部編輯）
