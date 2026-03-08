@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aegis — AI Agent Management Dashboard</title>
+<meta name="description" content="Deploy and manage AI agent teams from a tactical command center. Multi-AI routing, real-time monitoring, pixel art virtual office.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg-deep:#080c14;
+  --bg-panel:#0d1322;
+  --bg-card:#111827;
+  --cyan:#00e5ff;
+  --cyan-dim:#00e5ff44;
+  --cyan-glow:#00e5ff22;
+  --amber:#ff8a2b;
+  --amber-dim:#ff8a2b44;
+  --text:#c8d6e5;
+  --text-dim:#5a6a7e;
+  --border:#1a2744;
+  --grid-line:#0e1a2e;
+}
+html{scroll-behavior:smooth}
+body{
+  font-family:'JetBrains Mono',monospace;
+  background:var(--bg-deep);
+  color:var(--text);
+  overflow-x:hidden;
+  line-height:1.6;
+}
+
+/* ── Grid overlay ── */
+body::before{
+  content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:
+    linear-gradient(var(--grid-line) 1px,transparent 1px),
+    linear-gradient(90deg,var(--grid-line) 1px,transparent 1px);
+  background-size:60px 60px;
+  opacity:.4;
+}
+/* ── Scanline ── */
+body::after{
+  content:'';position:fixed;inset:0;z-index:9999;pointer-events:none;
+  background:repeating-linear-gradient(
+    0deg,transparent,transparent 2px,rgba(0,0,0,.03) 2px,rgba(0,0,0,.03) 4px
+  );
+}
+
+/* ── Layout ── */
+.container{max-width:1100px;margin:0 auto;padding:0 24px;position:relative;z-index:1}
+section{padding:80px 0}
+
+/* ── Hero ── */
+.hero{
+  min-height:100vh;display:flex;flex-direction:column;
+  justify-content:center;align-items:center;text-align:center;
+  padding-top:60px;position:relative;
+}
+.hero::before{
+  content:'';position:absolute;top:20%;left:50%;transform:translateX(-50%);
+  width:600px;height:600px;border-radius:50%;
+  background:radial-gradient(circle,var(--cyan-glow) 0%,transparent 70%);
+  pointer-events:none;
+}
+
+.ascii-logo{
+  font-family:'JetBrains Mono',monospace;
+  font-size:clamp(10px,2.2vw,18px);
+  line-height:1.2;
+  color:var(--cyan);
+  text-shadow:0 0 20px var(--cyan-dim),0 0 60px var(--cyan-glow);
+  white-space:pre;
+  margin-bottom:32px;
+  animation:glow-pulse 4s ease-in-out infinite;
+  letter-spacing:2px;
+}
+@keyframes glow-pulse{
+  0%,100%{text-shadow:0 0 20px var(--cyan-dim),0 0 60px var(--cyan-glow)}
+  50%{text-shadow:0 0 30px var(--cyan-dim),0 0 90px var(--cyan-glow),0 0 120px #00e5ff11}
+}
+
+.hero-subtitle{
+  font-family:'Rajdhani',sans-serif;
+  font-size:clamp(18px,3vw,28px);
+  font-weight:600;
+  color:var(--text);
+  letter-spacing:6px;
+  text-transform:uppercase;
+  margin-bottom:12px;
+}
+.hero-desc{
+  font-size:14px;color:var(--text-dim);
+  max-width:560px;margin:0 auto 48px;
+  line-height:1.8;
+}
+.hero-desc em{color:var(--amber);font-style:normal}
+
+/* ── Install Box ── */
+.install-box{
+  background:var(--bg-panel);
+  border:1px solid var(--border);
+  border-radius:8px;
+  padding:24px 32px;
+  max-width:680px;width:100%;
+  text-align:left;
+  position:relative;
+  overflow:hidden;
+}
+.install-box::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,transparent,var(--cyan),transparent);
+}
+.install-label{
+  font-size:11px;text-transform:uppercase;letter-spacing:3px;
+  color:var(--cyan);margin-bottom:12px;display:flex;align-items:center;gap:8px;
+}
+.install-label::before{
+  content:'';width:6px;height:6px;border-radius:50%;
+  background:var(--cyan);box-shadow:0 0 8px var(--cyan);
+  animation:blink 2s infinite;
+}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+
+.install-cmd{
+  display:flex;align-items:center;gap:12px;
+  background:var(--bg-deep);
+  border:1px solid var(--border);
+  border-radius:4px;
+  padding:16px 20px;
+  margin-bottom:16px;
+  cursor:pointer;
+  transition:border-color .2s;
+}
+.install-cmd:hover{border-color:var(--cyan-dim)}
+.install-cmd code{
+  flex:1;font-size:13px;color:var(--text);
+  overflow-x:auto;white-space:nowrap;
+}
+.install-cmd code .prompt{color:var(--cyan)}
+.install-cmd code .cmd{color:var(--amber)}
+.copy-btn{
+  background:none;border:1px solid var(--border);
+  color:var(--text-dim);padding:6px 14px;border-radius:4px;
+  font-family:inherit;font-size:11px;cursor:pointer;
+  letter-spacing:1px;text-transform:uppercase;
+  transition:all .2s;flex-shrink:0;
+}
+.copy-btn:hover{border-color:var(--cyan);color:var(--cyan)}
+.copy-btn.copied{border-color:var(--amber);color:var(--amber)}
+
+.install-note{font-size:11px;color:var(--text-dim);line-height:1.6}
+.install-note a{color:var(--cyan);text-decoration:none}
+.install-note a:hover{text-decoration:underline}
+
+/* ── Section headers ── */
+.section-tag{
+  font-family:'Rajdhani',sans-serif;
+  font-size:11px;text-transform:uppercase;
+  letter-spacing:4px;color:var(--cyan);
+  margin-bottom:8px;
+}
+.section-title{
+  font-family:'Rajdhani',sans-serif;
+  font-size:clamp(28px,4vw,42px);
+  font-weight:700;color:#fff;
+  margin-bottom:16px;line-height:1.2;
+}
+.section-desc{
+  font-size:13px;color:var(--text-dim);
+  max-width:560px;margin-bottom:48px;
+  line-height:1.8;
+}
+
+/* ── Feature grid ── */
+.features-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
+  gap:20px;
+}
+.feature-card{
+  background:var(--bg-card);
+  border:1px solid var(--border);
+  border-radius:8px;
+  padding:28px 24px;
+  position:relative;
+  transition:border-color .3s,transform .3s;
+}
+.feature-card:hover{
+  border-color:var(--cyan-dim);
+  transform:translateY(-2px);
+}
+.feature-card::after{
+  content:'';position:absolute;top:0;left:24px;right:24px;height:1px;
+  background:linear-gradient(90deg,transparent,var(--border),transparent);
+}
+.feature-icon{
+  font-size:24px;margin-bottom:16px;
+  display:inline-flex;align-items:center;justify-content:center;
+  width:44px;height:44px;border-radius:8px;
+  background:var(--cyan-glow);
+  border:1px solid var(--cyan-dim);
+}
+.feature-card:nth-child(even) .feature-icon{
+  background:var(--amber-dim);
+  border-color:var(--amber-dim);
+}
+.feature-name{
+  font-family:'Rajdhani',sans-serif;
+  font-size:18px;font-weight:600;color:#fff;
+  margin-bottom:8px;
+}
+.feature-desc{font-size:12px;color:var(--text-dim);line-height:1.7}
+
+/* ── Screenshots ── */
+.screenshots{text-align:center}
+.screenshot-grid{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
+  gap:20px;
+}
+.screenshot-frame{
+  border:1px solid var(--border);border-radius:8px;overflow:hidden;
+  background:var(--bg-card);
+  transition:border-color .3s;
+}
+.screenshot-frame:hover{border-color:var(--cyan-dim)}
+.screenshot-frame img{
+  width:100%;height:auto;display:block;
+  opacity:.85;transition:opacity .3s;
+}
+.screenshot-frame:hover img{opacity:1}
+.screenshot-frame figcaption{
+  padding:12px 16px;font-size:11px;
+  color:var(--text-dim);text-align:left;
+  letter-spacing:1px;text-transform:uppercase;
+  border-top:1px solid var(--border);
+}
+
+/* ── Requirements ── */
+.req-grid{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+  gap:16px;
+}
+.req-item{
+  background:var(--bg-card);
+  border:1px solid var(--border);
+  border-radius:8px;padding:20px;
+}
+.req-label{
+  font-size:10px;text-transform:uppercase;
+  letter-spacing:2px;color:var(--cyan);
+  margin-bottom:6px;
+}
+.req-value{font-size:14px;color:#fff}
+.req-note{font-size:11px;color:var(--text-dim);margin-top:4px}
+
+/* ── CTA ── */
+.cta-section{text-align:center;padding:100px 0}
+.cta-box{
+  display:inline-block;
+  background:var(--bg-panel);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:48px 64px;
+  position:relative;
+}
+.cta-box::before{
+  content:'';position:absolute;inset:-1px;border-radius:12px;
+  background:linear-gradient(135deg,var(--cyan-dim),transparent 50%,var(--amber-dim));
+  z-index:-1;
+}
+.cta-title{
+  font-family:'Rajdhani',sans-serif;
+  font-size:32px;font-weight:700;color:#fff;
+  margin-bottom:8px;
+}
+.cta-sub{font-size:13px;color:var(--text-dim);margin-bottom:32px}
+
+.btn-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.btn{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:12px 28px;border-radius:6px;
+  font-family:'Rajdhani',sans-serif;
+  font-size:15px;font-weight:600;
+  text-decoration:none;
+  letter-spacing:1px;text-transform:uppercase;
+  transition:all .2s;cursor:pointer;
+  border:none;
+}
+.btn-primary{
+  background:var(--cyan);color:var(--bg-deep);
+  box-shadow:0 0 20px var(--cyan-dim);
+}
+.btn-primary:hover{box-shadow:0 0 30px var(--cyan-dim),0 0 60px var(--cyan-glow)}
+.btn-secondary{
+  background:transparent;color:var(--text);
+  border:1px solid var(--border);
+}
+.btn-secondary:hover{border-color:var(--text-dim);color:#fff}
+
+/* ── Footer ── */
+footer{
+  border-top:1px solid var(--border);
+  padding:32px 0;text-align:center;
+  font-size:11px;color:var(--text-dim);
+  letter-spacing:1px;
+}
+footer a{color:var(--cyan);text-decoration:none}
+footer a:hover{text-decoration:underline}
+
+/* ── Responsive ── */
+@media(max-width:640px){
+  .ascii-logo{font-size:8px;letter-spacing:0}
+  .install-box{padding:16px}
+  .install-cmd{flex-direction:column;gap:8px}
+  .install-cmd code{font-size:11px;width:100%}
+  .copy-btn{width:100%;text-align:center}
+  .cta-box{padding:32px 24px}
+  section{padding:48px 0}
+  .hero{padding-top:40px}
+}
+
+/* ── Animations ── */
+.fade-in{opacity:0;transform:translateY(20px);transition:opacity .6s,transform .6s}
+.fade-in.visible{opacity:1;transform:translateY(0)}
+</style>
+</head>
+<body>
+
+<!-- ═══════════ HERO ═══════════ -->
+<section class="hero">
+  <div class="container" style="display:flex;flex-direction:column;align-items:center">
+    <pre class="ascii-logo" aria-label="AEGIS">
+    _    _____ ____ ___ ____
+   / \  | ____/ ___|_ _/ ___|
+  / _ \ |  _|| |  _ | |\___ \
+ / ___ \| |__| |_| || | ___) |
+/_/   \_\_____\____|___|____/</pre>
+    <p class="hero-subtitle">AI Agent Management Dashboard</p>
+    <p class="hero-desc">
+      Deploy AI agent teams from a <em>tactical command center</em>.
+      Multi-AI routing, real-time monitoring, pixel art virtual office.
+      Everything runs locally — your data never leaves your machine.
+    </p>
+
+    <div class="install-box">
+      <div class="install-label">Windows One-Click Install</div>
+      <div class="install-cmd" onclick="copyInstallCmd()" title="Click to copy">
+        <code><span class="prompt">PS&gt;</span> <span class="cmd">irm https://raw.githubusercontent.com/cwen0708/aegis/refs/heads/main/scripts/install-windows.ps1 | iex</span></code>
+        <button class="copy-btn" id="copyBtn">Copy</button>
+      </div>
+      <p class="install-note">
+        Open PowerShell as Administrator and paste the command above.
+        <br>Or download the
+        <a href="https://github.com/cwen0708/aegis/raw/refs/heads/main/setup-aegis.bat" download>setup-aegis.bat</a>
+        installer and double-click to run.
+        <br>Source code:
+        <a href="https://github.com/cwen0708/aegis" target="_blank" rel="noopener">github.com/cwen0708/aegis</a>
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ FEATURES ═══════════ -->
+<section class="fade-in">
+  <div class="container">
+    <div class="section-tag">// capabilities</div>
+    <h2 class="section-title">Built for AI-Native Workflows</h2>
+    <p class="section-desc">
+      Not just another kanban — Aegis is purpose-built for orchestrating
+      AI agents across planning, coding, and verification stages.
+    </p>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">&#x1f3af;</div>
+        <div class="feature-name">Multi-AI Routing</div>
+        <div class="feature-desc">
+          Route tasks to the right AI: Gemini for planning, Claude for coding.
+          Per-stage member assignment with automatic provider detection.
+        </div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">&#x1f3e2;</div>
+        <div class="feature-name">Virtual Office</div>
+        <div class="feature-desc">
+          Pixel art office with AI characters walking between desks.
+          Click any agent for AVG-style dialog with anime portraits.
+        </div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">&#x1f4cb;</div>
+        <div class="feature-name">Kanban Automation</div>
+        <div class="feature-desc">
+          Cards flow through Backlog &rarr; Planning &rarr; Developing &rarr;
+          Verifying &rarr; Done. AI picks up pending cards automatically.
+        </div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">&#x1f4e1;</div>
+        <div class="feature-name">Real-time Monitoring</div>
+        <div class="feature-desc">
+          WebSocket-powered dashboard showing CPU/RAM, running tasks,
+          live log streaming, and token cost analytics.
+        </div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">&#x1f9e0;</div>
+        <div class="feature-name">Agent Memory</div>
+        <div class="feature-desc">
+          Per-member short-term and long-term memory. Agents remember
+          past tasks, patterns, and project-specific conventions.
+        </div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">&#x1f512;</div>
+        <div class="feature-name">Local-First</div>
+        <div class="feature-desc">
+          SQLite database, local file system. No cloud dependency.
+          Carry the entire system on a USB drive.
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ SCREENSHOTS ═══════════ -->
+<section class="screenshots fade-in">
+  <div class="container">
+    <div class="section-tag">// interface</div>
+    <h2 class="section-title">Command Center Preview</h2>
+    <p class="section-desc" style="margin-left:auto;margin-right:auto">
+      A dashboard designed for developers who manage AI agent teams.
+    </p>
+    <div class="screenshot-grid">
+      <figure class="screenshot-frame">
+        <img src="https://raw.githubusercontent.com/cwen0708/aegis/main/docs/screenshots/office.png"
+             alt="Virtual Office" loading="lazy">
+        <figcaption>Virtual Office &mdash; Pixel art workspace</figcaption>
+      </figure>
+      <figure class="screenshot-frame">
+        <img src="https://raw.githubusercontent.com/cwen0708/aegis/main/docs/screenshots/kanban.png"
+             alt="Kanban Board" loading="lazy">
+        <figcaption>Kanban Board &mdash; AI-driven task flow</figcaption>
+      </figure>
+      <figure class="screenshot-frame">
+        <img src="https://raw.githubusercontent.com/cwen0708/aegis/main/docs/screenshots/character-dialog.png"
+             alt="Character Dialog" loading="lazy">
+        <figcaption>Character Dialog &mdash; AVG-style interaction</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ REQUIREMENTS ═══════════ -->
+<section class="fade-in">
+  <div class="container">
+    <div class="section-tag">// prerequisites</div>
+    <h2 class="section-title">System Requirements</h2>
+    <div class="req-grid">
+      <div class="req-item">
+        <div class="req-label">OS</div>
+        <div class="req-value">Windows 10/11</div>
+        <div class="req-note">x64, PowerShell 5.1+</div>
+      </div>
+      <div class="req-item">
+        <div class="req-label">Python</div>
+        <div class="req-value">3.10+</div>
+        <div class="req-note">python.org or winget</div>
+      </div>
+      <div class="req-item">
+        <div class="req-label">Node.js</div>
+        <div class="req-value">18+</div>
+        <div class="req-note">nodejs.org or winget</div>
+      </div>
+      <div class="req-item">
+        <div class="req-label">AI CLI</div>
+        <div class="req-value">Claude / Gemini</div>
+        <div class="req-note">At least one installed</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ CTA ═══════════ -->
+<section class="cta-section fade-in">
+  <div class="container">
+    <div class="cta-box">
+      <div class="cta-title">Ready to Deploy?</div>
+      <p class="cta-sub">Open-source, free, local-first. MIT License.</p>
+      <div class="btn-row">
+        <a href="https://github.com/cwen0708/aegis" class="btn btn-primary" target="_blank" rel="noopener">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          GitHub
+        </a>
+        <a href="https://github.com/cwen0708/aegis/raw/refs/heads/main/setup-aegis.bat" class="btn btn-secondary" download>
+          Download .bat
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <p>
+      Aegis &copy; 2025 &mdash;
+      <a href="https://github.com/cwen0708/aegis" target="_blank" rel="noopener">Open Source</a>
+      &middot; MIT License
+    </p>
+  </div>
+</footer>
+
+<script>
+function copyInstallCmd(){
+  const cmd='irm https://raw.githubusercontent.com/cwen0708/aegis/refs/heads/main/scripts/install-windows.ps1 | iex';
+  navigator.clipboard.writeText(cmd).then(()=>{
+    const b=document.getElementById('copyBtn');
+    b.textContent='Copied!';b.classList.add('copied');
+    setTimeout(()=>{b.textContent='Copy';b.classList.remove('copied')},2000);
+  });
+}
+
+// Scroll reveal
+const obs=new IntersectionObserver((entries)=>{
+  entries.forEach(e=>{if(e.isIntersecting){e.target.classList.add('visible');obs.unobserve(e.target)}});
+},{threshold:0.15});
+document.querySelectorAll('.fade-in').forEach(el=>obs.observe(el));
+</script>
+</body>
+</html>
