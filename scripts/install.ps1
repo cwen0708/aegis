@@ -421,9 +421,16 @@ set "PROJECT_DIR=%~dp0"
 :: Build frontend (served by backend as static files)
 echo  [1/2] Building frontend...
 cd /d "%PROJECT_DIR%frontend"
-call npm run build >nul 2>&1
+call npm run build
 if %ERRORLEVEL% NEQ 0 (
-    echo  [!] Frontend build failed, using existing build if available
+    if exist "%PROJECT_DIR%frontend\dist\index.html" (
+        echo  [!] Frontend build failed, using existing build
+    ) else (
+        echo  [X] Frontend build failed and no existing build found
+        echo  [!] Please run: cd frontend ^&^& npm install ^&^& npm run build
+        pause
+        exit /b 1
+    )
 ) else (
     echo  [OK] Frontend built
 )
