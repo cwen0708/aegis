@@ -8,6 +8,8 @@ from app.core.card_file import CardData, read_card, write_card, card_file_path
 from app.core.card_index import sync_card_to_index, query_pending_cards
 from app.core.runner import run_ai_task, busy_members
 from app.core.telemetry import is_system_overloaded
+from app.core.task_workspace import prepare_workspace, cleanup_workspace
+from app.core.memory_manager import write_member_short_term_memory
 
 logger = logging.getLogger(__name__)
 
@@ -89,11 +91,28 @@ async def _process_pending_cards():
                 project_name = project.name if project else "Unknown"
                 card_title = idx.title
 
+                # 建立臨時工作區（有指派角色時）
+                workspace_dir = None
+                member_slug = None
+                if member_id:
+                    from app.models.core import Member as MemberModel
+                    member_obj = session.get(MemberModel, member_id)
+                    if member_obj and member_obj.slug:
+                        member_slug = member_obj.slug
+                        workspace_dir = str(prepare_workspace(
+                            card_id=idx.card_id,
+                            member_slug=member_slug,
+                            provider=forced_provider or "claude",
+                            project_path=project_path,
+                            card_content=card_data.content,
+                        ))
+
                 # 使用 asyncio.create_task 在背景跑，這樣 poller 可以繼續掃描下一張卡片
                 asyncio.create_task(_execute_and_update(
                     idx.card_id, project_path, card_data.content, phase,
                     card_title, project_name, forced_provider, member_id,
                     idx.project_id, str(idx.file_path),
+                    workspace_dir=workspace_dir, member_slug=member_slug,
                 ))
             else:
                 # 如果被拉到了不需要 AI 的列表 (如 Backlog 或 Done)，就把 pending 清掉
@@ -148,9 +167,14 @@ async def _execute_and_update(
     card_title: str = "", project_name: str = "",
     forced_provider: str | None = None, member_id: int | None = None,
     project_id: int = 0, file_path_str: str = "",
+    workspace_dir: str | None = None, member_slug: str | None = None,
 ):
     """包裝 run_ai_task，並在完成後更新 MD 檔案與資料庫卡片狀態"""
-    result = await run_ai_task(card_id, project_path, prompt, phase, forced_provider=forced_provider, card_title=card_title, project_name=project_name, member_id=member_id)
+    # 有工作區時，cwd 用工作區；prompt 簡化為指示讀取 config
+    effective_cwd = workspace_dir or project_path
+    effective_prompt = "請閱讀你的設定檔並執行本次任務。" if workspace_dir else prompt
+
+    result = await run_ai_task(card_id, effective_cwd, effective_prompt, phase, forced_provider=forced_provider, card_title=card_title, project_name=project_name, member_id=member_id)
 
     async with get_card_lock(card_id):
         file_path = Path(file_path_str) if file_path_str else card_file_path(project_path, card_id)
@@ -187,6 +211,22 @@ async def _execute_and_update(
 
             session.commit()
             logger.info(f"[Task {card_id}] State updated to {new_status}")
+
+    # 寫入角色短期記憶
+    if member_slug:
+        try:
+            status_text = result.get("status", "unknown")
+            output_preview = result.get("output", "")[:500]
+            write_member_short_term_memory(
+                member_slug,
+                f"## 任務: {card_title}\n專案: {project_name}\n結果: {status_text}\n\n{output_preview}"
+            )
+        except Exception as e:
+            logger.warning(f"[Memory] Failed to write member memory: {e}")
+
+    # 清理臨時工作區
+    if workspace_dir:
+        cleanup_workspace(card_id)
 
 async def start_poller():
     """任務監聽器的主迴圈"""
