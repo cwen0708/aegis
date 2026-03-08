@@ -92,6 +92,7 @@ Co-Authored-By: Happy <yesreply@happy.engineering>
 | `ANALYSIS.md` | 專案深度分析（架構、優缺點、6 Critical bugs、適用場景） |
 | `FEATURE-ROADMAP.md` | 功能開發清單（基於 14 個 AI Agent 專案整合，P0-P10 優先級） |
 | `FEATURE-ROADMAP-SUMMARY.md` | 路線圖摘要（快速參考） |
+| `PLAN-P0-P1.md` | P0-P1 執行計畫（Week 1-4，含代碼範例） |
 
 ### 外部比較報告
 - `G:/vendor/AI-AGENT-COMPARISON_v3.md` — 14 個 AI Agent 專案綜合比較
