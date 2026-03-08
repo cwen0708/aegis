@@ -1,14 +1,25 @@
 """Member profile management — soul, skills, memory directories."""
 import logging
+import re
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 MEMBERS_ROOT = Path.home() / ".aegis" / "members"
 
+_SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9\-]*$")
+
+
+def _validate_slug(slug: str) -> str:
+    """Validate slug to prevent path traversal."""
+    if not slug or not _SLUG_PATTERN.match(slug) or ".." in slug:
+        raise ValueError(f"Invalid member slug: {slug!r}")
+    return slug
+
 
 def get_member_dir(slug: str) -> Path:
     """Return (and ensure) the member's profile directory."""
+    _validate_slug(slug)
     d = MEMBERS_ROOT / slug
     d.mkdir(parents=True, exist_ok=True)
     (d / "skills").mkdir(exist_ok=True)

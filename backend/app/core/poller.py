@@ -170,63 +170,64 @@ async def _execute_and_update(
     workspace_dir: str | None = None, member_slug: str | None = None,
 ):
     """包裝 run_ai_task，並在完成後更新 MD 檔案與資料庫卡片狀態"""
-    # 有工作區時，cwd 用工作區；prompt 簡化為指示讀取 config
-    effective_cwd = workspace_dir or project_path
-    effective_prompt = "請閱讀你的設定檔並執行本次任務。" if workspace_dir else prompt
+    try:
+        # 有工作區時，cwd 用工作區；prompt 簡化為指示讀取 config
+        effective_cwd = workspace_dir or project_path
+        effective_prompt = "請閱讀你的設定檔並執行本次任務。" if workspace_dir else prompt
 
-    result = await run_ai_task(card_id, effective_cwd, effective_prompt, phase, forced_provider=forced_provider, card_title=card_title, project_name=project_name, member_id=member_id)
+        result = await run_ai_task(card_id, effective_cwd, effective_prompt, phase, forced_provider=forced_provider, card_title=card_title, project_name=project_name, member_id=member_id)
 
-    async with get_card_lock(card_id):
-        file_path = Path(file_path_str) if file_path_str else card_file_path(project_path, card_id)
+        async with get_card_lock(card_id):
+            file_path = Path(file_path_str) if file_path_str else card_file_path(project_path, card_id)
 
-        with Session(engine) as session:
-            # Read current MD file (may have been modified during execution)
+            with Session(engine) as session:
+                # Read current MD file (may have been modified during execution)
+                try:
+                    card_data = read_card(file_path)
+                except Exception as e:
+                    logger.error(f"[Task {card_id}] Failed to read MD file after execution: {e}")
+                    # Fall back to ORM-only update
+                    card_data = None
+
+                if result["status"] == "success":
+                    append_text = f"\n\n### AI Output ({result['provider']})\n```\n{result['output'][:1000]}...\n```"
+                    new_status = "completed"
+                else:
+                    append_text = f"\n\n### Error ({result['provider']})\n{result['output']}"
+                    new_status = "failed"
+
+                # Update MD file
+                if card_data:
+                    card_data.content = card_data.content + append_text
+                    card_data.status = new_status
+                    write_card(file_path, card_data)
+                    sync_card_to_index(session, card_data, project_id, str(file_path))
+
+                # Dual-write: keep Card ORM in sync during transition
+                orm_card = session.get(Card, card_id)
+                if orm_card:
+                    orm_card.content = (orm_card.content or "") + append_text
+                    orm_card.status = new_status
+                    session.add(orm_card)
+
+                session.commit()
+                logger.info(f"[Task {card_id}] State updated to {new_status}")
+
+        # 寫入角色短期記憶
+        if member_slug:
             try:
-                card_data = read_card(file_path)
+                status_text = result.get("status", "unknown")
+                output_preview = result.get("output", "")[:500]
+                write_member_short_term_memory(
+                    member_slug,
+                    f"## 任務: {card_title}\n專案: {project_name}\n結果: {status_text}\n\n{output_preview}"
+                )
             except Exception as e:
-                logger.error(f"[Task {card_id}] Failed to read MD file after execution: {e}")
-                # Fall back to ORM-only update
-                card_data = None
-
-            if result["status"] == "success":
-                append_text = f"\n\n### AI Output ({result['provider']})\n```\n{result['output'][:1000]}...\n```"
-                new_status = "completed"
-            else:
-                append_text = f"\n\n### Error ({result['provider']})\n{result['output']}"
-                new_status = "failed"
-
-            # Update MD file
-            if card_data:
-                card_data.content = card_data.content + append_text
-                card_data.status = new_status
-                write_card(file_path, card_data)
-                sync_card_to_index(session, card_data, project_id, str(file_path))
-
-            # Dual-write: keep Card ORM in sync during transition
-            orm_card = session.get(Card, card_id)
-            if orm_card:
-                orm_card.content = (orm_card.content or "") + append_text
-                orm_card.status = new_status
-                session.add(orm_card)
-
-            session.commit()
-            logger.info(f"[Task {card_id}] State updated to {new_status}")
-
-    # 寫入角色短期記憶
-    if member_slug:
-        try:
-            status_text = result.get("status", "unknown")
-            output_preview = result.get("output", "")[:500]
-            write_member_short_term_memory(
-                member_slug,
-                f"## 任務: {card_title}\n專案: {project_name}\n結果: {status_text}\n\n{output_preview}"
-            )
-        except Exception as e:
-            logger.warning(f"[Memory] Failed to write member memory: {e}")
-
-    # 清理臨時工作區
-    if workspace_dir:
-        cleanup_workspace(card_id)
+                logger.warning(f"[Memory] Failed to write member memory: {e}")
+    finally:
+        # 確保臨時工作區一定被清理
+        if workspace_dir:
+            cleanup_workspace(card_id)
 
 async def start_poller():
     """任務監聽器的主迴圈"""

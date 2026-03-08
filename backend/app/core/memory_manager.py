@@ -210,7 +210,7 @@ def write_member_short_term_memory(member_slug: str, content: str, timestamp: da
     """Write a short-term memory file for a specific member."""
     if timestamp is None:
         timestamp = datetime.now(timezone.utc)
-    filename = timestamp.strftime("%Y-%m-%d-%H%M") + ".md"
+    filename = timestamp.strftime("%Y-%m-%d-%H%M%S") + ".md"
     fpath = _get_member_short_term_dir(member_slug) / filename
 
     frontmatter = f"""---
@@ -233,10 +233,18 @@ def read_member_short_term_memories(member_slug: str, days: int = 7) -> str:
     for f in sorted(d.glob("*.md")):
         try:
             date_str = f.stem
-            file_date = datetime.strptime(date_str, "%Y-%m-%d-%H%M").replace(tzinfo=timezone.utc)
+            # 支援秒級 (%H%M%S) 與分鐘級 (%H%M) 兩種格式
+            for fmt in ("%Y-%m-%d-%H%M%S", "%Y-%m-%d-%H%M"):
+                try:
+                    file_date = datetime.strptime(date_str, fmt).replace(tzinfo=timezone.utc)
+                    break
+                except ValueError:
+                    continue
+            else:
+                continue
             if file_date >= cutoff:
                 entries.append(f"### {date_str}\n\n{f.read_text(encoding='utf-8')}")
-        except (ValueError, OSError) as e:
+        except OSError as e:
             logger.warning(f"Skipping {f}: {e}")
 
     return "\n\n---\n\n".join(entries) if entries else "(no recent short-term memories)"
@@ -251,11 +259,18 @@ def cleanup_member_short_term(member_slug: str, retention_days: int = 30) -> int
     for f in d.glob("*.md"):
         try:
             date_str = f.stem
-            file_date = datetime.strptime(date_str, "%Y-%m-%d-%H%M").replace(tzinfo=timezone.utc)
+            for fmt in ("%Y-%m-%d-%H%M%S", "%Y-%m-%d-%H%M"):
+                try:
+                    file_date = datetime.strptime(date_str, fmt).replace(tzinfo=timezone.utc)
+                    break
+                except ValueError:
+                    continue
+            else:
+                continue
             if file_date < cutoff:
                 f.unlink()
                 deleted += 1
-        except (ValueError, OSError):
+        except OSError:
             pass
 
     return deleted
