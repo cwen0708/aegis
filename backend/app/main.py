@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()  # 載入 .env 檔案
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles

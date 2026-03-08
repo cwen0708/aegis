@@ -889,7 +889,7 @@ async def get_channel_status():
                 "last_heartbeat": s.last_heartbeat.isoformat() if s.last_heartbeat else None,
                 "stats": s.stats,
             }
-            for s in statuses
+            for s in statuses.values()
         ]
     }
 

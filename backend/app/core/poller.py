@@ -161,6 +161,53 @@ def _resolve_member(stage_list, phase: str, session) -> tuple[int | None, str | 
     return None, None
 
 
+async def _notify_channels(card_id: int, card_title: str, project_name: str,
+                          status: str, result: dict):
+    """發送任務完成通知到已綁定的頻道"""
+    from app.channels.bus import message_bus
+    from app.channels.types import OutboundMessage
+    from app.database import engine
+    from app.models.core import ChannelBinding
+    from sqlmodel import Session, select
+
+    try:
+        # 查詢此專案綁定的頻道
+        with Session(engine) as session:
+            bindings = session.exec(
+                select(ChannelBinding).where(
+                    ChannelBinding.entity_type == "project",
+                    ChannelBinding.notify_on_complete == True
+                )
+            ).all()
+
+            if not bindings:
+                return
+
+            # 格式化通知訊息
+            emoji = "✅" if status == "completed" else "❌"
+            output_preview = result.get("output", "")[:200]
+            text = (
+                f"{emoji} **任務{status}**\n"
+                f"📋 {card_title}\n"
+                f"📁 {project_name}\n"
+                f"```\n{output_preview}...\n```"
+            )
+
+            # 發送到每個綁定的頻道
+            for binding in bindings:
+                msg = OutboundMessage(
+                    chat_id=binding.chat_id,
+                    text=text,
+                    platform=binding.platform,
+                    card_id=card_id,
+                )
+                await message_bus.publish_outbound(msg)
+                logger.info(f"[Notify] Sent to {binding.platform}:{binding.chat_id}")
+
+    except Exception as e:
+        logger.warning(f"[Notify] Failed to send channel notification: {e}")
+
+
 async def _execute_and_update(
     card_id: int, project_path: str, prompt: str, phase: str,
     card_title: str = "", project_name: str = "",
@@ -217,6 +264,9 @@ async def _execute_and_update(
         # 在 index 更新並 commit 之後才廣播，避免前端刷看板時拿到舊狀態
         event = "task_completed" if new_status == "completed" else "task_failed"
         await broadcast_event(event, {"card_id": card_id, "status": new_status})
+
+        # 發送頻道通知（如有啟用）
+        await _notify_channels(card_id, card_title, project_name, new_status, result)
 
         # 寫入角色短期記憶
         if member_slug:

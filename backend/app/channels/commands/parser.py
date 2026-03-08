@@ -19,6 +19,11 @@ class CommandType(str, Enum):
     TASK_STOP = "task.stop"
     TASK_STATUS = "task.status"
 
+    # 綁定操作
+    BIND = "bind"
+    UNBIND = "unbind"
+    BIND_LIST = "bind.list"
+
     # 系統操作
     STATUS = "status"
     HELP = "help"
@@ -48,6 +53,13 @@ COMMAND_PATTERNS: list[tuple[str, CommandType]] = [
     (r"^/stop\s+(\d+)$", CommandType.TASK_STOP),  # 簡寫
     (r"^/task\s+status\s+(\d+)$", CommandType.TASK_STATUS),
     (r"^/task\s+(\d+)$", CommandType.TASK_STATUS),  # /task 123
+
+    # 綁定命令
+    (r"^/bind$", CommandType.BIND),
+    (r"^/bind\s+(\w+)\s+(\d+)$", CommandType.BIND),  # /bind project 123
+    (r"^/unbind$", CommandType.UNBIND),
+    (r"^/unbind\s+(\d+)$", CommandType.UNBIND),      # /unbind <binding_id>
+    (r"^/bindings?$", CommandType.BIND_LIST),
 
     # 系統命令
     (r"^/status$", CommandType.STATUS),
@@ -107,6 +119,12 @@ def get_help_text() -> str:
 /run <ID> — 執行卡片任務
 /stop <ID> — 中止任務
 /task <ID> — 查看任務狀態
+
+🔗 *綁定*
+/bind — 綁定此頻道接收通知
+/bind project <ID> — 綁定特定專案
+/unbind — 解除此頻道綁定
+/bindings — 查看綁定列表
 
 🔧 *系統*
 /status — 系統狀態

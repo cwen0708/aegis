@@ -6,7 +6,7 @@ from sqlmodel import Session, select
 from .parser import ParsedCommand, CommandType, get_help_text
 from ..types import InboundMessage
 from app.database import engine
-from app.models.core import Card, StageList, Project
+from app.models.core import Card, StageList, Project, ChannelBinding
 import logging
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,9 @@ async def handle_command(cmd: ParsedCommand, msg: InboundMessage) -> Optional[st
         CommandType.TASK_RUN: _handle_task_run,
         CommandType.TASK_STOP: _handle_task_stop,
         CommandType.TASK_STATUS: _handle_task_status,
+        CommandType.BIND: _handle_bind,
+        CommandType.UNBIND: _handle_unbind,
+        CommandType.BIND_LIST: _handle_bind_list,
         CommandType.STATUS: _handle_status,
         CommandType.HELP: _handle_help,
     }
@@ -236,3 +239,114 @@ async def _handle_status(cmd: ParsedCommand, msg: InboundMessage) -> str:
 async def _handle_help(cmd: ParsedCommand, msg: InboundMessage) -> str:
     """顯示說明"""
     return get_help_text()
+
+
+# ===== 綁定命令 =====
+
+async def _handle_bind(cmd: ParsedCommand, msg: InboundMessage) -> str:
+    """綁定頻道接收通知"""
+    with Session(engine) as session:
+        # 檢查是否已綁定
+        existing = session.exec(
+            select(ChannelBinding).where(
+                ChannelBinding.platform == msg.platform,
+                ChannelBinding.chat_id == msg.chat_id,
+            )
+        ).first()
+
+        if existing:
+            return (
+                f"⚠️ 此頻道已綁定\n"
+                f"類型: {existing.entity_type}\n"
+                f"使用 /unbind 可解除綁定"
+            )
+
+        # 解析參數
+        entity_type = "global"
+        entity_id = None
+
+        if len(cmd.args) >= 2:
+            entity_type = cmd.args[0]  # project, member
+            entity_id = int(cmd.args[1])
+
+            # 驗證實體存在
+            if entity_type == "project":
+                project = session.get(Project, entity_id)
+                if not project:
+                    return f"❌ 找不到專案 #{entity_id}"
+
+        # 建立綁定
+        binding = ChannelBinding(
+            platform=msg.platform,
+            user_id=msg.user_id,
+            chat_id=msg.chat_id,
+            user_name=msg.user_name,
+            entity_type=entity_type,
+            entity_id=entity_id,
+        )
+        session.add(binding)
+        session.commit()
+        session.refresh(binding)
+
+        scope = f"專案 #{entity_id}" if entity_type == "project" else "全域"
+        return (
+            f"✅ 綁定成功！\n"
+            f"🔗 ID: {binding.id}\n"
+            f"📍 範圍: {scope}\n"
+            f"📢 將接收任務完成通知"
+        )
+
+
+async def _handle_unbind(cmd: ParsedCommand, msg: InboundMessage) -> str:
+    """解除綁定"""
+    with Session(engine) as session:
+        if cmd.args:
+            # 指定 binding ID
+            binding_id = int(cmd.args[0])
+            binding = session.get(ChannelBinding, binding_id)
+            if not binding:
+                return f"❌ 找不到綁定 #{binding_id}"
+            if binding.chat_id != msg.chat_id:
+                return "❌ 無權解除此綁定"
+        else:
+            # 解除此頻道的綁定
+            binding = session.exec(
+                select(ChannelBinding).where(
+                    ChannelBinding.platform == msg.platform,
+                    ChannelBinding.chat_id == msg.chat_id,
+                )
+            ).first()
+
+            if not binding:
+                return "⚠️ 此頻道尚未綁定"
+
+        session.delete(binding)
+        session.commit()
+
+        return f"✅ 已解除綁定 #{binding.id}"
+
+
+async def _handle_bind_list(cmd: ParsedCommand, msg: InboundMessage) -> str:
+    """列出綁定"""
+    with Session(engine) as session:
+        bindings = session.exec(
+            select(ChannelBinding).where(
+                ChannelBinding.platform == msg.platform,
+                ChannelBinding.user_id == msg.user_id,
+            )
+        ).all()
+
+        if not bindings:
+            return "📭 尚無綁定\n使用 /bind 開始接收通知"
+
+        lines = ["🔗 *您的綁定*\n"]
+        for b in bindings:
+            scope = f"專案#{b.entity_id}" if b.entity_type == "project" else "全域"
+            notify = []
+            if b.notify_on_complete:
+                notify.append("完成")
+            if b.notify_on_fail:
+                notify.append("失敗")
+            lines.append(f"#{b.id} [{scope}] → {', '.join(notify)}")
+
+        return "\n".join(lines)

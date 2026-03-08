@@ -150,3 +150,23 @@ class MemberAccount(SQLModel, table=True):
     account_id: int = Field(foreign_key="account.id")
     priority: int = Field(default=0)  # 0=主要, 1=備用1, 2=備用2...
     model: str = ""  # "opus" / "sonnet" / "gemini-2.5-flash" 等
+
+
+class ChannelBinding(SQLModel, table=True):
+    """頻道綁定 — 用戶/專案與通訊頻道的對應"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    platform: str = Field(index=True)  # telegram, line, discord, slack, wecom, feishu
+    user_id: str = Field(index=True)   # 平台用戶 ID
+    chat_id: str                        # 發送訊息的目標 chat ID
+    user_name: Optional[str] = None     # 顯示名稱（方便識別）
+
+    # 綁定對象
+    entity_type: str = Field(default="global")  # global, project, member
+    entity_id: Optional[int] = None             # project_id 或 member_id
+
+    # 通知設定
+    notify_on_complete: bool = Field(default=True)   # 任務完成時通知
+    notify_on_fail: bool = Field(default=True)       # 任務失敗時通知
+    notify_on_start: bool = Field(default=False)     # 任務開始時通知
+
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
