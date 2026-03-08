@@ -36,10 +36,15 @@ async def _handle_change(change_type: Change, path_str: str):
         return
 
     # 內部寫入（write_card）已標記，跳過避免競態條件
-    if change_type != Change.deleted and consume_internal_write(path):
+    # Windows 的 os.replace() 原子寫入會觸發 delete + added 兩個事件，
+    # 必須對所有事件類型（含 deleted）都檢查 internal write 標記
+    if consume_internal_write(path):
         return
 
     if change_type == Change.deleted:
+        # 確認檔案真的不存在（排除原子寫入的瞬態 delete）
+        if path.exists():
+            return
         # File was deleted externally — remove from index
         with Session(engine) as session:
             remove_card_from_index(session, card_id)

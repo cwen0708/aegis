@@ -218,10 +218,10 @@ async function toggleRunner() {
   }
 }
 
-// WebSocket 事件監聽：任務完成時自動重整看板
+// WebSocket 事件監聽：任務狀態變化時自動重整看板
 function onTaskEvent(e: Event) {
   const detail = (e as CustomEvent).detail
-  if (detail.type === 'completed' || detail.type === 'failed') {
+  if (detail.type === 'started' || detail.type === 'completed' || detail.type === 'failed') {
     fetchBoard()
   }
 }

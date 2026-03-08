@@ -188,9 +188,8 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str, 
                 running_tasks.pop(task_id, None)
                 if member_id:
                     busy_members.discard(member_id)
-                await broadcast_event("task_failed", {"card_id": task_id, "reason": "timeout"})
                 _save_task_log(task_id, card_title, project_name, provider_name, member_id, "timeout", {})
-                return {"status": "timeout", "output": "", "provider": provider_name}
+                return {"status": "timeout", "output": "任務超時 (40 分鐘)", "provider": provider_name}
 
             output = "".join(output_lines)
             running_tasks.pop(task_id, None)
@@ -198,8 +197,9 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str, 
                 busy_members.discard(member_id)
 
             status = "success" if proc.returncode == 0 else "error"
-            event = "task_completed" if status == "success" else "task_failed"
-            await broadcast_event(event, {"card_id": task_id, "status": status})
+            # 注意：不在此處廣播 task_completed/task_failed
+            # 由 poller._execute_and_update 在更新完 CardIndex 後才廣播
+            # 避免前端收到事件時 index 尚未更新的競態條件
 
             # 解析 token 用量並儲存 TaskLog
             token_info = {}
@@ -224,8 +224,6 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str, 
             if member_id:
                 busy_members.discard(member_id)
             logger.exception(f"[Task {task_id}] Execution failed: {e}")
-            from app.core.ws_manager import broadcast_event
-            await broadcast_event("task_failed", {"card_id": task_id, "reason": str(e)})
             _save_task_log(task_id, card_title, project_name, provider_name, member_id, "error", {})
             return {"status": "error", "output": str(e), "provider": provider_name}
 
