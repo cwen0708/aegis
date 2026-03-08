@@ -54,9 +54,11 @@ export const useAegisStore = defineStore('aegis', () => {
   function addToast(message: string, type: Toast['type'] = 'info') {
     const id = ++toastId
     toasts.value.push({ id, message, type })
-    setTimeout(() => {
-      toasts.value = toasts.value.filter(t => t.id !== id)
-    }, 5000)
+    setTimeout(() => removeToast(id), 5000)
+  }
+
+  function removeToast(id: number) {
+    toasts.value = toasts.value.filter(t => t.id !== id)
   }
 
   function setConnected(val: boolean) {
@@ -190,6 +192,7 @@ export const useAegisStore = defineStore('aegis', () => {
     taskLogs,
     toasts,
     addToast,
+    removeToast,
     setConnected,
     updateRunningTasks,
     updateSystemInfo,

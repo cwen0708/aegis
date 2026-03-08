@@ -15,12 +15,20 @@ workstation_semaphore = asyncio.Semaphore(MAX_WORKSTATIONS)
 
 
 def update_max_workstations(new_max: int):
-    """更新工作台數量（從 Settings 呼叫）"""
-    global MAX_WORKSTATIONS, workstation_semaphore
+    """更新工作台數量（從 Settings 呼叫）。
+    調整既有 semaphore 的內部計數而非替換物件，
+    避免已持有引用的 coroutine 失去互斥保護。"""
+    global MAX_WORKSTATIONS
     if new_max < 1:
         new_max = 1
+    old_max = MAX_WORKSTATIONS
     MAX_WORKSTATIONS = new_max
-    workstation_semaphore = asyncio.Semaphore(new_max)
+    diff = new_max - old_max
+    if diff > 0:
+        for _ in range(diff):
+            workstation_semaphore.release()
+    elif diff < 0:
+        workstation_semaphore._value = max(0, workstation_semaphore._value + diff)
     logger.info(f"[Runner] MAX_WORKSTATIONS updated to {new_max}")
 
 # 追蹤忙碌的成員（同一成員同時只能佔用一個工作台）
@@ -41,7 +49,7 @@ PHASE_ROUTING = {
 # 支援的 AI 提供者指令配置
 PROVIDERS = {
     "gemini": {
-        "cmd_base": [r"C:\Users\cwen0708\AppData\Roaming\npm\gemini.cmd"],
+        "cmd_base": ["gemini"],
         "args": ["-p", "{prompt}", "-y", "--model", "gemini-2.5-flash"],
         "env": {}
     },
