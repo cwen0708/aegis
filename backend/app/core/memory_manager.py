@@ -188,3 +188,74 @@ def cleanup_short_term(aegis_path: str, retention_days: int = 30) -> int:
             logger.warning(f"Skipping cleanup of {f}: {e}")
 
     return deleted
+
+
+# ── Member-level memory (delegates to member_profile for paths) ──
+
+def _get_member_short_term_dir(member_slug: str) -> Path:
+    from app.core.member_profile import get_member_memory_dir
+    d = get_member_memory_dir(member_slug) / "short-term"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _get_member_long_term_dir(member_slug: str) -> Path:
+    from app.core.member_profile import get_member_memory_dir
+    d = get_member_memory_dir(member_slug) / "long-term"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def write_member_short_term_memory(member_slug: str, content: str, timestamp: datetime = None) -> Path:
+    """Write a short-term memory file for a specific member."""
+    if timestamp is None:
+        timestamp = datetime.now(timezone.utc)
+    filename = timestamp.strftime("%Y-%m-%d-%H%M") + ".md"
+    fpath = _get_member_short_term_dir(member_slug) / filename
+
+    frontmatter = f"""---
+timestamp: "{timestamp.isoformat()}"
+member: "{member_slug}"
+---
+
+"""
+    fpath.write_text(frontmatter + content, encoding="utf-8")
+    logger.info(f"Member short-term memory written: {fpath}")
+    return fpath
+
+
+def read_member_short_term_memories(member_slug: str, days: int = 7) -> str:
+    """Read all short-term memories for a member from the last N days."""
+    d = _get_member_short_term_dir(member_slug)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    entries = []
+
+    for f in sorted(d.glob("*.md")):
+        try:
+            date_str = f.stem
+            file_date = datetime.strptime(date_str, "%Y-%m-%d-%H%M").replace(tzinfo=timezone.utc)
+            if file_date >= cutoff:
+                entries.append(f"### {date_str}\n\n{f.read_text(encoding='utf-8')}")
+        except (ValueError, OSError) as e:
+            logger.warning(f"Skipping {f}: {e}")
+
+    return "\n\n---\n\n".join(entries) if entries else "(no recent short-term memories)"
+
+
+def cleanup_member_short_term(member_slug: str, retention_days: int = 30) -> int:
+    """Delete member short-term memory files older than retention_days."""
+    d = _get_member_short_term_dir(member_slug)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    deleted = 0
+
+    for f in d.glob("*.md"):
+        try:
+            date_str = f.stem
+            file_date = datetime.strptime(date_str, "%Y-%m-%d-%H%M").replace(tzinfo=timezone.utc)
+            if file_date < cutoff:
+                f.unlink()
+                deleted += 1
+        except (ValueError, OSError):
+            pass
+
+    return deleted
