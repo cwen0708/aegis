@@ -16,6 +16,8 @@ from app.core.card_watcher import start_card_watcher, stop_card_watcher
 from app.core.card_index import rebuild_index
 from app.core.card_file import read_card, write_card
 from app.models.core import CardIndex, Project
+from app.channels import channel_manager
+import os
 import time
 
 logger = logging.getLogger(__name__)
@@ -157,8 +159,16 @@ async def lifespan(app: FastAPI):
     # 啟動 MD 卡片檔案監視器（偵測外部編輯）
     await start_card_watcher()
 
+    # 啟動多頻道通訊（如有設定 Bot Token）
+    if os.getenv("TELEGRAM_BOT_TOKEN"):
+        from app.channels.adapters.telegram import TelegramChannel
+        channel_manager.register(TelegramChannel(os.getenv("TELEGRAM_BOT_TOKEN")))
+        logger.info("Telegram channel registered")
+    await channel_manager.start_all()
+
     yield
 
+    await channel_manager.stop_all()
     await stop_card_watcher()
     poller_task.cancel()
     cron_poller_task.cancel()
