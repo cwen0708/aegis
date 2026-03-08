@@ -13,8 +13,29 @@ AI Engineering Grid & Intelligence System (Aegis)
 | `origin` | 私人遠端（完整版本） | `https://github.com/Yooliang/Aegis.git` |
 | `public` | 開源遠端（公開版本） | `https://github.com/cwen0708/aegis.git` |
 
-- 日常開發 push 到 `origin`
-- 開源發布 push 到 `public`（注意不要推送 `private/` 目錄內容）
+### 分支結構
+
+| 分支 | 位置 | 用途 |
+|------|------|------|
+| `main` | 本地 + `origin` | 私人開發主線，含 `private/` 等私人內容 |
+| `open-source` | 本地 + `origin` + `public` | 開源版本，不含任何私人內容 |
+
+- `origin/main` — 私人完整版本
+- `origin/open-source` — 從開源同步過來，用於 PR 合併到 main
+- `public/main` — 開源發布版本（不含 `private/`）
+
+### 推送規則
+
+```bash
+# 開源改動（在 open-source 分支）
+git push public open-source:main    # 推到開源倉庫
+git push origin open-source         # 同步到私人倉庫
+# 然後在 GitHub 建 PR: origin/open-source → origin/main
+
+# 私人改動（在 main 分支）
+git push origin main                # 只推到私人倉庫
+# ⚠️ 絕對不要 push main 到 public！
+```
 
 ## 開發環境
 
