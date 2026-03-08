@@ -1,6 +1,6 @@
 # Aegis Windows Installation Script
-# Usage: irm https://raw.githubusercontent.com/cwen0708/aegis/refs/heads/main/scripts/install-windows.ps1 | iex
-# Or: .\install-windows.ps1 [-InstallDir "C:\Aegis"] [-SkipCLI] [-Dev]
+# Usage: irm https://raw.githubusercontent.com/cwen0708/aegis/main/scripts/install.ps1 | iex
+# Or: .\install.ps1 [-InstallDir "C:\Aegis"] [-SkipCLI] [-Dev]
 
 param(
     [string]$InstallDir = "$env:LOCALAPPDATA\Aegis",

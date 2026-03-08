@@ -9,8 +9,8 @@ echo.
 
 :: Determine script location
 set "SCRIPT_DIR=%~dp0"
-set "PS_SCRIPT=%SCRIPT_DIR%scripts\install-windows.ps1"
-set "DOWNLOAD_URL=https://raw.githubusercontent.com/cwen0708/aegis/refs/heads/main/scripts/install-windows.ps1"
+set "PS_SCRIPT=%SCRIPT_DIR%scripts\install.ps1"
+set "DOWNLOAD_URL=https://raw.githubusercontent.com/cwen0708/aegis/main/scripts/install.ps1"
 
 :: Check if install.ps1 exists locally (running from cloned repo)
 if exist "%PS_SCRIPT%" (
