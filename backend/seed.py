@@ -8,11 +8,66 @@ from app.models.core import (
     Member, Account, MemberAccount, CronJob,
 )
 from app.core.card_file import CardData, write_card, card_file_path
+from app.core.member_profile import get_member_dir
 from app.core.card_index import sync_card_to_index
 from datetime import datetime, timezone
 
 # 範例立繪路徑
 EXAMPLE_PORTRAITS_DIR = Path(__file__).parent / "uploads" / "portraits"
+
+
+def _seed_member_profiles():
+    """Create member profile directories with initial soul.md and skills."""
+    # 小筃 — 資深開發者
+    jun_dir = get_member_dir("xiao-jun")
+    (jun_dir / "soul.md").write_text(
+        "# 小筃 — 資深開發者\n\n"
+        "## 身份\n"
+        "你是 Aegis AI 開發團隊的資深全端工程師「小筃」。\n\n"
+        "## 專長\n"
+        "- Vue 3 Composition API + TypeScript\n"
+        "- Python FastAPI 後端\n"
+        "- 系統架構設計\n\n"
+        "## 工作風格\n"
+        "- 先讀現有程式碼再動手\n"
+        "- 小步提交、單一責任\n"
+        "- 繁體中文註解與 commit message\n"
+        "- 不自作主張加功能\n",
+        encoding="utf-8",
+    )
+    (jun_dir / "skills" / "fullstack-dev.md").write_text(
+        "# 全端開發規範\n\n"
+        "- 前端使用 Vue 3 Composition API + <script setup>\n"
+        "- 後端使用 FastAPI + SQLModel\n"
+        "- API 路由放在 app/api/routes.py\n"
+        "- 新功能要加測試\n",
+        encoding="utf-8",
+    )
+
+    # 小良 — 技術主管
+    liang_dir = get_member_dir("xiao-liang")
+    (liang_dir / "soul.md").write_text(
+        "# 小良 — 技術主管\n\n"
+        "## 身份\n"
+        "你是 Aegis AI 開發團隊的技術主管「小良」。\n\n"
+        "## 專長\n"
+        "- 需求分析與技術決策\n"
+        "- Code Review\n"
+        "- 架構規劃\n\n"
+        "## 工作風格\n"
+        "- 注重全局觀，先看整體再看細節\n"
+        "- Review 時指出問題但也肯定優點\n"
+        "- 決策要附帶理由\n",
+        encoding="utf-8",
+    )
+    (liang_dir / "skills" / "code-review.md").write_text(
+        "# Code Review 規範\n\n"
+        "- 檢查安全性（OWASP Top 10）\n"
+        "- 檢查效能瓶頸\n"
+        "- 確認測試覆蓋率\n"
+        "- 風格一致性\n",
+        encoding="utf-8",
+    )
 
 
 def seed_data():
@@ -45,6 +100,7 @@ def seed_data():
         # ── 2. Members (AI 虛擬角色，範例) ──
         m1 = Member(
             name="小筃",
+            slug="xiao-jun",
             avatar="👩‍💻",
             role="資深開發者",
             description="擅長全端開發與系統架構，負責 Coding 階段的任務執行。",
@@ -53,6 +109,7 @@ def seed_data():
         )
         m2 = Member(
             name="小良",
+            slug="xiao-liang",
             avatar="👨‍💼",
             role="技術主管",
             description="負責 Planning 與 Code Review，擅長需求分析與技術決策。",
@@ -63,6 +120,9 @@ def seed_data():
         session.commit()
         session.refresh(m1)
         session.refresh(m2)
+
+        # ── 2b. Member Profile Directories ──
+        _seed_member_profiles()
 
         # ── 3. AEGIS 系統專案（不可刪除） ──
         aegis = Project(
