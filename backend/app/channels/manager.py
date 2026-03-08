@@ -155,6 +155,32 @@ class ChannelManager:
         """取得所有活躍頻道名稱"""
         return list(self.channels.keys())
 
+    @property
+    def _channels(self) -> list[ChannelBase]:
+        """取得所有頻道實例（供 webhook 使用）"""
+        return list(self.channels.values())
+
+    async def restart_all(self):
+        """重啟所有頻道（停止 → 清空 → 重新載入 → 啟動）"""
+        logger.info("[Manager] Restarting all channels...")
+
+        # 停止現有頻道
+        await self.stop_all()
+
+        # 清空頻道列表
+        self.channels.clear()
+        self._outbound_tasks.clear()
+
+        # 重新載入設定並註冊頻道（延遲 import 避免循環引用）
+        from app.main import _register_channels_from_config
+        await _register_channels_from_config()
+
+        # 重新啟動
+        await self.start_all()
+
+        logger.info(f"[Manager] Restart complete, {len(self.channels)} channels active")
+        return len(self.channels)
+
 
 # 全域 Manager 實例
 channel_manager = ChannelManager()

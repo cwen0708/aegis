@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Settings, Globe, Cpu, Save, Sparkles, CloudCog, ExternalLink, Copy, Check, Loader2, Terminal, Download, MessageSquare } from 'lucide-vue-next'
+import { Settings, Globe, Cpu, Save, Sparkles, CloudCog, ExternalLink, Copy, Check, Loader2, Terminal, Download, MessageSquare, RefreshCw } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 import ChannelCard from '../components/ChannelCard.vue'
 
@@ -43,6 +43,7 @@ const channelsLoading = ref(true)
 const channelConfigs = ref<Record<string, ChannelConfig>>({})
 const channelStatuses = ref<Record<string, { connected: boolean; error?: string }>>({})
 const channelSaving = ref<string | null>(null)
+const channelRestarting = ref(false)
 
 // 頻道定義
 const channelDefs = [
@@ -260,6 +261,25 @@ async function updateChannelConfig(name: string, config: ChannelConfig) {
     store.showToast('儲存失敗', 'error')
   } finally {
     channelSaving.value = null
+  }
+}
+
+async function restartChannels() {
+  channelRestarting.value = true
+  try {
+    const res = await fetch(`${API}/api/v1/channels/restart`, { method: 'POST' })
+    const data = await res.json()
+    if (res.ok) {
+      store.showToast(data.message || '頻道已重啟', 'success')
+      // 重新載入狀態
+      await fetchChannelStatuses()
+    } else {
+      store.showToast(data.detail || '重啟失敗', 'error')
+    }
+  } catch {
+    store.showToast('重啟失敗', 'error')
+  } finally {
+    channelRestarting.value = false
   }
 }
 
@@ -659,9 +679,21 @@ async function saveSettings() {
                 @update="(cfg) => updateChannelConfig(ch.name, cfg)"
               />
             </template>
-            <p class="text-[10px] text-slate-500 px-2 pt-2">
-              設定變更後需重啟服務才會生效。Webhook 類型的頻道（LINE、企業微信、飛書）需要額外設定回調 URL。
-            </p>
+            <!-- 重啟按鈕 + 提示 -->
+            <div class="flex items-center justify-between px-2 pt-3">
+              <p class="text-[10px] text-slate-500">
+                設定變更後需重啟服務才會生效
+              </p>
+              <button
+                @click="restartChannels"
+                :disabled="channelRestarting"
+                class="flex items-center gap-1.5 px-3 py-1.5 bg-teal-500 hover:bg-teal-600 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-all"
+              >
+                <Loader2 v-if="channelRestarting" class="w-3 h-3 animate-spin" />
+                <RefreshCw v-else class="w-3 h-3" />
+                重啟頻道服務
+              </button>
+            </div>
           </div>
         </div>
 

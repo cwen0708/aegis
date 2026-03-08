@@ -888,6 +888,17 @@ async def get_channel_status():
     }
 
 
+@router.post("/channels/restart")
+async def restart_channels():
+    """重啟所有頻道（套用新設定）"""
+    from app.channels import channel_manager
+    try:
+        count = await channel_manager.restart_all()
+        return {"status": "ok", "message": f"已重啟 {count} 個頻道", "active_channels": count}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ==========================================
 # Account CRUD (多帳號管理)
 # ==========================================
