@@ -74,13 +74,29 @@
 | Monitoring | psutil (CPU/RAM/Disk) |
 | Icons | lucide-vue-next |
 
-## Getting Started
+## Quick Install
+
+### Windows (PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/cwen0708/aegis/main/scripts/install-windows.ps1 | iex
+```
+
+### Linux / macOS
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cwen0708/aegis/main/scripts/install-linux.sh | bash
+```
+
+After installation, open http://localhost:8899 in your browser.
+
+## Manual Setup
 
 ### Prerequisites
 
-- Python 3.12+
-- Node.js 18+ & pnpm
-- Claude Code CLI (`claude`) and/or Gemini CLI installed
+- Python 3.10+
+- Node.js 18+
+- Claude Code CLI (`npm install -g @anthropic-ai/claude-code`) and/or Gemini CLI
 
 ### Backend
 
@@ -101,11 +117,11 @@ uvicorn app.main:app --host 0.0.0.0 --port 8899 --reload
 
 ```bash
 cd frontend
-pnpm install
-pnpm dev
+npm install
+npm run dev
 ```
 
-Open http://localhost:5173
+Open http://localhost:5173 (dev) or http://localhost:8899 (production)
 
 ## Documentation
 
