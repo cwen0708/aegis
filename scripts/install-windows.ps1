@@ -193,20 +193,26 @@ Write-Step "Setting up frontend..."
 
 Set-Location "$InstallDir\frontend"
 
+# npm commands emit warnings to stderr; prevent PowerShell from treating them as errors
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+
 Write-Host "  Installing npm dependencies..."
-npm install --force
+npm install --force 2>$null
 if ($LASTEXITCODE -ne 0) {
     Write-Warn "npm install had issues, retrying with clean install..."
     Remove-Item -Recurse -Force node_modules -ErrorAction SilentlyContinue
-    npm install --force
+    npm install --force 2>$null
 }
 
 Write-Host "  Building frontend..."
-npm run build
+npm run build 2>$null
 if ($LASTEXITCODE -ne 0) {
     Write-Err "Frontend build failed. You can retry later with: cd frontend && npm run build"
     Write-Warn "Continuing installation..."
 }
+
+$ErrorActionPreference = $prevEAP
 
 Write-Success "Frontend ready"
 
@@ -215,6 +221,11 @@ Write-Success "Frontend ready"
 # ============================================
 if (-not $SkipCLI) {
     Write-Step "Installing AI CLI tools..."
+
+    # npm global installs emit deprecation warnings to stderr which
+    # PowerShell treats as terminating errors under $ErrorActionPreference=Stop
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
 
     Write-Host "  Installing Claude CLI..."
     npm install -g @anthropic-ai/claude-code 2>$null
@@ -231,6 +242,8 @@ if (-not $SkipCLI) {
     } else {
         Write-Warn "Gemini CLI installation failed (you can install it later)"
     }
+
+    $ErrorActionPreference = $prevEAP
 }
 
 # ============================================
