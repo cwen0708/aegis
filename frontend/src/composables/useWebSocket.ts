@@ -1,4 +1,4 @@
-import { ref, onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted } from 'vue'
 import { useAegisStore } from '../stores/aegis'
 
 let ws: WebSocket | null = null

@@ -14,7 +14,7 @@ export function computeWalkableByRoom(
     const tiles: Array<{ col: number; row: number }> = []
     for (let r = room.rMin; r <= room.rMax; r++) {
       for (let c = room.cMin; c <= room.cMax; c++) {
-        const g = ground[r * cols + c]
+        const g = ground[r * cols + c]!
         if (isWall(g) || g === GroundType.VOID) continue
 
         const blocked = allItems.some(f => {
@@ -38,7 +38,7 @@ export function computeAllWalkable(
 
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      const g = ground[r * cols + c]
+      const g = ground[r * cols + c]!
       // Skip walls and void
       if (isWall(g) || g === GroundType.VOID) continue
 
@@ -79,10 +79,10 @@ export function setGround(layout: OfficeLayout, r: number, c: number, type: Grou
 export function getWallBitmask(layout: OfficeLayout, row: number, col: number): number {
   const { cols, rows, ground } = layout
   let mask = 0
-  if (row > 0 && isWall(ground[(row - 1) * cols + col])) mask |= 1
-  if (col < cols - 1 && isWall(ground[row * cols + col + 1])) mask |= 2
-  if (row < rows - 1 && isWall(ground[(row + 1) * cols + col])) mask |= 4
-  if (col > 0 && isWall(ground[row * cols + col - 1])) mask |= 8
+  if (row > 0 && isWall(ground[(row - 1) * cols + col]!)) mask |= 1
+  if (col < cols - 1 && isWall(ground[row * cols + col + 1]!)) mask |= 2
+  if (row < rows - 1 && isWall(ground[(row + 1) * cols + col]!)) mask |= 4
+  if (col > 0 && isWall(ground[row * cols + col - 1]!)) mask |= 8
   return mask
 }
 

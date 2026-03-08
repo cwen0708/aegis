@@ -56,6 +56,8 @@ interface MemberInfo {
   name: string
   avatar: string
   provider: string
+  role?: string
+  portrait?: string
 }
 
 const members = ref<MemberInfo[]>([])
@@ -135,7 +137,7 @@ const bubbles = ref<Map<number, string>>(new Map())
 
 function randomBubble(memberId: number, isWorking: boolean) {
   const list = isWorking ? WORK_BUBBLES : IDLE_BUBBLES
-  const text = list[Math.floor(Math.random() * list.length)]
+  const text = list[Math.floor(Math.random() * list.length)]!
   bubbles.value.set(memberId, text)
   setTimeout(() => {
     bubbles.value.delete(memberId)
@@ -147,31 +149,11 @@ onMounted(() => {
   bubbleInterval = window.setInterval(() => {
     const allMembers = members.value
     if (allMembers.length === 0) return
-    const m = allMembers[Math.floor(Math.random() * allMembers.length)]
+    const m = allMembers[Math.floor(Math.random() * allMembers.length)]!
     randomBubble(m.id, busyMemberMap.value.has(m.id))
   }, 5000)
 })
 onUnmounted(() => clearInterval(bubbleInterval))
-
-// 頭像顯示
-function getAvatar(m: MemberInfo) {
-  if (m.avatar) return m.avatar
-  if (m.provider === 'claude') return '🟠'
-  if (m.provider === 'gemini') return '🔵'
-  return '🤖'
-}
-
-function getProviderColor(provider: string) {
-  if (provider === 'claude') return 'from-orange-500/30 to-orange-600/10 border-orange-500/40'
-  if (provider === 'gemini') return 'from-blue-500/30 to-blue-600/10 border-blue-500/40'
-  return 'from-slate-500/30 to-slate-600/10 border-slate-500/40'
-}
-
-function getProviderGlow(provider: string) {
-  if (provider === 'claude') return 'shadow-orange-500/20'
-  if (provider === 'gemini') return 'shadow-blue-500/20'
-  return 'shadow-slate-500/20'
-}
 
 // 時間顯示
 const now = ref(Date.now())
@@ -180,7 +162,7 @@ onMounted(() => { timeInterval = window.setInterval(() => now.value = Date.now()
 onUnmounted(() => clearInterval(timeInterval))
 
 // Debug: 格子座標追蹤
-const hoverPos = ref({ row: 0, col: 0, frame: '--' })
+const hoverPos = ref<{ row: number; col: number; frame: string | number }>({ row: 0, col: 0, frame: '--' })
 const TILE = 16, ZOOM = 3, tileSize = TILE * ZOOM
 
 function onCanvasMouseMove(e: MouseEvent) {
@@ -208,7 +190,7 @@ function onCanvasMouseMove(e: MouseEvent) {
   if (scene?.layout) {
     const { cols, rows, ground } = scene.layout
     if (row >= 0 && row < rows && col >= 0 && col < cols) {
-      const gt = ground[row * cols + col]
+      const gt = ground[row * cols + col]!
       const isWall = gt === 1 || (gt >= 13 && gt <= 16)
       if (!isWall) {
         frame = `g${gt}`
@@ -236,7 +218,7 @@ function copyPos() {
     const { cols, rows, ground } = scene.layout
     const getType = (r: number, c: number) => {
       if (r < 0 || r >= rows || c < 0 || c >= cols) return 'X'
-      const gt = ground[r * cols + c]
+      const gt = ground[r * cols + c]!
       if (gt === 0) return 'V' // void
       if (gt === 1 || (gt >= 13 && gt <= 16)) return 'W' // wall
       return 'F' // floor
@@ -260,15 +242,6 @@ function copyPos() {
   }
 
   navigator.clipboard.writeText(info)
-}
-
-function elapsed(startedAt: number) {
-  const s = Math.floor((now.value / 1000) - startedAt)
-  const m = Math.floor(s / 60)
-  const h = Math.floor(m / 60)
-  if (h > 0) return `${h}h ${m % 60}m`
-  if (m > 0) return `${m}m ${s % 60}s`
-  return `${s}s`
 }
 
 // ===== Phaser Game =====

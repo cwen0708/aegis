@@ -1,6 +1,6 @@
 import Phaser from 'phaser'
 import {
-  GroundType, isWall,
+  GroundType,
   type OfficeLayout, type FurnitureItem, type EditorLayer,
 } from './types'
 import { GROUND_COLORS } from './groundData'
@@ -27,7 +27,6 @@ export class EditorScene extends Phaser.Scene {
   private slotDirection: 'down' | 'left' | 'right' | 'up' = 'up'
 
   // Camera drag
-  private isDragging = false
   private didDrag = false
   private dragStartX = 0
   private dragStartY = 0
@@ -127,7 +126,6 @@ export class EditorScene extends Phaser.Scene {
       this.dragStartY = p.y
       this.camStartX = this.cameras.main.scrollX
       this.camStartY = this.cameras.main.scrollY
-      this.isDragging = false
       this.didDrag = false
     })
 
@@ -142,7 +140,6 @@ export class EditorScene extends Phaser.Scene {
 
       // Left or middle button — pan
       if (this.pointerDownButton === 0 || this.pointerDownButton === 1) {
-        this.isDragging = true
         this.didDrag = true
         this.cameras.main.scrollX = this.camStartX - dx
         this.cameras.main.scrollY = this.camStartY - dy
@@ -169,7 +166,6 @@ export class EditorScene extends Phaser.Scene {
           this.handlePlace(p)
         }
       }
-      this.isDragging = false
       this.didDrag = false
       this.pointerDownButton = -1
     })
@@ -258,7 +254,7 @@ export class EditorScene extends Phaser.Scene {
       )
       if (idx >= 0) {
         // Also remove workstation reference
-        const removedId = this.layout.furniture[idx].id
+        const removedId = this.layout.furniture[idx]!.id
         this.layout.workstations = this.layout.workstations.filter(
           ws => ws.deskId !== removedId && ws.chairId !== removedId
         )
@@ -270,7 +266,7 @@ export class EditorScene extends Phaser.Scene {
         col >= f.col && col < f.col + 2 && row >= f.row && row < f.row + 3
       )
       if (idx >= 0) {
-        const removedId = this.layout.props[idx].id
+        const removedId = this.layout.props[idx]!.id
         this.layout.workstations.forEach(ws => {
           if (ws.monitorId === removedId) ws.monitorId = undefined
         })
@@ -415,7 +411,7 @@ export class EditorScene extends Phaser.Scene {
       if (!this.textures.exists(texKey)) return
 
       // Center preview on cursor by offsetting by half sprite size
-      const offset = this.getSpriteOffset(this.selectedTool)
+      const offset = this.getSpriteOffset(this.selectedTool!)
       const placedCol = col - offset.col
       const placedRow = row - offset.row
       const px = placedCol * TILE * ZOOM
@@ -541,7 +537,7 @@ export class EditorScene extends Phaser.Scene {
 
     const ts = TILE * ZOOM
     for (let i = 0; i < this.layout.slots.length; i++) {
-      const slot = this.layout.slots[i]
+      const slot = this.layout.slots[i]!
       const x = slot.col * ts
       const y = slot.row * ts
       const cx = x + ts / 2

@@ -477,7 +477,7 @@ function formatResetTime(isoStr: string) {
                 </div>
                 <button
                   v-if="getDbAccountsByProvider('gemini')[0]"
-                  @click.stop="openEditAccountDialog(getDbAccountsByProvider('gemini')[0])"
+                  @click.stop="openEditAccountDialog(getDbAccountsByProvider('gemini')[0]!)"
                   class="p-1.5 rounded-lg hover:bg-slate-700/50 text-slate-500 hover:text-slate-300 transition-colors shrink-0"
                 >
                   <Edit3 class="w-3.5 h-3.5" />

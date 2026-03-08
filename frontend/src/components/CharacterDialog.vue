@@ -59,29 +59,6 @@ onUnmounted(() => {
 
 watch(() => props.memberId, fetchHistory)
 
-// Format time ago
-function timeAgo(dateStr: string): string {
-  const date = new Date(dateStr)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffMin = Math.floor(diffMs / 60000)
-  const diffHour = Math.floor(diffMin / 60)
-  const diffDay = Math.floor(diffHour / 24)
-
-  if (diffMin < 1) return '剛剛'
-  if (diffMin < 60) return `${diffMin} 分鐘前`
-  if (diffHour < 24) return `${diffHour} 小時前`
-  return `${diffDay} 天前`
-}
-
-// Format duration
-function formatDuration(ms: number): string {
-  const sec = Math.floor(ms / 1000)
-  const min = Math.floor(sec / 60)
-  if (min > 0) return `${min}m ${sec % 60}s`
-  return `${sec}s`
-}
-
 // Provider color
 function providerColor(provider: string): string {
   if (provider === 'claude') return 'text-orange-400'

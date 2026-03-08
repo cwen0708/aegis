@@ -97,19 +97,6 @@ const fetchBoard = async () => {
   boardData.value = await res.json()
 }
 
-const toggleProjectStatus = async () => {
-  if (!selectedProjectId.value) return
-  const project = projects.value.find(p => p.id === selectedProjectId.value)
-  if (!project) return
-  const res = await fetch(`/api/v1/projects/${selectedProjectId.value}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ is_active: !project.is_active })
-  })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  await fetchProjects()
-}
-
 const createCard = async () => {
   if (!newTaskForm.value.title || boardData.value.length === 0) return
   const firstListId = boardData.value[0].id
@@ -277,6 +264,7 @@ interface MemberOption {
   name: string
   avatar: string
   provider: string
+  role?: string
 }
 const allMembers = ref<MemberOption[]>([])
 const showAssignDialog = ref(false)
@@ -390,7 +378,7 @@ function switchToProjectsSidebar() {
         <div class="flex items-center justify-between mb-4 px-1">
           <h3 class="font-medium text-slate-200 flex items-center gap-2">
             {{ stage.name }}
-            <span v-if="stage.cards.some(c => c.status === 'running')" class="relative flex h-2 w-2 ml-1">
+            <span v-if="stage.cards.some((c: any) => c.status === 'running')" class="relative flex h-2 w-2 ml-1">
               <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
               <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
             </span>

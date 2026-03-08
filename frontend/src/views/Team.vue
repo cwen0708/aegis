@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
-import { Users, Plus, Trash2, ChevronUp, ChevronDown, UserPlus, Save, X, Edit3, Upload, Copy, Sparkles, Image } from 'lucide-vue-next'
+import { Users, Plus, UserPlus, Save, Edit3, Upload, Sparkles, Image } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 
@@ -19,13 +19,6 @@ const modelOptions: Record<string, { value: string; label: string }[]> = {
     { value: 'gemini-3-flash', label: '3 Flash (新)' },
     { value: 'gemini-3-pro', label: '3 Pro (新)' },
   ],
-}
-
-function getModelLabel(provider: string, model: string) {
-  const opts = modelOptions[provider]
-  if (!opts) return model
-  const found = opts.find(o => o.value === model)
-  return found ? found.label : model
 }
 
 const avatarOptions = ['🤖', '👨‍💼', '👩‍💻', '🧪', '📊', '🔧', '🎯', '🧠', '🦊', '🐱', '🐶', '🦉', '🚀', '⚡', '🔥', '💎']
@@ -144,7 +137,7 @@ async function uploadPortrait(event: Event) {
   uploadingPortrait.value = true
   try {
     const formData = new FormData()
-    formData.append('file', input.files[0])
+    formData.append('file', input.files[0]!)
 
     const res = await fetch(`${API}/api/v1/members/${editingMember.value.id}/portrait`, {
       method: 'POST',
@@ -172,7 +165,7 @@ async function generatePortrait(event: Event) {
   generatingPortrait.value = true
   try {
     const formData = new FormData()
-    formData.append('file', input.files[0])
+    formData.append('file', input.files[0]!)
 
     const res = await fetch(`${API}/api/v1/members/${editingMember.value.id}/generate-portrait`, {
       method: 'POST',
@@ -252,7 +245,7 @@ watch(() => bindForm.value.account_id, (accId) => {
   if (acc) {
     const opts = modelOptions[acc.provider]
     if (opts && opts.length > 0) {
-      bindForm.value.model = opts[0].value
+      bindForm.value.model = opts[0]!.value
     }
   }
 })

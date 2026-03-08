@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted, nextTick, computed } from 'vue'
+import { ref, watch, nextTick, computed } from 'vue'
 import { useAegisStore } from '../stores/aegis'
 
 const props = defineProps<{

@@ -440,13 +440,14 @@ if %ERRORLEVEL% NEQ 0 (
 
 :: Start server (backend serves both API and frontend)
 echo  [2/2] Starting server...
-start "Aegis Server" /min cmd /c "cd /d "%PROJECT_DIR%backend" && venv\Scripts\activate && python -m uvicorn app.main:app --host 127.0.0.1 --port $SERVER_PORT"
+cd /d "%PROJECT_DIR%backend"
+start "Aegis Server" /min cmd /c "call venv\Scripts\activate.bat && python -m uvicorn app.main:app --host 127.0.0.1 --port $SERVER_PORT"
 
 :: Wait for server to be ready
 echo  Waiting for server...
 :wait_server
 timeout /t 2 /nobreak >nul
-powershell -Command "try { `$r = Invoke-WebRequest -Uri 'http://127.0.0.1:$SERVER_PORT/health' -UseBasicParsing -TimeoutSec 2; if (`$r.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }"
+curl -sf http://127.0.0.1:$SERVER_PORT/health >nul 2>&1
 if %ERRORLEVEL% NEQ 0 goto wait_server
 echo  [OK] Server is ready
 
@@ -457,7 +458,7 @@ echo.
 echo  ╔══════════════════════════════════════╗
 echo  ║  Aegis is running!                   ║
 echo  ║                                      ║
-echo  ║  http://localhost:$SERVER_PORT              ║
+echo  ║  http://localhost:$SERVER_PORT               ║
 echo  ║                                      ║
 echo  ║  Close this window to stop Aegis.    ║
 echo  ╚══════════════════════════════════════╝

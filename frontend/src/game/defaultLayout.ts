@@ -131,7 +131,7 @@ export function buildDefaultLayout(deskCount: number): OfficeLayout {
   ]
 
   // Define 4 work slots directly (col, row = chair position)
-  const slots = [
+  const slots: WorkSlot[] = [
     { col: 2, row: 5 },   // desk 1
     { col: 6, row: 5 },   // desk 2
     { col: 10, row: 5 },  // desk 3

@@ -1,7 +1,7 @@
 import Phaser from 'phaser'
 import type { OfficeLayout, FurnitureItem } from './types'
-import { FURNITURE_ASSETS } from './furnitureData'
-import { computeWalkableByRoom, computeAllWalkable } from './layoutManager'
+
+import { computeAllWalkable } from './layoutManager'
 import { buildDefaultLayout } from './defaultLayout'
 import {
   TILE, ZOOM, preloadOfficeAssets,
@@ -41,7 +41,6 @@ export class OfficeScene extends Phaser.Scene {
   private lastDeskCount = 4
   public layout!: OfficeLayout
   private charCount = MAX_CHAR_COUNT  // 實際使用的角色數量（可透過設定調整）
-  private walkableByRoom: Array<Array<{ col: number; row: number }>> = []
   private allWalkable: Array<{ col: number; row: number }> = []
 
   // Camera drag
@@ -57,9 +56,6 @@ export class OfficeScene extends Phaser.Scene {
 
   // Wandering
   private wanderTimers: Map<string, Phaser.Time.TimerEvent> = new Map()
-
-  // Room labels
-  private roomLabels: Phaser.GameObjects.GameObject[] = []
 
   // External layout (set before scene starts or via loadLayout)
   private pendingLayout: OfficeLayout | null = null
@@ -101,7 +97,6 @@ export class OfficeScene extends Phaser.Scene {
 
   loadLayout(layout: OfficeLayout) {
     this.layout = layout
-    this.walkableByRoom = computeWalkableByRoom(layout)
     this.allWalkable = computeAllWalkable(layout)
 
     const worldW = layout.cols * TILE * ZOOM
@@ -112,7 +107,7 @@ export class OfficeScene extends Phaser.Scene {
     this.cleanupDynamic()
     // Destroy only non-system display objects (skip camera, input manager, etc.)
     const toDestroy = this.children.getAll().filter(
-      obj => obj !== this.cameras.main && obj.type !== 'Manager'
+      obj => (obj as unknown) !== this.cameras.main && obj.type !== 'Manager'
     )
     toDestroy.forEach(obj => obj.destroy())
 
@@ -188,8 +183,6 @@ export class OfficeScene extends Phaser.Scene {
   private tw(col: number, row: number) {
     return { x: col * TILE * ZOOM, y: row * TILE * ZOOM }
   }
-  private get ts() { return TILE * ZOOM }
-
   // ── Floor & Walls ────────────────────────────────────────────
   private renderFloor() {
     sharedRenderFloor(this, this.layout)
@@ -216,30 +209,6 @@ export class OfficeScene extends Phaser.Scene {
 
   private renderItem(f: FurnitureItem) {
     renderItemImage(this, f)
-  }
-
-  // ── Room labels ───────────────────────────────────────────────
-  private renderRoomLabels() {
-    this.roomLabels.forEach(o => o.destroy())
-    this.roomLabels = []
-
-    // Static labels for the 4 rooms
-    const labels = [
-      { text: 'WORK ROOM', col: 10, row: 1 },
-      { text: 'MEETING', col: 25.5, row: 1 },
-      { text: 'BREAK ROOM', col: 10, row: 11 },
-      { text: 'LOUNGE', col: 25.5, row: 13 },
-    ]
-
-    for (const l of labels) {
-      const { x, y } = this.tw(l.col, l.row)
-      const t = this.add.text(x, y, `- ${l.text} -`, {
-        fontFamily: '"Press Start 2P"',
-        fontSize: '7px',
-        color: '#8B7355',
-      }).setOrigin(0.5, 0.5).setDepth(999)
-      this.roomLabels.push(t)
-    }
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -346,19 +315,19 @@ export class OfficeScene extends Phaser.Scene {
             if (!this.usedSlots.has(i)) availableSlots.push(i)
           }
           if (availableSlots.length > 0) {
-            slotIdx = availableSlots[Math.floor(Math.random() * availableSlots.length)]
+            slotIdx = availableSlots[Math.floor(Math.random() * availableSlots.length)]!
             this.usedSlots.add(slotIdx)
             this.memberSlotMap.set(memberId, slotIdx)
           }
         }
         if (slotIdx === undefined || !slots[slotIdx]) return
-        col = slots[slotIdx].col + 0.5
-        row = slots[slotIdx].row + 0.5
-        workDir = slots[slotIdx].dir || 'up'
+        col = slots[slotIdx]!.col + 0.5
+        row = slots[slotIdx]!.row + 0.5
+        workDir = slots[slotIdx]!.dir || 'up'
       } else {
         // Fallback: use random walkable position
         if (this.allWalkable.length === 0) return
-        const sp = this.allWalkable[Math.floor(Math.random() * this.allWalkable.length)]
+        const sp = this.allWalkable[Math.floor(Math.random() * this.allWalkable.length)]!
         col = sp.col + 0.5
         row = sp.row + 0.5
         workDir = 'up'
@@ -403,7 +372,7 @@ export class OfficeScene extends Phaser.Scene {
       const walkable = this.allWalkable
       if (walkable.length === 0) return
 
-      const sp = walkable[Math.floor(Math.random() * walkable.length)]
+      const sp = walkable[Math.floor(Math.random() * walkable.length)]!
       const wp = this.tw(sp.col + 0.5, sp.row + 0.5)
       const c = this.createCharacter(wp.x, wp.y, memberId, m.name, m.provider, 'idle')
       const key = `r_${memberId}`
@@ -497,7 +466,7 @@ export class OfficeScene extends Phaser.Scene {
       }
 
       const nearbyCount = Math.max(3, Math.floor(byDist.length * 0.3))
-      const target = byDist[Math.floor(Math.random() * nearbyCount)]
+      const target = byDist[Math.floor(Math.random() * nearbyCount)]!
 
       // Find path using A*
       const path = findPath(this.layout, curCol, curRow, target.col, target.row, roomTiles)
