@@ -7,7 +7,9 @@ from app.core.member_profile import get_member_dir, get_soul_content, get_skills
 
 logger = logging.getLogger(__name__)
 
-WORKSPACES_ROOT = Path.home() / ".aegis" / "workspaces"
+# .aegis lives under the install root (backend/app/core/ → ../../.. → backend/ → .. → install root)
+_INSTALL_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+WORKSPACES_ROOT = _INSTALL_ROOT / ".aegis" / "workspaces"
 
 # Provider-specific file/dir names
 PROVIDER_CONFIG = {

@@ -127,7 +127,7 @@ def seed_data():
         # ── 3. AEGIS 系統專案（不可刪除） ──
         aegis = Project(
             name="AEGIS",
-            path=str(Path.home() / ".aegis"),
+            path=str(Path(__file__).resolve().parent.parent),
             default_provider="gemini",
             is_system=True,
         )
@@ -219,7 +219,7 @@ def seed_data():
         # ── 5. Demo 專案 ──
         p1 = Project(
             name="Aegis Demo",
-            path=str(Path.home() / "aegis-demo"),
+            path=str(Path(__file__).resolve().parent.parent / "aegis-demo"),
             default_provider="gemini",
         )
         session.add(p1)
