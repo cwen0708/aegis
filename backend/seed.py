@@ -5,9 +5,10 @@ from sqlmodel import Session, select
 from app.database import engine, init_db
 from app.models.core import (
     Project, StageList, Card, Tag, CardTagLink,
-    Member, Account, MemberAccount, CronJob,
+    Member, Account, MemberAccount, CronJob, SystemSetting,
 )
 from app.core.card_file import CardData, write_card, card_file_path
+from app.core.default_office_layout import get_default_office_layout_json
 from app.core.member_profile import get_member_dir
 from app.core.card_index import sync_card_to_index
 from datetime import datetime, timezone
@@ -123,6 +124,14 @@ def seed_data():
 
         # ── 2b. Member Profile Directories ──
         _seed_member_profiles()
+
+        # ── 2c. 預設辦公室佈局 ──
+        office_layout_setting = SystemSetting(
+            key="office_layout",
+            value=get_default_office_layout_json()
+        )
+        session.add(office_layout_setting)
+        session.commit()
 
         # ── 3. AEGIS 系統專案（不可刪除） ──
         aegis = Project(

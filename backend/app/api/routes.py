@@ -770,9 +770,12 @@ def resume_cron(body: CronToggleRequest):
 # ==========================================
 # System Settings
 # ==========================================
+from app.core.default_office_layout import get_default_office_layout_json
+
 SETTING_DEFAULTS = {
     "timezone": "Asia/Taipei",
     "max_workstations": "3",
+    "office_layout": get_default_office_layout_json(),
 }
 
 
