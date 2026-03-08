@@ -29,7 +29,7 @@ export function useWebSocket() {
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const host = import.meta.env.DEV ? '127.0.0.1:8899' : window.location.host
+    const host = window.location.host
     const wsUrl = `${protocol}://${host}/ws`
 
     ws = new WebSocket(wsUrl)

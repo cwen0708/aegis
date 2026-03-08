@@ -115,25 +115,61 @@ if ($Dev) {
 # ============================================
 Write-Step "Setting up installation directory..."
 
+$isUpdate = $false
 if (Test-Path $InstallDir) {
-    Write-Warn "Directory exists: $InstallDir"
-    $confirm = Read-Host "Overwrite? (y/N)"
-    if ($confirm -ne "y" -and $confirm -ne "Y") {
-        Write-Host "Aborted."
-        exit 0
+    # Check if this looks like an existing Aegis installation
+    if ((Test-Path "$InstallDir\backend") -and (Test-Path "$InstallDir\frontend")) {
+        Write-Warn "Existing Aegis installation found: $InstallDir"
+        Write-Host "  [U] Update - keep data, update code & dependencies (recommended)"
+        Write-Host "  [C] Clean  - delete everything and reinstall from scratch"
+        Write-Host "  [Q] Quit   - cancel installation"
+        $choice = Read-Host "Choose [U/c/q]"
+        switch ($choice.ToLower()) {
+            "c" {
+                Write-Warn "Removing existing installation..."
+                Remove-Item -Recurse -Force $InstallDir
+            }
+            "q" {
+                Write-Host "Aborted."
+                exit 0
+            }
+            default {
+                $isUpdate = $true
+                Write-Success "Updating existing installation..."
+            }
+        }
+    } else {
+        Write-Warn "Directory exists but is not an Aegis installation: $InstallDir"
+        $confirm = Read-Host "Overwrite? (y/N)"
+        if ($confirm -ne "y" -and $confirm -ne "Y") {
+            Write-Host "Aborted."
+            exit 0
+        }
+        Remove-Item -Recurse -Force $InstallDir
     }
 }
 
-New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+if (-not (Test-Path $InstallDir)) {
+    New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+}
 Set-Location $InstallDir
 Write-Success "Install directory: $InstallDir"
 
 # ============================================
 # Download or Clone Aegis
 # ============================================
+if ($isUpdate -and -not $Dev) {
+    Write-Step "Skipping download (update mode)..."
+    Write-Success "Using existing files"
+} elseif ($isUpdate -and $Dev) {
+    Write-Step "Pulling latest changes..."
+    git pull
+    Write-Success "Aegis updated"
+} else {
 Write-Step "Downloading Aegis..."
+}
 
-if ($Dev) {
+if (-not $isUpdate -and $Dev) {
     # Clone from GitHub
     if (Test-Path ".git") {
         Write-Host "  Updating existing repository..."
@@ -141,7 +177,7 @@ if ($Dev) {
     } else {
         git clone https://github.com/cwen0708/aegis.git .
     }
-} else {
+} elseif (-not $isUpdate) {
     # Download latest release
     $releaseUrl = "https://github.com/cwen0708/aegis/archive/refs/heads/main.zip"
     $zipPath = "$env:TEMP\aegis-main.zip"
@@ -165,9 +201,8 @@ if ($Dev) {
 
     Remove-Item $zipPath -Force
     Remove-Item $extractedDir.FullName -Force -Recurse -ErrorAction SilentlyContinue
+    Write-Success "Aegis downloaded"
 }
-
-Write-Success "Aegis downloaded"
 
 # ============================================
 # Setup Backend (Python)
@@ -193,6 +228,13 @@ $ErrorActionPreference = "Continue"
 $ErrorActionPreference = $prevEAP
 if (-not (Test-Path ".\venv\Scripts\pip.exe")) { throw "pip install failed" }
 
+# Seed initial data (tags, members, demo project; skips if already seeded)
+Write-Host "  Seeding initial data..."
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+& ".\venv\Scripts\python.exe" seed.py 2>&1 | ForEach-Object { "$_" }
+$ErrorActionPreference = $prevEAP
+
 Write-Success "Backend ready"
 
 # ============================================
@@ -207,11 +249,15 @@ $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 
 Write-Host "  Installing npm dependencies..."
-npm install --force 2>$null
+# Remove stale lockfile/node_modules to avoid optional-dep bugs with --force
+Remove-Item -Force package-lock.json -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force node_modules -ErrorAction SilentlyContinue
+npm install 2>$null
 if ($LASTEXITCODE -ne 0) {
-    Write-Warn "npm install had issues, retrying with clean install..."
+    Write-Warn "npm install had issues, retrying..."
+    Remove-Item -Force package-lock.json -ErrorAction SilentlyContinue
     Remove-Item -Recurse -Force node_modules -ErrorAction SilentlyContinue
-    npm install --force 2>$null
+    npm install 2>$null
 }
 
 Write-Host "  Building frontend..."
@@ -236,20 +282,32 @@ if (-not $SkipCLI) {
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
 
-    Write-Host "  Installing Claude CLI..."
-    npm install -g @anthropic-ai/claude-code 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Success "Claude CLI installed"
+    # Check if Claude CLI is already installed (skip to avoid killing running sessions)
+    $claudeInstalled = Get-Command claude -ErrorAction SilentlyContinue
+    if ($claudeInstalled) {
+        Write-Success "Claude CLI already installed (skipping to avoid interrupting running sessions)"
     } else {
-        Write-Warn "Claude CLI installation failed (you can install it later)"
+        Write-Host "  Installing Claude CLI..."
+        npm install -g @anthropic-ai/claude-code 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Success "Claude CLI installed"
+        } else {
+            Write-Warn "Claude CLI installation failed (you can install it later)"
+        }
     }
 
-    Write-Host "  Installing Gemini CLI..."
-    npm install -g @google/gemini-cli 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Success "Gemini CLI installed"
+    # Check if Gemini CLI is already installed
+    $geminiInstalled = Get-Command gemini -ErrorAction SilentlyContinue
+    if ($geminiInstalled) {
+        Write-Success "Gemini CLI already installed (skipping)"
     } else {
-        Write-Warn "Gemini CLI installation failed (you can install it later)"
+        Write-Host "  Installing Gemini CLI..."
+        npm install -g @google/gemini-cli 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Success "Gemini CLI installed"
+        } else {
+            Write-Warn "Gemini CLI installation failed (you can install it later)"
+        }
     }
 
     $ErrorActionPreference = $prevEAP
@@ -262,13 +320,23 @@ Write-Step "Creating startup scripts..."
 
 Set-Location $InstallDir
 
-# Create start script
+# Create start script (builds frontend, starts backend which serves everything)
 $startScript = @"
 @echo off
-title Aegis Server
-cd /d "$InstallDir\backend"
-call venv\Scripts\activate.bat
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8899
+title Aegis
+
+echo Building frontend...
+cd /d "$InstallDir\frontend"
+echo y | call npm run build
+
+echo Starting Aegis...
+start "Aegis" /min cmd /c "cd /d $InstallDir\backend && venv\Scripts\activate.bat && python -m uvicorn app.main:app --host 127.0.0.1 --port 8899"
+
+timeout /t 3 >nul
+echo.
+echo Aegis is running!
+echo   Open: http://localhost:8899
+start http://localhost:8899
 "@
 Set-Content -Path "start-aegis.bat" -Value $startScript
 
@@ -286,9 +354,9 @@ Write-Success "Created desktop shortcut"
 # ============================================
 # Done!
 # ============================================
-Write-Host "`n" + "=" * 50 -ForegroundColor Green
+Write-Host ("`n" + "=" * 50) -ForegroundColor Green
 Write-Host "  Installation Complete!" -ForegroundColor Green
-Write-Host "=" * 50 -ForegroundColor Green
+Write-Host ("=" * 50) -ForegroundColor Green
 
 Write-Host @"
 
