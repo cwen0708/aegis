@@ -84,3 +84,16 @@ Co-Authored-By: Happy <yesreply@happy.engineering>
 - `backend/local.db` — 本地資料庫
 - `.env` / credentials — 憑證檔案
 - `backend/uploads/` — 使用者上傳（example 立繪除外）
+
+## 參考文件
+
+| 文件 | 說明 |
+|------|------|
+| `ANALYSIS.md` | 專案深度分析（架構、優缺點、6 Critical bugs、適用場景） |
+| `FEATURE-ROADMAP.md` | 功能開發清單（基於 14 個 AI Agent 專案整合，P0-P10 優先級） |
+| `FEATURE-ROADMAP-SUMMARY.md` | 路線圖摘要（快速參考） |
+
+### 外部比較報告
+- `G:/vendor/AI-AGENT-COMPARISON_v3.md` — 14 個 AI Agent 專案綜合比較
+- `G:/vendor/AI-AGENT-COMPARISON_v1.md` — 第一批 6 專案（ClawHub, ClawWork 等）
+- `G:/vendor/AI-AGENT-COMPARISON_v2.md` — 第二批 8 專案（IronClaw, Spacebot 等）
