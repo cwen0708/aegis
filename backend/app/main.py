@@ -159,52 +159,103 @@ async def lifespan(app: FastAPI):
     # 啟動 MD 卡片檔案監視器（偵測外部編輯）
     await start_card_watcher()
 
-    # 啟動多頻道通訊（根據環境變數註冊頻道）
-    if os.getenv("TELEGRAM_BOT_TOKEN"):
-        from app.channels.adapters.telegram import TelegramChannel
-        channel_manager.register(TelegramChannel(os.getenv("TELEGRAM_BOT_TOKEN")))
-        logger.info("Telegram channel registered")
-
-    if os.getenv("LINE_CHANNEL_SECRET") and os.getenv("LINE_ACCESS_TOKEN"):
-        from app.channels.adapters.line import LineChannel
-        channel_manager.register(LineChannel(
-            channel_secret=os.getenv("LINE_CHANNEL_SECRET"),
-            access_token=os.getenv("LINE_ACCESS_TOKEN"),
-        ))
-        logger.info("LINE channel registered")
-
-    if os.getenv("DISCORD_BOT_TOKEN"):
-        from app.channels.adapters.discord import DiscordChannel
-        channel_manager.register(DiscordChannel(os.getenv("DISCORD_BOT_TOKEN")))
-        logger.info("Discord channel registered")
-
-    if os.getenv("SLACK_BOT_TOKEN") and os.getenv("SLACK_APP_TOKEN"):
-        from app.channels.adapters.slack import SlackChannel
-        channel_manager.register(SlackChannel(
-            bot_token=os.getenv("SLACK_BOT_TOKEN"),
-            app_token=os.getenv("SLACK_APP_TOKEN"),
-        ))
-        logger.info("Slack channel registered")
-
-    if os.getenv("WECOM_CORP_ID") and os.getenv("WECOM_CORP_SECRET"):
-        from app.channels.adapters.wecom import WeComChannel
-        channel_manager.register(WeComChannel(
-            corp_id=os.getenv("WECOM_CORP_ID"),
-            corp_secret=os.getenv("WECOM_CORP_SECRET"),
-            agent_id=int(os.getenv("WECOM_AGENT_ID", "0")),
-        ))
-        logger.info("WeCom channel registered")
-
-    if os.getenv("FEISHU_APP_ID") and os.getenv("FEISHU_APP_SECRET"):
-        from app.channels.adapters.feishu import FeishuChannel
-        channel_manager.register(FeishuChannel(
-            app_id=os.getenv("FEISHU_APP_ID"),
-            app_secret=os.getenv("FEISHU_APP_SECRET"),
-            is_lark=os.getenv("FEISHU_IS_LARK", "").lower() == "true",
-        ))
-        logger.info("Feishu channel registered")
-
+    # 啟動多頻道通訊（從 DB 讀取設定，環境變數為備援）
+    await _register_channels_from_config()
     await channel_manager.start_all()
+
+
+async def _register_channels_from_config():
+    """從資料庫讀取頻道設定並註冊（環境變數為備援）"""
+    import json
+    from app.database import engine
+    from app.models.core import SystemSetting
+    from sqlmodel import Session as DBSession
+
+    # 讀取 DB 中的頻道設定
+    channel_configs = {}
+    with DBSession(engine) as session:
+        for key in ["channel_telegram", "channel_line", "channel_discord",
+                    "channel_slack", "channel_wecom", "channel_feishu"]:
+            setting = session.get(SystemSetting, key)
+            if setting:
+                try:
+                    channel_configs[key] = json.loads(setting.value)
+                except:
+                    pass
+
+    # Telegram: DB 優先，env 備援
+    tg_config = channel_configs.get("channel_telegram", {})
+    tg_token = tg_config.get("bot_token") or os.getenv("TELEGRAM_BOT_TOKEN")
+    if tg_config.get("enabled") or (not tg_config and tg_token):
+        if tg_token:
+            from app.channels.adapters.telegram import TelegramChannel
+            channel_manager.register(TelegramChannel(tg_token))
+            logger.info("Telegram channel registered")
+
+    # LINE: DB 優先，env 備援
+    line_config = channel_configs.get("channel_line", {})
+    line_secret = line_config.get("channel_secret") or os.getenv("LINE_CHANNEL_SECRET")
+    line_token = line_config.get("access_token") or os.getenv("LINE_ACCESS_TOKEN")
+    if line_config.get("enabled") or (not line_config and line_secret and line_token):
+        if line_secret and line_token:
+            from app.channels.adapters.line import LineChannel
+            channel_manager.register(LineChannel(
+                channel_secret=line_secret,
+                access_token=line_token,
+            ))
+            logger.info("LINE channel registered")
+
+    # Discord: DB 優先，env 備援
+    discord_config = channel_configs.get("channel_discord", {})
+    discord_token = discord_config.get("bot_token") or os.getenv("DISCORD_BOT_TOKEN")
+    if discord_config.get("enabled") or (not discord_config and discord_token):
+        if discord_token:
+            from app.channels.adapters.discord import DiscordChannel
+            channel_manager.register(DiscordChannel(discord_token))
+            logger.info("Discord channel registered")
+
+    # Slack: DB 優先，env 備援
+    slack_config = channel_configs.get("channel_slack", {})
+    slack_bot = slack_config.get("bot_token") or os.getenv("SLACK_BOT_TOKEN")
+    slack_app = slack_config.get("app_token") or os.getenv("SLACK_APP_TOKEN")
+    if slack_config.get("enabled") or (not slack_config and slack_bot and slack_app):
+        if slack_bot and slack_app:
+            from app.channels.adapters.slack import SlackChannel
+            channel_manager.register(SlackChannel(
+                bot_token=slack_bot,
+                app_token=slack_app,
+            ))
+            logger.info("Slack channel registered")
+
+    # WeCom: DB 優先，env 備援
+    wecom_config = channel_configs.get("channel_wecom", {})
+    wecom_id = wecom_config.get("corp_id") or os.getenv("WECOM_CORP_ID")
+    wecom_secret = wecom_config.get("corp_secret") or os.getenv("WECOM_CORP_SECRET")
+    wecom_agent = wecom_config.get("agent_id") or os.getenv("WECOM_AGENT_ID", "0")
+    if wecom_config.get("enabled") or (not wecom_config and wecom_id and wecom_secret):
+        if wecom_id and wecom_secret:
+            from app.channels.adapters.wecom import WeComChannel
+            channel_manager.register(WeComChannel(
+                corp_id=wecom_id,
+                corp_secret=wecom_secret,
+                agent_id=int(wecom_agent) if wecom_agent else 0,
+            ))
+            logger.info("WeCom channel registered")
+
+    # Feishu: DB 優先，env 備援
+    feishu_config = channel_configs.get("channel_feishu", {})
+    feishu_id = feishu_config.get("app_id") or os.getenv("FEISHU_APP_ID")
+    feishu_secret = feishu_config.get("app_secret") or os.getenv("FEISHU_APP_SECRET")
+    feishu_lark = feishu_config.get("is_lark") or os.getenv("FEISHU_IS_LARK", "").lower() == "true"
+    if feishu_config.get("enabled") or (not feishu_config and feishu_id and feishu_secret):
+        if feishu_id and feishu_secret:
+            from app.channels.adapters.feishu import FeishuChannel
+            channel_manager.register(FeishuChannel(
+                app_id=feishu_id,
+                app_secret=feishu_secret,
+                is_lark=bool(feishu_lark),
+            ))
+            logger.info("Feishu channel registered")
 
     yield
 
