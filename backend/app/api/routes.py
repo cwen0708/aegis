@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from sqlmodel import Session, select
+from sqlalchemy import func as sa_func
 from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime, timezone
@@ -231,10 +232,9 @@ def create_card(card_in: CardCreateRequest, session: Session = Depends(get_sessi
 
     # Get next card ID (max of both old Card table and CardIndex)
     new_id = next_card_id(session)
-    # Also check old Card table max id
-    old_max = session.exec(select(Card)).all()
-    if old_max:
-        old_max_id = max(c.id for c in old_max if c.id is not None)
+    # Also check old Card table max id（用 SQL 聚合避免全表掃描）
+    old_max_id = session.exec(select(sa_func.max(Card.id))).one()
+    if old_max_id is not None:
         new_id = max(new_id, old_max_id + 1)
 
     now = datetime.now(timezone.utc)
@@ -803,10 +803,16 @@ def update_settings(data: dict, session: Session = Depends(get_session)):
         else:
             session.add(SystemSetting(key=key, value=str(value)))
     session.commit()
-    # 即時更新工作台數量
+    # 即時更新工作台數量（驗證為正整數且在合理範圍內）
     if "max_workstations" in data:
         from app.core.runner import update_max_workstations
-        update_max_workstations(int(data["max_workstations"]))
+        try:
+            val = int(data["max_workstations"])
+            if val < 1 or val > 100:
+                raise HTTPException(status_code=400, detail="max_workstations 必須介於 1~100")
+            update_max_workstations(val)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="max_workstations 必須為正整數")
     return get_settings(session=session)
 
 
@@ -1035,46 +1041,52 @@ def unbind_account(member_id: int, account_id: int, session: Session = Depends(g
 # ==========================================
 @router.get("/task-stats")
 def task_stats(session: Session = Depends(get_session)):
-    """任務統計：token 用量、任務數、費用"""
-    from sqlalchemy import func
+    """任務統計：token 用量、任務數、費用（使用 SQL 聚合避免全表載入）"""
+    from sqlalchemy import func, case
 
-    logs = session.exec(select(TaskLog)).all()
+    # 單次 SQL 聚合查詢取得總計數據
+    row = session.exec(
+        select(
+            func.count(TaskLog.id).label("total"),
+            func.sum(case((TaskLog.status == "success", 1), else_=0)).label("success"),
+            func.sum(case((TaskLog.status.in_(["error", "timeout"]), 1), else_=0)).label("failed"),
+            func.coalesce(func.sum(TaskLog.input_tokens), 0).label("input"),
+            func.coalesce(func.sum(TaskLog.output_tokens), 0).label("output"),
+            func.coalesce(func.sum(TaskLog.cache_read_tokens), 0).label("cache_read"),
+            func.coalesce(func.sum(TaskLog.cache_creation_tokens), 0).label("cache_create"),
+            func.coalesce(func.sum(TaskLog.cost_usd), 0).label("cost"),
+            func.coalesce(func.sum(TaskLog.duration_ms), 0).label("duration"),
+        )
+    ).one()
 
-    total_tasks = len(logs)
-    success_tasks = sum(1 for l in logs if l.status == "success")
-    failed_tasks = sum(1 for l in logs if l.status in ("error", "timeout"))
-
-    total_input = sum(l.input_tokens for l in logs)
-    total_output = sum(l.output_tokens for l in logs)
-    total_cache_read = sum(l.cache_read_tokens for l in logs)
-    total_cache_create = sum(l.cache_creation_tokens for l in logs)
-    total_cost = sum(l.cost_usd for l in logs)
-    total_duration = sum(l.duration_ms for l in logs)
-
-    # 按 provider 分組
-    by_provider: dict = {}
-    for l in logs:
-        p = l.provider or "unknown"
-        if p not in by_provider:
-            by_provider[p] = {"tasks": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0}
-        by_provider[p]["tasks"] += 1
-        by_provider[p]["input_tokens"] += l.input_tokens
-        by_provider[p]["output_tokens"] += l.output_tokens
-        by_provider[p]["cost_usd"] += l.cost_usd
+    # 按 provider 分組（SQL 聚合）
+    provider_rows = session.exec(
+        select(
+            func.coalesce(TaskLog.provider, "unknown"),
+            func.count(TaskLog.id),
+            func.coalesce(func.sum(TaskLog.input_tokens), 0),
+            func.coalesce(func.sum(TaskLog.output_tokens), 0),
+            func.coalesce(func.sum(TaskLog.cost_usd), 0),
+        ).group_by(func.coalesce(TaskLog.provider, "unknown"))
+    ).all()
+    by_provider = {
+        p: {"tasks": int(cnt), "input_tokens": int(inp), "output_tokens": int(out), "cost_usd": float(cost)}
+        for p, cnt, inp, out, cost in provider_rows
+    }
 
     # 最近 10 筆
     recent = session.exec(select(TaskLog).order_by(TaskLog.id.desc()).limit(10)).all()
 
     return {
-        "total_tasks": total_tasks,
-        "success_tasks": success_tasks,
-        "failed_tasks": failed_tasks,
-        "total_input_tokens": total_input,
-        "total_output_tokens": total_output,
-        "total_cache_read_tokens": total_cache_read,
-        "total_cache_creation_tokens": total_cache_create,
-        "total_cost_usd": total_cost,
-        "total_duration_ms": total_duration,
+        "total_tasks": int(row[0]),
+        "success_tasks": int(row[1] or 0),
+        "failed_tasks": int(row[2] or 0),
+        "total_input_tokens": int(row[3]),
+        "total_output_tokens": int(row[4]),
+        "total_cache_read_tokens": int(row[5]),
+        "total_cache_creation_tokens": int(row[6]),
+        "total_cost_usd": float(row[7]),
+        "total_duration_ms": int(row[8]),
         "by_provider": by_provider,
         "recent": [l.model_dump() for l in recent],
     }
@@ -1120,8 +1132,11 @@ async def upload_portrait(member_id: int, file: UploadFile = File(...), session:
         if old_path.exists():
             old_path.unlink()
 
-    # 儲存新檔案
-    content = await file.read()
+    # 儲存新檔案（限制 10MB）
+    MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
+    content = await file.read(MAX_UPLOAD_SIZE + 1)
+    if len(content) > MAX_UPLOAD_SIZE:
+        raise HTTPException(status_code=413, detail="檔案大小超過 10MB 限制")
     with open(filepath, "wb") as f:
         f.write(content)
 

@@ -34,7 +34,7 @@ function openEditModal(job: any) {
 const saveEditJob = async () => {
   if (!editJobForm.value) return
   try {
-    await fetch(`/api/v1/cron-jobs/${editJobForm.value.id}`, {
+    const res = await fetch(`/api/v1/cron-jobs/${editJobForm.value.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -44,6 +44,7 @@ const saveEditJob = async () => {
         prompt_template: editJobForm.value.prompt_template,
       })
     })
+    if (!res.ok) throw new Error('更新排程失敗')
     showEditModal.value = false
     store.addToast('排程已更新', 'success')
     await fetchCronJobs()
@@ -58,6 +59,7 @@ const deleteTargetId = ref<number | null>(null)
 
 const fetchProjects = async () => {
   const res = await fetch('/api/v1/projects/')
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
   projects.value = await res.json()
 }
 
@@ -65,6 +67,7 @@ const fetchCronJobs = async () => {
   loading.value = true
   try {
     const res = await fetch('/api/v1/cron-jobs/')
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
     cronJobs.value = await res.json()
   } catch (e) {
     console.error('Failed to fetch cron jobs', e)
@@ -76,11 +79,12 @@ const fetchCronJobs = async () => {
 const createCronJob = async () => {
   if (!newJobForm.value.name || !newJobForm.value.project_id) return
   try {
-    await fetch('/api/v1/cron-jobs/', {
+    const res = await fetch('/api/v1/cron-jobs/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newJobForm.value)
     })
+    if (!res.ok) throw new Error('建立排程失敗')
     showAddModal.value = false
     store.addToast('排程已建立', 'success')
     await fetchCronJobs()
@@ -93,11 +97,12 @@ const createCronJob = async () => {
 const toggleJob = async (job: any) => {
   const newStatus = !job.is_enabled
   try {
-    await fetch(`/api/v1/cron-jobs/${job.id}`, {
+    const res = await fetch(`/api/v1/cron-jobs/${job.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ is_enabled: newStatus })
     })
+    if (!res.ok) throw new Error('操作失敗')
     job.is_enabled = newStatus
     store.addToast(newStatus ? '排程已啟用' : '排程已停用', 'info')
   } catch (e) {
@@ -125,6 +130,7 @@ async function confirmDeleteJob() {
 const fetchCronPausedProjects = async () => {
   try {
     const res = await fetch('/api/v1/system/services')
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
     cronPausedProjects.value = data?.engines?.cron_poller?.paused_projects ?? []
   } catch (e) {

@@ -72,20 +72,19 @@ async def _process_pending_cards():
 
                 logger.info(f"[Poller] Found pending card {idx.card_id} in {list_name}. Dispatching...")
 
-                # 讀取 MD 檔並標記為 running 避免重複抓取
-                project_path = project.path if project else "."
-                card_data = _update_card_status(session, idx, "running", project_path)
-                if card_data is None:
-                    continue
-
                 # 決定 Phase、Member 和 Provider（三層路由）
                 phase = list_name.upper()
                 member_id, forced_provider = _resolve_member(stage_list, phase, session)
 
-                # 成員忙碌檢查：同一成員同時只能佔用一個工作台
+                # 成員忙碌檢查：先檢查再標記，避免不必要的 pending→running→pending 狀態翻轉
                 if member_id and member_id in busy_members:
                     logger.info(f"[Poller] Member {member_id} busy, skip card {idx.card_id}")
-                    _update_card_status(session, idx, "pending", project_path)
+                    continue
+
+                # 讀取 MD 檔並標記為 running 避免重複抓取
+                project_path = project.path if project else "."
+                card_data = _update_card_status(session, idx, "running", project_path)
+                if card_data is None:
                     continue
 
                 project_name = project.name if project else "Unknown"

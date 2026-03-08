@@ -312,10 +312,8 @@ const selectedCharacter = ref<CharacterInfo | null>(null)
 
 function setupCharacterClickListener() {
   const scene = getScene()
-  console.log('[Office] setupCharacterClickListener, scene:', !!scene)
   if (!scene) return
   scene.events.on('character-clicked', (data: CharacterInfo) => {
-    console.log('[Office] character-clicked received:', data)
     // Find member role and portrait from members list
     const member = members.value.find(m => m.id === data.memberId)
     selectedCharacter.value = {
@@ -332,13 +330,36 @@ function closeCharacterDialog() {
   selectedCharacter.value = null
 }
 
+function onSceneReady(g: Phaser.Game) {
+  const scene = g.scene.getScene('OfficeScene') as OfficeScene | null
+  if (scene?.scene.isActive()) {
+    pushDataToScene()
+    setupCharacterClickListener()
+  } else {
+    // Wait for scene 'create' event if not yet active
+    g.events.on('ready', () => {
+      const s = g.scene.getScene('OfficeScene') as OfficeScene | null
+      if (s) {
+        s.events.once('create', () => {
+          pushDataToScene()
+          setupCharacterClickListener()
+        })
+        // If already created by the time we listen, fire immediately
+        if (s.scene.isActive()) {
+          pushDataToScene()
+          setupCharacterClickListener()
+        }
+      }
+    })
+  }
+}
+
 async function rebuildOfficeGame() {
   game?.destroy(true)
   game = null
 
   // Wait for Vue to re-render #office-canvas
   await nextTick()
-  await new Promise(r => setTimeout(r, 100))
 
   if (isEditing.value) return
   const el = document.getElementById('office-canvas')
@@ -346,12 +367,7 @@ async function rebuildOfficeGame() {
 
   const layout = currentLayout.value || buildDefaultLayout(totalDesks.value || 4)
   game = createOfficeGame('office-canvas', layout)
-  game.events.on('ready', () => {
-    setTimeout(() => {
-      pushDataToScene()
-      setupCharacterClickListener()
-    }, 100)
-  })
+  onSceneReady(game)
 }
 
 onMounted(async () => {
@@ -360,13 +376,7 @@ onMounted(async () => {
 
   const layout = currentLayout.value || buildDefaultLayout(totalDesks.value || 4)
   game = createOfficeGame('office-canvas', layout)
-
-  game.events.on('ready', () => {
-    setTimeout(() => {
-      pushDataToScene()
-      setupCharacterClickListener()
-    }, 100)
-  })
+  onSceneReady(game)
 })
 
 onUnmounted(() => {

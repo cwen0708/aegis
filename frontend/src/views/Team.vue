@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { Users, Plus, Trash2, ChevronUp, ChevronDown, UserPlus, Save, X, Edit3, Upload, Copy, Sparkles, Image } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 
 const store = useAegisStore()
 const API = import.meta.env.DEV ? '' : 'http://localhost:8899'
@@ -95,6 +96,8 @@ async function fetchAll() {
       fetch(`${API}/api/v1/accounts`),
       fetch(`${API}/api/v1/members`),
     ])
+    if (!accRes.ok) throw new Error(`帳號載入失敗: HTTP ${accRes.status}`)
+    if (!memRes.ok) throw new Error(`成員載入失敗: HTTP ${memRes.status}`)
     accounts.value = await accRes.json()
     members.value = await memRes.json()
 
@@ -212,11 +215,24 @@ async function saveMember() {
   }
 }
 
-async function deleteMember(id: number) {
-  if (!confirm('確定刪除此成員？')) return
+// 刪除成員確認
+const confirmDeleteMember = ref(false)
+const deleteTargetMemberId = ref<number | null>(null)
+
+function requestDeleteMember(id: number) {
+  deleteTargetMemberId.value = id
+  confirmDeleteMember.value = true
+}
+
+async function doDeleteMember() {
+  if (!deleteTargetMemberId.value) return
   try {
-    await fetch(`${API}/api/v1/members/${id}`, { method: 'DELETE' })
+    const res = await fetch(`${API}/api/v1/members/${deleteTargetMemberId.value}`, { method: 'DELETE' })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
     store.addToast('成員已刪除', 'success')
+    confirmDeleteMember.value = false
+    deleteTargetMemberId.value = null
+    showMemberDialog.value = false
     await fetchAll()
   } catch {
     store.addToast('刪除失敗', 'error')
@@ -251,11 +267,12 @@ const availableAccountsForBind = computed(() => {
 async function bindAccount() {
   if (!bindingMemberId.value || !bindForm.value.account_id) return
   try {
-    await fetch(`${API}/api/v1/members/${bindingMemberId.value}/accounts`, {
+    const res = await fetch(`${API}/api/v1/members/${bindingMemberId.value}/accounts`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(bindForm.value),
     })
+    if (!res.ok) throw new Error('綁定失敗')
     store.addToast('帳號已綁定', 'success')
     showBindDialog.value = false
     await fetchAll()
@@ -304,7 +321,8 @@ async function removeBinding() {
 
 async function unbindAccount(memberId: number, accountId: number) {
   try {
-    await fetch(`${API}/api/v1/members/${memberId}/accounts/${accountId}`, { method: 'DELETE' })
+    const res = await fetch(`${API}/api/v1/members/${memberId}/accounts/${accountId}`, { method: 'DELETE' })
+    if (!res.ok) throw new Error('解綁失敗')
     await fetchAll()
   } catch {
     store.addToast('解綁失敗', 'error')
@@ -543,7 +561,7 @@ function providerBadgeClass(provider: string) {
           <div class="flex items-center justify-between pt-2">
             <button
               v-if="editingMember"
-              @click="deleteMember(editingMember.id); showMemberDialog = false"
+              @click="requestDeleteMember(editingMember.id)"
               class="px-3 py-2 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors"
             >
               刪除成員
@@ -641,5 +659,14 @@ function providerBadgeClass(provider: string) {
       </div>
     </Teleport>
 
+    <!-- Delete Member Confirm -->
+    <ConfirmDialog
+      :show="confirmDeleteMember"
+      title="刪除成員"
+      message="確定刪除此成員？相關的帳號綁定也會移除。"
+      confirm-text="刪除"
+      @confirm="doDeleteMember"
+      @cancel="confirmDeleteMember = false; deleteTargetMemberId = null"
+    />
   </div>
 </template>

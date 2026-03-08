@@ -110,7 +110,11 @@ export class OfficeScene extends Phaser.Scene {
     this.cameras.main.centerOn(worldW / 2, worldH / 2)
 
     this.cleanupDynamic()
-    this.children.getAll().forEach(obj => obj.destroy())
+    // Destroy only non-system display objects (skip camera, input manager, etc.)
+    const toDestroy = this.children.getAll().filter(
+      obj => obj !== this.cameras.main && obj.type !== 'Manager'
+    )
+    toDestroy.forEach(obj => obj.destroy())
 
     this.renderFloor()
     this.renderWalls()
@@ -462,7 +466,6 @@ export class OfficeScene extends Phaser.Scene {
     // Make sprite clickable
     sprite.setInteractive({ useHandCursor: true })
     sprite.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      console.log('[OfficeScene] Character clicked:', name, memberId)
       if (pointer.leftButtonDown()) {
         this.events.emit('character-clicked', { memberId, name, provider })
       }

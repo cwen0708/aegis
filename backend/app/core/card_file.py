@@ -66,13 +66,18 @@ def write_card(file_path: Path, card: CardData) -> None:
     """Atomic write: temp -> fsync -> rename."""
     file_path.parent.mkdir(parents=True, exist_ok=True)
     mark_internal_write(file_path)
-    tmp = file_path.with_suffix(".md.tmp")
-    content = serialize_card(card)
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(content)
-        f.flush()
-        os.fsync(f.fileno())
-    tmp.replace(file_path)
+    try:
+        tmp = file_path.with_suffix(".md.tmp")
+        content = serialize_card(card)
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        tmp.replace(file_path)
+    except Exception:
+        # 寫入失敗時清除標記，避免永久殘留在 _internal_writes 中
+        _internal_writes.discard(str(file_path.resolve()))
+        raise
 
 
 def read_card(file_path: Path) -> CardData:

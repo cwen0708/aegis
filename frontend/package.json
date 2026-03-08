@@ -11,15 +11,17 @@
   },
   "dependencies": {
     "@dnd-kit/vue": "^0.3.2",
-    "@rollup/rollup-win32-x64-msvc": "^4.59.0",
-    "@tailwindcss/oxide-win32-x64-msvc": "^4.2.1",
     "@vueuse/core": "^14.2.1",
-    "lightningcss-win32-x64-msvc": "^1.31.1",
     "lucide-vue-next": "^0.576.0",
     "phaser": "^3.90.0",
     "pinia": "^3.0.4",
     "vue": "^3.5.25",
     "vue-router": "^5.0.3"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-win32-x64-msvc": "^4.59.0",
+    "@tailwindcss/oxide-win32-x64-msvc": "^4.2.1",
+    "lightningcss-win32-x64-msvc": "^1.31.1"
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.19",

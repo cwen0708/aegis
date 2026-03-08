@@ -43,6 +43,7 @@ const projects = ref<any[]>([])
 const fetchProjects = async () => {
   try {
     const res = await fetch('/api/v1/projects/')
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
     projects.value = await res.json()
   } catch (e) {
     // silent

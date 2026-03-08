@@ -5,6 +5,21 @@ let ws: WebSocket | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let refCount = 0
 
+// HMR cleanup: close ghost connections on module reload
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    if (ws) {
+      ws.close()
+      ws = null
+    }
+    refCount = 0
+  })
+}
+
 export function useWebSocket() {
   const store = useAegisStore()
 
