@@ -219,7 +219,7 @@ def seed_data():
         # ── 5. Demo 專案 ──
         p1 = Project(
             name="Aegis Demo",
-            path=str(Path(__file__).resolve().parent.parent / "aegis-demo"),
+            path=str(Path(__file__).resolve().parent.parent / "projects" / "aegis-demo"),
             default_provider="gemini",
         )
         session.add(p1)

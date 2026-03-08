@@ -38,7 +38,7 @@ frontend/pnpm-lock.yaml
 # User data (portraits, uploads, .aegis runtime data)
 .aegis/
 backend/.aegis/
-backend/aegis-demo/
+projects/
 backend/uploads/
 !backend/uploads/portraits/example_*.png
 backend/portraits/
