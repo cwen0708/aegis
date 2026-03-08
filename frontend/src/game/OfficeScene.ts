@@ -97,6 +97,9 @@ export class OfficeScene extends Phaser.Scene {
       const worldH = this.layout.rows * TILE * ZOOM
       this.cameras.main.setBounds(0, 0, worldW, worldH)
     })
+
+    // Emit scene-ready event so Office.vue can push data after create() completes
+    this.game.events.emit('scene-ready')
   }
 
   loadLayout(layout: OfficeLayout) {
@@ -243,11 +246,20 @@ export class OfficeScene extends Phaser.Scene {
   // ══════════════════════════════════════════════════════════════════
   updateData(data: SceneData) {
     this.currentData = data
+    if (!this.layout) return  // Scene not yet created
     if (data.totalDesks !== this.lastDeskCount) {
       this.lastDeskCount = data.totalDesks
-      this.loadLayout(buildDefaultLayout(data.totalDesks))
+      // Only rebuild with default layout if no user-saved layout exists
+      if (!this.pendingLayout) {
+        this.loadLayout(buildDefaultLayout(data.totalDesks))
+      }
     }
     this.updateDynamic(data)
+  }
+
+  /** Check if scene has completed create() */
+  get isReady(): boolean {
+    return !!this.layout
   }
 
   private cleanupDynamic() {

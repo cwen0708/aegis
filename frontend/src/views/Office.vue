@@ -56,6 +56,8 @@ interface MemberInfo {
   name: string
   avatar: string
   provider: string
+  role?: string
+  portrait?: string
 }
 
 const members = ref<MemberInfo[]>([])
@@ -332,6 +334,16 @@ function closeCharacterDialog() {
   selectedCharacter.value = null
 }
 
+function setupGameListeners() {
+  if (!game) return
+  // Use 'scene-ready' emitted from OfficeScene.create() — reliable unlike
+  // 'ready' which may fire synchronously during new Phaser.Game() constructor
+  game.events.on('scene-ready', () => {
+    pushDataToScene()
+    setupCharacterClickListener()
+  })
+}
+
 async function rebuildOfficeGame() {
   game?.destroy(true)
   game = null
@@ -346,12 +358,7 @@ async function rebuildOfficeGame() {
 
   const layout = currentLayout.value || buildDefaultLayout(totalDesks.value || 4)
   game = createOfficeGame('office-canvas', layout)
-  game.events.on('ready', () => {
-    setTimeout(() => {
-      pushDataToScene()
-      setupCharacterClickListener()
-    }, 100)
-  })
+  setupGameListeners()
 }
 
 onMounted(async () => {
@@ -360,13 +367,7 @@ onMounted(async () => {
 
   const layout = currentLayout.value || buildDefaultLayout(totalDesks.value || 4)
   game = createOfficeGame('office-canvas', layout)
-
-  game.events.on('ready', () => {
-    setTimeout(() => {
-      pushDataToScene()
-      setupCharacterClickListener()
-    }, 100)
-  })
+  setupGameListeners()
 })
 
 onUnmounted(() => {
