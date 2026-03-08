@@ -308,7 +308,7 @@ footer a:hover{text-decoration:underline}
 
     <!-- Windows content -->
     <div class="os-content" data-os="windows">
-      <a href="https://github.com/cwen0708/aegis/raw/main/setup-aegis.bat" class="download-btn" download>
+      <a href="#" class="download-btn" onclick="downloadBat(event)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
           <polyline points="7 10 12 15 17 10"/>
@@ -517,6 +517,18 @@ function switchOS(os){
   const os = ua.includes('linux') ? 'linux' : 'windows';
   switchOS(os);
 })();
+
+function downloadBat(e){
+  e.preventDefault();
+  const url='https://raw.githubusercontent.com/cwen0708/aegis/main/setup-aegis.bat';
+  fetch(url).then(r=>r.blob()).then(blob=>{
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='setup-aegis.bat';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }).catch(()=>window.open(url));
+}
 
 function copyCmd(el){
   const text=el.querySelector('code').textContent;
