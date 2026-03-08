@@ -1,6 +1,7 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 import asyncio
 import logging
@@ -292,9 +293,22 @@ app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 app.include_router(routes.router, prefix="/api/v1")
 app.include_router(webhooks.router, prefix="/api/v1")
 
-@app.get("/")
-def read_root():
-    return {"message": "Welcome to Aegis API"}
+# ==========================================
+# SPA Frontend (serve from frontend/dist)
+# ==========================================
+_frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
+
+if _frontend_dist.exists() and (_frontend_dist / "index.html").exists():
+    # Serve static assets (js, css, images, etc.)
+    app.mount("/assets", StaticFiles(directory=str(_frontend_dist / "assets")), name="frontend-assets")
+
+    @app.get("/")
+    def serve_spa_root():
+        return FileResponse(str(_frontend_dist / "index.html"))
+else:
+    @app.get("/")
+    def read_root():
+        return {"message": "Welcome to Aegis API", "hint": "Run 'npm run build' in frontend/ to enable the dashboard"}
 
 @app.get("/health")
 def health_check():
@@ -366,3 +380,17 @@ async def websocket_endpoint(websocket: WebSocket):
     finally:
         websocket_clients.discard(websocket)
         logger.info(f"[WS] Client disconnected. Total: {len(websocket_clients)}")
+
+
+# ==========================================
+# SPA Catch-All (must be last)
+# ==========================================
+if _frontend_dist.exists() and (_frontend_dist / "index.html").exists():
+    @app.get("/{full_path:path}")
+    def serve_spa_catchall(full_path: str):
+        """Serve index.html for any unmatched route (Vue Router history mode)"""
+        # Try to serve as a static file first (e.g. favicon.ico, robots.txt)
+        file_path = (_frontend_dist / full_path).resolve()
+        if file_path.is_relative_to(_frontend_dist.resolve()) and file_path.is_file():
+            return FileResponse(str(file_path))
+        return FileResponse(str(_frontend_dist / "index.html"))

@@ -1,5 +1,5 @@
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlmodel import SQLModel, Field, Relationship
 
 # ==========================================
@@ -20,7 +20,7 @@ class Project(SQLModel, table=True):
     default_provider: Optional[str] = Field(default="auto") # auto, gemini, claude
     is_active: bool = Field(default=True) # 用於完全隱藏
     is_system: bool = Field(default=False) # 系統專案（AEGIS），前端禁止刪除/改名
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     lists: List["StageList"] = Relationship(back_populates="project")
 
@@ -49,8 +49,8 @@ class Card(SQLModel, table=True):
     description: Optional[str] = None
     content: str = Field(default="") # 詳細的 Markdown 內容，傳給 AI 的 prompt
     status: str = Field(default="idle") # idle, running, failed, completed
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     stage_list: Optional[StageList] = Relationship(back_populates="cards")
     tags: List[Tag] = Relationship(back_populates="cards", link_model=CardTagLink)
@@ -65,8 +65,8 @@ class CardIndex(SQLModel, table=True):
     title: str = ""
     description: Optional[str] = None
     tags_json: str = Field(default="[]")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     content_hash: str = ""
     file_mtime: float = Field(default=0.0)
 
@@ -87,8 +87,8 @@ class CronJob(SQLModel, table=True):
     # 存放原本 Supabase 裡的 metadata (field_id, event_type 等)，用 JSON 字串存
     metadata_json: str = Field(default="{}")
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class SystemSetting(SQLModel, table=True):
     """系統設定 key-value store"""
@@ -108,7 +108,7 @@ class Account(SQLModel, table=True):
     subscription: str = ""  # "max" / "pro" / "ai-pro"
     email: str = ""
     is_healthy: bool = Field(default=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Member(SQLModel, table=True):
@@ -121,7 +121,7 @@ class Member(SQLModel, table=True):
     description: str = ""
     sprite_index: int = Field(default=0)  # 小人物圖索引 0-5
     portrait: str = ""  # 立繪圖片路徑
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class TaskLog(SQLModel, table=True):
@@ -140,7 +140,7 @@ class TaskLog(SQLModel, table=True):
     cache_read_tokens: int = Field(default=0)
     cache_creation_tokens: int = Field(default=0)
     cost_usd: float = Field(default=0.0)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class MemberAccount(SQLModel, table=True):

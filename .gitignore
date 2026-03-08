@@ -35,8 +35,13 @@ Thumbs.db
 frontend/scripts/*.png
 frontend/pnpm-lock.yaml
 
-# User data (portraits, uploads)
-backend/uploads/
+# User data (portraits, uploads, .aegis runtime data)
+.aegis/
+backend/.aegis/
+projects/
+backend/uploads/*
+!backend/uploads/portraits/
+backend/uploads/portraits/*
 !backend/uploads/portraits/example_*.png
 backend/portraits/
 

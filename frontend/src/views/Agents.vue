@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { Bot, User, RefreshCw, Sparkles, Plus, Edit3 } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 
 const store = useAegisStore()
 const API = import.meta.env.DEV ? '' : 'http://localhost:8899'
@@ -21,6 +22,7 @@ const taskStats = ref<any>(null)
 async function fetchTaskStats() {
   try {
     const res = await fetch(`${API}/api/v1/task-stats`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
     taskStats.value = await res.json()
   } catch { /* silent */ }
 }
@@ -58,6 +60,7 @@ const editAccountForm = ref({ name: '' })
 async function fetchAccounts() {
   try {
     const res = await fetch(`${API}/api/v1/accounts`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
     accounts.value = await res.json()
   } catch { /* silent */ }
 }
@@ -109,12 +112,20 @@ async function saveEditAccount() {
   }
 }
 
-async function deleteEditingAccount() {
+// 刪除帳號確認
+const confirmDeleteAccount = ref(false)
+
+function requestDeleteAccount() {
+  confirmDeleteAccount.value = true
+}
+
+async function doDeleteAccount() {
   if (!editingAccount.value) return
-  if (!confirm('確定刪除此帳號？相關的成員綁定也會移除。')) return
   try {
-    await fetch(`${API}/api/v1/accounts/${editingAccount.value.id}`, { method: 'DELETE' })
+    const res = await fetch(`${API}/api/v1/accounts/${editingAccount.value.id}`, { method: 'DELETE' })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
     store.addToast('帳號已刪除', 'success')
+    confirmDeleteAccount.value = false
     showEditAccountDialog.value = false
     await fetchAccounts()
   } catch {
@@ -141,6 +152,7 @@ const fetchClaudeUsage = async () => {
   loadingClaude.value = true
   try {
     const res = await fetch('/api/v1/claude/usage')
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
     claudeAccounts.value = data.accounts || data
   } catch (e) {
@@ -158,6 +170,7 @@ const fetchGeminiUsage = async () => {
   loadingGemini.value = true
   try {
     const res = await fetch('/api/v1/gemini/usage')
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
     geminiUsage.value = await res.json()
   } catch (e) {
     console.error('Failed to fetch gemini usage', e)
@@ -464,7 +477,7 @@ function formatResetTime(isoStr: string) {
                 </div>
                 <button
                   v-if="getDbAccountsByProvider('gemini')[0]"
-                  @click.stop="openEditAccountDialog(getDbAccountsByProvider('gemini')[0])"
+                  @click.stop="openEditAccountDialog(getDbAccountsByProvider('gemini')[0]!)"
                   class="p-1.5 rounded-lg hover:bg-slate-700/50 text-slate-500 hover:text-slate-300 transition-colors shrink-0"
                 >
                   <Edit3 class="w-3.5 h-3.5" />
@@ -561,7 +574,7 @@ function formatResetTime(isoStr: string) {
             <input v-model="editAccountForm.name" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-slate-200 outline-none" />
           </div>
           <div class="flex items-center justify-between pt-2">
-            <button @click="deleteEditingAccount" class="px-3 py-2 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors">
+            <button @click="requestDeleteAccount" class="px-3 py-2 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors">
               刪除帳號
             </button>
             <div class="flex gap-2">
@@ -572,5 +585,15 @@ function formatResetTime(isoStr: string) {
         </div>
       </div>
     </Teleport>
+
+    <!-- Delete Account Confirm -->
+    <ConfirmDialog
+      :show="confirmDeleteAccount"
+      title="刪除帳號"
+      message="確定刪除此帳號？相關的成員綁定也會移除。"
+      confirm-text="刪除"
+      @confirm="doDeleteAccount"
+      @cancel="confirmDeleteAccount = false"
+    />
   </div>
 </template>

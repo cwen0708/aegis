@@ -17,6 +17,7 @@ const cronPausedProjects = ref<number[]>([])
 const fetchCronStatus = async () => {
   try {
     const res = await fetch('/api/v1/system/services')
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
     cronPausedProjects.value = data?.engines?.cron_poller?.paused_projects ?? []
   } catch (e) {
@@ -79,6 +80,7 @@ function updateElapsedTimers() {
 // API
 const fetchProjects = async () => {
   const res = await fetch('/api/v1/projects/')
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
   projects.value = await res.json()
   // 如果 URL 帶有 project query，使用它
   if (route.query.project) {
@@ -91,29 +93,19 @@ const fetchProjects = async () => {
 const fetchBoard = async () => {
   if (!selectedProjectId.value) return
   const res = await fetch(`/api/v1/projects/${selectedProjectId.value}/board`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
   boardData.value = await res.json()
-}
-
-const toggleProjectStatus = async () => {
-  if (!selectedProjectId.value) return
-  const project = projects.value.find(p => p.id === selectedProjectId.value)
-  if (!project) return
-  await fetch(`/api/v1/projects/${selectedProjectId.value}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ is_active: !project.is_active })
-  })
-  await fetchProjects()
 }
 
 const createCard = async () => {
   if (!newTaskForm.value.title || boardData.value.length === 0) return
   const firstListId = boardData.value[0].id
-  await fetch('/api/v1/cards/', {
+  const res = await fetch('/api/v1/cards/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ list_id: firstListId, title: newTaskForm.value.title, description: newTaskForm.value.description })
   })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
   await fetchBoard()
   showNewTaskModal.value = false
   newTaskForm.value = { title: '', description: '' }
@@ -126,6 +118,7 @@ const isEditingContent = ref(false)
 const openCardDetail = async (cardId: number) => {
   openMenuCardId.value = null
   const res = await fetch(`/api/v1/cards/${cardId}`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
   selectedCard.value = await res.json()
   isEditingContent.value = false
 }
@@ -134,7 +127,7 @@ const closeCardDetail = () => { selectedCard.value = null }
 
 const saveCardDetail = async () => {
   if (!selectedCard.value) return
-  await fetch(`/api/v1/cards/${selectedCard.value.id}`, {
+  const res = await fetch(`/api/v1/cards/${selectedCard.value.id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -143,6 +136,7 @@ const saveCardDetail = async () => {
       content: selectedCard.value.content
     })
   })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
   isEditingContent.value = false
   await fetchBoard()
 }
@@ -152,11 +146,12 @@ const onDragChange = async (event: any, targetListId: number) => {
   if (event.added) {
     const cardId = event.added.element.id
     try {
-      await fetch(`/api/v1/cards/${cardId}`, {
+      const res = await fetch(`/api/v1/cards/${cardId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ list_id: targetListId })
       })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
     } catch (e) {
       fetchBoard()
     }
@@ -223,10 +218,10 @@ async function toggleRunner() {
   }
 }
 
-// WebSocket 事件監聽：任務完成時自動重整看板
+// WebSocket 事件監聽：任務狀態變化時自動重整看板
 function onTaskEvent(e: Event) {
   const detail = (e as CustomEvent).detail
-  if (detail.type === 'completed' || detail.type === 'failed') {
+  if (detail.type === 'started' || detail.type === 'completed' || detail.type === 'failed') {
     fetchBoard()
   }
 }
@@ -269,6 +264,7 @@ interface MemberOption {
   name: string
   avatar: string
   provider: string
+  role?: string
 }
 const allMembers = ref<MemberOption[]>([])
 const showAssignDialog = ref(false)
@@ -278,6 +274,7 @@ const assigningListName = ref('')
 async function fetchMembers() {
   try {
     const res = await fetch('/api/v1/members')
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
     allMembers.value = await res.json()
   } catch {}
 }
@@ -292,11 +289,12 @@ function openAssignDialog(stage: any) {
 async function assignMember(memberId: number | null) {
   if (!assigningListId.value) return
   try {
-    await fetch(`/api/v1/lists/${assigningListId.value}`, {
+    const res = await fetch(`/api/v1/lists/${assigningListId.value}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ member_id: memberId }),
     })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
     showAssignDialog.value = false
     await fetchBoard()
   } catch (e: any) {
@@ -380,7 +378,7 @@ function switchToProjectsSidebar() {
         <div class="flex items-center justify-between mb-4 px-1">
           <h3 class="font-medium text-slate-200 flex items-center gap-2">
             {{ stage.name }}
-            <span v-if="stage.cards.some(c => c.status === 'running')" class="relative flex h-2 w-2 ml-1">
+            <span v-if="stage.cards.some((c: any) => c.status === 'running')" class="relative flex h-2 w-2 ml-1">
               <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
               <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
             </span>

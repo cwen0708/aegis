@@ -72,20 +72,19 @@ async def _process_pending_cards():
 
                 logger.info(f"[Poller] Found pending card {idx.card_id} in {list_name}. Dispatching...")
 
-                # 讀取 MD 檔並標記為 running 避免重複抓取
-                project_path = project.path if project else "."
-                card_data = _update_card_status(session, idx, "running", project_path)
-                if card_data is None:
-                    continue
-
                 # 決定 Phase、Member 和 Provider（三層路由）
                 phase = list_name.upper()
                 member_id, forced_provider = _resolve_member(stage_list, phase, session)
 
-                # 成員忙碌檢查：同一成員同時只能佔用一個工作台
+                # 成員忙碌檢查：先檢查再標記，避免不必要的 pending→running→pending 狀態翻轉
                 if member_id and member_id in busy_members:
                     logger.info(f"[Poller] Member {member_id} busy, skip card {idx.card_id}")
-                    _update_card_status(session, idx, "pending", project_path)
+                    continue
+
+                # 讀取 MD 檔並標記為 running 避免重複抓取
+                project_path = project.path if project else "."
+                card_data = _update_card_status(session, idx, "running", project_path)
+                if card_data is None:
                     continue
 
                 project_name = project.name if project else "Unknown"
@@ -170,6 +169,8 @@ async def _execute_and_update(
     workspace_dir: str | None = None, member_slug: str | None = None,
 ):
     """包裝 run_ai_task，並在完成後更新 MD 檔案與資料庫卡片狀態"""
+    from app.core.ws_manager import broadcast_event
+
     try:
         # 有工作區時，cwd 用工作區；prompt 簡化為指示讀取 config
         effective_cwd = workspace_dir or project_path
@@ -213,6 +214,10 @@ async def _execute_and_update(
                 session.commit()
                 logger.info(f"[Task {card_id}] State updated to {new_status}")
 
+        # 在 index 更新並 commit 之後才廣播，避免前端刷看板時拿到舊狀態
+        event = "task_completed" if new_status == "completed" else "task_failed"
+        await broadcast_event(event, {"card_id": card_id, "status": new_status})
+
         # 寫入角色短期記憶
         if member_slug:
             try:
@@ -224,6 +229,31 @@ async def _execute_and_update(
                 )
             except Exception as e:
                 logger.warning(f"[Memory] Failed to write member memory: {e}")
+
+    except Exception as e:
+        # 錯誤回復：確保卡片不會永遠卡在 running 狀態
+        logger.exception(f"[Task {card_id}] _execute_and_update failed: {e}")
+        try:
+            async with get_card_lock(card_id):
+                file_path = Path(file_path_str) if file_path_str else card_file_path(project_path, card_id)
+                with Session(engine) as session:
+                    try:
+                        card_data = read_card(file_path)
+                        card_data.status = "failed"
+                        card_data.content = card_data.content + f"\n\n### Error\n內部錯誤: {e}"
+                        write_card(file_path, card_data)
+                        sync_card_to_index(session, card_data, project_id, str(file_path))
+                    except Exception:
+                        pass
+                    orm_card = session.get(Card, card_id)
+                    if orm_card:
+                        orm_card.status = "failed"
+                        session.add(orm_card)
+                    session.commit()
+            await broadcast_event("task_failed", {"card_id": card_id, "reason": str(e)})
+        except Exception as inner_e:
+            logger.error(f"[Task {card_id}] Failed to recover card state: {inner_e}")
+
     finally:
         # 確保臨時工作區一定被清理
         if workspace_dir:

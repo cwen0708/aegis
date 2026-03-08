@@ -118,6 +118,7 @@ async function fetchGcloudStatus() {
   gcloudStatusLoading.value = true
   try {
     const res = await fetch(`${API}/api/v1/gcloud/status`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
     gcloudStatus.value = await res.json()
   } catch {
     gcloudStatus.value = { installed: false, authenticated: false, account: null }
@@ -189,6 +190,7 @@ async function fetchCliStatus() {
   cliLoading.value = true
   try {
     const res = await fetch(`${API}/api/v1/cli/status`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
     cliStatus.value = await res.json()
   } catch {
     cliStatus.value = null

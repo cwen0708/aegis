@@ -10,19 +10,25 @@ import frontmatter
 VALID_STATUSES = {"idle", "pending", "running", "completed", "failed"}
 
 # 內部寫入抑制：write_card() 寫入前註冊路徑，watcher 檢查後消耗
-_internal_writes: set[str] = set()
+# 使用計數器而非 set，避免兩次快速寫入只消耗一次標記
+_internal_writes: dict[str, int] = {}
 
 
 def mark_internal_write(path: Path) -> None:
     """標記路徑為內部寫入（抑制 watcher 重複處理）。"""
-    _internal_writes.add(str(path.resolve()))
+    resolved = str(path.resolve())
+    _internal_writes[resolved] = _internal_writes.get(resolved, 0) + 1
 
 
 def consume_internal_write(path: Path) -> bool:
-    """若路徑曾被標記為內部寫入，消耗標記並回傳 True。"""
+    """若路徑曾被標記為內部寫入，消耗一次標記並回傳 True。"""
     resolved = str(path.resolve())
-    if resolved in _internal_writes:
-        _internal_writes.discard(resolved)
+    count = _internal_writes.get(resolved, 0)
+    if count > 0:
+        if count == 1:
+            del _internal_writes[resolved]
+        else:
+            _internal_writes[resolved] = count - 1
         return True
     return False
 
@@ -66,13 +72,23 @@ def write_card(file_path: Path, card: CardData) -> None:
     """Atomic write: temp -> fsync -> rename."""
     file_path.parent.mkdir(parents=True, exist_ok=True)
     mark_internal_write(file_path)
-    tmp = file_path.with_suffix(".md.tmp")
-    content = serialize_card(card)
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(content)
-        f.flush()
-        os.fsync(f.fileno())
-    tmp.replace(file_path)
+    try:
+        tmp = file_path.with_suffix(".md.tmp")
+        content = serialize_card(card)
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        tmp.replace(file_path)
+    except Exception:
+        # 寫入失敗時回退計數器，避免永久殘留
+        resolved = str(file_path.resolve())
+        count = _internal_writes.get(resolved, 0)
+        if count <= 1:
+            _internal_writes.pop(resolved, None)
+        else:
+            _internal_writes[resolved] = count - 1
+        raise
 
 
 def read_card(file_path: Path) -> CardData:

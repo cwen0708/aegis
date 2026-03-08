@@ -27,11 +27,6 @@ const slotDirection = ref<'down' | 'left' | 'right' | 'up'>('up')
 let game: Phaser.Game | null = null
 let editorScene: EditorScene | null = null
 
-function getScene(): EditorScene | null {
-  if (!game) return null
-  return game.scene.getScene('EditorScene') as EditorScene | null
-}
-
 onMounted(async () => {
   await document.fonts.ready
   await nextTick()
@@ -102,7 +97,7 @@ function handleWheel(e: WheelEvent) {
     if (items.length === 0) return
     const curIdx = items.findIndex(g => g.value === selectedTool.value)
     const nextIdx = curIdx < 0 ? 0 : ((curIdx + dir + items.length) % items.length)
-    selectedTool.value = items[nextIdx].value
+    selectedTool.value = items[nextIdx]!.value
     editorScene?.setSelectedTool(selectedTool.value)
     isDeleteMode.value = false
   } else if (activeLayer.value === 'wall') {
@@ -110,7 +105,7 @@ function handleWheel(e: WheelEvent) {
     if (items.length === 0) return
     const curIdx = items.findIndex(w => w.value === selectedTool.value)
     const nextIdx = curIdx < 0 ? 0 : ((curIdx + dir + items.length) % items.length)
-    selectedTool.value = items[nextIdx].value
+    selectedTool.value = items[nextIdx]!.value
     editorScene?.setSelectedTool(selectedTool.value)
     isDeleteMode.value = false
   } else if (activeLayer.value === 'furniture' || activeLayer.value === 'props') {
@@ -121,7 +116,7 @@ function handleWheel(e: WheelEvent) {
     if (items.length === 0) return
     const curIdx = items.indexOf(selectedTool.value ?? '')
     const nextIdx = curIdx < 0 ? 0 : ((curIdx + dir + items.length) % items.length)
-    selectedTool.value = items[nextIdx]
+    selectedTool.value = items[nextIdx]!
     editorScene?.setSelectedTool(selectedTool.value)
     isDeleteMode.value = false
   }
@@ -139,9 +134,9 @@ watch(activeLayer, (layer) => {
   editorScene?.setActiveLayer(layer)
   // 切換圖層時設定預設分類
   if (layer === 'furniture' && FURNITURE_CATALOG.length > 0) {
-    activeCategory.value = FURNITURE_CATALOG[0].name
+    activeCategory.value = FURNITURE_CATALOG[0]!.name
   } else if (layer === 'props' && PROPS_CATALOG.length > 0) {
-    activeCategory.value = PROPS_CATALOG[0].name
+    activeCategory.value = PROPS_CATALOG[0]!.name
   }
 })
 
@@ -354,7 +349,7 @@ function tileThumbStyle(frameIdx: number) {
         <button
           v-for="layer in (['ground', 'wall', 'furniture', 'props', 'slots'] as EditorLayer[])"
           :key="layer"
-          @click="activeLayer = layer; isDeleteMode = false; editorScene?.setDeleteMode(false)"
+          @click="switchLayer(layer)"
           class="px-2 py-1 text-[10px] font-mono rounded transition-colors"
           :class="activeLayer === layer
             ? 'bg-emerald-600 text-white'

@@ -1,15 +1,13 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { Rocket, CheckCircle2, Circle, ChevronRight, Terminal, Users, Kanban, Clock, Settings, Sparkles } from 'lucide-vue-next'
+import { Rocket, CheckCircle2, ChevronRight, Terminal, Users, Kanban, Clock, Sparkles } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 
 const router = useRouter()
 const store = useAegisStore()
 const currentStep = ref(0)
 const completing = ref(false)
-
-const API = import.meta.env.DEV ? '' : 'http://localhost:8899'
 
 interface Step {
   id: string
@@ -98,6 +96,7 @@ const steps: Step[] = [
 ]
 
 const progress = computed(() => ((currentStep.value + 1) / steps.length) * 100)
+const currentStepData = computed(() => steps[currentStep.value]!)
 
 function nextStep() {
   if (currentStep.value < steps.length - 1) {
@@ -203,17 +202,17 @@ function skipOnboarding() {
             <div class="bg-slate-800/50 rounded-2xl border border-slate-700 p-8">
               <div class="flex items-start gap-4 mb-6">
                 <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-400/20 to-cyan-500/20 flex items-center justify-center">
-                  <component :is="steps[currentStep].icon" class="w-7 h-7 text-cyan-400" />
+                  <component :is="currentStepData.icon" class="w-7 h-7 text-cyan-400" />
                 </div>
                 <div>
-                  <h2 class="text-2xl font-bold text-slate-100 mb-2">{{ steps[currentStep].title }}</h2>
-                  <p class="text-slate-400">{{ steps[currentStep].description }}</p>
+                  <h2 class="text-2xl font-bold text-slate-100 mb-2">{{ currentStepData.title }}</h2>
+                  <p class="text-slate-400">{{ currentStepData.description }}</p>
                 </div>
               </div>
 
               <div class="space-y-3 mb-8">
                 <div
-                  v-for="(detail, i) in steps[currentStep].details"
+                  v-for="(detail, i) in currentStepData.details"
                   :key="i"
                   class="flex items-start gap-3 p-3 bg-slate-900/50 rounded-lg"
                 >
@@ -225,12 +224,12 @@ function skipOnboarding() {
               </div>
 
               <!-- Action button for step -->
-              <div v-if="steps[currentStep].action" class="mb-8">
+              <div v-if="currentStepData.action" class="mb-8">
                 <router-link
-                  :to="steps[currentStep].action!.route"
+                  :to="currentStepData.action!.route"
                   class="inline-flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm font-medium transition-colors"
                 >
-                  {{ steps[currentStep].action!.label }}
+                  {{ currentStepData.action!.label }}
                   <ChevronRight class="w-4 h-4" />
                 </router-link>
               </div>

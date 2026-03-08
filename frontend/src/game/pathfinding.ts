@@ -1,4 +1,4 @@
-import { GroundType, isWall, type OfficeLayout } from './types'
+import type { OfficeLayout } from './types'
 
 interface Node {
   col: number
@@ -22,7 +22,7 @@ function nodeKey(col: number, row: number): string {
  * Check if a tile is walkable (not wall, not void, not blocked by furniture)
  */
 function isWalkable(
-  layout: OfficeLayout,
+  _layout: OfficeLayout,
   col: number,
   row: number,
   walkableSet: Set<string>
@@ -151,12 +151,12 @@ export function simplifyPath(
 ): Array<{ col: number; row: number }> {
   if (path.length <= 2) return path
 
-  const result: Array<{ col: number; row: number }> = [path[0]]
+  const result: Array<{ col: number; row: number }> = [path[0]!]
 
   for (let i = 1; i < path.length - 1; i++) {
-    const prev = path[i - 1]
-    const curr = path[i]
-    const next = path[i + 1]
+    const prev = path[i - 1]!
+    const curr = path[i]!
+    const next = path[i + 1]!
 
     // Check if direction changes
     const d1c = curr.col - prev.col
@@ -169,6 +169,6 @@ export function simplifyPath(
     }
   }
 
-  result.push(path[path.length - 1])
+  result.push(path[path.length - 1]!)
   return result
 }

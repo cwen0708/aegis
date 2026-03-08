@@ -87,16 +87,16 @@ export function getWallAutoTileFrames(
   ground: number[], cols: number, rows: number,
   r: number, c: number,
 ): [number, number | undefined] {
-  const gt = ground[r * cols + c]
+  const gt = ground[r * cols + c]!
   const group = WALL_GROUP[gt]
 
   const wallAt = (row: number, col: number): boolean => {
     if (row < 0 || row >= rows || col < 0 || col >= cols) return false
-    return isWall(ground[row * cols + col])
+    return isWall(ground[row * cols + col]!)
   }
   const floorAt = (row: number, col: number): boolean => {
     if (row < 0 || row >= rows || col < 0 || col >= cols) return false
-    const g = ground[row * cols + col]
+    const g = ground[row * cols + col]!
     return g !== GroundType.VOID && !isWall(g)
   }
 

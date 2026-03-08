@@ -11,6 +11,7 @@ let intervalId: number
 const fetchMetrics = async () => {
   try {
     const res = await fetch('/api/v1/system/metrics')
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
     metrics.value = await res.json()
   } catch (e) {
     console.error('Failed to fetch metrics', e)
@@ -20,6 +21,7 @@ const fetchMetrics = async () => {
 const fetchServices = async () => {
   try {
     const res = await fetch('/api/v1/system/services')
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
     services.value = await res.json()
   } catch (e) {
     console.error('Failed to fetch services', e)

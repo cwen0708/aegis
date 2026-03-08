@@ -1,9 +1,24 @@
-import { ref, onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted } from 'vue'
 import { useAegisStore } from '../stores/aegis'
 
 let ws: WebSocket | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let refCount = 0
+
+// HMR cleanup: close ghost connections on module reload
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    if (ws) {
+      ws.close()
+      ws = null
+    }
+    refCount = 0
+  })
+}
 
 export function useWebSocket() {
   const store = useAegisStore()
@@ -14,7 +29,7 @@ export function useWebSocket() {
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const host = import.meta.env.DEV ? '127.0.0.1:8899' : window.location.host
+    const host = window.location.host
     const wsUrl = `${protocol}://${host}/ws`
 
     ws = new WebSocket(wsUrl)

@@ -5,7 +5,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-MEMBERS_ROOT = Path.home() / ".aegis" / "members"
+# .aegis lives under the install root (backend/app/core/ → ../../.. → backend/ → .. → install root)
+_INSTALL_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+MEMBERS_ROOT = _INSTALL_ROOT / ".aegis" / "members"
 
 _SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9\-]*$")
 
