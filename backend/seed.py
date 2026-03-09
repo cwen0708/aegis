@@ -134,7 +134,7 @@ def seed_data():
                 role="Aegis AI 助理",
                 description="Aegis 系統的預設 AI 助理，負責回答問題與協助任務管理。",
                 sprite_index=0,
-                portrait="/api/v1/portraits/aegis.png",
+                portrait="/api/v1/portraits/aegis_v2.png",
             )
             members_to_add.append(m_aegis)
 
@@ -146,7 +146,7 @@ def seed_data():
                 role="技術主管",
                 description="負責 Planning 與 Code Review，擅長需求分析與技術決策。",
                 sprite_index=1,
-                portrait="/api/v1/portraits/example_2.png",
+                portrait="/api/v1/portraits/example_2_v2.png",
             )
             members_to_add.append(m1)
 
@@ -158,7 +158,7 @@ def seed_data():
                 role="資深開發者",
                 description="擅長全端開發與系統架構，負責 Coding 階段的任務執行。",
                 sprite_index=2,
-                portrait="/api/v1/portraits/example_1.png",
+                portrait="/api/v1/portraits/example_1_v2.png",
             )
             members_to_add.append(m2)
 

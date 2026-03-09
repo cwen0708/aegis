@@ -43,7 +43,7 @@ backend/uploads/*
 !backend/uploads/portraits/
 backend/uploads/portraits/*
 !backend/uploads/portraits/example_*.png
-!backend/uploads/portraits/aegis.png
+!backend/uploads/portraits/aegis*.png
 backend/portraits/
 
 # Environment files
