@@ -1,0 +1,13 @@
+{
+  "name": "aegis",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n BE,WK,FE -c yellow,magenta,cyan \"backend\\venv\\Scripts\\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8899 --app-dir backend\" \"backend\\venv\\Scripts\\python.exe backend\\worker.py\" \"pnpm -F frontend dev\"",
+    "dev:fe": "pnpm -F frontend dev",
+    "dev:worker": "backend\\venv\\Scripts\\python.exe backend\\worker.py",
+    "build": "pnpm -F frontend build"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

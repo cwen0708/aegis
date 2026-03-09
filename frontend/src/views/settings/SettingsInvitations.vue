@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { Mail, Plus, Copy, Trash2, Loader2, Check, Clock, Ban, Users, Eye, PenTool, Play, Shield } from 'lucide-vue-next'
+import { Mail, Plus, Copy, Trash2, Loader2, Clock, Users, Eye, PenTool, Play, Shield } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 import ConfirmDialog from '../../components/ConfirmDialog.vue'
 
@@ -253,12 +253,6 @@ async function copyCode(code: string) {
 
 function formatDate(dateStr: string) {
   return new Date(dateStr).toLocaleDateString('zh-TW')
-}
-
-function getMemberName(memberId: number | null): string {
-  if (!memberId) return ''
-  const m = members.value.find(m => m.id === memberId)
-  return m ? m.name : ''
 }
 
 function getProjectNames(projectIds: number[] | null): string {

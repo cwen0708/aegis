@@ -1,0 +1,800 @@
+"""
+Aegis Worker - 獨立任務執行程序
+獨立於 FastAPI 運行，負責：
+1. 掃描 pending 卡片
+2. 執行 AI CLI 任務
+3. 即時輸出透過 HTTP 傳給 FastAPI 廣播
+4. 更新卡片狀態
+"""
+import os
+import sys
+import time
+import json
+import logging
+import subprocess
+import platform
+from pathlib import Path
+from datetime import datetime, timezone
+from typing import Optional, Dict, Any
+
+# 加入 app 路徑
+sys.path.insert(0, str(Path(__file__).parent))
+
+from sqlmodel import Session, select
+from app.database import engine
+from app.models.core import (
+    Card, CardIndex, StageList, Project, SystemSetting,
+    Member, MemberAccount, Account, TaskLog
+)
+from app.core.card_file import CardData, read_card, write_card
+from app.core.card_index import sync_card_to_index
+from app.core.telemetry import is_system_overloaded
+from app.core.task_workspace import prepare_workspace, cleanup_workspace
+from app.core.memory_manager import write_member_short_term_memory
+
+# HTTP client for broadcasting
+import urllib.request
+import urllib.error
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S"
+)
+logger = logging.getLogger(__name__)
+
+# ==========================================
+# 配置
+# ==========================================
+POLL_INTERVAL = 3  # 秒
+API_BASE = "http://127.0.0.1:8899/api/v1"
+MAX_WORKSTATIONS = 3  # 預設，啟動時從 DB 讀取
+
+# AI Provider 配置（從 runner.py 移植）
+PHASE_ROUTING = {
+    "PLANNING": "gemini",
+    "REVIEWING": "gemini",
+    "DEVELOPING": "claude",
+    "VERIFYING": "claude",
+    "SCHEDULED": "claude",
+}
+
+PROVIDERS = {
+    "gemini": {
+        "cmd_base": ["gemini"],
+        "args": ["-p", "{prompt}", "-y", "--model", "gemini-2.5-flash"],
+        "json_output": False,
+    },
+    "claude": {
+        "cmd_base": ["claude"],
+        # 使用 stream-json + verbose 實現即時串流輸出
+        "args": ["-p", "{prompt}", "--dangerously-skip-permissions", "--model", "opus",
+                 "--output-format", "stream-json", "--verbose"],
+        "json_output": False,
+        "stream_json": True,  # 標記需要解析 stream-json
+    },
+    "ollama": {
+        "cmd_base": ["ollama", "run"],
+        "args": ["{model}"],
+        "json_output": False,
+        "default_model": "llama3.1:8b",
+        "stdin_prompt": True,
+    },
+}
+
+
+# ==========================================
+# HTTP 工具
+# ==========================================
+def broadcast_log(card_id: int, line: str):
+    """透過 HTTP 發送 log 給 FastAPI 廣播"""
+    try:
+        # 過濾掉 ANSI escape codes 和控制字符
+        import re
+        clean_line = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07?', '', line)
+        clean_line = ''.join(c for c in clean_line if c.isprintable() or c in '\n\r\t')
+
+        if not clean_line.strip():
+            return  # 跳過空行
+
+        logger.info(f"[Broadcast] card={card_id} len={len(clean_line)}")
+        data = json.dumps({"card_id": card_id, "line": clean_line}).encode("utf-8")
+        req = urllib.request.Request(
+            f"{API_BASE}/internal/broadcast-log",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as e:
+        logger.warning(f"[Broadcast] Failed: {e}")
+        pass
+
+
+def broadcast_event(event_type: str, payload: dict):
+    """透過 HTTP 發送事件給 FastAPI 廣播"""
+    try:
+        data = json.dumps({"event": event_type, "payload": payload}).encode("utf-8")
+        req = urllib.request.Request(
+            f"{API_BASE}/internal/broadcast-event",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as e:
+        logger.warning(f"[Broadcast] Failed to send {event_type}: {e}")
+
+
+# ==========================================
+# DB 查詢工具
+# ==========================================
+def get_max_workstations() -> int:
+    """從 DB 讀取最大工作台數"""
+    with Session(engine) as session:
+        setting = session.get(SystemSetting, "max_workstations")
+        if setting:
+            try:
+                return int(setting.value)
+            except ValueError:
+                pass
+    return MAX_WORKSTATIONS
+
+
+def is_worker_paused() -> bool:
+    """檢查 Worker 是否被暫停"""
+    with Session(engine) as session:
+        setting = session.get(SystemSetting, "worker_paused")
+        return setting and setting.value == "true"
+
+
+def get_running_count() -> int:
+    """取得目前運行中的任務數"""
+    with Session(engine) as session:
+        stmt = select(CardIndex).where(CardIndex.status == "running")
+        return len(list(session.exec(stmt).all()))
+
+
+def is_member_busy(member_id: int) -> bool:
+    """檢查成員是否正在執行其他任務"""
+    if not member_id:
+        return False
+    with Session(engine) as session:
+        stmt = select(CardIndex).where(
+            CardIndex.status == "running",
+            CardIndex.member_id == member_id
+        )
+        return session.exec(stmt).first() is not None
+
+
+def get_pending_cards() -> list:
+    """取得待執行的卡片"""
+    with Session(engine) as session:
+        stmt = select(CardIndex).where(CardIndex.status == "pending")
+        return list(session.exec(stmt).all())
+
+
+def get_primary_provider(member_id: int) -> Optional[str]:
+    """從成員的主帳號取得 provider"""
+    with Session(engine) as session:
+        stmt = select(MemberAccount).where(
+            MemberAccount.member_id == member_id
+        ).order_by(MemberAccount.priority)
+        binding = session.exec(stmt).first()
+        if binding:
+            account = session.get(Account, binding.account_id)
+            if account:
+                return account.provider
+    return None
+
+
+def resolve_member(stage_list_id: int, phase: str) -> tuple:
+    """解析任務應該由哪個成員執行
+    回傳 (member_id, provider, member_slug)
+    """
+    with Session(engine) as session:
+        # 1. 列表級指派
+        stage_list = session.get(StageList, stage_list_id)
+        if stage_list and stage_list.member_id:
+            member = session.get(Member, stage_list.member_id)
+            if member:
+                provider = get_primary_provider(member.id)
+                logger.info(f"[Router] List '{stage_list.name}' → {member.name} ({provider})")
+                return member.id, provider, member.slug
+
+        # 2. 全域預設
+        setting = session.get(SystemSetting, f"phase_routing.{phase}")
+        if setting and setting.value:
+            try:
+                member = session.get(Member, int(setting.value))
+                if member:
+                    provider = get_primary_provider(member.id)
+                    return member.id, provider, member.slug
+            except (ValueError, TypeError):
+                pass
+
+        # 3. 無指派
+        return None, None, None
+
+
+# ==========================================
+# 卡片狀態更新
+# ==========================================
+def update_card_status(card_id: int, new_status: str, append_content: str = ""):
+    """更新卡片狀態（MD 檔 + DB）"""
+    with Session(engine) as session:
+        idx = session.get(CardIndex, card_id)
+        if not idx:
+            return
+
+        file_path = Path(idx.file_path)
+        try:
+            card_data = read_card(file_path)
+            card_data.status = new_status
+            if append_content:
+                card_data.content += append_content
+            write_card(file_path, card_data)
+            sync_card_to_index(session, card_data, idx.project_id, str(file_path))
+        except Exception as e:
+            logger.error(f"[Card {card_id}] Failed to update MD: {e}")
+
+        # Dual-write ORM
+        orm_card = session.get(Card, card_id)
+        if orm_card:
+            orm_card.status = new_status
+            if append_content:
+                orm_card.content = (orm_card.content or "") + append_content
+            session.add(orm_card)
+
+        session.commit()
+
+
+def mark_card_running(card_id: int, member_id: Optional[int]):
+    """標記卡片為 running 並設定 member_id"""
+    with Session(engine) as session:
+        idx = session.get(CardIndex, card_id)
+        if idx:
+            idx.status = "running"
+            idx.member_id = member_id
+            session.add(idx)
+
+            # 也更新 MD 檔
+            file_path = Path(idx.file_path)
+            try:
+                card_data = read_card(file_path)
+                card_data.status = "running"
+                write_card(file_path, card_data)
+            except Exception as e:
+                logger.warning(f"[Card {card_id}] Failed to update MD to running: {e}")
+
+        orm_card = session.get(Card, card_id)
+        if orm_card:
+            orm_card.status = "running"
+            session.add(orm_card)
+
+        session.commit()
+
+
+# ==========================================
+# JSON 解析
+# ==========================================
+def parse_claude_json(output: str) -> Dict[str, Any]:
+    """從 Claude CLI JSON 輸出解析 token 用量"""
+    try:
+        data = json.loads(output.strip())
+        usage = data.get("usage", {})
+        model_usage = data.get("modelUsage", {})
+        model_name = ""
+        if model_usage:
+            model_name = list(model_usage.keys())[0]
+        return {
+            "result_text": data.get("result", ""),
+            "model": model_name,
+            "duration_ms": data.get("duration_ms", 0),
+            "cost_usd": data.get("total_cost_usd", 0),
+            "input_tokens": usage.get("input_tokens", 0),
+            "output_tokens": usage.get("output_tokens", 0),
+            "cache_read_tokens": usage.get("cache_read_input_tokens", 0),
+            "cache_creation_tokens": usage.get("cache_creation_input_tokens", 0),
+        }
+    except (json.JSONDecodeError, KeyError, IndexError):
+        return {}
+
+
+def save_task_log(card_id: int, card_title: str, project_name: str, provider: str,
+                  member_id: Optional[int], status: str, token_info: Dict[str, Any]):
+    """儲存任務執行記錄"""
+    try:
+        with Session(engine) as session:
+            log = TaskLog(
+                card_id=card_id,
+                card_title=card_title,
+                project_name=project_name,
+                provider=provider,
+                model=token_info.get("model", ""),
+                member_id=member_id,
+                status=status,
+                duration_ms=token_info.get("duration_ms", 0),
+                input_tokens=token_info.get("input_tokens", 0),
+                output_tokens=token_info.get("output_tokens", 0),
+                cache_read_tokens=token_info.get("cache_read_tokens", 0),
+                cache_creation_tokens=token_info.get("cache_creation_tokens", 0),
+                cost_usd=token_info.get("cost_usd", 0),
+            )
+            session.add(log)
+            session.commit()
+    except Exception as e:
+        logger.warning(f"[TaskLog] Failed to save: {e}")
+
+
+# ==========================================
+# 任務執行（PTY 模式，即時串流輸出）
+# ==========================================
+def run_task(card_id: int, project_path: str, prompt: str, phase: str,
+             forced_provider: Optional[str], card_title: str, project_name: str,
+             member_id: Optional[int]) -> Dict[str, Any]:
+    """執行單一 AI 任務（使用 PTY 實現即時輸出串流）"""
+
+    provider_name = forced_provider if forced_provider and forced_provider in PROVIDERS else PHASE_ROUTING.get(phase, "gemini")
+    config = PROVIDERS.get(provider_name, PROVIDERS["gemini"])
+
+    # 建構命令
+    model = config.get("default_model", "")
+    cmd_parts = list(config["cmd_base"])
+    for arg in config["args"]:
+        if "{prompt}" in arg:
+            cmd_parts.append(arg.replace("{prompt}", prompt))
+        elif "{model}" in arg:
+            cmd_parts.append(arg.replace("{model}", model))
+        else:
+            cmd_parts.append(arg)
+
+    stdin_prompt = config.get("stdin_prompt", False)
+
+    # 完全隔離環境變數，避免干擾當前的 Claude Code session
+    env = os.environ.copy()
+    claude_env_keys = [k for k in env.keys() if k.upper().startswith(("CLAUDE", "ANTHROPIC"))]
+    for key in claude_env_keys:
+        env.pop(key, None)
+    env["CLAUDE_CODE_ENTRY_POINT"] = "worker"
+
+    logger.info(f"[Task {card_id}] Executing {provider_name} in {project_path} (PTY mode)")
+    logger.info(f"[Task {card_id}] Command: {' '.join(cmd_parts[:3])}...")
+
+    # 廣播任務開始
+    broadcast_event("task_started", {
+        "card_id": card_id,
+        "card_title": card_title,
+        "project": project_name,
+        "provider": provider_name
+    })
+
+    start_time = time.time()
+
+    # 嘗試使用 PTY，失敗則 fallback 到 subprocess
+    if platform.system() == "Windows":
+        try:
+            return run_task_pty_windows(
+                card_id, project_path, cmd_parts, stdin_prompt, prompt,
+                env, provider_name, card_title, project_name, member_id,
+                config, start_time
+            )
+        except Exception as e:
+            logger.warning(f"[Task {card_id}] PTY failed, fallback to subprocess: {e}")
+
+    # Fallback: 使用一般 subprocess
+    return run_task_subprocess(
+        card_id, project_path, cmd_parts, stdin_prompt, prompt,
+        env, provider_name, card_title, project_name, member_id,
+        config, start_time
+    )
+
+
+def parse_stream_json_line(line: str) -> Optional[str]:
+    """解析 stream-json 行，提取文字內容"""
+    try:
+        data = json.loads(line.strip())
+        msg_type = data.get("type")
+
+        # assistant 類型：檢查 content 陣列中的 text block
+        if msg_type == "assistant":
+            content = data.get("content", [])
+            if content and isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        return block.get("text", "")
+            # 也檢查 message.content（嵌套結構）
+            msg = data.get("message", {})
+            content = msg.get("content", [])
+            if content and isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        return block.get("text", "")
+
+        # result 類型：最終結果（備用）
+        if msg_type == "result":
+            return data.get("result", "")
+
+    except (json.JSONDecodeError, KeyError, TypeError):
+        pass
+    return None
+
+
+def run_task_pty_windows(
+    card_id: int, project_path: str, cmd_parts: list, stdin_prompt: bool,
+    prompt: str, env: dict, provider_name: str, card_title: str,
+    project_name: str, member_id: Optional[int], config: dict, start_time: float
+) -> Dict[str, Any]:
+    """Windows PTY 執行（使用 pywinpty 實現即時輸出）"""
+    from winpty import PtyProcess
+    import re
+    import threading
+
+    # 保存原始工作目錄
+    original_cwd = os.getcwd()
+
+    # 找出需要刪除的 CLAUDE 相關環境變數
+    claude_env_keys = [k for k in os.environ.keys() if k.upper().startswith(("CLAUDE", "ANTHROPIC"))]
+    old_claude_env = {k: os.environ.get(k) for k in claude_env_keys}
+
+    # 從 os.environ 中刪除這些變數（這是 PTY 關鍵！）
+    for key in claude_env_keys:
+        del os.environ[key]
+
+    # 設定我們需要的環境變數
+    old_env = {k: os.environ.get(k) for k in env.keys()}
+    os.environ.update(env)
+    os.chdir(project_path)
+
+    logger.info(f"[Task {card_id}] PTY env cleaned: removed {claude_env_keys}")
+
+    # 檢查是否使用 stream-json 格式
+    stream_json = config.get("stream_json", False)
+    output_lines = []
+    result_text_parts = []  # 收集實際的文字輸出
+
+    # 心跳機制：每 5 秒發送進度更新
+    heartbeat_stop = threading.Event()
+    heartbeat_interval = 5  # 秒
+
+    def heartbeat_worker():
+        elapsed = 0
+        while not heartbeat_stop.wait(heartbeat_interval):
+            elapsed += heartbeat_interval
+            broadcast_log(card_id, f"⏳ 處理中... ({elapsed}s)\n")
+
+    heartbeat_thread = threading.Thread(target=heartbeat_worker, daemon=True)
+    heartbeat_thread.start()
+
+    try:
+        # 使用 PtyProcess.spawn
+        pty_process = PtyProcess.spawn(cmd_parts)
+
+        # 如果需要 stdin，先寫入 prompt
+        if stdin_prompt:
+            pty_process.write(prompt + "\n")
+
+        # 使用 read() 讀取並按行處理
+        buffer = ""
+        while pty_process.isalive():
+            try:
+                chunk = pty_process.read(512)
+                if chunk:
+                    output_lines.append(chunk)
+                    buffer += chunk
+
+                    # 按行處理
+                    while "\n" in buffer:
+                        line, buffer = buffer.split("\n", 1)
+
+                        if stream_json:
+                            # 解析 stream-json，提取文字
+                            # 先清理 ANSI codes
+                            clean_line = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07?', '', line)
+                            if clean_line.strip().startswith("{"):
+                                text = parse_stream_json_line(clean_line)
+                                if text:
+                                    result_text_parts.append(text)
+                                    broadcast_log(card_id, text)
+                        else:
+                            broadcast_log(card_id, line + "\n")
+            except EOFError:
+                break
+            except Exception as e:
+                logger.warning(f"[Task {card_id}] PTY read error: {e}")
+                time.sleep(0.05)
+
+        # 讀取剩餘輸出
+        try:
+            while True:
+                chunk = pty_process.read(512)
+                if not chunk:
+                    break
+                output_lines.append(chunk)
+                buffer += chunk
+        except EOFError:
+            pass
+
+        # 處理剩餘 buffer
+        if buffer:
+            if stream_json:
+                for line in buffer.split("\n"):
+                    clean_line = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07?', '', line)
+                    if clean_line.strip().startswith("{"):
+                        text = parse_stream_json_line(clean_line)
+                        if text:
+                            result_text_parts.append(text)
+                            broadcast_log(card_id, text)
+            else:
+                broadcast_log(card_id, buffer)
+
+        # 取得退出碼
+        pty_process.wait()
+        exit_code = pty_process.exitstatus or 0
+
+    finally:
+        # 停止心跳線程
+        heartbeat_stop.set()
+
+        # 恢復環境
+        os.chdir(original_cwd)
+        for k, v in old_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        # 恢復被刪除的 CLAUDE 環境變數
+        for k, v in old_claude_env.items():
+            if v is not None:
+                os.environ[k] = v
+
+    output = "".join(output_lines)
+    duration_ms = int((time.time() - start_time) * 1000)
+    status = "success" if exit_code == 0 else "error"
+
+    # 解析 token 用量
+    token_info = {}
+    # 如果是 stream_json，使用收集的文字部分作為輸出
+    if stream_json and result_text_parts:
+        actual_output = "".join(result_text_parts)
+    else:
+        actual_output = output
+    if provider_name == "claude" and config.get("json_output"):
+        token_info = parse_claude_json(output)
+        token_info["duration_ms"] = duration_ms
+        if token_info.get("result_text"):
+            actual_output = token_info["result_text"]
+
+    save_task_log(card_id, card_title, project_name, provider_name, member_id, status, token_info)
+
+    return {
+        "status": status,
+        "output": actual_output,
+        "provider": provider_name,
+        "exit_code": exit_code,
+        "token_info": token_info,
+    }
+
+
+def run_task_subprocess(
+    card_id: int, project_path: str, cmd_parts: list, stdin_prompt: bool,
+    prompt: str, env: dict, provider_name: str, card_title: str,
+    project_name: str, member_id: Optional[int], config: dict, start_time: float
+) -> Dict[str, Any]:
+    """一般 subprocess 執行（fallback）"""
+    import threading
+
+    # 心跳機制
+    heartbeat_stop = threading.Event()
+    heartbeat_interval = 5
+
+    def heartbeat_worker():
+        elapsed = 0
+        while not heartbeat_stop.wait(heartbeat_interval):
+            elapsed += heartbeat_interval
+            broadcast_log(card_id, f"⏳ 處理中... ({elapsed}s)\n")
+
+    heartbeat_thread = threading.Thread(target=heartbeat_worker, daemon=True)
+    heartbeat_thread.start()
+
+    try:
+        creation_flags = 0
+        if platform.system() == "Windows":
+            creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+
+        proc = subprocess.Popen(
+            cmd_parts,
+            cwd=project_path,
+            stdin=subprocess.PIPE if stdin_prompt else None,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            env=env,
+            creationflags=creation_flags,
+        )
+
+        if stdin_prompt and proc.stdin:
+            proc.stdin.write(prompt.encode("utf-8"))
+            proc.stdin.close()
+
+        output_lines = []
+        for raw_line in proc.stdout:
+            line = raw_line.decode("utf-8", errors="replace")
+            output_lines.append(line)
+            broadcast_log(card_id, line)
+
+        proc.wait()
+
+        output = "".join(output_lines)
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        status = "success" if proc.returncode == 0 else "error"
+
+        token_info = {}
+        actual_output = output
+        if provider_name == "claude" and config.get("json_output"):
+            token_info = parse_claude_json(output)
+            token_info["duration_ms"] = duration_ms
+            if token_info.get("result_text"):
+                actual_output = token_info["result_text"]
+
+        save_task_log(card_id, card_title, project_name, provider_name, member_id, status, token_info)
+
+        return {
+            "status": status,
+            "output": actual_output,
+            "provider": provider_name,
+            "exit_code": proc.returncode,
+            "token_info": token_info,
+        }
+
+    except Exception as e:
+        logger.exception(f"[Task {card_id}] Subprocess execution failed: {e}")
+        save_task_log(card_id, card_title, project_name, provider_name, member_id, "error", {})
+        return {"status": "error", "output": str(e), "provider": provider_name}
+
+    finally:
+        heartbeat_stop.set()
+
+
+# ==========================================
+# 主處理迴圈
+# ==========================================
+def process_pending_cards():
+    """處理一輪 pending 卡片"""
+    max_ws = get_max_workstations()
+    running = get_running_count()
+
+    if running >= max_ws:
+        return  # 工作台已滿
+
+    # 系統負載檢查
+    if is_system_overloaded(cpu_threshold=90.0, mem_threshold=90.0):
+        logger.warning("[Worker] System overloaded, skipping this round")
+        return
+
+    pending = get_pending_cards()
+
+    for idx in pending:
+        # 再次檢查工作台
+        if get_running_count() >= max_ws:
+            break
+
+        with Session(engine) as session:
+            stage_list = session.get(StageList, idx.list_id)
+            list_name = stage_list.name if stage_list else "Unknown"
+            project = session.get(Project, idx.project_id)
+
+        # 只處理特定列表
+        if list_name not in ["Planning", "Developing", "Verifying", "Scheduled"]:
+            # 不需要 AI 的列表，清除 pending 狀態
+            update_card_status(idx.card_id, "idle")
+            continue
+
+        # 解析成員
+        member_id, forced_provider, member_slug = resolve_member(idx.list_id, list_name.upper())
+
+        # 成員忙碌檢查
+        if member_id and is_member_busy(member_id):
+            logger.info(f"[Worker] Member {member_id} busy, skip card {idx.card_id}")
+            continue
+
+        # 標記為 running
+        mark_card_running(idx.card_id, member_id)
+        logger.info(f"[Worker] Processing card {idx.card_id}: {idx.title}")
+
+        # 讀取卡片內容
+        with Session(engine) as session:
+            idx_fresh = session.get(CardIndex, idx.card_id)
+            project_obj = session.get(Project, idx.project_id)
+            project_path = project_obj.path if project_obj else "."
+            project_name = project_obj.name if project_obj else "Unknown"
+
+        try:
+            card_data = read_card(Path(idx.file_path))
+        except Exception as e:
+            logger.error(f"[Worker] Failed to read card {idx.card_id}: {e}")
+            update_card_status(idx.card_id, "failed", f"\n\n### Error\n無法讀取卡片: {e}")
+            broadcast_event("task_failed", {"card_id": idx.card_id, "reason": str(e)})
+            continue
+
+        # 準備工作區
+        workspace_dir = None
+        if member_slug:
+            workspace_dir = str(prepare_workspace(
+                card_id=idx.card_id,
+                member_slug=member_slug,
+                provider=forced_provider or "claude",
+                project_path=project_path,
+                card_content=card_data.content,
+            ))
+
+        effective_cwd = workspace_dir or project_path
+        effective_prompt = "請閱讀你的設定檔並執行本次任務。" if workspace_dir else card_data.content
+
+        # 執行任務
+        result = run_task(
+            card_id=idx.card_id,
+            project_path=effective_cwd,
+            prompt=effective_prompt,
+            phase=list_name.upper(),
+            forced_provider=forced_provider,
+            card_title=idx.title,
+            project_name=project_name,
+            member_id=member_id,
+        )
+
+        # 更新卡片狀態
+        if result["status"] == "success":
+            append_text = f"\n\n### AI Output ({result['provider']})\n```\n{result['output'][:1000]}...\n```"
+            new_status = "completed"
+        else:
+            append_text = f"\n\n### Error ({result['provider']})\n{result['output']}"
+            new_status = "failed"
+
+        update_card_status(idx.card_id, new_status, append_text)
+
+        # 廣播完成事件
+        event = "task_completed" if new_status == "completed" else "task_failed"
+        broadcast_event(event, {"card_id": idx.card_id, "status": new_status})
+
+        # 寫入成員記憶
+        if member_slug:
+            try:
+                output_preview = result.get("output", "")[:500]
+                write_member_short_term_memory(
+                    member_slug,
+                    f"## 任務: {idx.title}\n專案: {project_name}\n結果: {result['status']}\n\n{output_preview}"
+                )
+            except Exception as e:
+                logger.warning(f"[Memory] Failed: {e}")
+
+        # 清理工作區
+        if workspace_dir:
+            cleanup_workspace(idx.card_id)
+
+        logger.info(f"[Worker] Card {idx.card_id} completed with status: {new_status}")
+
+
+def main():
+    """Worker 主程式"""
+    logger.info("=" * 50)
+    logger.info("Aegis Worker Starting...")
+    logger.info(f"API Base: {API_BASE}")
+    logger.info(f"Poll Interval: {POLL_INTERVAL}s")
+    logger.info("=" * 50)
+
+    while True:
+        try:
+            # 暫停檢查
+            if is_worker_paused():
+                pass  # 靜默跳過
+            else:
+                process_pending_cards()
+        except Exception as e:
+            logger.error(f"[Worker Error] {e}")
+
+        time.sleep(POLL_INTERVAL)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { FolderKanban, Plus, Edit3, Trash2, FolderOpen, Lock, Loader2, UserCircle } from 'lucide-vue-next'
+import { FolderKanban, Plus, Edit3, Trash2, FolderOpen, Lock, Loader2 } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 import ConfirmDialog from '../../components/ConfirmDialog.vue'
 
