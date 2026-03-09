@@ -90,6 +90,24 @@ class StageListResponse(BaseModel):
     cards: List[CardResponse] = []
 
 # ==========================================
+# Project Schemas
+# ==========================================
+class ProjectCreate(BaseModel):
+    name: str
+    path: str
+    deploy_type: str = "none"
+    default_provider: str = "auto"
+
+
+class ProjectUpdate(BaseModel):
+    name: Optional[str] = None
+    path: Optional[str] = None
+    is_active: Optional[bool] = None
+    deploy_type: Optional[str] = None
+    default_provider: Optional[str] = None
+
+
+# ==========================================
 # Project Routes
 # ==========================================
 @router.get("/projects/", response_model=List[Project])
@@ -99,28 +117,61 @@ def read_projects(session: Session = Depends(get_session)):
     return projects
 
 @router.post("/projects/", response_model=Project)
-def create_project(project: Project, session: Session = Depends(get_session)):
+def create_project(data: ProjectCreate, session: Session = Depends(get_session)):
+    """建立新專案，自動建立 cards 目錄和預設 StageList"""
+    # 1. 路徑驗證與建立
+    project_path = Path(data.path)
+    if not project_path.exists():
+        try:
+            project_path.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"無法建立路徑: {e}")
+
+    # 2. 建立 cards 子目錄
+    cards_dir = project_path / "cards"
+    cards_dir.mkdir(exist_ok=True)
+
+    # 3. 建立專案
+    project = Project(
+        name=data.name,
+        path=str(project_path),
+        deploy_type=data.deploy_type,
+        default_provider=data.default_provider,
+    )
     session.add(project)
     session.commit()
     session.refresh(project)
-    return project
 
-class ProjectUpdate(BaseModel):
-    name: Optional[str] = None
-    path: Optional[str] = None
-    is_active: Optional[bool] = None
+    # 4. 建立預設 StageList
+    stages = ["Backlog", "Planning", "Developing", "Verifying", "Done", "Aborted"]
+    for idx, name in enumerate(stages):
+        sl = StageList(project_id=project.id, name=name, position=idx)
+        session.add(sl)
+    session.commit()
+
+    return project
 
 @router.patch("/projects/{project_id}", response_model=Project)
 def update_project(project_id: int, update_data: ProjectUpdate, session: Session = Depends(get_session)):
     project = session.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    # 系統專案禁止改名
+    if project.is_system and update_data.name is not None:
+        raise HTTPException(status_code=403, detail="無法修改系統專案名稱")
     if update_data.name is not None:
         project.name = update_data.name
     if update_data.path is not None:
-        project.path = update_data.path
+        new_path = Path(update_data.path)
+        if not new_path.exists():
+            raise HTTPException(status_code=400, detail="路徑不存在")
+        project.path = str(new_path)
     if update_data.is_active is not None:
         project.is_active = update_data.is_active
+    if update_data.deploy_type is not None:
+        project.deploy_type = update_data.deploy_type
+    if update_data.default_provider is not None:
+        project.default_provider = update_data.default_provider
     session.add(project)
     session.commit()
     session.refresh(project)

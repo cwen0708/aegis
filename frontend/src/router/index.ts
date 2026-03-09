@@ -11,6 +11,7 @@ import SettingsLayout from '../views/settings/SettingsLayout.vue'
 import SettingsGeneral from '../views/settings/SettingsGeneral.vue'
 import SettingsAI from '../views/settings/SettingsAI.vue'
 import SettingsChannels from '../views/settings/SettingsChannels.vue'
+import SettingsProjects from '../views/settings/SettingsProjects.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -29,6 +30,7 @@ const router = createRouter({
         { path: 'general', component: SettingsGeneral },
         { path: 'ai', component: SettingsAI },
         { path: 'channels', component: SettingsChannels },
+        { path: 'projects', component: SettingsProjects },
         { path: 'team', component: Team },
         { path: 'agents', component: Agents },
         { path: 'status', component: Dashboard },

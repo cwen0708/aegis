@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Settings, Globe, Sparkles, MessageSquare, Users, Bot, Activity, Lock, Loader2 } from 'lucide-vue-next'
+import { Settings, Globe, Sparkles, MessageSquare, Users, Bot, Activity, Lock, Loader2, FolderKanban } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 
 const route = useRoute()
@@ -9,6 +9,7 @@ const menuItems = [
   { path: '/settings/general', label: '一般設定', icon: Globe },
   { path: '/settings/ai', label: 'AI 模型', icon: Sparkles },
   { path: '/settings/channels', label: '頻道', icon: MessageSquare },
+  { path: '/settings/projects', label: '專案管理', icon: FolderKanban },
   { path: '/settings/team', label: '團隊管理', icon: Users },
   { path: '/settings/agents', label: 'AI 代理', icon: Bot },
   { path: '/settings/status', label: '服務狀態', icon: Activity },
