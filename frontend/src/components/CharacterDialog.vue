@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { X, CheckCircle, XCircle, Clock, Loader2, ListTodo } from 'lucide-vue-next'
 
 const props = defineProps<{
