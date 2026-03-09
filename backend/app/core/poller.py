@@ -62,18 +62,26 @@ async def _process_pending_cards():
             list_name = stage_list.name if stage_list else "Unknown"
             project = session.get(Project, idx.project_id)
 
-            # 只有特定的列表才需要喚醒 AI
-            if list_name in ["Planning", "Developing", "Verifying", "Scheduled"]:
+            # 判斷此階段是否需要 AI 處理
+            # 根據 stage_type 和 is_ai_stage 決定（通用化工作流）
+            should_ai_process = (
+                stage_list
+                and stage_list.is_ai_stage
+                and stage_list.stage_type in ["auto_process", "auto_review"]
+            )
+
+            if should_ai_process:
 
                 # 防護機制：如果系統負載過高，暫停派發
                 if is_system_overloaded(cpu_threshold=90.0, mem_threshold=90.0):
                     logger.warning(f"[Poller] System overloaded! Pausing task dispatch. Card {idx.card_id} waiting.")
                     continue
 
-                logger.info(f"[Poller] Found pending card {idx.card_id} in {list_name}. Dispatching...")
+                logger.info(f"[Poller] Found pending card {idx.card_id} in {list_name} (type={stage_list.stage_type}). Dispatching...")
 
                 # 決定 Phase、Member 和 Provider（三層路由）
-                phase = list_name.upper()
+                # phase 用於向後相容，從列表名稱推導
+                phase = list_name.upper() if list_name else "DEVELOPING"
                 member_id, forced_provider = _resolve_member(stage_list, phase, session)
 
                 # 成員忙碌檢查：先檢查再標記，避免不必要的 pending→running→pending 狀態翻轉
@@ -114,7 +122,7 @@ async def _process_pending_cards():
                     workspace_dir=workspace_dir, member_slug=member_slug,
                 ))
             else:
-                # 如果被拉到了不需要 AI 的列表 (如 Backlog 或 Done)，就把 pending 清掉
+                # 非 AI 處理階段（manual, terminal 或 is_ai_stage=False），清除 pending 狀態
                 project_path = project.path if project else "."
                 _update_card_status(session, idx, "idle", project_path)
 

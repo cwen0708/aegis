@@ -33,6 +33,12 @@ class StageList(SQLModel, table=True):
     position: int = Field(default=0) # 用於排序
     member_id: Optional[int] = Field(default=None, foreign_key="member.id")  # 指派成員（覆寫預設路由）
 
+    # 階段行為配置（通用化工作流）
+    stage_type: str = Field(default="auto_process")  # manual, auto_process, auto_review, terminal
+    system_instruction: Optional[str] = Field(default=None)  # 階段專屬系統指令
+    prompt_template: Optional[str] = Field(default=None)  # 階段專屬 prompt 模板
+    is_ai_stage: bool = Field(default=True)  # 是否為 AI 處理階段
+
     project: Optional[Project] = Relationship(back_populates="lists")
     cards: List["Card"] = Relationship(back_populates="stage_list")
 

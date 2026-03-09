@@ -213,9 +213,13 @@ def seed_data():
             session.refresh(aegis)
             print("  - Added AEGIS system project")
 
-            # AEGIS 只有 Scheduled 列表
+            # AEGIS 只有 Scheduled 列表（用於排程任務）
             aegis_scheduled = StageList(
-                project_id=aegis.id, name="Scheduled", position=0
+                project_id=aegis.id,
+                name="Scheduled",
+                position=0,
+                stage_type="auto_process",
+                is_ai_stage=True,
             )
             session.add(aegis_scheduled)
             session.commit()
@@ -317,10 +321,24 @@ def seed_data():
             print("  - Added Aegis Demo project")
 
             # ── 6. StageLists ──
-            stages = ["Backlog", "Planning", "Developing", "Verifying", "Done", "Aborted"]
+            # 階段配置：(name, stage_type, is_ai_stage)
+            stages_config = [
+                ("Backlog", "manual", False),
+                ("Planning", "auto_process", True),
+                ("Developing", "auto_process", True),
+                ("Verifying", "auto_review", True),
+                ("Done", "terminal", False),
+                ("Aborted", "terminal", False),
+            ]
             stage_objs = {}
-            for idx, name in enumerate(stages):
-                sl = StageList(project_id=p1.id, name=name, position=idx)
+            for idx, (name, stage_type, is_ai) in enumerate(stages_config):
+                sl = StageList(
+                    project_id=p1.id,
+                    name=name,
+                    position=idx,
+                    stage_type=stage_type,
+                    is_ai_stage=is_ai,
+                )
                 session.add(sl)
                 stage_objs[name] = sl
             session.commit()

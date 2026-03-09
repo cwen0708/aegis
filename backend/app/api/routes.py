@@ -88,6 +88,11 @@ class StageListResponse(BaseModel):
     member_id: Optional[int] = None
     member: Optional[MemberBrief] = None
     cards: List[CardResponse] = []
+    # 階段配置
+    stage_type: str = "auto_process"
+    system_instruction: Optional[str] = None
+    prompt_template: Optional[str] = None
+    is_ai_stage: bool = True
 
 # ==========================================
 # Project Schemas
@@ -142,10 +147,23 @@ def create_project(data: ProjectCreate, session: Session = Depends(get_session))
     session.commit()
     session.refresh(project)
 
-    # 4. 建立預設 StageList
-    stages = ["Backlog", "Planning", "Developing", "Verifying", "Done", "Aborted"]
-    for idx, name in enumerate(stages):
-        sl = StageList(project_id=project.id, name=name, position=idx)
+    # 4. 建立預設 StageList（含階段配置）
+    stages_config = [
+        ("Backlog", "manual", False),
+        ("Planning", "auto_process", True),
+        ("Developing", "auto_process", True),
+        ("Verifying", "auto_review", True),
+        ("Done", "terminal", False),
+        ("Aborted", "terminal", False),
+    ]
+    for idx, (name, stage_type, is_ai) in enumerate(stages_config):
+        sl = StageList(
+            project_id=project.id,
+            name=name,
+            position=idx,
+            stage_type=stage_type,
+            is_ai_stage=is_ai,
+        )
         session.add(sl)
     session.commit()
 
@@ -216,7 +234,12 @@ def read_project_board(project_id: int, session: Session = Depends(get_session))
             cards=[CardResponse(
                 id=ci.card_id, list_id=ci.list_id, title=ci.title,
                 description=ci.description, status=ci.status, created_at=ci.created_at
-            ) for ci in list_cards]
+            ) for ci in list_cards],
+            # 階段配置
+            stage_type=l.stage_type,
+            system_instruction=l.system_instruction,
+            prompt_template=l.prompt_template,
+            is_ai_stage=l.is_ai_stage,
         ))
     return result
 
@@ -225,6 +248,11 @@ def read_project_board(project_id: int, session: Session = Depends(get_session))
 # ==========================================
 class StageListUpdateRequest(BaseModel):
     member_id: Optional[int] = None  # null = 使用預設路由
+    # 階段行為配置
+    stage_type: Optional[str] = None  # manual, auto_process, auto_review, terminal
+    system_instruction: Optional[str] = None
+    prompt_template: Optional[str] = None
+    is_ai_stage: Optional[bool] = None
 
 
 @router.patch("/lists/{list_id}")
@@ -232,17 +260,43 @@ def update_stage_list(list_id: int, data: StageListUpdateRequest, session: Sessi
     stage_list = session.get(StageList, list_id)
     if not stage_list:
         raise HTTPException(status_code=404, detail="StageList not found")
-    stage_list.member_id = data.member_id
+
+    # 更新成員指派
+    if data.member_id is not None:
+        stage_list.member_id = data.member_id if data.member_id != 0 else None
+
+    # 更新階段配置
+    if data.stage_type is not None:
+        stage_list.stage_type = data.stage_type
+    if data.system_instruction is not None:
+        stage_list.system_instruction = data.system_instruction if data.system_instruction else None
+    if data.prompt_template is not None:
+        stage_list.prompt_template = data.prompt_template if data.prompt_template else None
+    if data.is_ai_stage is not None:
+        stage_list.is_ai_stage = data.is_ai_stage
+
     session.add(stage_list)
     session.commit()
     session.refresh(stage_list)
-    # 回傳 member brief
+
+    # 回傳完整資訊
     member_brief = None
     if stage_list.member_id:
         m = session.get(Member, stage_list.member_id)
         if m:
             member_brief = {"id": m.id, "name": m.name, "avatar": m.avatar, "provider": _get_member_primary_provider(m.id, session)}
-    return {"ok": True, "member_id": stage_list.member_id, "member": member_brief}
+
+    return {
+        "ok": True,
+        "id": stage_list.id,
+        "name": stage_list.name,
+        "member_id": stage_list.member_id,
+        "member": member_brief,
+        "stage_type": stage_list.stage_type,
+        "system_instruction": stage_list.system_instruction,
+        "prompt_template": stage_list.prompt_template,
+        "is_ai_stage": stage_list.is_ai_stage,
+    }
 
 
 # ==========================================
