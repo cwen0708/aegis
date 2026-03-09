@@ -114,8 +114,13 @@ class TelegramChannel(ChannelBase):
         # 發送到 Bus
         await message_bus.publish_inbound(msg)
 
-    async def send(self, msg: OutboundMessage) -> bool:
-        """發送訊息到 Telegram"""
+    async def send(self, msg: OutboundMessage) -> str | bool:
+        """
+        發送或編輯訊息到 Telegram
+
+        Returns:
+            成功時返回 message_id (str)，失敗返回 False
+        """
         if not self._app or not self._app.bot:
             logger.warning("[Telegram] Bot not ready")
             return False
@@ -128,8 +133,18 @@ class TelegramChannel(ChannelBase):
             elif msg.parse_mode == ParseMode.HTML:
                 parse_mode = "HTML"
 
-            # 發送
-            await self._app.bot.send_message(
+            # 編輯現有訊息
+            if msg.edit_message_id:
+                await self._app.bot.edit_message_text(
+                    chat_id=int(msg.chat_id),
+                    message_id=int(msg.edit_message_id),
+                    text=msg.text,
+                    parse_mode=parse_mode,
+                )
+                return msg.edit_message_id
+
+            # 發送新訊息
+            result = await self._app.bot.send_message(
                 chat_id=int(msg.chat_id),
                 text=msg.text,
                 parse_mode=parse_mode,
@@ -137,7 +152,7 @@ class TelegramChannel(ChannelBase):
                     int(msg.reply_to_id) if msg.reply_to_id else None
                 ),
             )
-            return True
+            return str(result.message_id)
 
         except Exception as e:
             logger.error(f"[Telegram] Send failed: {e}")

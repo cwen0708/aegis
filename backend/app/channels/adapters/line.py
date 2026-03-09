@@ -110,22 +110,31 @@ class LineChannel(ChannelBase):
 
         return count
 
-    async def send(self, msg: OutboundMessage) -> bool:
+    async def send(self, msg: OutboundMessage) -> str | bool:
         """
         發送訊息（Push API，免費版每月 200 則限制）
+
+        注意：LINE 不支援編輯訊息，edit_message_id 會被忽略
         """
         if not self._api:
             logger.warning("[LINE] API not ready")
             return False
 
+        # LINE 不支援編輯訊息，直接跳過 thinking 訊息
+        if msg.edit_message_id:
+            # 編輯 = 發送新訊息（LINE 限制）
+            pass
+
         try:
-            await self._api.push_message(
+            result = await self._api.push_message(
                 PushMessageRequest(
                     to=msg.chat_id,
                     messages=[TextMessage(text=msg.text)]
                 )
             )
-            return True
+            # LINE push API 不返回 message_id，用時間戳代替
+            import time
+            return str(int(time.time() * 1000))
         except Exception as e:
             logger.error(f"[LINE] Send failed: {e}")
             return False

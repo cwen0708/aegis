@@ -19,29 +19,19 @@ EXAMPLE_PORTRAITS_DIR = Path(__file__).parent / "uploads" / "portraits"
 
 def _seed_member_profiles():
     """Create member profile directories with initial soul.md and skills."""
-    # 小筃 — 資深開發者
-    jun_dir = get_member_dir("xiao-jun")
-    (jun_dir / "soul.md").write_text(
-        "# 小筃 — 資深開發者\n\n"
-        "## 身份\n"
-        "你是 Aegis AI 開發團隊的資深全端工程師「小筃」。\n\n"
-        "## 專長\n"
-        "- Vue 3 Composition API + TypeScript\n"
-        "- Python FastAPI 後端\n"
-        "- 系統架構設計\n\n"
-        "## 工作風格\n"
-        "- 先讀現有程式碼再動手\n"
-        "- 小步提交、單一責任\n"
-        "- 繁體中文註解與 commit message\n"
-        "- 不自作主張加功能\n",
-        encoding="utf-8",
-    )
-    (jun_dir / "skills" / "fullstack-dev.md").write_text(
-        "# 全端開發規範\n\n"
-        "- 前端使用 Vue 3 Composition API + <script setup>\n"
-        "- 後端使用 FastAPI + SQLModel\n"
-        "- API 路由放在 app/api/routes.py\n"
-        "- 新功能要加測試\n",
+    # 愛吉絲 — Aegis AI 助理
+    aegis_dir = get_member_dir("aegis")
+    (aegis_dir / "soul.md").write_text(
+        "# 愛吉絲\n\n"
+        "你是 Aegis 專案管理系統的 AI 助理「愛吉絲」。\n\n"
+        "## 角色\n"
+        "- 名字諧音自 AEGIS（宙斯盾）\n"
+        "- 守護專案、協助團隊的可靠夥伴\n"
+        "- 友善、專業、簡潔\n\n"
+        "## 職責\n"
+        "- 回答用戶問題\n"
+        "- 協助任務管理\n"
+        "- 提供系統狀態資訊\n",
         encoding="utf-8",
     )
 
@@ -67,6 +57,32 @@ def _seed_member_profiles():
         "- 檢查效能瓶頸\n"
         "- 確認測試覆蓋率\n"
         "- 風格一致性\n",
+        encoding="utf-8",
+    )
+
+    # 小筃 — 資深開發者
+    jun_dir = get_member_dir("xiao-jun")
+    (jun_dir / "soul.md").write_text(
+        "# 小筃 — 資深開發者\n\n"
+        "## 身份\n"
+        "你是 Aegis AI 開發團隊的資深全端工程師「小筃」。\n\n"
+        "## 專長\n"
+        "- Vue 3 Composition API + TypeScript\n"
+        "- Python FastAPI 後端\n"
+        "- 系統架構設計\n\n"
+        "## 工作風格\n"
+        "- 先讀現有程式碼再動手\n"
+        "- 小步提交、單一責任\n"
+        "- 繁體中文註解與 commit message\n"
+        "- 不自作主張加功能\n",
+        encoding="utf-8",
+    )
+    (jun_dir / "skills" / "fullstack-dev.md").write_text(
+        "# 全端開發規範\n\n"
+        "- 前端使用 Vue 3 Composition API + <script setup>\n"
+        "- 後端使用 FastAPI + SQLModel\n"
+        "- API 路由放在 app/api/routes.py\n"
+        "- 新功能要加測試\n",
         encoding="utf-8",
     )
 
@@ -98,17 +114,17 @@ def seed_data():
         for t in tag_objs.values():
             session.refresh(t)
 
-        # ── 2. Members (AI 虛擬角色，範例) ──
-        m1 = Member(
-            name="小筃",
-            slug="xiao-jun",
-            avatar="👩‍💻",
-            role="資深開發者",
-            description="擅長全端開發與系統架構，負責 Coding 階段的任務執行。",
+        # ── 2. Members (AI 虛擬角色) ──
+        m_aegis = Member(
+            name="愛吉絲",
+            slug="aegis",
+            avatar="🤖",
+            role="Aegis AI 助理",
+            description="Aegis 系統的預設 AI 助理，負責回答問題與協助任務管理。",
             sprite_index=0,
-            portrait="/api/v1/portraits/example_1.png",
+            portrait="/api/v1/portraits/aegis.png",
         )
-        m2 = Member(
+        m1 = Member(
             name="小良",
             slug="xiao-liang",
             avatar="👨‍💼",
@@ -117,8 +133,18 @@ def seed_data():
             sprite_index=1,
             portrait="/api/v1/portraits/example_2.png",
         )
-        session.add_all([m1, m2])
+        m2 = Member(
+            name="小筃",
+            slug="xiao-jun",
+            avatar="👩‍💻",
+            role="資深開發者",
+            description="擅長全端開發與系統架構，負責 Coding 階段的任務執行。",
+            sprite_index=2,
+            portrait="/api/v1/portraits/example_1.png",
+        )
+        session.add_all([m_aegis, m1, m2])
         session.commit()
+        session.refresh(m_aegis)
         session.refresh(m1)
         session.refresh(m2)
 
@@ -131,6 +157,20 @@ def seed_data():
             value=get_default_office_layout_json()
         )
         session.add(office_layout_setting)
+
+        # ── 2d. 管理員設定 ──
+        # 格式: "platform:user_id,platform:user_id"
+        # 例如: "telegram:123456789,line:Uabcdef"
+        import os
+        admin_ids = os.getenv("AEGIS_ADMIN_USER_IDS", "")
+        if admin_ids:
+            admin_setting = SystemSetting(
+                key="admin_user_ids",
+                value=admin_ids
+            )
+            session.add(admin_setting)
+            print(f"  - Admin user IDs configured: {admin_ids}")
+
         session.commit()
 
         # ── 3. AEGIS 系統專案（不可刪除） ──
@@ -291,7 +331,7 @@ def seed_data():
 
         print(f"Seed completed!")
         print(f"  - {len(tags)} tags")
-        print(f"  - 2 members (with example portraits)")
+        print(f"  - 3 members (愛吉絲 + 小良 + 小筃)")
         print(f"  - 1 system project (AEGIS) with 3 cron jobs")
         print(f"  - 1 demo project with {len(stages)} stages")
         print(f"  - {len(cards_data)} cards")

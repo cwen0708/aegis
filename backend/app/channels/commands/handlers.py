@@ -5,52 +5,95 @@ from typing import Optional
 from sqlmodel import Session, select
 from .parser import ParsedCommand, CommandType, get_help_text
 from ..types import InboundMessage
+from ..bot_user import (
+    get_or_create_bot_user, check_permission, verify_invite_code,
+    create_invite_code, get_user_info, list_users, set_user_level,
+    ban_user, assign_member, switch_member, get_available_members
+)
 from app.database import engine
-from app.models.core import Card, StageList, Project, ChannelBinding
+from app.models.core import Card, StageList, Project, ChannelBinding, BotUser, Member
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-async def handle_command(cmd: ParsedCommand, msg: InboundMessage) -> Optional[str]:
+async def handle_command(cmd: ParsedCommand, msg: InboundMessage, bot_user: Optional[BotUser] = None) -> Optional[str]:
     """
     處理命令並返回回應文字
 
     Args:
         cmd: 解析後的命令
         msg: 原始訊息（用於取得用戶資訊）
+        bot_user: BotUser 實例（由 Router 傳入）
 
     Returns:
         回應文字，或 None（不需要回應）
     """
+    # 取得或建立 BotUser
+    if not bot_user:
+        bot_user = get_or_create_bot_user(msg.platform, msg.user_id, msg.user_name)
+
+    # 檢查用戶是否被停用
+    if not bot_user.is_active:
+        return "⛔ 您的帳號已被停用"
+
+    # 命令到處理器的對應
     handler_map = {
+        # 卡片操作
         CommandType.CARD_CREATE: _handle_card_create,
         CommandType.CARD_LIST: _handle_card_list,
         CommandType.CARD_VIEW: _handle_card_view,
+        # 任務操作
         CommandType.TASK_RUN: _handle_task_run,
         CommandType.TASK_STOP: _handle_task_stop,
         CommandType.TASK_STATUS: _handle_task_status,
+        # 綁定操作
         CommandType.BIND: _handle_bind,
         CommandType.UNBIND: _handle_unbind,
         CommandType.BIND_LIST: _handle_bind_list,
+        # P2: 驗證
+        CommandType.VERIFY: _handle_verify,
+        CommandType.INVITE: _handle_invite,
+        # P2: 用戶管理
+        CommandType.ME: _handle_me,
+        CommandType.USER_LIST: _handle_user_list,
+        CommandType.USER_INFO: _handle_user_info,
+        CommandType.USER_GRANT: _handle_user_grant,
+        CommandType.USER_BAN: _handle_user_ban,
+        CommandType.USER_ASSIGN: _handle_user_assign,
+        # P2: 角色切換
+        CommandType.SWITCH: _handle_switch,
+        # 系統操作
         CommandType.STATUS: _handle_status,
         CommandType.HELP: _handle_help,
     }
 
     handler = handler_map.get(cmd.cmd_type)
-    if handler:
-        try:
-            return await handler(cmd, msg)
-        except Exception as e:
-            logger.error(f"Command handler error: {e}", exc_info=True)
-            return f"❌ 執行失敗: {str(e)[:100]}"
+    if not handler:
+        return "❓ 未知命令，輸入 /help 查看說明"
 
-    return "❓ 未知命令，輸入 /help 查看說明"
+    # 從命令類型取得命令名稱（用於權限檢查）
+    cmd_name = cmd.cmd_type.value.split(".")[0]  # card.create -> card
+
+    # 權限檢查
+    if not check_permission(bot_user, cmd_name):
+        level_names = {0: "未驗證", 1: "訪客", 2: "成員", 3: "管理員"}
+        return (
+            f"🔒 權限不足\n"
+            f"您的身份：{level_names.get(bot_user.level, '未知')}\n"
+            f"請使用 /verify <邀請碼> 驗證身份"
+        )
+
+    try:
+        return await handler(cmd, msg, bot_user)
+    except Exception as e:
+        logger.error(f"Command handler error: {e}", exc_info=True)
+        return f"❌ 執行失敗: {str(e)[:100]}"
 
 
 # ===== 卡片命令 =====
 
-async def _handle_card_create(cmd: ParsedCommand, msg: InboundMessage) -> str:
+async def _handle_card_create(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
     """建立新卡片"""
     title = cmd.args[0] if cmd.args else "新卡片"
 
@@ -95,7 +138,7 @@ async def _handle_card_create(cmd: ParsedCommand, msg: InboundMessage) -> str:
         )
 
 
-async def _handle_card_list(cmd: ParsedCommand, msg: InboundMessage) -> str:
+async def _handle_card_list(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
     """列出最近卡片"""
     with Session(engine) as session:
         cards = session.exec(
@@ -121,7 +164,7 @@ async def _handle_card_list(cmd: ParsedCommand, msg: InboundMessage) -> str:
         return "\n".join(lines)
 
 
-async def _handle_card_view(cmd: ParsedCommand, msg: InboundMessage) -> str:
+async def _handle_card_view(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
     """查看卡片詳情"""
     card_id = int(cmd.args[0])
 
@@ -149,7 +192,7 @@ async def _handle_card_view(cmd: ParsedCommand, msg: InboundMessage) -> str:
 
 # ===== 任務命令 =====
 
-async def _handle_task_run(cmd: ParsedCommand, msg: InboundMessage) -> str:
+async def _handle_task_run(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
     """執行任務"""
     card_id = int(cmd.args[0])
 
@@ -170,7 +213,7 @@ async def _handle_task_run(cmd: ParsedCommand, msg: InboundMessage) -> str:
     return f"🚀 卡片 #{card_id} 已加入執行佇列"
 
 
-async def _handle_task_stop(cmd: ParsedCommand, msg: InboundMessage) -> str:
+async def _handle_task_stop(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
     """中止任務"""
     card_id = int(cmd.args[0])
 
@@ -186,7 +229,7 @@ async def _handle_task_stop(cmd: ParsedCommand, msg: InboundMessage) -> str:
     return f"🛑 已請求中止卡片 #{card_id}"
 
 
-async def _handle_task_status(cmd: ParsedCommand, msg: InboundMessage) -> str:
+async def _handle_task_status(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
     """查看任務狀態"""
     card_id = int(cmd.args[0])
 
@@ -212,7 +255,7 @@ async def _handle_task_status(cmd: ParsedCommand, msg: InboundMessage) -> str:
 
 # ===== 系統命令 =====
 
-async def _handle_status(cmd: ParsedCommand, msg: InboundMessage) -> str:
+async def _handle_status(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
     """系統狀態"""
     import psutil
 
@@ -236,14 +279,14 @@ async def _handle_status(cmd: ParsedCommand, msg: InboundMessage) -> str:
     )
 
 
-async def _handle_help(cmd: ParsedCommand, msg: InboundMessage) -> str:
+async def _handle_help(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
     """顯示說明"""
-    return get_help_text()
+    return get_help_text(bot_user.level)
 
 
 # ===== 綁定命令 =====
 
-async def _handle_bind(cmd: ParsedCommand, msg: InboundMessage) -> str:
+async def _handle_bind(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
     """綁定頻道接收通知"""
     with Session(engine) as session:
         # 檢查是否已綁定
@@ -283,6 +326,7 @@ async def _handle_bind(cmd: ParsedCommand, msg: InboundMessage) -> str:
             user_name=msg.user_name,
             entity_type=entity_type,
             entity_id=entity_id,
+            bot_user_id=bot_user.id,  # P2: 關聯 BotUser
         )
         session.add(binding)
         session.commit()
@@ -297,7 +341,7 @@ async def _handle_bind(cmd: ParsedCommand, msg: InboundMessage) -> str:
         )
 
 
-async def _handle_unbind(cmd: ParsedCommand, msg: InboundMessage) -> str:
+async def _handle_unbind(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
     """解除綁定"""
     with Session(engine) as session:
         if cmd.args:
@@ -326,7 +370,7 @@ async def _handle_unbind(cmd: ParsedCommand, msg: InboundMessage) -> str:
         return f"✅ 已解除綁定 #{binding.id}"
 
 
-async def _handle_bind_list(cmd: ParsedCommand, msg: InboundMessage) -> str:
+async def _handle_bind_list(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
     """列出綁定"""
     with Session(engine) as session:
         bindings = session.exec(
@@ -350,3 +394,230 @@ async def _handle_bind_list(cmd: ParsedCommand, msg: InboundMessage) -> str:
             lines.append(f"#{b.id} [{scope}] → {', '.join(notify)}")
 
         return "\n".join(lines)
+
+
+# ===== P2: 用戶驗證命令 =====
+
+async def _handle_verify(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
+    """驗證邀請碼"""
+    if not cmd.args:
+        return "用法: /verify <邀請碼>"
+
+    code = cmd.args[0]
+    success, message = verify_invite_code(bot_user, code)
+
+    if success:
+        return f"✅ {message}"
+    else:
+        return f"❌ {message}"
+
+
+async def _handle_invite(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
+    """產生邀請碼"""
+    # 解析參數
+    target_level = 1  # 預設訪客
+    note = ""
+
+    if len(cmd.args) >= 1:
+        try:
+            target_level = int(cmd.args[0])
+            if target_level < 1 or target_level > 3:
+                return "❌ 等級必須是 1-3"
+        except ValueError:
+            return "❌ 等級必須是數字"
+
+    if len(cmd.args) >= 2:
+        note = cmd.args[1]
+
+    code = create_invite_code(
+        created_by=bot_user.id,
+        target_level=target_level,
+        note=note,
+    )
+
+    level_names = {1: "訪客", 2: "成員", 3: "管理員"}
+    return (
+        f"🎟️ 邀請碼已產生\n\n"
+        f"*{code}*\n\n"
+        f"權限等級: {level_names.get(target_level, '未知')}\n"
+        f"有效期: 7 天\n"
+        f"使用次數: 1 次\n"
+        f"{f'備註: {note}' if note else ''}"
+    )
+
+
+# ===== P2: 用戶管理命令 =====
+
+async def _handle_me(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
+    """查看自己的資訊"""
+    info = get_user_info(bot_user)
+
+    lines = [
+        f"👤 *{info['username']}*",
+        f"",
+        f"🔑 身份: {info['level_name']}",
+        f"📅 加入: {info['created_at'][:10] if info['created_at'] else '未知'}",
+    ]
+
+    if info['default_member']:
+        lines.append(f"🤖 AI 角色: {info['default_member']['name']}")
+
+    if info['members']:
+        lines.append(f"")
+        lines.append(f"可切換角色:")
+        for m in info['members']:
+            marker = "✓" if m['is_default'] else " "
+            lines.append(f"  {marker} {m['name']} (ID: {m['id']})")
+
+    return "\n".join(lines)
+
+
+async def _handle_user_list(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
+    """列出所有用戶"""
+    users = list_users(limit=20)
+
+    if not users:
+        return "📭 目前沒有用戶"
+
+    lines = ["👥 *用戶列表*\n"]
+    for u in users:
+        status = "🟢" if u['is_active'] else "🔴"
+        lines.append(f"{status} #{u['id']} {u['username']} [{u['level_name']}]")
+
+    return "\n".join(lines)
+
+
+async def _handle_user_info(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
+    """查看用戶詳情"""
+    if not cmd.args:
+        return "用法: /user <ID>"
+
+    try:
+        user_id = int(cmd.args[0])
+    except ValueError:
+        return "❌ ID 必須是數字"
+
+    with Session(engine) as session:
+        target = session.get(BotUser, user_id)
+        if not target:
+            return f"❌ 找不到用戶 #{user_id}"
+
+        info = get_user_info(target)
+
+    lines = [
+        f"👤 *用戶 #{info['id']}*",
+        f"",
+        f"名稱: {info['username']}",
+        f"平台: {info['platform']}",
+        f"身份: {info['level_name']}",
+        f"狀態: {'啟用' if info['is_active'] else '停用'}",
+        f"加入: {info['created_at'][:10] if info['created_at'] else '未知'}",
+        f"最後活躍: {info['last_active_at'][:10] if info['last_active_at'] else '未知'}",
+    ]
+
+    if info['default_member']:
+        lines.append(f"AI 角色: {info['default_member']['name']}")
+
+    return "\n".join(lines)
+
+
+async def _handle_user_grant(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
+    """設定用戶權限"""
+    if len(cmd.args) < 2:
+        return "用法: /grant <用戶ID> <等級(0-3)>"
+
+    try:
+        user_id = int(cmd.args[0])
+        level = int(cmd.args[1])
+    except ValueError:
+        return "❌ ID 和等級必須是數字"
+
+    if level < 0 or level > 3:
+        return "❌ 等級必須是 0-3"
+
+    if set_user_level(user_id, level):
+        level_names = {0: "未驗證", 1: "訪客", 2: "成員", 3: "管理員"}
+        return f"✅ 已將用戶 #{user_id} 設為 {level_names.get(level, '未知')}"
+    else:
+        return f"❌ 找不到用戶 #{user_id}"
+
+
+async def _handle_user_ban(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
+    """停用用戶"""
+    if not cmd.args:
+        return "用法: /ban <用戶ID>"
+
+    try:
+        user_id = int(cmd.args[0])
+    except ValueError:
+        return "❌ ID 必須是數字"
+
+    if user_id == bot_user.id:
+        return "❌ 不能停用自己"
+
+    if ban_user(user_id):
+        return f"⛔ 已停用用戶 #{user_id}"
+    else:
+        return f"❌ 找不到用戶 #{user_id}"
+
+
+async def _handle_user_assign(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
+    """指派 Member 給用戶"""
+    if len(cmd.args) < 2:
+        return "用法: /assign <用戶ID> <角色ID>"
+
+    try:
+        user_id = int(cmd.args[0])
+        member_id = int(cmd.args[1])
+    except ValueError:
+        return "❌ ID 必須是數字"
+
+    with Session(engine) as session:
+        member = session.get(Member, member_id)
+        if not member:
+            return f"❌ 找不到角色 #{member_id}"
+
+    if assign_member(user_id, member_id):
+        return f"✅ 已將角色 {member.name} 指派給用戶 #{user_id}"
+    else:
+        return f"❌ 找不到用戶 #{user_id}"
+
+
+# ===== P2: 角色切換命令 =====
+
+async def _handle_switch(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
+    """切換 AI 角色"""
+    if not cmd.args:
+        # 列出可用角色
+        members = get_available_members(bot_user)
+        if not members:
+            return "📭 您沒有可用的 AI 角色"
+
+        lines = ["🤖 *可切換角色*\n"]
+        for m in members:
+            marker = "✓" if m['is_default'] else " "
+            lines.append(f"{marker} {m['avatar']} {m['name']} → /switch {m['id']}")
+
+        return "\n".join(lines)
+
+    # 嘗試切換
+    arg = cmd.args[0]
+
+    # 先嘗試當作 ID
+    try:
+        member_id = int(arg)
+    except ValueError:
+        # 當作名稱搜尋
+        with Session(engine) as session:
+            member = session.exec(
+                select(Member).where(Member.name.contains(arg))
+            ).first()
+            if not member:
+                return f"❌ 找不到角色: {arg}"
+            member_id = member.id
+
+    success, message = switch_member(bot_user, member_id)
+    if success:
+        return f"✅ {message}"
+    else:
+        return f"❌ {message}"

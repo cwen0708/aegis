@@ -49,19 +49,21 @@ class ChannelBase(ABC):
         pass
 
     @abstractmethod
-    async def send(self, msg: OutboundMessage) -> bool:
+    async def send(self, msg: OutboundMessage) -> str | bool:
         """
         發送訊息到平台
 
         Args:
             msg: 統一格式的外發訊息
+                 - 若 edit_message_id 有值，則編輯該訊息
 
         Returns:
-            是否發送成功
+            成功時返回 message_id (str)，失敗返回 False
 
         實作須：
         - 將 OutboundMessage 翻譯為平台原生格式
         - 處理發送失敗（記錄日誌，不拋例外）
+        - 支援 edit_message_id 欄位（編輯訊息）
         """
         pass
 

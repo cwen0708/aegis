@@ -24,6 +24,21 @@ class CommandType(str, Enum):
     UNBIND = "unbind"
     BIND_LIST = "bind.list"
 
+    # P2: 用戶驗證
+    VERIFY = "verify"
+    INVITE = "invite"
+
+    # P2: 用戶管理
+    ME = "me"
+    USER_LIST = "user.list"
+    USER_INFO = "user.info"
+    USER_GRANT = "user.grant"
+    USER_BAN = "user.ban"
+    USER_ASSIGN = "user.assign"
+
+    # P2: 角色切換
+    SWITCH = "switch"
+
     # 系統操作
     STATUS = "status"
     HELP = "help"
@@ -60,6 +75,28 @@ COMMAND_PATTERNS: list[tuple[str, CommandType]] = [
     (r"^/unbind$", CommandType.UNBIND),
     (r"^/unbind\s+(\d+)$", CommandType.UNBIND),      # /unbind <binding_id>
     (r"^/bindings?$", CommandType.BIND_LIST),
+
+    # P2: 用戶驗證
+    (r"^/verify\s+(\S+)$", CommandType.VERIFY),      # /verify ABC123
+    (r"^/invite$", CommandType.INVITE),              # /invite (產生預設邀請碼)
+    (r"^/invite\s+(\d+)(?:\s+(.+))?$", CommandType.INVITE),  # /invite 2 給客戶A
+
+    # P2: 用戶管理
+    (r"^/me$", CommandType.ME),
+    (r"^/user\s+list$", CommandType.USER_LIST),
+    (r"^/users?$", CommandType.USER_LIST),           # /user 或 /users
+    (r"^/user\s+info\s+(\d+)$", CommandType.USER_INFO),
+    (r"^/user\s+(\d+)$", CommandType.USER_INFO),     # /user 123
+    (r"^/user\s+grant\s+(\d+)\s+(\d+)$", CommandType.USER_GRANT),  # /user grant 1 2
+    (r"^/grant\s+(\d+)\s+(\d+)$", CommandType.USER_GRANT),         # /grant 1 2
+    (r"^/user\s+ban\s+(\d+)$", CommandType.USER_BAN),
+    (r"^/ban\s+(\d+)$", CommandType.USER_BAN),       # /ban 123
+    (r"^/user\s+assign\s+(\d+)\s+(\d+)$", CommandType.USER_ASSIGN),  # /user assign 1 2
+    (r"^/assign\s+(\d+)\s+(\d+)$", CommandType.USER_ASSIGN),         # /assign 1 2
+
+    # P2: 角色切換
+    (r"^/switch\s+(\d+)$", CommandType.SWITCH),      # /switch 2 (member_id)
+    (r"^/switch\s+(.+)$", CommandType.SWITCH),       # /switch 小美 (member name)
 
     # 系統命令
     (r"^/status$", CommandType.STATUS),
@@ -106,26 +143,56 @@ def parse_command(text: str) -> Optional[ParsedCommand]:
     return None
 
 
-def get_help_text() -> str:
-    """取得說明文字"""
-    return """*Aegis Bot 命令*
+def get_help_text(level: int = 0) -> str:
+    """
+    取得說明文字（根據權限等級）
 
-📋 *卡片*
-/card create <標題> — 建立新卡片
-/card list — 列出最近卡片
-/card <ID> — 查看卡片詳情
+    Args:
+        level: 用戶權限等級 (0-3)
+    """
+    lines = ["*Aegis Bot 命令*", ""]
 
-⚡ *任務*
-/run <ID> — 執行卡片任務
-/stop <ID> — 中止任務
-/task <ID> — 查看任務狀態
+    # L0: 所有人可用
+    lines.append("🔑 *驗證*")
+    lines.append("/verify <邀請碼> — 驗證身份")
+    lines.append("")
 
-🔗 *綁定*
-/bind — 綁定此頻道接收通知
-/bind project <ID> — 綁定特定專案
-/unbind — 解除此頻道綁定
-/bindings — 查看綁定列表
+    if level >= 1:
+        lines.append("👤 *個人*")
+        lines.append("/me — 查看我的資訊")
+        lines.append("")
 
-🔧 *系統*
-/status — 系統狀態
-/help — 顯示此說明"""
+        lines.append("📋 *卡片*")
+        lines.append("/card list — 列出最近卡片")
+        lines.append("/card <ID> — 查看卡片詳情")
+        lines.append("")
+
+        lines.append("🔗 *綁定*")
+        lines.append("/bind — 綁定此頻道接收通知")
+        lines.append("/unbind — 解除此頻道綁定")
+        lines.append("/bindings — 查看綁定列表")
+        lines.append("")
+
+    if level >= 2:
+        lines.append("⚡ *任務*")
+        lines.append("/run <ID> — 執行卡片任務")
+        lines.append("/stop <ID> — 中止任務")
+        lines.append("/card create <標題> — 建立新卡片")
+        lines.append("/switch <角色> — 切換 AI 角色")
+        lines.append("")
+
+    if level >= 3:
+        lines.append("👑 *管理員*")
+        lines.append("/invite [等級] [備註] — 產生邀請碼")
+        lines.append("/users — 列出所有用戶")
+        lines.append("/user <ID> — 查看用戶詳情")
+        lines.append("/grant <用戶ID> <等級> — 設定權限")
+        lines.append("/ban <用戶ID> — 停用用戶")
+        lines.append("/assign <用戶ID> <角色ID> — 指派角色")
+        lines.append("")
+
+    lines.append("🔧 *系統*")
+    lines.append("/status — 系統狀態")
+    lines.append("/help — 顯示此說明")
+
+    return "\n".join(lines)

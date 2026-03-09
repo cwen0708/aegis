@@ -1,6 +1,7 @@
 from typing import Optional, List
 from datetime import datetime, timezone
 from sqlmodel import SQLModel, Field, Relationship
+from sqlalchemy import UniqueConstraint
 
 # ==========================================
 # 關聯表 (Link Tables)
@@ -168,5 +169,125 @@ class ChannelBinding(SQLModel, table=True):
     notify_on_complete: bool = Field(default=True)   # 任務完成時通知
     notify_on_fail: bool = Field(default=True)       # 任務失敗時通知
     notify_on_start: bool = Field(default=False)     # 任務開始時通知
+
+    # P2: 關聯到 BotUser（可選，向後相容）
+    bot_user_id: Optional[int] = Field(default=None, foreign_key="botuser.id")
+
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# ==========================================
+# P2: Bot 用戶與權限系統
+# ==========================================
+class BotUser(SQLModel, table=True):
+    """Bot 用戶（真人）"""
+    __table_args__ = (
+        UniqueConstraint("platform", "platform_user_id", name="uq_botuser_platform_user"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    # 平台身份
+    platform: str = Field(index=True)       # telegram, line, discord...
+    platform_user_id: str = Field(index=True)
+    username: Optional[str] = None          # 顯示名稱
+
+    # 權限
+    level: int = Field(default=0)           # 0=未驗證, 1=訪客, 2=成員, 3=管理員
+    is_active: bool = Field(default=True)
+
+    # 綁定（預設 Member，用於對話）
+    default_member_id: Optional[int] = Field(default=None, foreign_key="member.id")
+
+    # 時間
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_active_at: Optional[datetime] = None
+
+    # 安全性
+    failed_verify_count: int = Field(default=0)      # 驗證失敗次數
+    last_failed_at: Optional[datetime] = None        # 最後失敗時間
+    locked_until: Optional[datetime] = None          # 鎖定到期時間
+
+
+class BotUserPermission(SQLModel, table=True):
+    """細粒度權限控制"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    bot_user_id: int = Field(foreign_key="botuser.id", index=True)
+
+    # 權限類型
+    permission: str         # "view", "execute", "create", "admin"
+
+    # 資源範圍（可選）
+    resource_type: Optional[str] = None   # "project", "member"
+    resource_id: Optional[int] = None     # 具體 ID，null = 全部
+
+
+class BotUserMember(SQLModel, table=True):
+    """用戶與 Member 的多對多關聯"""
+    __table_args__ = (
+        UniqueConstraint("bot_user_id", "member_id", name="uq_botusermember"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    bot_user_id: int = Field(foreign_key="botuser.id", index=True)
+    member_id: int = Field(foreign_key="member.id", index=True)
+
+    # 關聯屬性
+    is_default: bool = Field(default=False)     # 是否為預設 Member
+    can_switch: bool = Field(default=True)      # 是否可切換到此 Member
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class InviteCode(SQLModel, table=True):
+    """邀請碼"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    code: str = Field(index=True, unique=True)  # "CUSTA2024"
+
+    # 配置
+    target_level: int = Field(default=1)        # 驗證後的權限等級
+    target_member_id: Optional[int] = Field(default=None, foreign_key="member.id")
+    allowed_projects: Optional[str] = None      # JSON: [1, 2, 3]
+
+    # 使用限制
+    max_uses: int = Field(default=1)
+    used_count: int = Field(default=0)
+    expires_at: Optional[datetime] = None
+
+    # 元資料
+    created_by: Optional[int] = Field(default=None, foreign_key="botuser.id")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    note: str = ""          # "給客戶A用"
+
+
+class ChatSession(SQLModel, table=True):
+    """對話 Session（User × Member × Channel）"""
+    __table_args__ = (
+        UniqueConstraint("bot_user_id", "member_id", "chat_id", name="uq_chatsession"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    bot_user_id: int = Field(foreign_key="botuser.id", index=True)
+    member_id: int = Field(foreign_key="member.id", index=True)
+    chat_id: str = Field(index=True)        # 對話頻道 ID
+
+    # Token 統計（用於限流）
+    total_input_tokens: int = Field(default=0)
+    total_output_tokens: int = Field(default=0)
+    message_count: int = Field(default=0)
+
+    # 時間
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_message_at: Optional[datetime] = None
+
+
+class ChatMessage(SQLModel, table=True):
+    """對話訊息（獨立儲存，支援高效查詢）"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    session_id: int = Field(foreign_key="chatsession.id", index=True)
+
+    role: str               # "user" | "assistant"
+    content: str            # 訊息內容
+    input_tokens: int = Field(default=0)
+    output_tokens: int = Field(default=0)
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

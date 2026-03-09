@@ -3,12 +3,17 @@
 """
 import asyncio
 from .bus import message_bus
-from .types import InboundMessage, OutboundMessage, MessageType
+from .types import InboundMessage, OutboundMessage, MessageType, ParseMode
 from .commands.parser import parse_command
 from .commands.handlers import handle_command
+from .bot_user import get_or_create_bot_user
+from .chat_handler import handle_chat
 import logging
 
 logger = logging.getLogger(__name__)
+
+# 思考中提示訊息
+THINKING_MESSAGE = "🤔 思考中..."
 
 
 class MessageRouter:
@@ -59,27 +64,67 @@ class MessageRouter:
         """處理單一訊息"""
         logger.debug(f"[Router] Processing: [{msg.platform}] {msg.text[:50]}")
 
+        # P2: 取得或建立 BotUser
+        bot_user = get_or_create_bot_user(msg.platform, msg.user_id, msg.user_name)
+
         # 解析命令
         cmd = parse_command(msg.text)
 
         response_text: str | None = None
 
         if cmd:
-            # 執行命令
-            response_text = await handle_command(cmd, msg)
+            # 執行命令（帶入 bot_user 做權限檢查）
+            response_text = await handle_command(cmd, msg, bot_user)
+            # 命令回應走 queue
+            if response_text:
+                await message_bus.publish_outbound(OutboundMessage(
+                    chat_id=msg.chat_id,
+                    platform=msg.platform,
+                    text=response_text,
+                    reply_to_id=msg.id,
+                ))
         else:
-            # 非命令訊息
-            # 目前不處理，未來可接 AI 對話
-            pass
+            # P2: 非命令訊息 → AI 對話（先回再更新）
+            await self._handle_ai_chat(msg, bot_user)
 
-        # 產生回應
-        if response_text:
-            await message_bus.publish_outbound(OutboundMessage(
-                chat_id=msg.chat_id,
-                platform=msg.platform,
-                text=response_text,
-                reply_to_id=msg.id,
-            ))
+    async def _handle_ai_chat(self, msg: InboundMessage, bot_user):
+        """
+        處理 AI 對話（先發「思考中...」再更新）
+        """
+        from .manager import channel_manager
+
+        channel = channel_manager.get_channel(msg.platform)
+        if not channel:
+            logger.warning(f"[Router] Channel not found: {msg.platform}")
+            return
+
+        # 1. 先發送「思考中...」
+        placeholder_msg = OutboundMessage(
+            chat_id=msg.chat_id,
+            platform=msg.platform,
+            text=THINKING_MESSAGE,
+            parse_mode=ParseMode.PLAIN,
+        )
+        message_id = await channel.send(placeholder_msg)
+
+        if not message_id:
+            logger.warning("[Router] Failed to send placeholder")
+            return
+
+        # 2. 執行 AI 對話
+        response_text = await handle_chat(msg, bot_user)
+
+        if not response_text:
+            response_text = "（無回應）"
+
+        # 3. 編輯訊息為實際回應
+        edit_msg = OutboundMessage(
+            chat_id=msg.chat_id,
+            platform=msg.platform,
+            text=response_text,
+            edit_message_id=str(message_id),
+        )
+        await channel.send(edit_msg)
 
 
 # 全域 Router 實例

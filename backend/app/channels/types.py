@@ -68,6 +68,9 @@ class OutboundMessage:
     task_id: Optional[str] = None
     card_id: Optional[int] = None
 
+    # 用於編輯訊息（先回再更新）
+    edit_message_id: Optional[str] = None
+
 
 @dataclass
 class ChannelStatus:
