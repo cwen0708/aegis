@@ -1,18 +1,24 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { FolderKanban, Plus, Edit3, Trash2, FolderOpen, Lock, Loader2 } from 'lucide-vue-next'
+import { FolderKanban, Plus, Edit3, Trash2, FolderOpen, Lock, Loader2, UserCircle } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 import ConfirmDialog from '../../components/ConfirmDialog.vue'
 
 const store = useAegisStore()
 const API = import.meta.env.DEV ? '' : 'http://localhost:8899'
 
+interface MemberOption {
+  id: number
+  name: string
+  avatar: string
+  provider: string
+}
+
 interface ProjectInfo {
   id: number
   name: string
   path: string
-  deploy_type: string
-  default_provider: string
+  default_member_id: number | null
   is_active: boolean
   is_system: boolean
   created_at: string
@@ -21,6 +27,7 @@ interface ProjectInfo {
 const loading = ref(true)
 const saving = ref(false)
 const projects = ref<ProjectInfo[]>([])
+const members = ref<MemberOption[]>([])
 
 // Dialog
 const showDialog = ref(false)
@@ -28,25 +35,12 @@ const editingProject = ref<ProjectInfo | null>(null)
 const form = ref({
   name: '',
   path: '',
-  deploy_type: 'none',
-  default_provider: 'auto',
+  default_member_id: null as number | null,
 })
 
 // Delete confirm
 const confirmDelete = ref(false)
 const deleteTarget = ref<ProjectInfo | null>(null)
-
-const providerOptions = [
-  { value: 'auto', label: '自動選擇' },
-  { value: 'claude', label: 'Claude' },
-  { value: 'gemini', label: 'Gemini' },
-]
-
-const deployOptions = [
-  { value: 'none', label: '無' },
-  { value: 'local', label: '本地' },
-  { value: 'gcp', label: 'GCP' },
-]
 
 async function fetchProjects() {
   loading.value = true
@@ -60,7 +54,17 @@ async function fetchProjects() {
   loading.value = false
 }
 
-onMounted(fetchProjects)
+async function fetchMembers() {
+  try {
+    const res = await fetch(`${API}/api/v1/members`)
+    if (res.ok) members.value = await res.json()
+  } catch {}
+}
+
+onMounted(() => {
+  fetchProjects()
+  fetchMembers()
+})
 
 function openDialog(project?: ProjectInfo) {
   if (project) {
@@ -68,12 +72,11 @@ function openDialog(project?: ProjectInfo) {
     form.value = {
       name: project.name,
       path: project.path,
-      deploy_type: project.deploy_type || 'none',
-      default_provider: project.default_provider || 'auto',
+      default_member_id: project.default_member_id,
     }
   } else {
     editingProject.value = null
-    form.value = { name: '', path: '', deploy_type: 'none', default_provider: 'auto' }
+    form.value = { name: '', path: '', default_member_id: null }
   }
   showDialog.value = true
 }
@@ -123,6 +126,7 @@ async function doDelete() {
     store.addToast('專案已刪除', 'success')
     confirmDelete.value = false
     deleteTarget.value = null
+    showDialog.value = false  // 關閉編輯對話框
     await fetchProjects()
   } catch (e: any) {
     store.addToast(e.message, 'error')
@@ -143,12 +147,16 @@ async function toggleActive(project: ProjectInfo) {
   }
 }
 
-function providerColor(provider: string) {
-  switch (provider) {
-    case 'claude': return 'bg-orange-500/20 text-orange-400 border-orange-500/30'
-    case 'gemini': return 'bg-blue-500/20 text-blue-400 border-blue-500/30'
-    default: return 'bg-slate-500/20 text-slate-400 border-slate-500/30'
-  }
+function getMemberName(memberId: number | null): string {
+  if (!memberId) return ''
+  const m = members.value.find(m => m.id === memberId)
+  return m ? m.name : ''
+}
+
+function getMemberAvatar(memberId: number | null): string {
+  if (!memberId) return ''
+  const m = members.value.find(m => m.id === memberId)
+  return m?.avatar || ''
 }
 
 function formatDate(dateStr: string) {
@@ -192,12 +200,11 @@ function formatDate(dateStr: string) {
               <span class="font-medium text-slate-200">{{ project.name }}</span>
               <Lock v-if="project.is_system" class="w-4 h-4 text-slate-500" title="系統專案" />
               <span
-                :class="[
-                  'px-2 py-0.5 text-xs rounded border',
-                  providerColor(project.default_provider)
-                ]"
+                v-if="project.default_member_id"
+                class="flex items-center gap-1 px-2 py-0.5 text-xs rounded border bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
               >
-                {{ project.default_provider }}
+                <span>{{ getMemberAvatar(project.default_member_id) }}</span>
+                {{ getMemberName(project.default_member_id) }}
               </span>
               <span
                 v-if="!project.is_active"
@@ -236,14 +243,6 @@ function formatDate(dateStr: string) {
             >
               <Edit3 class="w-4 h-4" />
             </button>
-            <button
-              v-if="!project.is_system"
-              @click="requestDelete(project)"
-              class="p-2 text-red-400 hover:text-red-300 hover:bg-red-500/20 rounded-lg transition"
-              title="刪除"
-            >
-              <Trash2 class="w-4 h-4" />
-            </button>
           </div>
         </div>
       </div>
@@ -273,7 +272,7 @@ function formatDate(dateStr: string) {
               <input
                 v-model="form.name"
                 type="text"
-                class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg focus:outline-none focus:border-emerald-500"
+                class="w-full px-3 py-2 bg-slate-900 text-slate-200 border border-slate-600 rounded-lg focus:outline-none focus:border-emerald-500 placeholder-slate-500"
                 placeholder="如：Infinite Novel"
                 :disabled="editingProject?.is_system"
               />
@@ -285,7 +284,7 @@ function formatDate(dateStr: string) {
               <input
                 v-model="form.path"
                 type="text"
-                class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg focus:outline-none focus:border-emerald-500"
+                class="w-full px-3 py-2 bg-slate-900 text-slate-200 border border-slate-600 rounded-lg focus:outline-none focus:border-emerald-500 placeholder-slate-500"
                 placeholder="如：G:\Projects\infinite-novel"
               />
               <p class="text-xs text-slate-500 mt-1">
@@ -293,49 +292,55 @@ function formatDate(dateStr: string) {
               </p>
             </div>
 
-            <!-- Provider -->
+            <!-- Default Member -->
             <div>
-              <label class="block text-sm text-slate-400 mb-1">預設 AI Provider</label>
+              <label class="block text-sm text-slate-400 mb-1">預設成員</label>
               <select
-                v-model="form.default_provider"
-                class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg focus:outline-none focus:border-emerald-500"
+                v-model="form.default_member_id"
+                class="w-full px-3 py-2 bg-slate-900 text-slate-200 border border-slate-600 rounded-lg focus:outline-none focus:border-emerald-500"
               >
-                <option v-for="opt in providerOptions" :key="opt.value" :value="opt.value">
-                  {{ opt.label }}
+                <option :value="null">無（使用全域設定）</option>
+                <option v-for="m in members" :key="m.id" :value="m.id">
+                  {{ m.avatar }} {{ m.name }} ({{ m.provider }})
                 </option>
               </select>
+              <p class="text-xs text-slate-500 mt-1">
+                列表沒有指派成員時使用
+              </p>
             </div>
 
-            <!-- Deploy Type -->
-            <div>
-              <label class="block text-sm text-slate-400 mb-1">部署類型</label>
-              <select
-                v-model="form.deploy_type"
-                class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg focus:outline-none focus:border-emerald-500"
-              >
-                <option v-for="opt in deployOptions" :key="opt.value" :value="opt.value">
-                  {{ opt.label }}
-                </option>
-              </select>
-            </div>
           </div>
 
           <!-- Actions -->
-          <div class="flex justify-end gap-3 pt-2">
-            <button
-              @click="showDialog = false"
-              class="px-4 py-2 text-slate-400 hover:text-slate-200 transition"
-            >
-              取消
-            </button>
-            <button
-              @click="saveProject"
-              :disabled="saving || !form.name.trim() || !form.path.trim()"
-              class="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition"
-            >
-              <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
-              {{ editingProject ? '儲存' : '建立' }}
-            </button>
+          <div class="flex justify-between pt-2">
+            <!-- Left: Delete (only when editing non-system project) -->
+            <div>
+              <button
+                v-if="editingProject && !editingProject.is_system"
+                @click="requestDelete(editingProject)"
+                class="flex items-center gap-2 px-4 py-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition"
+              >
+                <Trash2 class="w-4 h-4" />
+                刪除專案
+              </button>
+            </div>
+            <!-- Right: Cancel & Save -->
+            <div class="flex gap-3">
+              <button
+                @click="showDialog = false"
+                class="px-4 py-2 text-slate-400 hover:text-slate-200 transition"
+              >
+                取消
+              </button>
+              <button
+                @click="saveProject"
+                :disabled="saving || !form.name.trim() || !form.path.trim()"
+                class="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition"
+              >
+                <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
+                {{ editingProject ? '儲存' : '建立' }}
+              </button>
+            </div>
           </div>
         </div>
       </div>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, inject, onMounted, onUnmounted, watch, computed, type Ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Plus, Play, Pause, Square, Clock, Trash2, Zap, MoreVertical, ChevronDown, FolderOpen, Eye, UserCircle, Settings2, Bot, Hand, CheckCircle, XCircle, Archive, RotateCcw, Loader2 } from 'lucide-vue-next'
+import { Plus, Play, Pause, Square, Clock, Trash2, Zap, MoreVertical, ChevronDown, ChevronLeft, ChevronRight, FolderOpen, Eye, UserCircle, Settings2, Bot, Hand, CheckCircle, XCircle, Archive, RotateCcw, Loader2 } from 'lucide-vue-next'
 import draggable from 'vuedraggable'
 import { useAegisStore } from '../stores/aegis'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -323,6 +323,7 @@ function switchToProjectsSidebar() {
 const showStageConfigDialog = ref(false)
 const configuringStage = ref<any>(null)
 const stageConfigForm = ref({
+  name: '',
   stage_type: 'auto_process',
   is_ai_stage: true,
 })
@@ -337,6 +338,7 @@ const stageTypeOptions = [
 function openStageConfigDialog(stage: any) {
   configuringStage.value = stage
   stageConfigForm.value = {
+    name: stage.name || '',
     stage_type: stage.stage_type || 'auto_process',
     is_ai_stage: stage.is_ai_stage ?? true,
   }
@@ -362,6 +364,40 @@ async function saveStageConfig() {
 
 function getStageTypeIcon(stageType: string) {
   return stageTypeOptions.find(o => o.value === stageType)?.icon || Bot
+}
+
+// 階段排序
+async function moveStage(direction: 'up' | 'down') {
+  if (!configuringStage.value) return
+  const stages = [...boardData.value]
+  const idx = stages.findIndex(s => s.id === configuringStage.value.id)
+  if (idx < 0) return
+  const newIdx = direction === 'up' ? idx - 1 : idx + 1
+  if (newIdx < 0 || newIdx >= stages.length) return
+
+  // Swap positions
+  ;[stages[idx], stages[newIdx]] = [stages[newIdx], stages[idx]]
+  const order = stages.map(s => s.id)
+
+  try {
+    const res = await fetch('/api/v1/lists/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order }),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    await fetchBoard()
+    store.addToast('順序已更新', 'success')
+  } catch (e: any) {
+    store.addToast(e.message || '排序失敗', 'error')
+  }
+}
+
+function canMoveStage(direction: 'up' | 'down'): boolean {
+  if (!configuringStage.value) return false
+  const idx = boardData.value.findIndex(s => s.id === configuringStage.value.id)
+  if (direction === 'up') return idx > 0
+  return idx < boardData.value.length - 1
 }
 
 // 封存面板
@@ -799,7 +835,40 @@ async function unarchiveCard(cardId: number) {
   <Teleport to="body">
     <div v-if="showStageConfigDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" @click.self="showStageConfigDialog = false">
       <div class="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-sm p-5 space-y-4">
-        <h3 class="text-sm font-bold text-slate-200">階段配置 — {{ configuringStage?.name }}</h3>
+        <div class="flex items-center justify-between">
+          <h3 class="text-sm font-bold text-slate-200">階段配置</h3>
+          <div class="flex items-center gap-1">
+            <button
+              @click="moveStage('up')"
+              :disabled="!canMoveStage('up')"
+              class="p-1.5 rounded-lg transition-colors"
+              :class="canMoveStage('up') ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700' : 'text-slate-600 cursor-not-allowed'"
+              title="往前移"
+            >
+              <ChevronLeft class="w-4 h-4" />
+            </button>
+            <button
+              @click="moveStage('down')"
+              :disabled="!canMoveStage('down')"
+              class="p-1.5 rounded-lg transition-colors"
+              :class="canMoveStage('down') ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700' : 'text-slate-600 cursor-not-allowed'"
+              title="往後移"
+            >
+              <ChevronRight class="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        <!-- Name -->
+        <div class="space-y-1.5">
+          <label class="block text-xs font-medium text-slate-400">階段名稱</label>
+          <input
+            v-model="stageConfigForm.name"
+            type="text"
+            class="w-full px-3 py-2 bg-slate-900 text-slate-200 border border-slate-600 rounded-lg focus:outline-none focus:border-emerald-500 text-sm"
+            placeholder="階段名稱"
+          />
+        </div>
 
         <!-- Stage Type -->
         <div class="space-y-2">

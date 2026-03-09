@@ -84,7 +84,7 @@ async def _process_pending_cards():
                 # 決定 Phase、Member 和 Provider（三層路由）
                 # phase 用於向後相容，從列表名稱推導
                 phase = list_name.upper() if list_name else "DEVELOPING"
-                member_id, forced_provider = _resolve_member(stage_list, phase, session)
+                member_id, forced_provider = _resolve_member(stage_list, project, phase, session)
 
                 # 成員忙碌檢查：先檢查再標記，避免不必要的 pending→running→pending 狀態翻轉
                 if member_id and member_id in busy_members:
@@ -142,8 +142,8 @@ def _get_primary_provider(member_id: int, session) -> str | None:
             return account.provider
     return None
 
-def _resolve_member(stage_list, phase: str, session) -> tuple[int | None, str | None]:
-    """三層路由：list 指派 → 全域預設 → None（由 runner PHASE_ROUTING 決定）
+def _resolve_member(stage_list, project, phase: str, session) -> tuple[int | None, str | None]:
+    """三層路由：列表指派 → 專案預設 → 全域預設
     回傳 (member_id, provider) tuple"""
     from app.models.core import Member
 
@@ -152,22 +152,30 @@ def _resolve_member(stage_list, phase: str, session) -> tuple[int | None, str | 
         member = session.get(Member, stage_list.member_id)
         if member:
             provider = _get_primary_provider(member.id, session)
-            logger.info(f"[Router] List '{stage_list.name}' assigned to {member.name} ({provider})")
+            logger.info(f"[Router] List '{stage_list.name}' assigned → {member.name} ({provider})")
             return member.id, provider
 
-    # 2. 全域預設 (SystemSetting)
+    # 2. 專案預設成員
+    if project and project.default_member_id:
+        member = session.get(Member, project.default_member_id)
+        if member:
+            provider = _get_primary_provider(member.id, session)
+            logger.info(f"[Router] Project '{project.name}' default → {member.name} ({provider})")
+            return member.id, provider
+
+    # 3. 全域預設 (SystemSetting)
     setting = session.get(SystemSetting, f"phase_routing.{phase}")
     if setting and setting.value:
         try:
             member = session.get(Member, int(setting.value))
             if member:
                 provider = _get_primary_provider(member.id, session)
-                logger.info(f"[Router] Phase '{phase}' default → {member.name} ({provider})")
+                logger.info(f"[Router] Phase '{phase}' global default → {member.name} ({provider})")
                 return member.id, provider
         except (ValueError, TypeError):
             pass
 
-    # 3. 由 runner.py PHASE_ROUTING 硬編碼決定
+    # 無路由，使用第一個可用成員
     return None, None
 
 
