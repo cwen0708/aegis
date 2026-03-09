@@ -1487,6 +1487,43 @@ def get_member_history(member_id: int, limit: int = 10, session: Session = Depen
 
 
 # ==========================================
+# Member Skills
+# ==========================================
+@router.get("/members/{member_id}/skills")
+def list_member_skills(member_id: int, session: Session = Depends(get_session)):
+    """列出成員的所有技能"""
+    from app.core.member_profile import list_skills
+
+    member = session.get(Member, member_id)
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    if not member.slug:
+        return []  # 沒有 slug 的成員沒有技能檔案
+
+    return list_skills(member.slug)
+
+
+@router.get("/members/{member_id}/skills/{skill_name}")
+def get_member_skill(member_id: int, skill_name: str, session: Session = Depends(get_session)):
+    """取得成員的特定技能內容"""
+    from app.core.member_profile import get_skill_content
+
+    member = session.get(Member, member_id)
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    if not member.slug:
+        raise HTTPException(status_code=404, detail="Member has no profile")
+
+    content = get_skill_content(member.slug, skill_name)
+    if not content:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    return {"name": skill_name, "content": content}
+
+
+# ==========================================
 # Member Portrait Upload
 # ==========================================
 @router.post("/members/{member_id}/portrait")

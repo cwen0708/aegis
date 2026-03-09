@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
-import { Plus, UserPlus, Save, Edit3, Upload, Sparkles, Image } from 'lucide-vue-next'
+import { Plus, UserPlus, Save, Edit3, Upload, Sparkles, Image, BookOpen, ChevronLeft } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 
@@ -70,6 +70,19 @@ const editBindForm = ref({ model: '', priority: 0 })
 
 const memberForm = ref({ name: '', avatar: '🤖', role: '', description: '', sprite_index: 0, portrait: '' })
 const bindForm = ref({ account_id: 0, priority: 0, model: '' })
+
+// Skills
+interface SkillInfo {
+  name: string
+  title: string
+}
+const showSkillsDialog = ref(false)
+const showSkillDetailDialog = ref(false)
+const skillsMember = ref<MemberInfo | null>(null)
+const skillsList = ref<SkillInfo[]>([])
+const loadingSkills = ref(false)
+const selectedSkill = ref<{ name: string; content: string } | null>(null)
+const loadingSkillDetail = ref(false)
 
 // 綁定時根據選的帳號 provider 提供 model 選項
 const bindAccountProvider = computed(() => {
@@ -336,6 +349,45 @@ function providerBadgeClass(provider: string) {
     ? 'bg-orange-500/10 text-orange-400 border-orange-500/20'
     : 'bg-blue-500/10 text-blue-400 border-blue-500/20'
 }
+
+// Skills functions
+async function openSkillsDialog(member: MemberInfo) {
+  skillsMember.value = member
+  skillsList.value = []
+  loadingSkills.value = true
+  showSkillsDialog.value = true
+
+  try {
+    const res = await fetch(`${API}/api/v1/members/${member.id}/skills`)
+    if (!res.ok) throw new Error('載入失敗')
+    skillsList.value = await res.json()
+  } catch (e) {
+    store.addToast('技能載入失敗', 'error')
+  }
+  loadingSkills.value = false
+}
+
+async function openSkillDetail(skill: SkillInfo) {
+  selectedSkill.value = null
+  loadingSkillDetail.value = true
+  showSkillDetailDialog.value = true
+
+  try {
+    const res = await fetch(`${API}/api/v1/members/${skillsMember.value?.id}/skills/${skill.name}`)
+    if (!res.ok) throw new Error('載入失敗')
+    const data = await res.json()
+    selectedSkill.value = { name: skill.title, content: data.content }
+  } catch (e) {
+    store.addToast('技能詳情載入失敗', 'error')
+    showSkillDetailDialog.value = false
+  }
+  loadingSkillDetail.value = false
+}
+
+function backToSkillsList() {
+  showSkillDetailDialog.value = false
+  selectedSkill.value = null
+}
 </script>
 
 <template>
@@ -400,10 +452,16 @@ function providerBadgeClass(provider: string) {
                     <Edit3 class="w-3 h-3 text-slate-600" />
                   </div>
                 </div>
-                <button @click="openBindDialog(member.id)" class="flex items-center gap-1 px-3 py-1.5 text-[11px] text-slate-500 hover:text-emerald-400 transition-colors">
-                  <Plus class="w-3 h-3" />
-                  綁定帳號
-                </button>
+                <div class="flex items-center gap-3">
+                  <button @click="openBindDialog(member.id)" class="flex items-center gap-1 px-3 py-1.5 text-[11px] text-slate-500 hover:text-emerald-400 transition-colors">
+                    <Plus class="w-3 h-3" />
+                    綁定帳號
+                  </button>
+                  <button @click="openSkillsDialog(member)" class="flex items-center gap-1 px-3 py-1.5 text-[11px] text-slate-500 hover:text-purple-400 transition-colors">
+                    <BookOpen class="w-3 h-3" />
+                    技能
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -637,6 +695,74 @@ function providerBadgeClass(provider: string) {
               <button @click="showEditBindDialog = false" class="px-4 py-2 text-xs text-slate-400 hover:text-slate-200 transition-colors">取消</button>
               <button @click="saveEditBinding" class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold transition-all">儲存</button>
             </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Skills List Dialog -->
+    <Teleport to="body">
+      <div v-if="showSkillsDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" @click.self="showSkillsDialog = false">
+        <div class="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-md p-6 space-y-4">
+          <div class="flex items-center gap-3">
+            <span class="text-xl">{{ skillsMember?.avatar || '🤖' }}</span>
+            <div>
+              <h3 class="text-sm font-bold text-slate-200">{{ skillsMember?.name }} 的技能</h3>
+              <p class="text-xs text-slate-500">{{ skillsMember?.role }}</p>
+            </div>
+          </div>
+
+          <div v-if="loadingSkills" class="text-center text-sm text-slate-500 py-8">載入中...</div>
+
+          <div v-else-if="skillsList.length === 0" class="text-center text-sm text-slate-500 py-8">
+            尚未設定技能
+          </div>
+
+          <div v-else class="space-y-2 max-h-80 overflow-y-auto">
+            <button
+              v-for="skill in skillsList"
+              :key="skill.name"
+              @click="openSkillDetail(skill)"
+              class="w-full flex items-center gap-3 px-4 py-3 bg-slate-900/50 hover:bg-slate-900 rounded-xl border border-slate-700/50 hover:border-purple-500/30 transition-all text-left"
+            >
+              <BookOpen class="w-4 h-4 text-purple-400 shrink-0" />
+              <div class="min-w-0">
+                <div class="text-sm text-slate-200 truncate">{{ skill.title }}</div>
+                <div class="text-[10px] text-slate-500 font-mono">{{ skill.name }}.md</div>
+              </div>
+            </button>
+          </div>
+
+          <div class="flex justify-end pt-2">
+            <button @click="showSkillsDialog = false" class="px-4 py-2 text-xs text-slate-400 hover:text-slate-200 transition-colors">關閉</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Skill Detail Dialog -->
+    <Teleport to="body">
+      <div v-if="showSkillDetailDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" @click.self="backToSkillsList">
+        <div class="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-2xl max-h-[80vh] flex flex-col">
+          <div class="px-6 py-4 border-b border-slate-700/50 flex items-center gap-3">
+            <button @click="backToSkillsList" class="p-1.5 rounded-lg hover:bg-slate-700/50 text-slate-400 hover:text-slate-200 transition-colors">
+              <ChevronLeft class="w-4 h-4" />
+            </button>
+            <div>
+              <h3 class="text-sm font-bold text-slate-200">{{ selectedSkill?.name || '技能詳情' }}</h3>
+              <p class="text-xs text-slate-500">{{ skillsMember?.name }}</p>
+            </div>
+          </div>
+
+          <div class="flex-1 overflow-y-auto p-6">
+            <div v-if="loadingSkillDetail" class="text-center text-sm text-slate-500 py-8">載入中...</div>
+            <div v-else-if="selectedSkill" class="prose prose-invert prose-sm max-w-none">
+              <pre class="whitespace-pre-wrap text-sm text-slate-300 font-mono bg-slate-900/50 rounded-xl p-4 border border-slate-700/50">{{ selectedSkill.content }}</pre>
+            </div>
+          </div>
+
+          <div class="px-6 py-4 border-t border-slate-700/50 flex justify-end">
+            <button @click="showSkillDetailDialog = false; showSkillsDialog = false" class="px-4 py-2 text-xs text-slate-400 hover:text-slate-200 transition-colors">關閉</button>
           </div>
         </div>
       </div>
