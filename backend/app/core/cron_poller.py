@@ -32,7 +32,7 @@ async def poll_local_cron_jobs():
     global last_check_at
     last_check_at = datetime.now(timezone.utc).isoformat()
     now = datetime.now(timezone.utc)
-    
+
     with Session(engine) as session:
         # 找出啟用且到期的任務 (next_scheduled_at <= now)
         due_jobs = session.exec(
@@ -42,6 +42,7 @@ async def poll_local_cron_jobs():
         ).all()
 
         if not due_jobs:
+            print(f"[Cron Poller] {now.strftime('%H:%M:%S')} - No due jobs")
             return
 
         # 過濾掉被暫停排程的專案
@@ -128,6 +129,7 @@ async def poll_local_cron_jobs():
 
 async def start_cron_poller():
     """獨立的排程迴圈，每 60 秒檢查一次本地資料庫"""
+    print("[Cron Poller] Starting Aegis Local Cron Poller...")
     logger.info("Starting Aegis Local Cron Poller...")
     while True:
         try:
