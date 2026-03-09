@@ -30,15 +30,16 @@ def _calculate_next_time(cron_expression: str) -> datetime:
 async def poll_local_cron_jobs():
     """輪詢本地的 CronJob 表，將到期的排程轉化為待執行的 Card"""
     global last_check_at
-    last_check_at = datetime.now(timezone.utc).isoformat()
     now = datetime.now(timezone.utc)
+    last_check_at = now.isoformat()
+    now_str = now.isoformat()  # SQLite 需要 ISO 字串比較
 
     with Session(engine) as session:
         # 找出啟用且到期的任務 (next_scheduled_at <= now)
         due_jobs = session.exec(
             select(CronJob)
             .where(CronJob.is_enabled == True)
-            .where(CronJob.next_scheduled_at <= now)
+            .where(CronJob.next_scheduled_at <= now_str)
         ).all()
 
         if not due_jobs:
