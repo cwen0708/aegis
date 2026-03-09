@@ -5,9 +5,10 @@ import logging
 from datetime import datetime, timezone
 from sqlmodel import Session, select
 from app.database import engine
-from app.models.core import Card, StageList, Project, Tag, CardTagLink, CronJob
+from app.models.core import Card, StageList, Project, Tag, CardTagLink, CronJob, CardIndex, SystemSetting, TaskLog
 from app.core.card_file import CardData, write_card, card_file_path
 from app.core.card_index import sync_card_to_index, next_card_id
+from app.core.telemetry import get_system_metrics
 from croniter import croniter
 
 logger = logging.getLogger(__name__)
@@ -15,6 +16,60 @@ logger = logging.getLogger(__name__)
 # 模組級狀態（供 API 讀取）
 last_check_at: str | None = None
 paused_projects: set[int] = set()  # 被暫停排程的專案 ID
+
+
+def _get_template_variables(session: Session) -> dict:
+    """取得 prompt_template 變數替換用的系統狀態"""
+    # 系統指標
+    metrics = get_system_metrics()
+
+    # Worker 狀態
+    max_ws_setting = session.get(SystemSetting, "max_workstations")
+    max_workstations = int(max_ws_setting.value) if max_ws_setting else 3
+
+    running_cards = session.exec(
+        select(CardIndex).where(CardIndex.status == "running")
+    ).all()
+    running_count = len(running_cards)
+
+    pending_cards = session.exec(
+        select(CardIndex).where(CardIndex.status == "pending")
+    ).all()
+    pending_summary = f"{len(pending_cards)} 張" if pending_cards else "無"
+
+    # 最近失敗的任務（過去 1 小時）
+    one_hour_ago = datetime.now(timezone.utc).isoformat()
+    recent_logs = session.exec(
+        select(TaskLog)
+        .where(TaskLog.status == "error")
+        .order_by(TaskLog.created_at.desc())
+        .limit(5)
+    ).all()
+    if recent_logs:
+        failures = [f"{log.card_title}" for log in recent_logs]
+        recent_failures = ", ".join(failures[:3])
+        if len(failures) > 3:
+            recent_failures += f" 等 {len(failures)} 個"
+    else:
+        recent_failures = "無"
+
+    return {
+        "cpu_percent": f"{metrics['cpu_percent']:.1f}",
+        "mem_percent": f"{metrics['memory_percent']:.1f}",
+        "running_count": str(running_count),
+        "max_workstations": str(max_workstations),
+        "pending_cards_summary": pending_summary,
+        "recent_failures": recent_failures,
+    }
+
+
+def _render_template(template: str, variables: dict) -> str:
+    """替換 template 中的 {var} 佔位符"""
+    result = template
+    for key, value in variables.items():
+        result = result.replace(f"{{{key}}}", value)
+    return result
+
 
 def _calculate_next_time(cron_expression: str) -> datetime:
     """計算下一次執行時間"""
@@ -74,12 +129,15 @@ async def poll_local_cron_jobs():
                 logger.error(f"Cannot find Scheduled list for project {job.project_id}")
                 continue
 
-            # 組合 prompt 內容
+            # 組合 prompt 內容（替換變數）
             metadata = json.loads(job.metadata_json) if job.metadata_json else {}
-            
-            content = f"【任務內容】\n{job.prompt_template}"
+            template_vars = _get_template_variables(session)
+
+            rendered_prompt = _render_template(job.prompt_template, template_vars)
+            content = f"【任務內容】\n{rendered_prompt}"
             if job.system_instruction:
-                content = f"【系統指令】\n{job.system_instruction}\n\n{content}"
+                rendered_instruction = _render_template(job.system_instruction, template_vars)
+                content = f"【系統指令】\n{rendered_instruction}\n\n{content}"
 
             full_content = f"## 營運排程元數據\n```json\n{json.dumps(metadata, ensure_ascii=False, indent=2)}\n```\n\n{content}"
 

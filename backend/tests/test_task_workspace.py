@@ -65,8 +65,8 @@ def test_prepare_workspace_gemini(ws_root):
         project_path="/fake/project",
         card_content="## Task\nGemini task",
     )
-    # .gemini.md should exist (not CLAUDE.md)
-    assert (ws / ".gemini.md").exists()
+    # Gemini.md should exist (not CLAUDE.md)
+    assert (ws / "Gemini.md").exists()
     assert not (ws / "CLAUDE.md").exists()
     # skills in .gemini/skills/
     assert (ws / ".gemini" / "skills" / "python.md").exists()
