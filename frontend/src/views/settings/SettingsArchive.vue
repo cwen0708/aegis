@@ -32,7 +32,7 @@ async function fetchProjects() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     projects.value = await res.json()
     if (projects.value.length > 0 && !selectedProjectId.value) {
-      selectedProjectId.value = projects.value[0].id
+      selectedProjectId.value = projects.value[0]?.id ?? null
     }
   } catch (e: any) {
     store.addToast('載入專案失敗', 'error')

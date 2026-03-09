@@ -44,7 +44,7 @@ async function fetchCliStatus() {
   finally { cliLoading.value = false }
 }
 
-async function installCli(type: 'claude' | 'gemini') {
+async function installCli(type: 'claude' | 'gemini' | 'codex') {
   cliInstalling.value = type
   cliError.value = ''
   cliSuccess.value = ''

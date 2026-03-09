@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Loader2, Check, X, ChevronDown, ChevronUp } from 'lucide-vue-next'
+import { Loader2, Check, ChevronDown, ChevronUp } from 'lucide-vue-next'
 
 interface ChannelConfig {
   enabled: boolean
@@ -65,15 +65,6 @@ function saveConfig() {
   emit('update', { ...localConfig.value })
 }
 
-// 圖標映射
-const iconMap: Record<string, string> = {
-  telegram: '/icons/telegram.svg',
-  line: '/icons/line.svg',
-  discord: '/icons/discord.svg',
-  slack: '/icons/slack.svg',
-  wecom: '/icons/wecom.svg',
-  feishu: '/icons/feishu.svg',
-}
 </script>
 
 <template>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { Server, Cpu, HardDrive, Activity, Play, Pause, Clock, Radio, Terminal, Sparkles, Eye } from 'lucide-vue-next'
+import { Server, Cpu, HardDrive, Activity, Clock, Radio, Terminal, Sparkles, Eye } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 
 const store = useAegisStore()

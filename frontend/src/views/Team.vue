@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
-import { Users, Plus, UserPlus, Save, Edit3, Upload, Sparkles, Image } from 'lucide-vue-next'
+import { Plus, UserPlus, Save, Edit3, Upload, Sparkles, Image } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 

@@ -255,12 +255,12 @@ async function updateChannelConfig(name: string, config: ChannelConfig) {
     })
     if (res.ok) {
       channelConfigs.value[name] = config
-      store.showToast('頻道設定已儲存', 'success')
+      store.addToast('頻道設定已儲存', 'success')
     } else {
-      store.showToast('儲存失敗', 'error')
+      store.addToast('儲存失敗', 'error')
     }
   } catch {
-    store.showToast('儲存失敗', 'error')
+    store.addToast('儲存失敗', 'error')
   } finally {
     channelSaving.value = null
   }
@@ -272,14 +272,14 @@ async function restartChannels() {
     const res = await fetch(`${API}/api/v1/channels/restart`, { method: 'POST' })
     const data = await res.json()
     if (res.ok) {
-      store.showToast(data.message || '頻道已重啟', 'success')
+      store.addToast(data.message || '頻道已重啟', 'success')
       // 重新載入狀態
       await fetchChannelStatuses()
     } else {
-      store.showToast(data.detail || '重啟失敗', 'error')
+      store.addToast(data.detail || '重啟失敗', 'error')
     }
   } catch {
-    store.showToast('重啟失敗', 'error')
+    store.addToast('重啟失敗', 'error')
   } finally {
     channelRestarting.value = false
   }
