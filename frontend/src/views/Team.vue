@@ -5,7 +5,7 @@ import { useAegisStore } from '../stores/aegis'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 
 const store = useAegisStore()
-const API = import.meta.env.DEV ? '' : 'http://localhost:8899'
+const API = ''
 
 const modelOptions: Record<string, { value: string; label: string }[]> = {
   claude: [

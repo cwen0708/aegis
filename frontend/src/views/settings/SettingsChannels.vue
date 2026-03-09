@@ -5,7 +5,7 @@ import { useAegisStore } from '../../stores/aegis'
 import ChannelCard from '../../components/ChannelCard.vue'
 
 const store = useAegisStore()
-const API = import.meta.env.DEV ? '' : 'http://localhost:8899'
+const API = ''
 
 // 頻道設定狀態
 interface ChannelConfig {

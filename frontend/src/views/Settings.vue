@@ -112,7 +112,7 @@ const channelDefs = [
 // Gcloud 載入狀態
 const gcloudStatusLoading = ref(true)
 
-const API = import.meta.env.DEV ? '' : 'http://localhost:8899'
+const API = ''
 
 async function fetchGcloudStatus() {
   gcloudStatusLoading.value = true
