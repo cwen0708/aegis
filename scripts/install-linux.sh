@@ -21,6 +21,7 @@ print_error() { echo -e "${RED}[-] $1${NC}"; }
 INSTALL_DIR="$HOME/.local/aegis"
 SKIP_CLI=false
 DEV_MODE=false
+YES_MODE=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -37,6 +38,10 @@ while [[ $# -gt 0 ]]; do
             DEV_MODE=true
             shift
             ;;
+        --yes|-y)
+            YES_MODE=true
+            shift
+            ;;
         --help|-h)
             echo "Aegis Installation Script for Linux"
             echo ""
@@ -47,6 +52,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --install-dir <path>   Installation directory (default: ~/.local/aegis)"
             echo "  --skip-cli             Skip Claude CLI and Gemini CLI installation"
             echo "  --dev                  Clone with git instead of downloading release"
+            echo "  --yes, -y              Non-interactive mode (skip all prompts)"
             echo "  --help                 Show this help message"
             echo ""
             echo "Examples:"
@@ -141,12 +147,18 @@ print_step "Setting up installation directory..."
 
 if [ -d "$INSTALL_DIR" ]; then
     print_warn "Directory exists: $INSTALL_DIR"
-    read -p "Overwrite? (y/N) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Aborted."
-        exit 0
+    if [ "$YES_MODE" = false ]; then
+        read -p "Overwrite? (y/N) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "Aborted."
+            exit 0
+        fi
+    else
+        print_warn "Overwriting (--yes mode)"
     fi
+    # Clean existing contents for fresh install
+    rm -rf "$INSTALL_DIR"/*
 fi
 
 mkdir -p "$INSTALL_DIR"
@@ -324,16 +336,21 @@ Next steps:
 EOF
 
 # Ask if user wants to start now
-read -p "Start Aegis now? (Y/n) " -n 1 -r
-echo
-if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-    "$INSTALL_DIR/start-aegis.sh" &
-    sleep 3
-    if command -v xdg-open &> /dev/null; then
-        xdg-open "http://localhost:8899"
-    elif command -v open &> /dev/null; then
-        open "http://localhost:8899"
-    else
-        echo "Open http://localhost:8899 in your browser"
+if [ "$YES_MODE" = true ]; then
+    # In non-interactive mode, don't start automatically
+    echo "Run '$INSTALL_DIR/start-aegis.sh' to start Aegis"
+else
+    read -p "Start Aegis now? (Y/n) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+        "$INSTALL_DIR/start-aegis.sh" &
+        sleep 3
+        if command -v xdg-open &> /dev/null; then
+            xdg-open "http://localhost:8899"
+        elif command -v open &> /dev/null; then
+            open "http://localhost:8899"
+        else
+            echo "Open http://localhost:8899 in your browser"
+        fi
     fi
 fi
