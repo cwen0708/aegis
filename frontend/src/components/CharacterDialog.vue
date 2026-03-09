@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { X, CheckCircle, XCircle, Clock, Loader2, ListTodo } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -13,6 +13,20 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'close'): void
 }>()
+
+// 圖片比例檢測：正方形用 cover + top，長條形用 contain + bottom
+const portraitAspect = ref<'tall' | 'square'>('tall')
+function detectPortraitAspect() {
+  if (!props.portrait) return
+  const img = new Image()
+  img.onload = () => {
+    const ratio = img.height / img.width
+    // 比例 < 1.4 視為正方形或半身像，用 cover
+    portraitAspect.value = ratio < 1.4 ? 'square' : 'tall'
+  }
+  img.src = props.portrait.startsWith('http') ? props.portrait : props.portrait
+}
+watch(() => props.portrait, detectPortraitAspect, { immediate: true })
 
 // Task history
 interface TaskLogItem {
@@ -80,11 +94,17 @@ function providerLabel(provider: string): string {
     <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="emit('close')" />
 
     <!-- Character portrait - large, left side -->
+    <!-- 智能適配：正方形/半身像用 cover+top，全身立繪用 contain+bottom -->
     <div class="absolute left-0 sm:left-8 bottom-0 w-[280px] sm:w-[500px] h-[60vh] sm:h-[85vh]">
       <template v-if="portrait">
         <img
           :src="portrait.startsWith('http') ? portrait : `${portrait}`"
-          class="w-full h-full object-contain object-bottom drop-shadow-2xl"
+          :class="[
+            'w-full h-full drop-shadow-2xl transition-all duration-300',
+            portraitAspect === 'square'
+              ? 'object-cover object-top'
+              : 'object-contain object-bottom'
+          ]"
         />
       </template>
       <template v-else>
