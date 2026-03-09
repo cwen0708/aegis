@@ -344,7 +344,7 @@ def seed_data():
             session.commit()
             for sl in stage_objs.values():
                 session.refresh(sl)
-            print(f"  - Added {len(stages)} stage lists")
+            print(f"  - Added {len(stage_objs)} stage lists")
 
             # ── 7. Cards（只在新建 Demo 專案時加入）──
             cards_data = [
