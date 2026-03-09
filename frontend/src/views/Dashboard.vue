@@ -60,33 +60,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="h-full flex flex-col">
-    <!-- Header h-16 -->
-    <div class="sticky top-0 z-10 h-16 shrink-0 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 px-8 flex items-center justify-between">
-      <h1 class="text-lg font-bold text-slate-100">系統監控</h1>
-      <div class="flex items-center gap-3">
-        <button
-          @click="toggleRunner"
-          class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors"
-          :class="store.systemInfo.is_paused
-            ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
-            : 'bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'"
-        >
-          <Play v-if="store.systemInfo.is_paused" class="w-3.5 h-3.5" />
-          <Pause v-else class="w-3.5 h-3.5" />
-          {{ store.systemInfo.is_paused ? '恢復' : '暫停' }}
-        </button>
-        <div class="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-full">
-          <span class="relative flex h-2.5 w-2.5">
-            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-            <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-          </span>
-          <span class="text-xs font-semibold text-emerald-400 tracking-wider">引擎運行中</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="flex-1 overflow-auto p-8 space-y-6">
+  <div class="space-y-6">
 
     <!-- Hardware Metrics Grid -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6" v-if="metrics">
@@ -239,6 +213,5 @@ onUnmounted(() => {
       </div>
     </div>
 
-    </div>
   </div>
 </template>

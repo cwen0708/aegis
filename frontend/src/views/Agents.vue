@@ -230,13 +230,7 @@ function formatResetTime(isoStr: string) {
 </script>
 
 <template>
-  <div class="h-full flex flex-col">
-    <!-- Header h-16 -->
-    <div class="sticky top-0 z-10 h-16 shrink-0 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 px-8 flex items-center">
-      <h1 class="text-lg font-bold text-slate-100">AI 代理</h1>
-    </div>
-
-    <div class="flex-1 overflow-auto p-8 space-y-6">
+  <div class="max-w-4xl space-y-6">
 
       <!-- Claude 區塊 -->
       <div>
@@ -533,8 +527,6 @@ function formatResetTime(isoStr: string) {
           </div>
         </div>
       </div>
-
-    </div>
 
     <!-- Add Account Dialog -->
     <Teleport to="body">

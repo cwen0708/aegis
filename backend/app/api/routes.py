@@ -11,7 +11,7 @@ from typing import Any
 from app.core.runner import running_tasks, abort_task
 import app.core.runner as runner_module
 from app.core.usage_poller import get_cached_claude_usage, get_cached_gemini_usage, get_last_updated
-import app.core.poller as poller_module
+# Worker 程序獨立執行，暫停狀態改用 DB SystemSetting "worker_paused"
 import app.core.cron_poller as cron_module
 from app.core.ws_manager import websocket_clients
 from app.core.card_file import CardData, read_card as read_card_md, write_card, card_file_path
@@ -566,39 +566,98 @@ def reindex_project(project_id: int, session: Session = Depends(get_session)):
 
 
 # ==========================================
-# Runner Control
+# Runner Control (DB-based for Worker process)
 # ==========================================
 @router.post("/runner/pause")
-def pause_runner():
-    poller_module.is_paused = True
+def pause_runner(session: Session = Depends(get_session)):
+    """暫停 Worker（透過 DB 旗標）"""
+    setting = session.get(SystemSetting, "worker_paused")
+    if setting:
+        setting.value = "true"
+    else:
+        setting = SystemSetting(key="worker_paused", value="true")
+        session.add(setting)
+    session.commit()
     return {"ok": True, "is_paused": True}
 
 
 @router.post("/runner/resume")
-def resume_runner():
-    poller_module.is_paused = False
+def resume_runner(session: Session = Depends(get_session)):
+    """恢復 Worker（透過 DB 旗標）"""
+    setting = session.get(SystemSetting, "worker_paused")
+    if setting:
+        setting.value = "false"
+    else:
+        setting = SystemSetting(key="worker_paused", value="false")
+        session.add(setting)
+    session.commit()
     return {"ok": True, "is_paused": False}
 
 
 @router.get("/runner/status")
-def runner_status():
+def runner_status(session: Session = Depends(get_session)):
+    """從 DB 查詢運行中任務（Worker 獨立程序架構）"""
+    from sqlmodel import select
+
+    stmt = select(CardIndex).where(CardIndex.status == "running")
+    running_cards = list(session.exec(stmt).all())
+
     tasks_data = []
-    for tid, info in list(running_tasks.items()):
+    for idx in running_cards:
+        project = session.get(Project, idx.project_id)
         tasks_data.append({
-            "task_id": info["task_id"],
-            "project": info.get("project", ""),
-            "card_title": info.get("card_title", ""),
-            "started_at": info.get("started_at", 0),
-            "pid": info.get("pid"),
-            "provider": info.get("provider", ""),
-            "member_id": info.get("member_id"),
+            "task_id": idx.card_id,
+            "project": project.name if project else "",
+            "card_title": idx.title,
+            "started_at": idx.updated_at.timestamp() if idx.updated_at else 0,
+            "pid": None,  # Worker 獨立程序
+            "provider": "",
+            "member_id": idx.member_id,
         })
+
+    # 讀取最大工作台數
+    max_ws_setting = session.get(SystemSetting, "max_workstations")
+    max_workstations = int(max_ws_setting.value) if max_ws_setting else 3
+
+    # 讀取暫停旗標
+    paused_setting = session.get(SystemSetting, "worker_paused")
+    is_paused = paused_setting and paused_setting.value == "true"
+
     return {
-        "is_paused": poller_module.is_paused,
+        "is_paused": is_paused,
         "running_tasks": tasks_data,
-        "workstations_used": len(running_tasks),
-        "workstations_total": runner_module.MAX_WORKSTATIONS,
+        "workstations_used": len(tasks_data),
+        "workstations_total": max_workstations,
     }
+
+
+# ==========================================
+# Internal APIs (for Worker process)
+# ==========================================
+from pydantic import BaseModel
+
+class BroadcastLogRequest(BaseModel):
+    card_id: int
+    line: str
+
+class BroadcastEventRequest(BaseModel):
+    event: str
+    payload: dict
+
+@router.post("/internal/broadcast-log")
+async def internal_broadcast_log(req: BroadcastLogRequest):
+    """Worker 呼叫：廣播任務輸出行"""
+    from app.core.ws_manager import broadcast_event
+    await broadcast_event("task_log", {"card_id": req.card_id, "line": req.line})
+    return {"ok": True}
+
+
+@router.post("/internal/broadcast-event")
+async def internal_broadcast_event(req: BroadcastEventRequest):
+    """Worker 呼叫：廣播事件"""
+    from app.core.ws_manager import broadcast_event
+    await broadcast_event(req.event, req.payload)
+    return {"ok": True}
 
 
 # ==========================================
@@ -712,19 +771,23 @@ def _check_gemini_cli() -> dict:
 
 
 @router.get("/system/services")
-def get_services():
+def get_services(session: Session = Depends(get_session)):
     """查詢所有服務健康狀態（引擎 + CLI 工具，10 秒快取）"""
     now = time_module.time()
     if _services_cache["data"] and (now - _services_cache["ts"]) < _CACHE_TTL:
         return _services_cache["data"]
 
+    # 讀取 Worker 暫停旗標
+    paused_setting = session.get(SystemSetting, "worker_paused")
+    worker_paused = paused_setting and paused_setting.value == "true"
+
     result = {
         "pid": os.getpid(),
         "engines": {
-            "task_poller": {
-                "status": "paused" if poller_module.is_paused else "running",
+            "task_worker": {
+                "status": "paused" if worker_paused else "running",
                 "interval_sec": 3,
-                "is_paused": poller_module.is_paused,
+                "is_paused": worker_paused,
             },
             "cron_poller": {
                 "status": "running",
@@ -817,6 +880,43 @@ def update_settings(data: dict, session: Session = Depends(get_session)):
         except (ValueError, TypeError):
             raise HTTPException(status_code=400, detail="max_workstations 必須為正整數")
     return get_settings(session=session)
+
+
+# ==========================================
+# Auth API
+# ==========================================
+class AuthVerifyRequest(BaseModel):
+    password: str
+
+class AuthChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+@router.post("/auth/verify")
+def verify_admin_password(req: AuthVerifyRequest, session: Session = Depends(get_session)):
+    """驗證管理員密碼"""
+    setting = session.get(SystemSetting, "admin_password")
+    stored_password = setting.value if setting else "aegis2026!"
+    if req.password == stored_password:
+        return {"success": True}
+    raise HTTPException(status_code=401, detail="密碼錯誤")
+
+@router.post("/auth/change-password")
+def change_admin_password(req: AuthChangePasswordRequest, session: Session = Depends(get_session)):
+    """修改管理員密碼"""
+    setting = session.get(SystemSetting, "admin_password")
+    stored_password = setting.value if setting else "aegis2026!"
+    if req.current_password != stored_password:
+        raise HTTPException(status_code=401, detail="目前密碼錯誤")
+    if len(req.new_password) < 6:
+        raise HTTPException(status_code=400, detail="新密碼至少需要 6 個字元")
+    if setting:
+        setting.value = req.new_password
+        session.add(setting)
+    else:
+        session.add(SystemSetting(key="admin_password", value=req.new_password))
+    session.commit()
+    return {"success": True, "message": "密碼已更新"}
 
 
 # ==========================================
@@ -1408,43 +1508,74 @@ def cancel_gcloud_auth_api(data: GcloudAuthCancelRequest):
 # ==========================================
 @router.get("/cli/status")
 def get_cli_status():
-    """檢查 Claude CLI 和 Gemini CLI 安裝狀態"""
+    """檢查 AI CLI 工具安裝狀態"""
+    import shutil
+
     result = {
         "claude": {"installed": False, "version": None, "path": None},
         "gemini": {"installed": False, "version": None, "path": None},
+        "codex": {"installed": False, "version": None, "path": None},
+        "ollama": {"installed": False, "version": None, "path": None},
     }
 
-    # 檢查 Claude CLI
+    # 檢查 Claude CLI（使用跨平台的 shutil.which）
     try:
-        which_result = subprocess.run(
-            "which claude", shell=True, capture_output=True, text=True, timeout=5
-        )
-        if which_result.returncode == 0:
+        claude_path = shutil.which("claude")
+        if claude_path:
             result["claude"]["installed"] = True
-            result["claude"]["path"] = which_result.stdout.strip()
+            result["claude"]["path"] = claude_path
             # 取得版本
             ver_result = subprocess.run(
-                "claude --version", shell=True, capture_output=True, text=True, timeout=10
+                ["claude", "--version"], capture_output=True, text=True, timeout=10
             )
             if ver_result.returncode == 0:
                 result["claude"]["version"] = ver_result.stdout.strip().split("\n")[0]
     except Exception:
         pass
 
-    # 檢查 Gemini CLI
+    # 檢查 Gemini CLI（Windows 的 .cmd 需要 shell=True）
     try:
-        which_result = subprocess.run(
-            "which gemini", shell=True, capture_output=True, text=True, timeout=5
-        )
-        if which_result.returncode == 0:
+        gemini_path = shutil.which("gemini")
+        if gemini_path:
             result["gemini"]["installed"] = True
-            result["gemini"]["path"] = which_result.stdout.strip()
-            # 取得版本
+            result["gemini"]["path"] = gemini_path
+            # 取得版本（Windows .cmd 需要 shell=True）
             ver_result = subprocess.run(
                 "gemini --version", shell=True, capture_output=True, text=True, timeout=10
             )
             if ver_result.returncode == 0:
                 result["gemini"]["version"] = ver_result.stdout.strip().split("\n")[0]
+    except Exception:
+        pass
+
+    # 檢查 Codex CLI (OpenAI)
+    try:
+        codex_path = shutil.which("codex")
+        if codex_path:
+            result["codex"]["installed"] = True
+            result["codex"]["path"] = codex_path
+            # 取得版本（Windows .cmd 需要 shell=True）
+            ver_result = subprocess.run(
+                "codex --version", shell=True, capture_output=True, text=True, timeout=10
+            )
+            if ver_result.returncode == 0:
+                result["codex"]["version"] = ver_result.stdout.strip().split("\n")[0]
+    except Exception:
+        pass
+
+    # 檢查 Ollama CLI
+    try:
+        ollama_path = shutil.which("ollama")
+        if ollama_path:
+            result["ollama"]["installed"] = True
+            result["ollama"]["path"] = ollama_path
+            # 取得版本
+            ver_result = subprocess.run(
+                ["ollama", "--version"], capture_output=True, text=True, timeout=10
+            )
+            if ver_result.returncode == 0:
+                # ollama version is 0.9.0
+                result["ollama"]["version"] = ver_result.stdout.strip().split("\n")[0]
     except Exception:
         pass
 
@@ -1497,3 +1628,58 @@ def install_gemini_cli():
         raise HTTPException(status_code=500, detail="安裝超時")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/cli/codex/install")
+def install_codex_cli():
+    """安裝 Codex CLI (OpenAI)"""
+    import platform
+    try:
+        # Windows 不需要 sudo，Linux 需要
+        if platform.system() == "Windows":
+            cmd = "npm install -g @openai/codex"
+        else:
+            cmd = "sudo -n npm install -g @openai/codex"
+
+        result = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True, timeout=300
+        )
+        if result.returncode == 0:
+            return {"ok": True, "message": "Codex CLI 安裝成功", "output": result.stdout}
+        else:
+            raise HTTPException(status_code=500, detail=f"安裝失敗: {result.stderr}")
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="安裝超時")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/ollama/models")
+def get_ollama_models():
+    """取得 Ollama 已下載的模型列表"""
+    try:
+        result = subprocess.run(
+            ["ollama", "list"],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode != 0:
+            return {"models": [], "error": "Ollama 未安裝或未啟動"}
+
+        # 解析輸出格式：NAME    ID    SIZE    MODIFIED
+        lines = result.stdout.strip().split("\n")
+        models = []
+        for line in lines[1:]:  # 跳過標題行
+            parts = line.split()
+            if parts:
+                models.append({
+                    "name": parts[0],
+                    "id": parts[1] if len(parts) > 1 else "",
+                    "size": parts[2] if len(parts) > 2 else "",
+                })
+        return {"models": models}
+    except FileNotFoundError:
+        return {"models": [], "error": "Ollama 未安裝"}
+    except subprocess.TimeoutExpired:
+        return {"models": [], "error": "查詢超時"}
+    except Exception as e:
+        return {"models": [], "error": str(e)}

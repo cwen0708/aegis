@@ -12,7 +12,7 @@ from pathlib import Path
 from app.database import init_db
 from app.api import routes, webhooks
 from app.core.telemetry import get_system_metrics
-from app.core.poller import start_poller
+# start_poller 已移到獨立的 worker.py 程序
 from app.core.cron_poller import start_cron_poller
 from app.core.usage_poller import start_usage_poller
 from app.core.ws_manager import websocket_clients, periodic_broadcast, broadcast_message
@@ -263,8 +263,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to rebuild card index on startup: {e}")
 
-    # 啟動背景的 AI Task Poller
-    poller_task = asyncio.create_task(start_poller())
+    # 注意：AI Task Poller 已移到獨立的 worker.py 程序
+    # 透過 dev.bat 啟動，避免阻塞 FastAPI event loop
 
     # 啟動本地 Cron Job Poller
     cron_poller_task = asyncio.create_task(start_cron_poller())
@@ -286,7 +286,6 @@ async def lifespan(app: FastAPI):
 
     await channel_manager.stop_all()
     await stop_card_watcher()
-    poller_task.cancel()
     cron_poller_task.cancel()
     ws_broadcast_task.cancel()
     usage_poller_task.cancel()
@@ -301,7 +300,7 @@ app = FastAPI(
 # 加入 CORS Middleware 允許前端呼叫
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8888", "http://127.0.0.1:8888"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

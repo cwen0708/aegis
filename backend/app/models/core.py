@@ -70,6 +70,7 @@ class CardIndex(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     content_hash: str = ""
     file_mtime: float = Field(default=0.0)
+    member_id: Optional[int] = Field(default=None, index=True)  # 執行中的成員 ID
 
 
 class CronJob(SQLModel, table=True):
@@ -103,7 +104,7 @@ class SystemSetting(SQLModel, table=True):
 class Account(SQLModel, table=True):
     """AI 帳號（實體的 CLI 登入憑證）"""
     id: Optional[int] = Field(default=None, primary_key=True)
-    provider: str  # "claude" | "gemini"
+    provider: str  # "claude" | "gemini" | "codex" | "ollama"
     name: str  # 顯示名稱，如 "Max 小良"
     credential_file: str  # profile 檔名，如 "claude-max-a.json"
     subscription: str = ""  # "max" / "pro" / "ai-pro"

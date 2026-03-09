@@ -51,13 +51,31 @@ PROVIDERS = {
     "gemini": {
         "cmd_base": ["gemini"],
         "args": ["-p", "{prompt}", "-y", "--model", "gemini-2.5-flash"],
-        "env": {}
+        "env": {},
+        "json_output": False,
     },
     "claude": {
         "cmd_base": ["claude"],
         "args": ["-p", "{prompt}", "--dangerously-skip-permissions", "--model", "opus", "--output-format", "json"],
-        "env": {}
-    }
+        "env": {},
+        "json_output": True,
+    },
+    # TODO: Codex CLI 尚未驗證，需要 ChatGPT Plus/Pro 帳號登入
+    "codex": {
+        "cmd_base": ["codex"],
+        "args": ["-p", "{prompt}"],  # 待確認完整參數
+        "env": {},
+        "json_output": False,  # 待確認是否支援 JSON 輸出
+    },
+    # Ollama 本地模型，model 會在執行時替換
+    "ollama": {
+        "cmd_base": ["ollama", "run"],
+        "args": ["{model}"],  # model 由設定決定，預設 llama3.1:8b
+        "env": {},
+        "json_output": False,
+        "default_model": "llama3.1:8b",
+        "stdin_prompt": True,  # Ollama 用 stdin 傳 prompt
+    },
 }
 
 def _parse_claude_json(output: str) -> Dict[str, Any]:
@@ -115,7 +133,7 @@ def _save_task_log(card_id: int, card_title: str, project_name: str, provider: s
         logger.warning(f"[TaskLog] Failed to save: {e}")
 
 
-async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str, forced_provider: Optional[str] = None, card_title: str = "", project_name: str = "", member_id: Optional[int] = None) -> Dict[str, Any]:
+async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str, forced_provider: Optional[str] = None, card_title: str = "", project_name: str = "", member_id: Optional[int] = None, model_override: Optional[str] = None) -> Dict[str, Any]:
     """
     執行單一 AI 任務，受 Semaphore 保護。
     使用 asyncio subprocess 支援即時 log streaming 和 abort。
@@ -123,12 +141,20 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str, 
     provider_name = forced_provider if forced_provider and forced_provider in PROVIDERS else PHASE_ROUTING.get(phase, "gemini")
     config = PROVIDERS[provider_name]
 
+    # 決定模型（Ollama 等需要指定模型的 provider）
+    model = model_override or config.get("default_model", "")
+
     cmd = list(config["cmd_base"])
     for arg in config["args"]:
         if "{prompt}" in arg:
             cmd.append(arg.replace("{prompt}", prompt))
+        elif "{model}" in arg:
+            cmd.append(arg.replace("{model}", model))
         else:
             cmd.append(arg)
+
+    # Ollama 等使用 stdin 傳 prompt 的 provider
+    stdin_prompt = config.get("stdin_prompt", False)
 
     env = os.environ.copy()
     env.pop("CLAUDECODE", None)  # 避免子程序偵測到巢狀 session 而拒絕啟動
@@ -142,38 +168,46 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str, 
             busy_members.add(member_id)
 
         try:
+            # Ollama 等 provider 使用 stdin 傳 prompt
             proc = subprocess.Popen(
                 cmd,
                 cwd=project_path,
+                stdin=subprocess.PIPE if stdin_prompt else None,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 env=env,
             )
+            # 如果使用 stdin，寫入 prompt 後關閉
+            if stdin_prompt and proc.stdin:
+                proc.stdin.write(prompt.encode("utf-8"))
+                proc.stdin.close()
 
-            # 註冊到 running_tasks
-            running_tasks[task_id] = {
-                "task_id": task_id,
-                "project": project_name,
-                "card_title": card_title,
-                "started_at": time.time(),
-                "pid": proc.pid,
-                "process": proc,
-                "provider": provider_name,
-                "member_id": member_id,
-            }
+            # 註冊到 running_tasks（task_id=0 是 chat 對話，不加入）
+            if task_id != 0:
+                running_tasks[task_id] = {
+                    "task_id": task_id,
+                    "project": project_name,
+                    "card_title": card_title,
+                    "started_at": time.time(),
+                    "pid": proc.pid,
+                    "process": proc,
+                    "provider": provider_name,
+                    "member_id": member_id,
+                }
 
-            # 通知 WebSocket
-            from app.core.ws_manager import broadcast_event
-            await broadcast_event("task_started", {
-                "card_id": task_id, "card_title": card_title,
-                "project": project_name, "provider": provider_name
-            })
+                # 通知 WebSocket
+                from app.core.ws_manager import broadcast_event
+                await broadcast_event("task_started", {
+                    "card_id": task_id, "card_title": card_title,
+                    "project": project_name, "provider": provider_name
+                })
 
             # 在 thread 裡讀取 stdout，避免阻塞 event loop
             def _read_output():
                 lines = []
                 for raw_line in proc.stdout:
-                    lines.append(raw_line.decode("utf-8", errors="replace"))
+                    line = raw_line.decode("utf-8", errors="replace")
+                    lines.append(line)
                 proc.wait()
                 return lines
 
@@ -185,14 +219,16 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str, 
             except asyncio.TimeoutError:
                 proc.kill()
                 proc.wait()
-                running_tasks.pop(task_id, None)
+                if task_id != 0:
+                    running_tasks.pop(task_id, None)
                 if member_id:
                     busy_members.discard(member_id)
                 _save_task_log(task_id, card_title, project_name, provider_name, member_id, "timeout", {})
                 return {"status": "timeout", "output": "任務超時 (40 分鐘)", "provider": provider_name}
 
             output = "".join(output_lines)
-            running_tasks.pop(task_id, None)
+            if task_id != 0:
+                running_tasks.pop(task_id, None)
             if member_id:
                 busy_members.discard(member_id)
 
@@ -220,7 +256,8 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str, 
             }
 
         except Exception as e:
-            running_tasks.pop(task_id, None)
+            if task_id != 0:
+                running_tasks.pop(task_id, None)
             if member_id:
                 busy_members.discard(member_id)
             logger.exception(f"[Task {task_id}] Execution failed: {e}")

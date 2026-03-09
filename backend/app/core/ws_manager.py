@@ -38,9 +38,10 @@ async def broadcast_event(event_type: str, payload: Dict[str, Any] = None):
 
 async def periodic_broadcast():
     """定期廣播系統狀態 + 運行中任務（每 5 秒）"""
-    import app.core.runner as runner_module
     from app.core.telemetry import get_system_metrics
-    import app.core.poller as poller_module
+    from sqlmodel import Session, select
+    from app.database import engine
+    from app.models.core import CardIndex, StageList, Project, SystemSetting
 
     while True:
         await asyncio.sleep(5)
@@ -48,18 +49,28 @@ async def periodic_broadcast():
             continue
 
         try:
-            # 運行中任務
+            # 從 DB 查詢運行中任務
             tasks_data = []
-            for tid, info in list(runner_module.running_tasks.items()):
-                tasks_data.append({
-                    "task_id": info["task_id"],
-                    "project": info.get("project", ""),
-                    "card_title": info.get("card_title", ""),
-                    "started_at": info.get("started_at", 0),
-                    "pid": info.get("pid"),
-                    "provider": info.get("provider", ""),
-                    "member_id": info.get("member_id"),
-                })
+            with Session(engine) as session:
+                stmt = select(CardIndex).where(CardIndex.status == "running")
+                running_cards = list(session.exec(stmt).all())
+
+                for idx in running_cards:
+                    project = session.get(Project, idx.project_id)
+                    stage_list = session.get(StageList, idx.list_id)
+                    tasks_data.append({
+                        "task_id": idx.card_id,
+                        "project": project.name if project else "",
+                        "card_title": idx.title,
+                        "started_at": idx.updated_at.timestamp() if idx.updated_at else 0,
+                        "pid": None,  # Worker 獨立程序，無法追蹤 PID
+                        "provider": "",  # 可從 stage_list 推斷
+                        "member_id": idx.member_id,
+                    })
+
+                # 讀取最大工作台數
+                max_ws_setting = session.get(SystemSetting, "max_workstations")
+                max_workstations = int(max_ws_setting.value) if max_ws_setting else 3
 
             await broadcast_message({
                 "type": "running_tasks_update",
@@ -75,9 +86,9 @@ async def periodic_broadcast():
                     "cpu_percent": metrics["cpu_percent"],
                     "mem_percent": metrics["memory_percent"],
                     "mem_available_gb": metrics["memory_available_gb"],
-                    "is_paused": poller_module.is_paused,
-                    "workstations_used": len(runner_module.running_tasks),
-                    "workstations_total": runner_module.MAX_WORKSTATIONS,
+                    "is_paused": False,  # Worker 獨立程序，暫停邏輯待實作
+                    "workstations_used": len(tasks_data),
+                    "workstations_total": max_workstations,
                 },
                 "timestamp": time.time()
             })

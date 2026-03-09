@@ -22,16 +22,21 @@ _pending_auth_sessions: Dict[str, subprocess.Popen] = {}
 # Profiles 目錄
 CLAUDE_PROFILES_DIR = Path.home() / ".claude-profiles"
 GEMINI_PROFILES_DIR = Path.home() / ".gemini-profiles"
+# TODO: Codex profiles 目錄待確認
+CODEX_PROFILES_DIR = Path.home() / ".codex-profiles"
 
 # 活躍 credential 位置
 CLAUDE_CREDS_FILE = Path.home() / ".claude" / ".credentials.json"
 GEMINI_CREDS_FILE = Path.home() / ".gemini" / "oauth_creds.json"
+# TODO: Codex credential 位置待確認
+CODEX_CREDS_FILE = Path.home() / ".codex" / "credentials.json"
 
 
 def ensure_profiles_dirs():
     """確保 profiles 目錄存在"""
     CLAUDE_PROFILES_DIR.mkdir(exist_ok=True)
     GEMINI_PROFILES_DIR.mkdir(exist_ok=True)
+    CODEX_PROFILES_DIR.mkdir(exist_ok=True)
 
 
 def capture_current_credential(provider: str, profile_name: str) -> Optional[str]:
@@ -44,6 +49,13 @@ def capture_current_credential(provider: str, profile_name: str) -> Optional[str
     elif provider == "gemini":
         src = GEMINI_CREDS_FILE
         dst_dir = GEMINI_PROFILES_DIR
+    elif provider == "codex":
+        # TODO: Codex credential 位置待確認
+        src = CODEX_CREDS_FILE
+        dst_dir = CODEX_PROFILES_DIR
+    elif provider == "ollama":
+        # Ollama 是本地運行，不需要 credential
+        return None
     else:
         return None
 
@@ -65,6 +77,14 @@ def activate_account(account: Account):
     elif account.provider == "gemini":
         src = GEMINI_PROFILES_DIR / account.credential_file
         dst = GEMINI_CREDS_FILE
+    elif account.provider == "codex":
+        # TODO: Codex credential 位置待確認
+        src = CODEX_PROFILES_DIR / account.credential_file
+        dst = CODEX_CREDS_FILE
+    elif account.provider == "ollama":
+        # Ollama 本地運行，不需要啟用帳號
+        logger.info(f"Ollama runs locally, no account activation needed")
+        return
     else:
         return
 
@@ -166,7 +186,8 @@ def select_best_account(session: Session, member_id: int) -> Optional[Account]:
             activate_account(account)
             token = _read_token(CLAUDE_CREDS_FILE)
             if token:
-                usage = _fetch_usage(token)
+                # 使用帳號名稱作為 cache_key 避免 429
+                usage = _fetch_usage(token, cache_key=account.name or "default")
                 if usage:
                     five_hour = usage.get("five_hour", {}).get("utilization", 100)
                     if five_hour < 80:
@@ -187,6 +208,24 @@ def select_best_account(session: Session, member_id: int) -> Optional[Account]:
                 else:
                     # 沒找到特定模型，只要有任何模型有配額就可用
                     return account
+
+        elif account.provider == "codex":
+            # TODO: Codex 帳號健康檢查待實作
+            # 目前假設已登入的帳號都可用
+            activate_account(account)
+            return account
+
+        elif account.provider == "ollama":
+            # Ollama 本地運行，檢查服務是否可用
+            try:
+                result = subprocess.run(
+                    ["ollama", "list"],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0:
+                    return account
+            except Exception:
+                pass
 
     return None
 

@@ -3,6 +3,7 @@ import json
 import os
 import logging
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 import urllib.request
@@ -42,13 +43,15 @@ def _fetch_usage(token: str, cache_key: str = "") -> Optional[Dict[str, Any]]:
             _usage_cache[cache_key] = (time.time(), result)
         return result
     except urllib.error.HTTPError as e:
+        ts = datetime.now().strftime("%H:%M:%S")
         if e.code == 429 and cache_key and cache_key in _usage_cache:
-            logger.info(f"[Claude Usage] 429 for {cache_key}, using cached data")
+            logger.info(f"[{ts}] [Claude Usage] 429 for {cache_key}, using cached data")
             return _usage_cache[cache_key][1]
-        logger.warning(f"[Claude Usage] API query failed: {e}")
+        logger.warning(f"[{ts}] [Claude Usage] API query failed: {e}")
         return None
     except Exception as e:
-        logger.warning(f"[Claude Usage] API query failed: {e}")
+        ts = datetime.now().strftime("%H:%M:%S")
+        logger.warning(f"[{ts}] [Claude Usage] API query failed: {e}")
         return None
 
 
@@ -103,10 +106,15 @@ def get_all_accounts_usage() -> List[Dict[str, Any]]:
         if not active_name and profile_files:
             active_name = profile_files[0].stem
 
-        for f in profile_files:
+        for i, f in enumerate(profile_files):
             name = f.stem
             token = _read_token(f)
             info = _read_account_info(f)
+
+            # 多帳號時，延遲 2 秒避免 429
+            if i > 0:
+                time.sleep(2)
+
             usage = _fetch_usage(token, cache_key=name) if token else None
 
             accounts.append({

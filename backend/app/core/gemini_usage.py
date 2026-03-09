@@ -114,7 +114,8 @@ def get_gemini_quota() -> Optional[Dict[str, Any]]:
             timeout=10,
         )
         if resp.status_code != 200:
-            logger.warning(f"RetrieveUserQuota returned {resp.status_code}")
+            ts = datetime.now().strftime("%H:%M:%S")
+            logger.warning(f"[{ts}] RetrieveUserQuota returned {resp.status_code}")
             return None
 
         data = resp.json()

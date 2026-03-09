@@ -339,19 +339,10 @@ function providerBadgeClass(provider: string) {
 </script>
 
 <template>
-  <div class="h-full flex flex-col">
-    <!-- Header -->
-    <div class="sticky top-0 z-10 h-16 shrink-0 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 px-8 flex items-center justify-between">
-      <div class="flex items-center gap-2">
-        <Users class="w-5 h-5 text-slate-400" />
-        <h1 class="text-lg font-bold text-slate-100">團隊管理</h1>
-      </div>
-    </div>
+  <div class="max-w-4xl">
+    <div v-if="loading" class="text-sm text-slate-500 text-center py-20">載入中...</div>
 
-    <div class="flex-1 overflow-auto p-8">
-      <div v-if="loading" class="text-sm text-slate-500 text-center py-20">載入中...</div>
-
-      <div v-else class="max-w-4xl space-y-8">
+    <div v-else class="space-y-8">
 
         <!-- 成員管理 -->
         <div class="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
@@ -444,7 +435,6 @@ function providerBadgeClass(provider: string) {
           </div>
         </div>
       </div>
-    </div>
 
     <!-- Member Dialog -->
     <Teleport to="body">

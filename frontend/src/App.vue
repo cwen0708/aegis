@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, provide, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Monitor, ListTodo, Bot, Settings, Activity, Clock, FolderOpen, Wifi, WifiOff, Sun, Moon, Zap, Users, Building2, PanelLeftClose, PanelLeftOpen, Rocket } from 'lucide-vue-next'
+import { Shield, ListTodo, Settings, Clock, FolderOpen, Wifi, WifiOff, Sun, Moon, Zap, Building2, PanelLeftClose, PanelLeftOpen, Rocket } from 'lucide-vue-next'
 import { useWebSocket } from './composables/useWebSocket'
 import { useAegisStore } from './stores/aegis'
 import ToastNotification from './components/ToastNotification.vue'
@@ -82,7 +82,7 @@ function barColor(val: number) {
 }
 
 function navClass(path: string) {
-  const active = route.path === path
+  const active = route.path === path || route.path.startsWith(path + '/')
   return [
     sidebarCollapsed.value ? 'justify-center px-2' : 'px-3',
     active ? 'bg-emerald-500/10 text-emerald-400' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50',
@@ -98,7 +98,7 @@ function navClass(path: string) {
       <!-- Logo Area -->
       <div class="h-16 flex items-center border-b border-slate-700" :class="sidebarCollapsed ? 'justify-center px-2' : 'px-6'">
         <div class="flex items-center gap-2 text-emerald-400">
-          <Monitor class="w-6 h-6 shrink-0" />
+          <Shield class="w-6 h-6 shrink-0" />
           <span v-if="!sidebarCollapsed" class="font-bold text-xl tracking-tight">Aegis</span>
         </div>
       </div>
@@ -128,9 +128,15 @@ function navClass(path: string) {
         <!-- 總覽 -->
         <div class="space-y-1 mb-2">
           <p v-if="!sidebarCollapsed" class="px-3 text-[10px] font-semibold text-slate-600 tracking-widest uppercase mb-1">總覽</p>
-          <router-link to="/dashboard" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/dashboard')">
-            <Activity class="w-5 h-5 shrink-0" />
-            <span v-if="!sidebarCollapsed">儀表板</span>
+          <router-link to="/onboarding" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/onboarding')">
+            <Rocket class="w-5 h-5 shrink-0" />
+            <span v-if="!sidebarCollapsed" class="flex items-center gap-2">
+              設定引導
+              <span
+                v-if="store.settings.onboarding_completed !== 'true'"
+                class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"
+              ></span>
+            </span>
           </router-link>
           <router-link to="/office" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/office')">
             <Building2 class="w-5 h-5 shrink-0" />
@@ -160,27 +166,9 @@ function navClass(path: string) {
         <div class="border-t border-slate-700/40 my-2"></div>
         <div class="space-y-1">
           <p v-if="!sidebarCollapsed" class="px-3 text-[10px] font-semibold text-slate-600 tracking-widest uppercase mb-1">管理</p>
-          <router-link to="/team" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/team')">
-            <Users class="w-5 h-5 shrink-0" />
-            <span v-if="!sidebarCollapsed">團隊管理</span>
-          </router-link>
-          <router-link to="/agents" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/agents')">
-            <Bot class="w-5 h-5 shrink-0" />
-            <span v-if="!sidebarCollapsed">AI 代理</span>
-          </router-link>
           <router-link to="/settings" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/settings')">
             <Settings class="w-5 h-5 shrink-0" />
             <span v-if="!sidebarCollapsed">系統設定</span>
-          </router-link>
-          <router-link to="/onboarding" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/onboarding')">
-            <Rocket class="w-5 h-5 shrink-0" />
-            <span v-if="!sidebarCollapsed" class="flex items-center gap-2">
-              設定引導
-              <span
-                v-if="store.settings.onboarding_completed !== 'true'"
-                class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"
-              ></span>
-            </span>
           </router-link>
         </div>
       </nav>

@@ -15,6 +15,10 @@ WORKSPACES_ROOT = _INSTALL_ROOT / ".aegis" / "workspaces"
 PROVIDER_CONFIG = {
     "claude": {"config_file": "CLAUDE.md", "dot_dir": ".claude"},
     "gemini": {"config_file": ".gemini.md", "dot_dir": ".gemini"},
+    # TODO: Codex 尚未驗證配置檔名，暫用類似 Claude 的格式
+    "codex": {"config_file": "CODEX.md", "dot_dir": ".codex"},
+    # Ollama 本地模型，使用通用 AI 配置
+    "ollama": {"config_file": "OLLAMA.md", "dot_dir": ".ollama"},
 }
 
 
