@@ -200,10 +200,12 @@ def verify_invite_code(bot_user: BotUser, code: str) -> tuple[bool, str]:
             record_verify_failure(bot_user)
             return False, "無效的邀請碼"
 
-        # 檢查過期
-        if invite.expires_at and invite.expires_at < datetime.now(timezone.utc):
-            record_verify_failure(bot_user)
-            return False, "邀請碼已過期"
+        # 檢查過期（處理 naive datetime）
+        if invite.expires_at:
+            exp = invite.expires_at if invite.expires_at.tzinfo else invite.expires_at.replace(tzinfo=timezone.utc)
+            if exp < datetime.now(timezone.utc):
+                record_verify_failure(bot_user)
+                return False, "邀請碼已過期"
 
         # 檢查使用次數
         if invite.used_count >= invite.max_uses:
