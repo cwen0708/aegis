@@ -4,7 +4,7 @@ import { Sparkles, CloudCog, Terminal, Save, Loader2, ExternalLink, Copy, Check,
 import { useAegisStore } from '../../stores/aegis'
 
 const store = useAegisStore()
-const API = ''
+const API = import.meta.env.DEV ? 'http://localhost:8899' : ''
 
 // Gemini API Key
 const settingsLoading = ref(true)

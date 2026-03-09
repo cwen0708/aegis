@@ -22,7 +22,7 @@ const password = ref('')
 const error = ref('')
 const loading = ref(false)
 
-const API = ''
+const API = import.meta.env.DEV ? 'http://localhost:8899' : ''
 
 onMounted(() => {
   // 檢查 sessionStorage 是否已驗證
