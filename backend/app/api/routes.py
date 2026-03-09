@@ -16,6 +16,7 @@ import app.core.cron_poller as cron_module
 from app.core.ws_manager import websocket_clients
 from app.core.card_file import CardData, read_card as read_card_md, write_card, card_file_path
 from app.core.card_index import sync_card_to_index, remove_card_from_index, query_board, next_card_id, rebuild_index
+from croniter import croniter
 import asyncio
 import subprocess
 import time as time_module
@@ -517,6 +518,13 @@ def create_cron_job(data: CronJobCreateRequest, session: Session = Depends(get_s
     project = session.get(Project, data.project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    # 計算下次執行時間
+    next_time = None
+    try:
+        cron = croniter(data.cron_expression, datetime.now(timezone.utc))
+        next_time = cron.get_next(datetime)
+    except Exception:
+        pass
     job = CronJob(
         project_id=data.project_id,
         name=data.name,
@@ -524,6 +532,7 @@ def create_cron_job(data: CronJobCreateRequest, session: Session = Depends(get_s
         cron_expression=data.cron_expression,
         system_instruction=data.system_instruction,
         prompt_template=data.prompt_template,
+        next_scheduled_at=next_time,
     )
     session.add(job)
     session.commit()
