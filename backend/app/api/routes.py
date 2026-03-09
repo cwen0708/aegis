@@ -1933,8 +1933,12 @@ class InvitationResponse(BaseModel):
 
 def _invitation_status(inv: InviteCode) -> str:
     """計算邀請碼狀態"""
-    if inv.expires_at and datetime.now(timezone.utc) > inv.expires_at:
-        return "expired"
+    if inv.expires_at:
+        # 處理 naive datetime（無時區）與 aware datetime 比較
+        now = datetime.now(timezone.utc)
+        exp = inv.expires_at if inv.expires_at.tzinfo else inv.expires_at.replace(tzinfo=timezone.utc)
+        if now > exp:
+            return "expired"
     if inv.used_count >= inv.max_uses:
         return "depleted"
     return "active"
