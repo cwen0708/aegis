@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue'
-import { X, CheckCircle, XCircle, Clock, Loader2, ListTodo } from 'lucide-vue-next'
+import { X, CheckCircle, XCircle, Clock, Loader2, ListTodo, BookOpen } from 'lucide-vue-next'
 
 const props = defineProps<{
   memberId: number
@@ -42,6 +42,41 @@ const history = ref<TaskLogItem[]>([])
 const loading = ref(true)
 const showTasks = ref(false)
 
+// Skills
+interface SkillInfo {
+  name: string
+  title: string
+}
+const skills = ref<SkillInfo[]>([])
+const loadingSkills = ref(false)
+const showSkills = ref(false)
+const selectedSkill = ref<{ name: string; content: string } | null>(null)
+
+async function fetchSkills() {
+  loadingSkills.value = true
+  try {
+    const res = await fetch(`/api/v1/members/${props.memberId}/skills`)
+    if (res.ok) {
+      skills.value = await res.json()
+    }
+  } catch (e) {
+    console.error('Failed to fetch skills:', e)
+  }
+  loadingSkills.value = false
+}
+
+async function viewSkill(skill: SkillInfo) {
+  try {
+    const res = await fetch(`/api/v1/members/${props.memberId}/skills/${skill.name}`)
+    if (res.ok) {
+      const data = await res.json()
+      selectedSkill.value = { name: skill.title, content: data.content }
+    }
+  } catch (e) {
+    console.error('Failed to fetch skill:', e)
+  }
+}
+
 async function fetchHistory() {
   loading.value = true
   try {
@@ -65,6 +100,7 @@ function handleKeyDown(e: KeyboardEvent) {
 onMounted(() => {
   window.addEventListener('keydown', handleKeyDown)
   fetchHistory()
+  fetchSkills()
 })
 
 onUnmounted(() => {
@@ -151,6 +187,52 @@ function providerLabel(provider: string): string {
       </div>
     </Transition>
 
+    <!-- Skills panel - right side (toggle) -->
+    <Transition name="slide-fade">
+      <div v-if="showSkills" class="absolute right-4 sm:right-[50px] top-20 w-72 max-h-[50vh] overflow-hidden">
+        <div class="bg-slate-900/40 backdrop-blur-sm rounded-lg border-2 border-purple-400/40 shadow-xl">
+          <div class="p-3 max-h-[50vh] overflow-y-auto">
+            <!-- 技能列表 -->
+            <template v-if="!selectedSkill">
+              <div v-if="loadingSkills" class="flex items-center justify-center py-4">
+                <Loader2 class="w-5 h-5 text-purple-400 animate-spin" />
+              </div>
+
+              <div v-else-if="skills.length === 0" class="text-center py-4 text-slate-500 text-sm">
+                尚未設定技能
+              </div>
+
+              <div v-else class="space-y-1">
+                <button
+                  v-for="skill in skills"
+                  :key="skill.name"
+                  @click="viewSkill(skill)"
+                  class="w-full flex items-center gap-2 py-2 px-2 rounded hover:bg-purple-500/20 transition-colors text-left"
+                >
+                  <BookOpen class="w-4 h-4 text-purple-400 shrink-0" />
+                  <div class="flex-1 min-w-0">
+                    <p class="text-xs text-white truncate">{{ skill.title }}</p>
+                    <p class="text-[10px] text-slate-500 font-mono">{{ skill.name }}.md</p>
+                  </div>
+                </button>
+              </div>
+            </template>
+
+            <!-- 技能詳情 -->
+            <template v-else>
+              <div class="flex items-center gap-2 mb-3">
+                <button @click="selectedSkill = null" class="text-purple-400 hover:text-purple-300 text-xs">
+                  ← 返回
+                </button>
+                <span class="text-white text-sm font-bold">{{ selectedSkill.name }}</span>
+              </div>
+              <pre class="text-xs text-slate-300 whitespace-pre-wrap font-mono bg-slate-900/50 rounded p-2 max-h-[35vh] overflow-y-auto">{{ selectedSkill.content }}</pre>
+            </template>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
     <!-- Dialog box - bottom, full width with frame -->
     <div class="absolute bottom-4 left-2 right-2 sm:left-[50px] sm:right-[50px]">
       <div class="bg-slate-900/40 backdrop-blur-sm rounded-lg border-2 border-slate-400/40 shadow-2xl">
@@ -180,12 +262,20 @@ function providerLabel(provider: string): string {
         <!-- Action buttons - overlapping bottom border -->
         <div class="absolute -bottom-3 right-6 flex items-center gap-2">
           <button
-            @click="showTasks = !showTasks"
+            @click="showTasks = !showTasks; if (showTasks) showSkills = false"
             class="flex items-center gap-1 px-3 py-1 bg-slate-700 text-slate-300 hover:text-white hover:bg-slate-600 rounded transition-colors text-xs"
             :class="showTasks ? 'bg-emerald-600 text-white' : ''"
           >
             <ListTodo :size="12" />
             <span class="hidden sm:inline">任務</span>
+          </button>
+          <button
+            @click="showSkills = !showSkills; if (showSkills) { showTasks = false; selectedSkill = null }"
+            class="flex items-center gap-1 px-3 py-1 bg-slate-700 text-slate-300 hover:text-white hover:bg-slate-600 rounded transition-colors text-xs"
+            :class="showSkills ? 'bg-purple-600 text-white' : ''"
+          >
+            <BookOpen :size="12" />
+            <span class="hidden sm:inline">技能</span>
           </button>
           <button
             @click="emit('close')"

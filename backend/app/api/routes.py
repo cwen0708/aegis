@@ -1324,9 +1324,44 @@ def list_members(session: Session = Depends(get_session)):
     return result
 
 
+def _generate_slug(name: str, session: Session) -> str:
+    """從名稱生成唯一的 slug"""
+    import re
+    import unicodedata
+
+    # 嘗試用 pypinyin 轉換中文（如果有安裝）
+    try:
+        from pypinyin import lazy_pinyin
+        base = "-".join(lazy_pinyin(name))
+    except ImportError:
+        # 沒有 pypinyin，用簡單轉換
+        base = name.lower()
+
+    # 清理：只保留字母、數字、連字號
+    base = re.sub(r"[^a-z0-9\-]", "-", base)
+    base = re.sub(r"-+", "-", base).strip("-")
+
+    if not base:
+        base = "member"
+
+    # 確保唯一性
+    slug = base
+    counter = 1
+    while session.exec(select(Member).where(Member.slug == slug)).first():
+        slug = f"{base}-{counter}"
+        counter += 1
+
+    return slug
+
+
 @router.post("/members")
 def create_member(data: MemberCreateRequest, session: Session = Depends(get_session)):
     member = Member(**data.model_dump())
+
+    # 自動生成 slug
+    if not member.slug:
+        member.slug = _generate_slug(member.name, session)
+
     session.add(member)
     session.commit()
     session.refresh(member)
@@ -1349,6 +1384,11 @@ def update_member(member_id: int, data: MemberUpdateRequest, session: Session = 
         raise HTTPException(status_code=404, detail="Member not found")
     for field, val in data.model_dump(exclude_unset=True).items():
         setattr(member, field, val)
+
+    # 如果沒有 slug，自動生成
+    if not member.slug:
+        member.slug = _generate_slug(member.name, session)
+
     session.add(member)
     session.commit()
     session.refresh(member)
@@ -1521,6 +1561,99 @@ def get_member_skill(member_id: int, skill_name: str, session: Session = Depends
         raise HTTPException(status_code=404, detail="Skill not found")
 
     return {"name": skill_name, "content": content}
+
+
+class SkillUpdateRequest(BaseModel):
+    content: str
+
+
+@router.put("/members/{member_id}/skills/{skill_name}")
+def update_member_skill(member_id: int, skill_name: str, data: SkillUpdateRequest, session: Session = Depends(get_session)):
+    """更新成員的技能內容"""
+    from app.core.member_profile import get_skills_dir
+    import re
+
+    member = session.get(Member, member_id)
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    if not member.slug:
+        # 自動生成 slug
+        member.slug = _generate_slug(member.name, session)
+        session.add(member)
+        session.commit()
+
+    # 驗證技能名稱
+    if not skill_name or ".." in skill_name or "/" in skill_name or "\\" in skill_name:
+        raise HTTPException(status_code=400, detail="Invalid skill name")
+    if not re.match(r"^[a-z0-9][a-z0-9\-]*$", skill_name):
+        raise HTTPException(status_code=400, detail="Skill name must be lowercase letters, numbers, and hyphens")
+
+    skills_dir = get_skills_dir(member.slug)
+    skill_file = skills_dir / f"{skill_name}.md"
+    skill_file.write_text(data.content, encoding="utf-8")
+
+    return {"name": skill_name, "content": data.content}
+
+
+@router.post("/members/{member_id}/skills")
+def create_member_skill(member_id: int, data: dict, session: Session = Depends(get_session)):
+    """建立新技能"""
+    from app.core.member_profile import get_skills_dir
+    import re
+
+    member = session.get(Member, member_id)
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    if not member.slug:
+        member.slug = _generate_slug(member.name, session)
+        session.add(member)
+        session.commit()
+
+    skill_name = data.get("name", "").strip().lower()
+    content = data.get("content", "")
+
+    # 驗證技能名稱
+    if not skill_name:
+        raise HTTPException(status_code=400, detail="Skill name is required")
+    if not re.match(r"^[a-z0-9][a-z0-9\-]*$", skill_name):
+        raise HTTPException(status_code=400, detail="Skill name must be lowercase letters, numbers, and hyphens")
+
+    skills_dir = get_skills_dir(member.slug)
+    skill_file = skills_dir / f"{skill_name}.md"
+
+    if skill_file.exists():
+        raise HTTPException(status_code=409, detail="Skill already exists")
+
+    skill_file.write_text(content, encoding="utf-8")
+    return {"name": skill_name, "content": content}
+
+
+@router.delete("/members/{member_id}/skills/{skill_name}")
+def delete_member_skill(member_id: int, skill_name: str, session: Session = Depends(get_session)):
+    """刪除技能"""
+    from app.core.member_profile import get_skills_dir
+
+    member = session.get(Member, member_id)
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    if not member.slug:
+        raise HTTPException(status_code=404, detail="Member has no profile")
+
+    # 驗證技能名稱
+    if not skill_name or ".." in skill_name or "/" in skill_name or "\\" in skill_name:
+        raise HTTPException(status_code=400, detail="Invalid skill name")
+
+    skills_dir = get_skills_dir(member.slug)
+    skill_file = skills_dir / f"{skill_name}.md"
+
+    if not skill_file.exists():
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    skill_file.unlink()
+    return {"deleted": skill_name}
 
 
 # ==========================================

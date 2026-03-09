@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
-import { Plus, UserPlus, Save, Edit3, Upload, Sparkles, Image, BookOpen, ChevronLeft } from 'lucide-vue-next'
+import { Plus, UserPlus, Save, Edit3, Upload, Sparkles, Image, BookOpen, ChevronLeft, Trash2 } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 
@@ -83,6 +83,11 @@ const skillsList = ref<SkillInfo[]>([])
 const loadingSkills = ref(false)
 const selectedSkill = ref<{ name: string; content: string } | null>(null)
 const loadingSkillDetail = ref(false)
+const editingSkill = ref(false)
+const skillEditContent = ref('')
+const savingSkill = ref(false)
+const showNewSkillDialog = ref(false)
+const newSkillForm = ref({ name: '', content: '' })
 
 // 綁定時根據選的帳號 provider 提供 model 選項
 const bindAccountProvider = computed(() => {
@@ -387,6 +392,91 @@ async function openSkillDetail(skill: SkillInfo) {
 function backToSkillsList() {
   showSkillDetailDialog.value = false
   selectedSkill.value = null
+  editingSkill.value = false
+}
+
+function startEditSkill() {
+  if (selectedSkill.value) {
+    skillEditContent.value = selectedSkill.value.content
+    editingSkill.value = true
+  }
+}
+
+async function saveSkill() {
+  if (!selectedSkill.value || !skillsMember.value) return
+
+  // 從 selectedSkill.name 找到原始的 skill name
+  const skill = skillsList.value.find(s => s.title === selectedSkill.value?.name)
+  if (!skill) return
+
+  savingSkill.value = true
+  try {
+    const res = await fetch(`${API}/api/v1/members/${skillsMember.value.id}/skills/${skill.name}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: skillEditContent.value }),
+    })
+    if (!res.ok) throw new Error('儲存失敗')
+
+    selectedSkill.value.content = skillEditContent.value
+    editingSkill.value = false
+    store.addToast('技能已更新', 'success')
+
+    // 重新載入技能列表（標題可能改變）
+    await openSkillsDialog(skillsMember.value)
+  } catch (e) {
+    store.addToast('儲存失敗', 'error')
+  }
+  savingSkill.value = false
+}
+
+function openNewSkillDialog() {
+  newSkillForm.value = { name: '', content: '# 新技能\n\n' }
+  showNewSkillDialog.value = true
+}
+
+async function createSkill() {
+  if (!skillsMember.value || !newSkillForm.value.name) return
+
+  try {
+    const res = await fetch(`${API}/api/v1/members/${skillsMember.value.id}/skills`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newSkillForm.value),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: '建立失敗' }))
+      throw new Error(err.detail)
+    }
+
+    store.addToast('技能已建立', 'success')
+    showNewSkillDialog.value = false
+    await openSkillsDialog(skillsMember.value)
+  } catch (e: any) {
+    store.addToast(e.message || '建立失敗', 'error')
+  }
+}
+
+async function deleteSkill() {
+  if (!selectedSkill.value || !skillsMember.value) return
+
+  const skill = skillsList.value.find(s => s.title === selectedSkill.value?.name)
+  if (!skill) return
+
+  if (!confirm(`確定刪除技能「${skill.title}」？`)) return
+
+  try {
+    const res = await fetch(`${API}/api/v1/members/${skillsMember.value.id}/skills/${skill.name}`, {
+      method: 'DELETE',
+    })
+    if (!res.ok) throw new Error('刪除失敗')
+
+    store.addToast('技能已刪除', 'success')
+    backToSkillsList()
+    await openSkillsDialog(skillsMember.value)
+  } catch (e) {
+    store.addToast('刪除失敗', 'error')
+  }
 }
 </script>
 
@@ -733,7 +823,11 @@ function backToSkillsList() {
             </button>
           </div>
 
-          <div class="flex justify-end pt-2">
+          <div class="flex justify-between items-center pt-2">
+            <button @click="openNewSkillDialog" class="flex items-center gap-1 px-3 py-2 text-xs text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 rounded-lg transition-colors">
+              <Plus class="w-3.5 h-3.5" />
+              新增技能
+            </button>
             <button @click="showSkillsDialog = false" class="px-4 py-2 text-xs text-slate-400 hover:text-slate-200 transition-colors">關閉</button>
           </div>
         </div>
@@ -756,13 +850,72 @@ function backToSkillsList() {
 
           <div class="flex-1 overflow-y-auto p-6">
             <div v-if="loadingSkillDetail" class="text-center text-sm text-slate-500 py-8">載入中...</div>
-            <div v-else-if="selectedSkill" class="prose prose-invert prose-sm max-w-none">
-              <pre class="whitespace-pre-wrap text-sm text-slate-300 font-mono bg-slate-900/50 rounded-xl p-4 border border-slate-700/50">{{ selectedSkill.content }}</pre>
+            <div v-else-if="selectedSkill">
+              <!-- 檢視模式 -->
+              <pre v-if="!editingSkill" class="whitespace-pre-wrap text-sm text-slate-300 font-mono bg-slate-900/50 rounded-xl p-4 border border-slate-700/50">{{ selectedSkill.content }}</pre>
+              <!-- 編輯模式 -->
+              <textarea
+                v-else
+                v-model="skillEditContent"
+                class="w-full h-[50vh] bg-slate-900/50 rounded-xl p-4 border border-purple-500/50 text-sm text-slate-300 font-mono resize-none outline-none focus:ring-2 focus:ring-purple-500"
+              ></textarea>
             </div>
           </div>
 
-          <div class="px-6 py-4 border-t border-slate-700/50 flex justify-end">
-            <button @click="showSkillDetailDialog = false; showSkillsDialog = false" class="px-4 py-2 text-xs text-slate-400 hover:text-slate-200 transition-colors">關閉</button>
+          <div class="px-6 py-4 border-t border-slate-700/50 flex justify-between">
+            <button @click="deleteSkill" class="px-3 py-2 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors flex items-center gap-1">
+              <Trash2 class="w-3.5 h-3.5" />
+              刪除
+            </button>
+            <div class="flex gap-2">
+              <template v-if="!editingSkill">
+                <button @click="startEditSkill" class="px-4 py-2 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 rounded-lg text-xs font-medium transition-colors flex items-center gap-1">
+                  <Edit3 class="w-3.5 h-3.5" />
+                  編輯
+                </button>
+              </template>
+              <template v-else>
+                <button @click="editingSkill = false" class="px-4 py-2 text-xs text-slate-400 hover:text-slate-200 transition-colors">取消</button>
+                <button @click="saveSkill" :disabled="savingSkill" class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1">
+                  <Save class="w-3.5 h-3.5" />
+                  {{ savingSkill ? '儲存中...' : '儲存' }}
+                </button>
+              </template>
+              <button @click="showSkillDetailDialog = false; showSkillsDialog = false" class="px-4 py-2 text-xs text-slate-400 hover:text-slate-200 transition-colors">關閉</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- New Skill Dialog -->
+    <Teleport to="body">
+      <div v-if="showNewSkillDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" @click.self="showNewSkillDialog = false">
+        <div class="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-md p-6 space-y-4">
+          <h3 class="text-sm font-bold text-slate-200">新增技能</h3>
+
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">技能名稱（英文、小寫、連字號）</label>
+            <input
+              v-model="newSkillForm.name"
+              class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-slate-200 font-mono outline-none focus:ring-2 focus:ring-purple-500"
+              placeholder="例：code-review"
+            />
+          </div>
+
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">內容（Markdown）</label>
+            <textarea
+              v-model="newSkillForm.content"
+              rows="8"
+              class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-slate-200 font-mono outline-none resize-none focus:ring-2 focus:ring-purple-500"
+              placeholder="# 技能標題&#10;&#10;技能說明..."
+            ></textarea>
+          </div>
+
+          <div class="flex justify-end gap-2 pt-2">
+            <button @click="showNewSkillDialog = false" class="px-4 py-2 text-xs text-slate-400 hover:text-slate-200 transition-colors">取消</button>
+            <button @click="createSkill" :disabled="!newSkillForm.name" class="px-4 py-2 bg-purple-500 hover:bg-purple-600 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-all">建立</button>
           </div>
         </div>
       </div>
