@@ -56,6 +56,7 @@ class Card(SQLModel, table=True):
     description: Optional[str] = None
     content: str = Field(default="") # 詳細的 Markdown 內容，傳給 AI 的 prompt
     status: str = Field(default="idle") # idle, running, failed, completed
+    is_archived: bool = Field(default=False)  # 封存後在看板隱藏
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -72,6 +73,7 @@ class CardIndex(SQLModel, table=True):
     title: str = ""
     description: Optional[str] = None
     tags_json: str = Field(default="[]")
+    is_archived: bool = Field(default=False, index=True)  # 封存後在看板隱藏
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     content_hash: str = ""

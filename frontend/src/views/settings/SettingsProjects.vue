@@ -218,6 +218,7 @@ function formatDate(dateStr: string) {
           <!-- Right: Actions -->
           <div class="flex items-center gap-2 ml-4">
             <button
+              v-if="!project.is_system"
               @click="toggleActive(project)"
               :class="[
                 'px-3 py-1.5 text-sm rounded-lg transition',
@@ -288,7 +289,7 @@ function formatDate(dateStr: string) {
                 placeholder="如：G:\Projects\infinite-novel"
               />
               <p class="text-xs text-slate-500 mt-1">
-                若路徑不存在會自動建立
+                卡片檔案存放於此路徑的 .aegis/cards/ 目錄下
               </p>
             </div>
 

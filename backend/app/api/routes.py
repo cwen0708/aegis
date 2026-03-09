@@ -631,6 +631,65 @@ def abort_card(card_id: int, session: Session = Depends(get_session)):
     return {"ok": True, "status": "reset"}
 
 
+@router.post("/cards/{card_id}/archive")
+def archive_card(card_id: int, session: Session = Depends(get_session)):
+    """封存卡片（從看板隱藏）"""
+    idx = session.get(CardIndex, card_id)
+    if not idx or not idx.file_path or not Path(idx.file_path).exists():
+        raise HTTPException(status_code=404, detail="Card not found")
+
+    # 運行中的卡片不能封存
+    if idx.status in ("running", "pending"):
+        raise HTTPException(status_code=400, detail="Cannot archive running/pending card")
+
+    cd = read_card_md(Path(idx.file_path))
+    cd.is_archived = True
+    cd.updated_at = datetime.now(timezone.utc)
+    write_card(Path(idx.file_path), cd)
+    sync_card_to_index(session, cd, project_id=idx.project_id, file_path=idx.file_path)
+    session.commit()
+    return {"ok": True}
+
+
+@router.post("/cards/{card_id}/unarchive")
+def unarchive_card(card_id: int, session: Session = Depends(get_session)):
+    """取消封存卡片"""
+    idx = session.get(CardIndex, card_id)
+    if not idx or not idx.file_path or not Path(idx.file_path).exists():
+        raise HTTPException(status_code=404, detail="Card not found")
+
+    cd = read_card_md(Path(idx.file_path))
+    cd.is_archived = False
+    cd.updated_at = datetime.now(timezone.utc)
+    write_card(Path(idx.file_path), cd)
+    sync_card_to_index(session, cd, project_id=idx.project_id, file_path=idx.file_path)
+    session.commit()
+    return {"ok": True}
+
+
+@router.get("/projects/{project_id}/archived")
+def list_archived_cards(project_id: int, session: Session = Depends(get_session)):
+    """取得專案的封存卡片列表"""
+    from app.core.card_index import query_archived
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    cards = query_archived(session, project_id)
+    return [
+        {
+            "id": c.card_id,
+            "title": c.title,
+            "description": c.description,
+            "status": c.status,
+            "list_id": c.list_id,
+            "created_at": c.created_at,
+            "updated_at": c.updated_at,
+        }
+        for c in cards
+    ]
+
+
 # ==========================================
 # Project Delete (with is_system guard)
 # ==========================================

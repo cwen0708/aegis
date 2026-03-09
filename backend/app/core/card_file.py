@@ -43,6 +43,7 @@ class CardData:
     content: str
     status: str
     tags: list[str] = field(default_factory=list)
+    is_archived: bool = False
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -61,6 +62,7 @@ def serialize_card(card: CardData) -> str:
         "description": card.description,
         "status": card.status,
         "tags": card.tags,
+        "is_archived": card.is_archived,
         "created_at": card.created_at.isoformat(),
         "updated_at": card.updated_at.isoformat(),
     }
@@ -112,6 +114,7 @@ def read_card(file_path: Path) -> CardData:
         content=post.content,
         status=meta["status"],
         tags=meta.get("tags", []),
+        is_archived=meta.get("is_archived", False),
         created_at=parse_dt(meta.get("created_at", datetime.now(timezone.utc))),
         updated_at=parse_dt(meta.get("updated_at", datetime.now(timezone.utc))),
     )

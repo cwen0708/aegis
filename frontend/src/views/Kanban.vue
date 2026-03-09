@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, inject, onMounted, onUnmounted, watch, computed, type Ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Plus, Play, Pause, Square, Clock, Trash2, Zap, MoreVertical, ChevronDown, FolderOpen, Eye, UserCircle } from 'lucide-vue-next'
+import { Plus, Play, Pause, Square, Clock, Trash2, Zap, MoreVertical, ChevronDown, FolderOpen, Eye, UserCircle, Settings2, Bot, Hand, CheckCircle, XCircle, Archive, RotateCcw, Loader2 } from 'lucide-vue-next'
 import draggable from 'vuedraggable'
 import { useAegisStore } from '../stores/aegis'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -189,6 +189,18 @@ function requestDeleteCard(cardId: number) {
   confirmDelete.value = true
 }
 
+async function archiveCard(cardId: number) {
+  openMenuCardId.value = null
+  try {
+    const res = await fetch(`/api/v1/cards/${cardId}/archive`, { method: 'POST' })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    store.addToast('卡片已封存', 'success')
+    await fetchBoard()
+  } catch (e: any) {
+    store.addToast(e.message || '封存失敗', 'error')
+  }
+}
+
 async function confirmDeleteCard() {
   if (!deleteTargetCardId.value) return
   const targetId = deleteTargetCardId.value
@@ -306,6 +318,91 @@ async function assignMember(memberId: number | null) {
 function switchToProjectsSidebar() {
   if (sidebarMode) sidebarMode.value = 'projects'
 }
+
+// 階段配置 Dialog
+const showStageConfigDialog = ref(false)
+const configuringStage = ref<any>(null)
+const stageConfigForm = ref({
+  stage_type: 'auto_process',
+  is_ai_stage: true,
+})
+
+const stageTypeOptions = [
+  { value: 'manual', label: '手動', icon: Hand, desc: '不自動執行，需手動觸發' },
+  { value: 'auto_process', label: '自動執行', icon: Bot, desc: '卡片進入後自動執行 AI 任務' },
+  { value: 'auto_review', label: '自動審核', icon: CheckCircle, desc: '自動執行 AI 審核/驗證' },
+  { value: 'terminal', label: '終止階段', icon: XCircle, desc: '流程結束，不執行任何操作' },
+]
+
+function openStageConfigDialog(stage: any) {
+  configuringStage.value = stage
+  stageConfigForm.value = {
+    stage_type: stage.stage_type || 'auto_process',
+    is_ai_stage: stage.is_ai_stage ?? true,
+  }
+  showStageConfigDialog.value = true
+}
+
+async function saveStageConfig() {
+  if (!configuringStage.value) return
+  try {
+    const res = await fetch(`/api/v1/lists/${configuringStage.value.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(stageConfigForm.value),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    showStageConfigDialog.value = false
+    await fetchBoard()
+    store.addToast('階段配置已更新', 'success')
+  } catch (e: any) {
+    store.addToast(e.message || '儲存失敗', 'error')
+  }
+}
+
+function getStageTypeIcon(stageType: string) {
+  return stageTypeOptions.find(o => o.value === stageType)?.icon || Bot
+}
+
+// 封存面板
+const showArchivePanel = ref(false)
+const archivedCards = ref<any[]>([])
+const archiveLoading = ref(false)
+const unarchiveLoading = ref<number | null>(null)
+
+async function fetchArchivedCards() {
+  if (!selectedProjectId.value) return
+  archiveLoading.value = true
+  try {
+    const res = await fetch(`/api/v1/projects/${selectedProjectId.value}/archived`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    archivedCards.value = await res.json()
+  } catch {
+    archivedCards.value = []
+  } finally {
+    archiveLoading.value = false
+  }
+}
+
+function openArchivePanel() {
+  showArchivePanel.value = true
+  fetchArchivedCards()
+}
+
+async function unarchiveCard(cardId: number) {
+  unarchiveLoading.value = cardId
+  try {
+    const res = await fetch(`/api/v1/cards/${cardId}/unarchive`, { method: 'POST' })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    store.addToast('卡片已恢復', 'success')
+    await fetchArchivedCards()
+    await fetchBoard()
+  } catch (e: any) {
+    store.addToast(e.message || '恢復失敗', 'error')
+  } finally {
+    unarchiveLoading.value = null
+  }
+}
 </script>
 
 <template>
@@ -362,6 +459,15 @@ function switchToProjectsSidebar() {
           </button>
         </div>
 
+        <button
+          @click="openArchivePanel"
+          class="flex items-center gap-1.5 bg-slate-700/50 hover:bg-slate-600 text-slate-300 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border border-slate-600/50"
+          title="封存卡片"
+        >
+          <Archive class="w-3.5 h-3.5" />
+          封存
+        </button>
+
         <button @click="showNewTaskModal = true" class="flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shadow-lg shadow-emerald-500/20">
           <Plus class="w-3.5 h-3.5" />
           新增任務
@@ -377,6 +483,18 @@ function switchToProjectsSidebar() {
       <div v-for="stage in boardData" :key="stage.id" class="w-80 shrink-0 bg-slate-800/40 rounded-xl p-4 border border-slate-700/50 flex flex-col max-h-full">
         <div class="flex items-center justify-between mb-4 px-1">
           <h3 class="font-medium text-slate-200 flex items-center gap-2">
+            <!-- Stage Type Icon -->
+            <component
+              :is="getStageTypeIcon(stage.stage_type)"
+              class="w-4 h-4"
+              :class="{
+                'text-slate-500': stage.stage_type === 'manual',
+                'text-emerald-400': stage.stage_type === 'auto_process',
+                'text-blue-400': stage.stage_type === 'auto_review',
+                'text-slate-600': stage.stage_type === 'terminal',
+              }"
+              :title="stageTypeOptions.find(o => o.value === stage.stage_type)?.label || '自動執行'"
+            />
             {{ stage.name }}
             <span v-if="stage.cards.some((c: any) => c.status === 'running')" class="relative flex h-2 w-2 ml-1">
               <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -384,6 +502,7 @@ function switchToProjectsSidebar() {
             </span>
           </h3>
           <div class="flex items-center gap-1.5">
+            <!-- Member (left) -->
             <button
               @click.stop="openAssignDialog(stage)"
               class="flex items-center justify-center w-6 h-6 rounded-full transition-colors"
@@ -393,8 +512,14 @@ function switchToProjectsSidebar() {
               <span v-if="stage.member" class="text-xs">{{ stage.member.avatar || '🤖' }}</span>
               <UserCircle v-else class="w-4 h-4" />
             </button>
-            <button v-if="stage.name === 'Backlog'" @click="showNewTaskModal = true" class="text-slate-500 hover:text-slate-300"><Plus class="w-4 h-4"/></button>
-            <span class="bg-slate-700/50 text-slate-300 text-xs px-2.5 py-0.5 rounded-full border border-slate-600">{{ stage.cards.length }}</span>
+            <!-- Stage Config (right) -->
+            <button
+              @click.stop="openStageConfigDialog(stage)"
+              class="flex items-center justify-center w-6 h-6 rounded-full text-slate-600 hover:text-slate-400 hover:bg-slate-700/50 transition-colors"
+              title="階段配置"
+            >
+              <Settings2 class="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
 
@@ -434,6 +559,14 @@ function switchToProjectsSidebar() {
                     :disabled="card.status === 'running'"
                   >
                     <Zap class="w-3.5 h-3.5 text-amber-400" /> 手動觸發
+                  </button>
+                  <button
+                    @click.stop="archiveCard(card.id)"
+                    class="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:bg-slate-600 transition-colors"
+                    :class="{ 'opacity-50 cursor-not-allowed': card.status === 'running' || card.status === 'pending' }"
+                    :disabled="card.status === 'running' || card.status === 'pending'"
+                  >
+                    <Archive class="w-3.5 h-3.5 text-slate-400" /> 封存
                   </button>
                   <button
                     @click.stop="requestDeleteCard(card.id)"
@@ -657,6 +790,127 @@ function switchToProjectsSidebar() {
 
         <div class="flex justify-end pt-1">
           <button @click="showAssignDialog = false" class="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors">取消</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+
+  <!-- Stage Config Dialog -->
+  <Teleport to="body">
+    <div v-if="showStageConfigDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" @click.self="showStageConfigDialog = false">
+      <div class="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-sm p-5 space-y-4">
+        <h3 class="text-sm font-bold text-slate-200">階段配置 — {{ configuringStage?.name }}</h3>
+
+        <!-- Stage Type -->
+        <div class="space-y-2">
+          <label class="block text-xs font-medium text-slate-400">階段類型</label>
+          <div class="space-y-1.5">
+            <button
+              v-for="opt in stageTypeOptions"
+              :key="opt.value"
+              @click="stageConfigForm.stage_type = opt.value"
+              class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors border"
+              :class="stageConfigForm.stage_type === opt.value
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                : 'border-transparent hover:bg-slate-700/50 hover:border-slate-600 text-slate-300'"
+            >
+              <component :is="opt.icon" class="w-4 h-4" />
+              <div class="flex-1">
+                <div class="text-sm font-medium">{{ opt.label }}</div>
+                <div class="text-[10px] text-slate-500">{{ opt.desc }}</div>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <!-- Is AI Stage -->
+        <div class="flex items-center justify-between py-2 px-1">
+          <div>
+            <div class="text-sm text-slate-200">AI 處理階段</div>
+            <div class="text-[10px] text-slate-500">關閉後不會自動分派給 AI 成員</div>
+          </div>
+          <button
+            @click="stageConfigForm.is_ai_stage = !stageConfigForm.is_ai_stage"
+            class="relative w-10 h-5 rounded-full transition-colors"
+            :class="stageConfigForm.is_ai_stage ? 'bg-emerald-500' : 'bg-slate-600'"
+          >
+            <span
+              class="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform"
+              :class="stageConfigForm.is_ai_stage ? 'left-5' : 'left-0.5'"
+            />
+          </button>
+        </div>
+
+        <!-- Actions -->
+        <div class="flex justify-end gap-2 pt-2 border-t border-slate-700">
+          <button @click="showStageConfigDialog = false" class="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors">取消</button>
+          <button @click="saveStageConfig" class="px-4 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors">儲存</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+
+  <!-- Archive Panel -->
+  <Teleport to="body">
+    <div v-if="showArchivePanel" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" @click.self="showArchivePanel = false">
+      <div class="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-lg max-h-[70vh] flex flex-col">
+        <!-- Header -->
+        <div class="flex items-center justify-between p-5 border-b border-slate-700">
+          <div class="flex items-center gap-3">
+            <Archive class="w-5 h-5 text-slate-400" />
+            <h3 class="text-sm font-bold text-slate-200">封存卡片</h3>
+          </div>
+          <button @click="showArchivePanel = false" class="text-slate-400 hover:text-slate-200 p-1 rounded-lg hover:bg-slate-700">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </button>
+        </div>
+
+        <!-- Content -->
+        <div class="flex-1 overflow-y-auto p-4 custom-scrollbar">
+          <!-- Loading -->
+          <div v-if="archiveLoading" class="flex items-center justify-center py-8 text-slate-500">
+            <Loader2 class="w-5 h-5 animate-spin mr-2" />
+            載入中...
+          </div>
+
+          <!-- Empty -->
+          <div v-else-if="archivedCards.length === 0" class="text-center py-12 text-slate-500">
+            <Archive class="w-10 h-10 mx-auto mb-3 opacity-30" />
+            <p class="text-sm">沒有封存的卡片</p>
+          </div>
+
+          <!-- Card List -->
+          <div v-else class="space-y-2">
+            <div
+              v-for="card in archivedCards"
+              :key="card.id"
+              class="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg border border-slate-700/50"
+            >
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2 mb-0.5">
+                  <span class="text-[10px] font-bold text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded">C-{{ card.id }}</span>
+                  <span
+                    class="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                    :class="{
+                      'bg-green-500/10 text-green-400': card.status === 'completed',
+                      'bg-red-500/10 text-red-400': card.status === 'failed',
+                      'bg-slate-500/10 text-slate-400': card.status === 'idle',
+                    }"
+                  >{{ card.status }}</span>
+                </div>
+                <div class="text-sm text-slate-200 truncate">{{ card.title }}</div>
+              </div>
+              <button
+                @click="unarchiveCard(card.id)"
+                :disabled="unarchiveLoading !== null"
+                class="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 ml-3"
+              >
+                <Loader2 v-if="unarchiveLoading === card.id" class="w-3 h-3 animate-spin" />
+                <RotateCcw v-else class="w-3 h-3" />
+                恢復
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

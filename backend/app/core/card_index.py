@@ -31,6 +31,7 @@ def sync_card_to_index(
         existing.title = card.title
         existing.description = card.description
         existing.tags_json = tags_json
+        existing.is_archived = card.is_archived
         existing.created_at = card.created_at
         existing.updated_at = card.updated_at
         existing.content_hash = content_hash
@@ -46,6 +47,7 @@ def sync_card_to_index(
             title=card.title,
             description=card.description,
             tags_json=tags_json,
+            is_archived=card.is_archived,
             created_at=card.created_at,
             updated_at=card.updated_at,
             content_hash=content_hash,
@@ -70,8 +72,20 @@ def query_pending_cards(session: Session, project_id: int = None) -> list[CardIn
 
 
 def query_board(session: Session, project_id: int) -> list[CardIndex]:
-    """Query all cards for a project (for board display)."""
-    stmt = select(CardIndex).where(CardIndex.project_id == project_id)
+    """Query non-archived cards for a project (for board display)."""
+    stmt = select(CardIndex).where(
+        CardIndex.project_id == project_id,
+        CardIndex.is_archived == False  # noqa: E712
+    )
+    return list(session.exec(stmt).all())
+
+
+def query_archived(session: Session, project_id: int) -> list[CardIndex]:
+    """Query archived cards for a project."""
+    stmt = select(CardIndex).where(
+        CardIndex.project_id == project_id,
+        CardIndex.is_archived == True  # noqa: E712
+    ).order_by(CardIndex.updated_at.desc())
     return list(session.exec(stmt).all())
 
 

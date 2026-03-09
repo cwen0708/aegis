@@ -58,6 +58,7 @@ interface MemberInfo {
   provider: string
   role?: string
   portrait?: string
+  sprite_index?: number
 }
 
 const members = ref<MemberInfo[]>([])
@@ -259,11 +260,11 @@ function pushDataToScene() {
   scene.updateData({
     totalDesks: totalDesks.value,
     desks: deskAssignments.value.map(d => d ? {
-      member: { id: d.member.id, name: d.member.name, provider: d.member.provider },
+      member: { id: d.member.id, name: d.member.name, provider: d.member.provider, sprite_index: d.member.sprite_index ?? 0 },
       task: { card_title: d.task.card_title, project: d.task.project },
     } : null),
     resting: restingMembers.value.map(m => ({
-      id: m.id, name: m.name, provider: m.provider,
+      id: m.id, name: m.name, provider: m.provider, sprite_index: m.sprite_index ?? 0,
     })),
     bubbles: bubbles.value,
     used: store.systemInfo.workstations_used,

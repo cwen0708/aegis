@@ -19,14 +19,14 @@ const MAX_CHAR_COUNT = 6  // 最大可用角色圖數量（preload 用）
 
 // ── Types ───────────────────────────────────────────────────────
 export type DeskInfo = {
-  member: { id: number; name: string; provider: string }
+  member: { id: number; name: string; provider: string; sprite_index: number }
   task: { card_title: string; project: string }
 } | null
 
 export interface SceneData {
   totalDesks: number
   desks: DeskInfo[]
-  resting: { id: number; name: string; provider: string }[]
+  resting: { id: number; name: string; provider: string; sprite_index: number }[]
   bubbles: Map<number, string>
   used: number
   total: number
@@ -346,7 +346,7 @@ export class OfficeScene extends Phaser.Scene {
       }
 
       const pos = this.tw(col, row)
-      const c = this.createCharacter(pos.x, pos.y, memberId, desk.member.name, desk.member.provider, 'working', workDir)
+      const c = this.createCharacter(pos.x, pos.y, memberId, desk.member.name, desk.member.provider, desk.member.sprite_index, 'working', workDir)
       const key = `w_${memberId}`
       this.characterSprites.set(key, c)
       this.memberSpriteKeys.set(memberId, key)
@@ -386,7 +386,7 @@ export class OfficeScene extends Phaser.Scene {
 
       const sp = walkable[Math.floor(Math.random() * walkable.length)]!
       const wp = this.tw(sp.col + 0.5, sp.row + 0.5)
-      const c = this.createCharacter(wp.x, wp.y, memberId, m.name, m.provider, 'idle')
+      const c = this.createCharacter(wp.x, wp.y, memberId, m.name, m.provider, m.sprite_index, 'idle')
       const key = `r_${memberId}`
       this.characterSprites.set(key, c)
       this.memberSpriteKeys.set(memberId, key)
@@ -403,12 +403,14 @@ export class OfficeScene extends Phaser.Scene {
   private createCharacter(
     cx: number, cy: number,
     memberId: number, name: string, provider: string,
+    spriteIndex: number,
     mode: 'working' | 'idle',
     workDir: 'down' | 'left' | 'right' | 'up' = 'up',
   ): Phaser.GameObjects.Container {
     const container = this.add.container(cx, cy)
     container.setData('memberId', memberId)
-    const charKey = `char_${(memberId - 1) % this.charCount}`
+    container.setData('spriteIndex', spriteIndex)
+    const charKey = `char_${spriteIndex % this.charCount}`
 
     const shadow = this.add.graphics()
     shadow.fillStyle(0x000000, 0.2)
@@ -501,13 +503,15 @@ export class OfficeScene extends Phaser.Scene {
   private walkPath(
     key: string,
     container: Phaser.GameObjects.Container,
-    memberId: number,
+    _memberId: number,
     path: Array<{ col: number; row: number }>,
     roomTiles: Array<{ col: number; row: number }>,
     onComplete: () => void,
   ) {
+    const spriteIndex = container.getData('spriteIndex') ?? 0
+    const charKey = `char_${spriteIndex % this.charCount}`
+
     if (path.length === 0 || !container.active) {
-      const charKey = `char_${(memberId - 1) % this.charCount}`
       const sprite = container.getAt(1) as Phaser.GameObjects.Sprite
       if (sprite?.anims) { sprite.play(`${charKey}_idle`); sprite.setFlipX(false) }
       this.wanderTimers.set(key, this.time.delayedCall(1500 + Math.random() * 4000, onComplete))
@@ -522,7 +526,6 @@ export class OfficeScene extends Phaser.Scene {
     const speed = TILE * ZOOM * 1.5
     const duration = Math.max(100, (dist / speed) * 1000)
 
-    const charKey = `char_${(memberId - 1) % this.charCount}`
     const sprite = container.getAt(1) as Phaser.GameObjects.Sprite
     if (sprite?.anims) {
       // 根據移動方向選擇動畫
@@ -548,7 +551,7 @@ export class OfficeScene extends Phaser.Scene {
       },
       onComplete: () => {
         // Continue to next waypoint
-        this.walkPath(key, container, memberId, path, roomTiles, onComplete)
+        this.walkPath(key, container, 0, path, roomTiles, onComplete)
       },
     })
   }

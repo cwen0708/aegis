@@ -1,11 +1,13 @@
 import asyncio
 import logging
+import re
+import json
 from pathlib import Path
 from sqlmodel import Session, select
 from app.database import engine
 from app.models.core import Card, CardIndex, StageList, Project, SystemSetting
 from app.core.card_file import CardData, read_card, write_card, card_file_path
-from app.core.card_index import sync_card_to_index, query_pending_cards
+from app.core.card_index import sync_card_to_index, query_pending_cards, next_card_id
 from app.core.runner import run_ai_task, busy_members
 from app.core.telemetry import is_system_overloaded
 from app.core.task_workspace import prepare_workspace, cleanup_workspace
@@ -169,6 +171,88 @@ def _resolve_member(stage_list, phase: str, session) -> tuple[int | None, str | 
     return None, None
 
 
+def _parse_and_create_cards(output: str, project_id: int, project_path: str, session: Session) -> list[int]:
+    """解析 AI 輸出中的 create_cards 區塊，自動建立卡片
+
+    AI 可在輸出中使用以下格式建立新卡片：
+    ```json:create_cards
+    [
+      {"title": "卡片標題", "list_name": "待處置", "content": "卡片內容..."}
+    ]
+    ```
+
+    Returns: 新建卡片的 ID 列表
+    """
+    # 匹配 ```json:create_cards ... ```
+    pattern = r'```json:create_cards\s*\n(.*?)\n```'
+    matches = re.findall(pattern, output, re.DOTALL)
+
+    if not matches:
+        return []
+
+    created_ids = []
+    for match in matches:
+        try:
+            cards_data = json.loads(match)
+            if not isinstance(cards_data, list):
+                cards_data = [cards_data]
+
+            for card_info in cards_data:
+                title = card_info.get("title", "").strip()
+                list_name = card_info.get("list_name", "").strip()
+                content = card_info.get("content", "")
+
+                if not title or not list_name:
+                    logger.warning(f"[CreateCard] Missing title or list_name: {card_info}")
+                    continue
+
+                # 查找對應的 StageList
+                stage_list = session.exec(
+                    select(StageList).where(
+                        StageList.project_id == project_id,
+                        StageList.name == list_name
+                    )
+                ).first()
+
+                if not stage_list:
+                    logger.warning(f"[CreateCard] List '{list_name}' not found in project {project_id}")
+                    continue
+
+                # 取得下一個卡片 ID
+                new_card_id = next_card_id(session)
+
+                # 建立 CardData
+                card_data = CardData(
+                    id=new_card_id,
+                    title=title,
+                    status="idle",  # 新卡片預設 idle，讓用戶決定何時啟動
+                    list_id=stage_list.id,
+                    content=content,
+                    tags=[],
+                )
+
+                # 寫入 MD 檔案
+                file_path = card_file_path(project_path, new_card_id)
+                write_card(file_path, card_data)
+
+                # 同步到索引
+                sync_card_to_index(session, card_data, project_id, str(file_path))
+
+                created_ids.append(new_card_id)
+                logger.info(f"[CreateCard] Created card {new_card_id}: {title} → {list_name}")
+
+        except json.JSONDecodeError as e:
+            logger.warning(f"[CreateCard] Failed to parse JSON: {e}")
+        except Exception as e:
+            logger.warning(f"[CreateCard] Error creating card: {e}")
+
+    if created_ids:
+        session.commit()
+        logger.info(f"[CreateCard] Total {len(created_ids)} cards created: {created_ids}")
+
+    return created_ids
+
+
 async def _notify_channels(card_id: int, card_title: str, project_name: str,
                           status: str, result: dict):
     """發送任務完成通知到已綁定的頻道"""
@@ -268,6 +352,17 @@ async def _execute_and_update(
 
                 session.commit()
                 logger.info(f"[Task {card_id}] State updated to {new_status}")
+
+                # 解析 AI 輸出中的 create_cards 區塊，自動建立新卡片
+                if new_status == "completed":
+                    created_card_ids = _parse_and_create_cards(
+                        result.get("output", ""),
+                        project_id,
+                        project_path,
+                        session
+                    )
+                    if created_card_ids:
+                        logger.info(f"[Task {card_id}] AI auto-created {len(created_card_ids)} cards")
 
         # 在 index 更新並 commit 之後才廣播，避免前端刷看板時拿到舊狀態
         event = "task_completed" if new_status == "completed" else "task_failed"
