@@ -178,25 +178,25 @@ if [ "$DEV_MODE" = true ]; then
         git clone https://github.com/cwen0708/aegis.git .
     fi
 else
-    # Download latest release
-    RELEASE_URL="https://github.com/cwen0708/aegis/archive/refs/heads/main.zip"
-    TMP_ZIP="/tmp/aegis-main.zip"
+    # Download latest release (use tar.gz, more commonly available than unzip)
+    RELEASE_URL="https://github.com/cwen0708/aegis/archive/refs/heads/main.tar.gz"
+    TMP_TAR="/tmp/aegis-main.tar.gz"
 
     echo "  Downloading from GitHub..."
-    curl -fsSL "$RELEASE_URL" -o "$TMP_ZIP"
+    curl -fsSL "$RELEASE_URL" -o "$TMP_TAR"
 
     echo "  Extracting..."
-    unzip -q "$TMP_ZIP" -d /tmp
+    tar -xzf "$TMP_TAR" -C /tmp
 
     # Move contents from extracted folder
-    EXTRACTED_DIR=$(find /tmp -maxdepth 1 -type d -name "aegis-*" -o -name "Aegis-*" 2>/dev/null | head -1)
+    EXTRACTED_DIR=$(find /tmp -maxdepth 1 -type d -name "aegis-*" 2>/dev/null | head -1)
     if [ -z "$EXTRACTED_DIR" ]; then
         print_error "Failed to find extracted Aegis folder"
         exit 1
     fi
     mv "$EXTRACTED_DIR"/* "$INSTALL_DIR"/
 
-    rm -f "$TMP_ZIP"
+    rm -f "$TMP_TAR"
     rm -rf "$EXTRACTED_DIR"
 fi
 
