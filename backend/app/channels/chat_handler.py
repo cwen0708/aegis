@@ -9,11 +9,12 @@ from sqlmodel import Session, select
 from app.database import engine
 from app.models.core import (
     BotUser, Member, MemberAccount, Account,
-    ChatSession, ChatMessage
+    ChatSession, ChatMessage, BotUserProject, Project
 )
 from app.core.member_profile import get_soul_content
 from app.core.runner import run_ai_task
 from .types import InboundMessage
+from .bot_user import get_user_projects, get_user_context, get_default_project
 
 logger = logging.getLogger(__name__)
 
@@ -67,14 +68,28 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser) -> Optional[str]:
     # 6. 載入最近對話歷史
     history = _get_recent_messages(session_obj.id, limit=MAX_HISTORY_MESSAGES)
 
-    # 7. 建構 prompt
-    prompt = _build_chat_prompt(soul, member, history, msg.text)
+    # 7. 取得用戶可存取的專案和身份上下文
+    accessible_projects = get_user_projects(bot_user.id)
+    user_context = None
+    default_project = get_default_project(bot_user.id)
+    if default_project:
+        user_context = get_user_context(bot_user.id, default_project.id)
 
-    # 8. 取得 AI 帳號
+    # 8. 建構 prompt（含用戶身份和專案範圍）
+    prompt = _build_chat_prompt(
+        soul=soul,
+        member=member,
+        history=history,
+        user_message=msg.text,
+        user_context=user_context,
+        accessible_projects=accessible_projects,
+    )
+
+    # 9. 取得 AI 帳號
     account = _get_primary_account(member.id)
     provider = account.provider if account else "claude"
 
-    # 9. 呼叫 AI
+    # 10. 呼叫 AI
     try:
         result = await run_ai_task(
             task_id=0,  # 非卡片任務
@@ -96,11 +111,11 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser) -> Optional[str]:
     output = result.get("output", "")
     token_info = result.get("token_info", {})
 
-    # 10. 儲存對話訊息
+    # 11. 儲存對話訊息
     _save_message(session_obj.id, "user", msg.text, token_info.get("input_tokens", 0), 0)
     _save_message(session_obj.id, "assistant", output, 0, token_info.get("output_tokens", 0))
 
-    # 11. 更新 Session 統計
+    # 12. 更新 Session 統計
     _update_session_stats(session_obj.id, token_info)
 
     return output
@@ -167,8 +182,25 @@ def _get_primary_account(member_id: int) -> Optional[Account]:
     return None
 
 
-def _build_chat_prompt(soul: str, member: Member, history: List[ChatMessage], user_message: str) -> str:
-    """組合完整 prompt = 靈魂 + 歷史 + 新訊息"""
+def _build_chat_prompt(
+    soul: str,
+    member: Member,
+    history: List[ChatMessage],
+    user_message: str,
+    user_context: Optional[BotUserProject] = None,
+    accessible_projects: Optional[List[Project]] = None,
+) -> str:
+    """
+    組合完整 prompt = 靈魂 + 用戶身份 + 專案範圍 + 歷史 + 新訊息
+
+    Args:
+        soul: 靈魂檔案內容
+        member: AI 成員
+        history: 對話歷史
+        user_message: 用戶訊息
+        user_context: 用戶身份上下文（含 display_name, description）
+        accessible_projects: 用戶可存取的專案列表
+    """
     lines = []
 
     # 靈魂人設（放最前面，定義角色）
@@ -180,6 +212,26 @@ def _build_chat_prompt(soul: str, member: Member, history: List[ChatMessage], us
         lines.append(f"你是 {member.name}，{member.role}。")
         if member.description:
             lines.append(member.description)
+        lines.append("")
+
+    # 用戶身份描述（讓 AI 知道在跟誰說話）
+    if user_context:
+        lines.append("## 當前用戶")
+        if user_context.display_name:
+            lines.append(f"姓名：{user_context.display_name}")
+        if user_context.description:
+            lines.append(f"身份描述：{user_context.description}")
+        lines.append("")
+        lines.append("請根據用戶的身份和權限範圍回答，用適當的稱呼和語氣。")
+        lines.append("")
+
+    # 用戶可存取的專案（讓 AI 知道範圍）
+    if accessible_projects:
+        lines.append("## 用戶可存取的專案")
+        for p in accessible_projects:
+            lines.append(f"- {p.name}（ID: {p.id}）")
+        lines.append("")
+        lines.append("回答問題時只能提供這些專案的資訊。")
         lines.append("")
 
     # 對話歷史

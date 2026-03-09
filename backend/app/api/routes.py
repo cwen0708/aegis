@@ -6,7 +6,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from app.database import get_session
-from app.models.core import Project, Card, StageList, CronJob, SystemSetting, Account, Member, MemberAccount, TaskLog, CardIndex
+from app.models.core import Project, Card, StageList, CronJob, SystemSetting, Account, Member, MemberAccount, TaskLog, CardIndex, InviteCode, BotUser, BotUserProject
 from typing import Any
 from app.core.runner import running_tasks, abort_task
 import app.core.runner as runner_module
@@ -101,7 +101,7 @@ class ProjectCreate(BaseModel):
     name: str
     path: str
     deploy_type: str = "none"
-    default_provider: str = "auto"
+    default_member_id: Optional[int] = None  # 專案預設成員
 
 
 class ProjectUpdate(BaseModel):
@@ -109,7 +109,7 @@ class ProjectUpdate(BaseModel):
     path: Optional[str] = None
     is_active: Optional[bool] = None
     deploy_type: Optional[str] = None
-    default_provider: Optional[str] = None
+    default_member_id: Optional[int] = None  # 專案預設成員
 
 
 # ==========================================
@@ -141,7 +141,7 @@ def create_project(data: ProjectCreate, session: Session = Depends(get_session))
         name=data.name,
         path=str(project_path),
         deploy_type=data.deploy_type,
-        default_provider=data.default_provider,
+        default_member_id=data.default_member_id,
     )
     session.add(project)
     session.commit()
@@ -188,8 +188,8 @@ def update_project(project_id: int, update_data: ProjectUpdate, session: Session
         project.is_active = update_data.is_active
     if update_data.deploy_type is not None:
         project.deploy_type = update_data.deploy_type
-    if update_data.default_provider is not None:
-        project.default_provider = update_data.default_provider
+    if update_data.default_member_id is not None:
+        project.default_member_id = update_data.default_member_id if update_data.default_member_id != 0 else None
     session.add(project)
     session.commit()
     session.refresh(project)
@@ -247,6 +247,8 @@ def read_project_board(project_id: int, session: Session = Depends(get_session))
 # StageList Routes
 # ==========================================
 class StageListUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    position: Optional[int] = None
     member_id: Optional[int] = None  # null = 使用預設路由
     # 階段行為配置
     stage_type: Optional[str] = None  # manual, auto_process, auto_review, terminal
@@ -260,6 +262,14 @@ def update_stage_list(list_id: int, data: StageListUpdateRequest, session: Sessi
     stage_list = session.get(StageList, list_id)
     if not stage_list:
         raise HTTPException(status_code=404, detail="StageList not found")
+
+    # 更新名稱
+    if data.name is not None and data.name.strip():
+        stage_list.name = data.name.strip()
+
+    # 更新位置
+    if data.position is not None:
+        stage_list.position = data.position
 
     # 更新成員指派
     if data.member_id is not None:
@@ -297,6 +307,22 @@ def update_stage_list(list_id: int, data: StageListUpdateRequest, session: Sessi
         "prompt_template": stage_list.prompt_template,
         "is_ai_stage": stage_list.is_ai_stage,
     }
+
+
+class StageListReorderRequest(BaseModel):
+    order: list[int]  # list of stage_list IDs in desired order
+
+
+@router.post("/lists/reorder")
+def reorder_stage_lists(data: StageListReorderRequest, session: Session = Depends(get_session)):
+    """批次更新 StageList 順序"""
+    for idx, list_id in enumerate(data.order):
+        stage_list = session.get(StageList, list_id)
+        if stage_list:
+            stage_list.position = idx
+            session.add(stage_list)
+    session.commit()
+    return {"ok": True}
 
 
 # ==========================================
@@ -1847,3 +1873,204 @@ def get_ollama_models():
         return {"models": [], "error": "查詢超時"}
     except Exception as e:
         return {"models": [], "error": str(e)}
+
+
+# ==========================================
+# Invitations API
+# ==========================================
+
+class InvitationCreate(BaseModel):
+    """建立邀請碼"""
+    code: Optional[str] = None           # 自訂代碼，不填則自動生成
+    target_level: int = 1                # 驗證後的權限等級 (1-3)
+    target_member_id: Optional[int] = None
+    allowed_projects: Optional[List[int]] = None  # 可存取的專案 ID 列表
+    user_display_name: str = ""          # 預設顯示名稱
+    user_description: str = ""           # 預設身份描述
+    default_can_view: bool = True
+    default_can_create_card: bool = False
+    default_can_run_task: bool = False
+    default_can_access_sensitive: bool = False
+    max_uses: int = 1
+    expires_days: Optional[int] = None   # 幾天後過期，None 表示永不過期
+    note: str = ""
+
+
+class InvitationUpdate(BaseModel):
+    """更新邀請碼"""
+    user_display_name: Optional[str] = None
+    user_description: Optional[str] = None
+    default_can_view: Optional[bool] = None
+    default_can_create_card: Optional[bool] = None
+    default_can_run_task: Optional[bool] = None
+    default_can_access_sensitive: Optional[bool] = None
+    max_uses: Optional[int] = None
+    expires_days: Optional[int] = None
+    note: Optional[str] = None
+
+
+class InvitationResponse(BaseModel):
+    """邀請碼回應"""
+    id: int
+    code: str
+    target_level: int
+    target_member_id: Optional[int]
+    allowed_projects: Optional[List[int]]
+    user_display_name: str
+    user_description: str
+    default_can_view: bool
+    default_can_create_card: bool
+    default_can_run_task: bool
+    default_can_access_sensitive: bool
+    max_uses: int
+    used_count: int
+    expires_at: Optional[datetime]
+    created_at: datetime
+    note: str
+    # 狀態
+    status: str  # active, expired, depleted
+
+
+def _invitation_status(inv: InviteCode) -> str:
+    """計算邀請碼狀態"""
+    if inv.expires_at and datetime.now(timezone.utc) > inv.expires_at:
+        return "expired"
+    if inv.used_count >= inv.max_uses:
+        return "depleted"
+    return "active"
+
+
+def _invitation_to_response(inv: InviteCode) -> dict:
+    """轉換為回應格式"""
+    allowed = None
+    if inv.allowed_projects:
+        try:
+            allowed = json_module.loads(inv.allowed_projects)
+        except:
+            allowed = None
+    return {
+        "id": inv.id,
+        "code": inv.code,
+        "target_level": inv.target_level,
+        "target_member_id": inv.target_member_id,
+        "allowed_projects": allowed,
+        "user_display_name": inv.user_display_name,
+        "user_description": inv.user_description,
+        "default_can_view": inv.default_can_view,
+        "default_can_create_card": inv.default_can_create_card,
+        "default_can_run_task": inv.default_can_run_task,
+        "default_can_access_sensitive": inv.default_can_access_sensitive,
+        "max_uses": inv.max_uses,
+        "used_count": inv.used_count,
+        "expires_at": inv.expires_at,
+        "created_at": inv.created_at,
+        "note": inv.note,
+        "status": _invitation_status(inv),
+    }
+
+
+@router.get("/invitations")
+def list_invitations(session: Session = Depends(get_session)):
+    """列出所有邀請碼"""
+    invitations = session.exec(
+        select(InviteCode).order_by(InviteCode.created_at.desc())
+    ).all()
+    return [_invitation_to_response(inv) for inv in invitations]
+
+
+@router.post("/invitations")
+def create_invitation(data: InvitationCreate, session: Session = Depends(get_session)):
+    """建立邀請碼"""
+    from datetime import timedelta
+    import secrets
+
+    # 自動生成或使用自訂代碼
+    code = data.code or secrets.token_urlsafe(6).upper()[:8]
+
+    # 檢查代碼是否已存在
+    existing = session.exec(select(InviteCode).where(InviteCode.code == code)).first()
+    if existing:
+        raise HTTPException(status_code=400, detail=f"邀請碼 {code} 已存在")
+
+    # 計算過期時間
+    expires_at = None
+    if data.expires_days:
+        expires_at = datetime.now(timezone.utc) + timedelta(days=data.expires_days)
+
+    # allowed_projects 轉 JSON
+    allowed_json = None
+    if data.allowed_projects:
+        allowed_json = json_module.dumps(data.allowed_projects)
+
+    invitation = InviteCode(
+        code=code,
+        target_level=data.target_level,
+        target_member_id=data.target_member_id,
+        allowed_projects=allowed_json,
+        user_display_name=data.user_display_name,
+        user_description=data.user_description,
+        default_can_view=data.default_can_view,
+        default_can_create_card=data.default_can_create_card,
+        default_can_run_task=data.default_can_run_task,
+        default_can_access_sensitive=data.default_can_access_sensitive,
+        max_uses=data.max_uses,
+        expires_at=expires_at,
+        note=data.note,
+    )
+    session.add(invitation)
+    session.commit()
+    session.refresh(invitation)
+    return _invitation_to_response(invitation)
+
+
+@router.get("/invitations/{invitation_id}")
+def get_invitation(invitation_id: int, session: Session = Depends(get_session)):
+    """取得單一邀請碼"""
+    invitation = session.get(InviteCode, invitation_id)
+    if not invitation:
+        raise HTTPException(status_code=404, detail="邀請碼不存在")
+    return _invitation_to_response(invitation)
+
+
+@router.patch("/invitations/{invitation_id}")
+def update_invitation(invitation_id: int, data: InvitationUpdate, session: Session = Depends(get_session)):
+    """更新邀請碼"""
+    from datetime import timedelta
+
+    invitation = session.get(InviteCode, invitation_id)
+    if not invitation:
+        raise HTTPException(status_code=404, detail="邀請碼不存在")
+
+    if data.user_display_name is not None:
+        invitation.user_display_name = data.user_display_name
+    if data.user_description is not None:
+        invitation.user_description = data.user_description
+    if data.default_can_view is not None:
+        invitation.default_can_view = data.default_can_view
+    if data.default_can_create_card is not None:
+        invitation.default_can_create_card = data.default_can_create_card
+    if data.default_can_run_task is not None:
+        invitation.default_can_run_task = data.default_can_run_task
+    if data.default_can_access_sensitive is not None:
+        invitation.default_can_access_sensitive = data.default_can_access_sensitive
+    if data.max_uses is not None:
+        invitation.max_uses = data.max_uses
+    if data.expires_days is not None:
+        invitation.expires_at = datetime.now(timezone.utc) + timedelta(days=data.expires_days)
+    if data.note is not None:
+        invitation.note = data.note
+
+    session.commit()
+    session.refresh(invitation)
+    return _invitation_to_response(invitation)
+
+
+@router.delete("/invitations/{invitation_id}")
+def delete_invitation(invitation_id: int, session: Session = Depends(get_session)):
+    """刪除邀請碼"""
+    invitation = session.get(InviteCode, invitation_id)
+    if not invitation:
+        raise HTTPException(status_code=404, detail="邀請碼不存在")
+    session.delete(invitation)
+    session.commit()
+    return {"ok": True}

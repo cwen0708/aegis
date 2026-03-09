@@ -18,7 +18,7 @@ class Project(SQLModel, table=True):
     name: str = Field(index=True)
     path: str # 本地實體路徑，如 G:\cwen0708\infinite-novel
     deploy_type: Optional[str] = Field(default="none")
-    default_provider: Optional[str] = Field(default="auto") # auto, gemini, claude
+    default_member_id: Optional[int] = Field(default=None, foreign_key="member.id")  # 專案預設成員
     is_active: bool = Field(default=True) # 用於完全隱藏
     is_system: bool = Field(default=False) # 系統專案（AEGIS），前端禁止刪除/改名
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -219,7 +219,7 @@ class BotUser(SQLModel, table=True):
 
 
 class BotUserPermission(SQLModel, table=True):
-    """細粒度權限控制"""
+    """細粒度權限控制（舊版，保留向後相容）"""
     id: Optional[int] = Field(default=None, primary_key=True)
     bot_user_id: int = Field(foreign_key="botuser.id", index=True)
 
@@ -229,6 +229,36 @@ class BotUserPermission(SQLModel, table=True):
     # 資源範圍（可選）
     resource_type: Optional[str] = None   # "project", "member"
     resource_id: Optional[int] = None     # 具體 ID，null = 全部
+
+
+class BotUserProject(SQLModel, table=True):
+    """用戶與專案的多對多關聯（權限控制）"""
+    __tablename__ = "bot_user_project"
+    __table_args__ = (
+        UniqueConstraint("bot_user_id", "project_id", name="uq_botuserproject"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    bot_user_id: int = Field(foreign_key="botuser.id", index=True)
+    project_id: int = Field(foreign_key="project.id", index=True)
+
+    # === 身份描述（給 AI 讀的自然語言） ===
+    display_name: str = Field(default="")         # "王小華"
+    description: str = Field(default="")          # "案場業主，可查看發電資料，不可修改設定"
+
+    # === 硬性權限（程式碼強制檢查，防止 AI 誤判） ===
+    can_view: bool = Field(default=True)          # 可查看卡片
+    can_create_card: bool = Field(default=False)  # 可建立卡片
+    can_run_task: bool = Field(default=False)     # 可執行任務
+    can_comment: bool = Field(default=True)       # 可留言
+    can_access_sensitive: bool = Field(default=False)  # 可存取敏感資料
+
+    # 預設專案（建卡時優先使用）
+    is_default: bool = Field(default=False)
+
+    # 元資料
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_by: Optional[int] = Field(default=None)  # 誰授權的（BotUser ID）
 
 
 class BotUserMember(SQLModel, table=True):
@@ -256,6 +286,16 @@ class InviteCode(SQLModel, table=True):
     target_level: int = Field(default=1)        # 驗證後的權限等級
     target_member_id: Optional[int] = Field(default=None, foreign_key="member.id")
     allowed_projects: Optional[str] = None      # JSON: [1, 2, 3]
+
+    # 用戶身份描述（驗證時自動填入 BotUserProject）
+    user_display_name: str = Field(default="")  # "王小華"
+    user_description: str = Field(default="")   # "案場業主，可查看發電資料..."
+
+    # 預設權限（驗證時自動填入 BotUserProject）
+    default_can_view: bool = Field(default=True)
+    default_can_create_card: bool = Field(default=False)
+    default_can_run_task: bool = Field(default=False)
+    default_can_access_sensitive: bool = Field(default=False)
 
     # 使用限制
     max_uses: int = Field(default=1)

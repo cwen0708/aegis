@@ -129,21 +129,76 @@ class BotUser(SQLModel, table=True):
     locked_until: Optional[datetime] = None          # 鎖定到期時間
 ```
 
-### 4.2 BotUserPermission（新增）
+### 4.2 BotUserProject（新增）
 
 ```python
-class BotUserPermission(SQLModel, table=True):
-    """細粒度權限控制"""
+class BotUserProject(SQLModel, table=True):
+    """用戶與專案的多對多關聯（權限控制）"""
+    __tablename__ = "bot_user_project"
+    __table_args__ = (
+        UniqueConstraint("bot_user_id", "project_id", name="uq_botuserproject"),
+    )
+
     id: Optional[int] = Field(default=None, primary_key=True)
-    bot_user_id: int = Field(foreign_key="botuser.id")
+    bot_user_id: int = Field(foreign_key="botuser.id", index=True)
+    project_id: int = Field(foreign_key="project.id", index=True)
 
-    # 權限類型
-    permission: str         # "view", "execute", "create", "admin"
+    # === 身份描述（給 AI 讀的自然語言） ===
+    display_name: str = Field(default="")         # "王小華"
+    description: str = Field(default="")          # "案場業主，可查看發電資料，不可修改設定"
 
-    # 資源範圍（可選）
-    resource_type: Optional[str] = None   # "project", "member"
-    resource_id: Optional[int] = None     # 具體 ID，null = 全部
+    # === 硬性權限（程式碼強制檢查，防止 AI 誤判） ===
+    can_view: bool = Field(default=True)          # 可查看卡片
+    can_create_card: bool = Field(default=False)  # 可建立卡片
+    can_run_task: bool = Field(default=False)     # 可執行任務
+    can_comment: bool = Field(default=True)       # 可留言
+    can_access_sensitive: bool = Field(default=False)  # 可存取敏感資料
+
+    # 預設專案（建卡時優先使用）
+    is_default: bool = Field(default=False)
+
+    # 元資料
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_by: Optional[int] = Field(default=None)  # 誰授權的（BotUser ID）
 ```
+
+> **設計說明**：
+> 1. **雙層權限控制**：`description` 給 AI 理解用戶身份，`can_*` 欄位由程式碼強制檢查
+> 2. AI 依據 description 判斷回答範圍和語氣，但實際操作仍由硬性權限把關
+> 3. 例如 description 寫「可查看發電資料」，AI 會主動提供相關資訊；但若 `can_run_task=False`，即使 AI 想幫忙執行也會被程式碼擋下
+
+#### 權限設計對照
+
+| 欄位 | 類型 | 用途 |
+|------|------|------|
+| `display_name` | 描述層 | AI 稱呼用戶（「王先生您好」） |
+| `description` | 描述層 | AI 理解用戶身份與權限範圍 |
+| `can_view` | 硬性權限 | 程式碼檢查：能否查看卡片 |
+| `can_create_card` | 硬性權限 | 程式碼檢查：能否建立卡片 |
+| `can_run_task` | 硬性權限 | 程式碼檢查：能否執行 AI 任務 |
+| `can_access_sensitive` | 硬性權限 | 程式碼檢查：能否存取敏感資料（如成本、利潤） |
+
+#### Description 範例
+
+| 場景 | display_name | description |
+|------|--------------|-------------|
+| 案場業主 | 王小華 | 「台南案場業主，可查看發電資料和維運進度，不可修改設定或查看財務報表」 |
+| 維運工程師 | 李大明 | 「維運組長，負責北區三座案場，可查看設備狀態、建立維修工單、執行診斷任務」 |
+| 財務人員 | 陳會計 | 「財務部門，可查看所有專案的成本和收入報表，不可建立或修改工單」 |
+| 外部稽核 | 張稽核 | 「年度稽核人員，僅可查看 2025 年度結案專案，限期至 2026/03/31」 |
+
+#### UI 權限模板（不存資料庫）
+
+管理員新增用戶時，UI 提供快捷模板自動填入 description 和 can_* 欄位：
+
+| 模板 | description 預設值 | can_view | can_create | can_run | can_sensitive |
+|------|-------------------|----------|------------|---------|---------------|
+| 訪客 | 「外部人員，僅可查看專案進度」 | ✅ | ❌ | ❌ | ❌ |
+| 成員 | 「內部成員，可查看、建立卡片和執行任務」 | ✅ | ✅ | ✅ | ❌ |
+| 管理員 | 「專案管理員，擁有完整權限」 | ✅ | ✅ | ✅ | ✅ |
+
+> **設計說明**：模板只是 UI 快捷鍵，不存到資料庫。選擇模板後自動填入預設值，
+> 管理員可再修改 description 和權限勾選。這樣保持資料模型乾淨，同時操作方便。
 
 ### 4.3 BotUserMember（新增）
 
@@ -178,7 +233,19 @@ class InviteCode(SQLModel, table=True):
     # 配置
     target_level: int = Field(default=1)
     target_member_id: Optional[int] = None
+
+    # 專案授權
     allowed_projects: Optional[str] = None      # JSON: [1, 2, 3]
+
+    # 用戶身份描述（驗證時自動填入 BotUserProject）
+    user_display_name: str = Field(default="")  # "王小華"
+    user_description: str = Field(default="")   # "案場業主，可查看發電資料..."
+
+    # 預設權限（驗證時自動填入 BotUserProject）
+    default_can_view: bool = Field(default=True)
+    default_can_create_card: bool = Field(default=False)
+    default_can_run_task: bool = Field(default=False)
+    default_can_access_sensitive: bool = Field(default=False)
 
     # 使用限制
     max_uses: int = Field(default=1)
@@ -190,6 +257,17 @@ class InviteCode(SQLModel, table=True):
     created_at: datetime
     note: str = ""          # "給客戶A用"
 ```
+
+> **驗證成功時自動建立 BotUserProject**：邀請碼的 `allowed_projects` 會自動轉為
+> BotUserProject 記錄，第一個專案設為 `is_default=True`。
+
+#### 邀請流程
+
+1. 管理員執行 `/invite` 時填入用戶姓名、描述和預設權限
+2. 邀請碼產生後傳給客戶
+3. 客戶執行 `/verify <code>` 驗證
+4. 系統自動建立 BotUserProject，帶入 `display_name`、`description` 和 `can_*` 權限
+5. AI 後續對話時能用正確的稱呼和權限範圍回應
 
 ---
 
@@ -355,7 +433,48 @@ class ChatMessage(SQLModel, table=True):
 - `get_soul_content(slug)` → 讀取 soul.md
 - `get_member_memory_dir(slug)` → 取得記憶目錄
 
-### 7.3 對話處理
+### 7.3 專案存取查詢
+
+```python
+def get_user_projects(bot_user_id: int, can_view_only: bool = True) -> list[Project]:
+    """取得用戶可存取的專案"""
+    with Session(engine) as session:
+        stmt = (
+            select(Project)
+            .join(BotUserProject, BotUserProject.project_id == Project.id)
+            .where(BotUserProject.bot_user_id == bot_user_id)
+        )
+        if can_view_only:
+            stmt = stmt.where(BotUserProject.can_view == True)
+        return session.exec(stmt).all()
+
+
+def get_default_project(bot_user_id: int) -> Optional[Project]:
+    """取得用戶的預設專案"""
+    with Session(engine) as session:
+        stmt = (
+            select(Project)
+            .join(BotUserProject, BotUserProject.project_id == Project.id)
+            .where(
+                BotUserProject.bot_user_id == bot_user_id,
+                BotUserProject.is_default == True,
+            )
+        )
+        return session.exec(stmt).first()
+
+
+def can_user_create_card(bot_user_id: int, project_id: int) -> bool:
+    """檢查用戶能否在指定專案建卡"""
+    with Session(engine) as session:
+        stmt = select(BotUserProject).where(
+            BotUserProject.bot_user_id == bot_user_id,
+            BotUserProject.project_id == project_id,
+            BotUserProject.can_create_card == True,
+        )
+        return session.exec(stmt).first() is not None
+```
+
+### 7.4 對話處理
 
 ```python
 async def handle_chat(msg: InboundMessage, bot_user: BotUser):
@@ -384,8 +503,11 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser):
     # 5. 載入最近 N 條對話（從 ChatMessage）
     recent_messages = get_recent_messages(session.id, limit=10)
 
-    # 6. 建構 prompt（靈魂 + 歷史 + 新訊息）
-    prompt = build_chat_prompt(soul, recent_messages, msg.text)
+    # 6. 取得用戶可存取的專案清單
+    accessible_projects = get_user_projects(bot_user.id)
+
+    # 7. 建構 prompt（靈魂 + 歷史 + 專案 + 新訊息）
+    prompt = build_chat_prompt(soul, recent_messages, msg.text, accessible_projects)
 
     # 7. 呼叫 AI（用 Member 的 Account）
     account = get_primary_account(member.id)
@@ -407,13 +529,35 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser):
     return result["output"]
 
 
-def build_chat_prompt(soul: str, history: list, user_message: str) -> str:
-    """組合完整 prompt = 靈魂 + 歷史 + 新訊息"""
+def build_chat_prompt(soul: str, history: list, user_message: str,
+                      user_context: BotUserProject = None,
+                      accessible_projects: list[Project] = None) -> str:
+    """組合完整 prompt = 靈魂 + 用戶身份 + 專案範圍 + 歷史 + 新訊息"""
     lines = []
 
     # 靈魂人設（放最前面，定義角色）
     if soul:
         lines.append(soul.strip())
+        lines.append("")
+
+    # 用戶身份描述（讓 AI 知道在跟誰說話）
+    if user_context:
+        lines.append("## 當前用戶")
+        if user_context.display_name:
+            lines.append(f"姓名：{user_context.display_name}")
+        if user_context.description:
+            lines.append(f"身份描述：{user_context.description}")
+        lines.append("")
+        lines.append("請根據用戶的身份和權限範圍回答，用適當的稱呼和語氣。")
+        lines.append("")
+
+    # 用戶可存取的專案（讓 AI 知道範圍）
+    if accessible_projects:
+        lines.append("## 用戶可存取的專案")
+        for p in accessible_projects:
+            lines.append(f"- {p.name}（ID: {p.id}）")
+        lines.append("")
+        lines.append("回答問題時只能提供這些專案的資訊。")
         lines.append("")
 
     # 對話歷史
@@ -444,22 +588,27 @@ def build_chat_prompt(soul: str, history: list, user_message: str) -> str:
 - [ ] ChannelBinding 新增 bot_user_id FK
 
 ### Phase 2.2：邀請碼驗證（1 天）
-- [ ] InviteCode Model
+- [ ] InviteCode Model（含 allowed_projects, project_role）
 - [ ] /invite 命令
 - [ ] /verify 命令（含暴力破解保護）
 - [ ] 過期/使用次數檢查
 - [ ] 驗證失敗鎖定機制
+- [ ] 驗證成功自動建立 BotUserProject
 
-### Phase 2.3：用戶管理（1 天）
+### Phase 2.3：用戶與專案管理（2 天）
+- [ ] BotUserProject Model（用戶 ↔ 專案多對多）
+- [ ] BotUserMember Model（用戶 ↔ 成員多對多）
+- [ ] get_user_projects(), get_default_project(), can_user_create_card()
 - [ ] /user list, info, grant, ban
 - [ ] /me 命令
-- [ ] BotUserMember 多對多關聯
+- [ ] /project list（列出用戶可存取的專案）
 - [ ] Web UI 用戶管理頁面
 
 ### Phase 2.4：AI 對話（2 天）
 - [ ] ChatSession + ChatMessage Model
 - [ ] Router 非命令分支
 - [ ] 整合 `get_soul_content(slug)` 載入靈魂檔案
+- [ ] build_chat_prompt() 加入專案範圍限制
 - [ ] `build_chat_prompt()` 組合 prompt
 - [ ] 對話記憶（最近 10 條）
 - [ ] Token 統計與限流
@@ -546,9 +695,10 @@ async def check_permission(bot_user: BotUser, command: str) -> bool:
 
 ### 9.5 資源隔離
 
-1. **專案存取**：透過 BotUserPermission 控制
+1. **專案存取**：透過 BotUserProject 控制（多對多關聯）
 2. **Member 切換**：只能切換到 BotUserMember 中有記錄的
 3. **對話隔離**：ChatSession 按 User × Member × Channel 隔離
+4. **AI 回答範圍**：build_chat_prompt 加入 accessible_projects，限制 AI 只能回答用戶有權存取的專案
 
 ---
 
@@ -596,15 +746,102 @@ InboundMessage → 查/建 BotUser → 權限檢查 → 建立 ChannelBinding（
 
 ---
 
-## 十一、變更記錄
+## 十一、三方審查報告（2026-03-09）
+
+### 11.1 資料模型審查
+
+**優點：**
+- BotUser、BotUserMember、ChatSession/ChatMessage 設計完整
+- UniqueConstraint 和索引設計正確
+- ChannelBinding.bot_user_id FK 整合正確
+
+**需修正：**
+
+| 優先級 | 問題 | 建議 |
+|--------|------|------|
+| P0 | `core.py` 仍用舊版 `BotUserPermission`，缺少 `BotUserProject` 表 | 新增 BotUserProject 表，移除或保留 BotUserPermission 作補充 |
+| P1 | `InviteCode` 缺少 `project_role` 欄位 | 補欄位：`project_role: str = Field(default="viewer")` |
+| P2 | 外鍵缺少 `ON DELETE` 行為 | 定義刪除策略（CASCADE 或 SET NULL） |
+| P3 | `ChatMessage.content` 無長度限制 | 加 `max_length=4000` |
+
+### 11.2 安全性審查
+
+**高風險（P0）：**
+
+| 問題 | 建議 |
+|------|------|
+| `/card <id>` 無專案權限檢查，可越權查看他人卡片 | 所有涉及專案資源的操作必須驗證 `BotUserProject` |
+| `/run` 無 `can_run_task` 檢查 | 執行任務前驗證專案權限 |
+
+**中風險（P1）：**
+
+| 問題 | 建議 |
+|------|------|
+| 邀請碼驗證無 race condition 防護 | 使用 `SELECT FOR UPDATE` 或原子操作 |
+| 無 IP 層級暴力破解保護 | 加 IP 限流：同 IP 每小時最多 20 次 /verify |
+| 邀請碼明文儲存 | 改用 SHA256 hash 儲存 |
+| Redis 不可用時限流失效 | 加 in-memory fallback 或 fail-close |
+
+**低風險（P2-P3）：**
+- 無停用審計欄位 → 加 `ban_reason`, `banned_by`
+- 對話內容明文儲存 → 定期清理或加密
+- 無 GDPR 資料刪除機制 → 支援用戶資料刪除請求
+
+### 11.3 實作可行性審查
+
+**好消息：已完成 80%+**
+
+| Phase | 狀態 | 剩餘工作 |
+|-------|------|----------|
+| 2.1 基礎用戶系統 | ✅ 90% | 補 migration |
+| 2.2 邀請碼驗證 | ✅ 90% | 補 `project_role` 欄位 |
+| 2.3 用戶與專案管理 | ⚠️ 60% | **新增 BotUserProject**、查詢函式 |
+| 2.4 AI 對話 | ✅ 80% | 補專案範圍限制 |
+| 2.5 進階功能 | ❌ 0% | 可延後（限流用 in-memory 先頂） |
+
+**修正後時程：5 天（原 9 天）**
+
+**限流替代方案（不依賴 Redis）：**
+```python
+from cachetools import TTLCache
+rate_cache = TTLCache(maxsize=10000, ttl=60)
+
+def is_rate_limited(bot_user_id: int) -> bool:
+    key = f"rate:{bot_user_id}"
+    count = rate_cache.get(key, 0) + 1
+    rate_cache[key] = count
+    return count > 10
+```
+
+### 11.4 關鍵待辦清單
+
+```
+☐ P0: 新增 BotUserProject 表（含 display_name, description, can_* 欄位）
+☐ P0: 命令處理加專案權限檢查（/card, /run 等）
+☐ P1: InviteCode 補 user_display_name, user_description, default_can_* 欄位
+☐ P1: 補專案存取查詢函式（get_user_projects, get_user_context 等）
+☐ P1: build_chat_prompt() 補 user_context 和 accessible_projects 參數
+☐ P1: 邀請碼驗證加 race condition 防護
+☐ P1: /invite 命令支援輸入用戶姓名和描述
+☐ P2: 限流機制加 in-memory fallback
+☐ P3: 補停用審計欄位（ban_reason, banned_by）
+```
+
+---
+
+## 十二、變更記錄
 
 | 版本 | 日期 | 變更 |
 |------|------|------|
 | v1.0 | 2026-03-09 | 初版規劃 |
 | v1.1 | 2026-03-09 | Agent 審查後更新：<br>• BotUser 加 unique constraint<br>• 新增 BotUserMember 多對多表<br>• ChatContext 改為 ChatSession + ChatMessage<br>• 新增安全與邊緣情況章節<br>• 釐清 ChannelBinding 整合策略<br>• 完善命令權限矩陣 |
 | v1.2 | 2026-03-09 | 整合成員 Profile：<br>• 新增 7.2 成員 Profile 整合章節<br>• 對話流程載入 soul.md 靈魂檔案<br>• 新增 build_chat_prompt() 範例 |
+| v1.3 | 2026-03-09 | 用戶與專案多對多關聯：<br>• 將 BotUserPermission 改為 BotUserProject（更直觀）<br>• 新增 7.3 專案存取查詢章節<br>• build_chat_prompt() 加入 accessible_projects 參數<br>• 更新實作優先級 |
+| v1.4 | 2026-03-09 | 三方審查報告：<br>• 資料模型審查：確認 BotUserProject 缺失<br>• 安全性審查：識別高風險專案權限漏洞<br>• 實作可行性：確認 80%+ 已完成，修正時程為 5 天<br>• 新增關鍵待辦清單（P0-P3 優先級）<br>• 新增限流替代方案（in-memory TTLCache） |
+| v1.5 | 2026-03-09 | 自然語言身份描述：<br>• BotUserProject 新增 `display_name` 和 `description` 欄位<br>• 雙層權限控制：描述層（AI 理解）+ 硬性權限（程式碼強制）<br>• 新增 `can_access_sensitive` 權限欄位<br>• `build_chat_prompt()` 加入 `user_context` 參數<br>• InviteCode 新增 `user_display_name` 和 `user_description` 欄位<br>• 移除固定 role 欄位（viewer/member/admin），改用自然語言描述 |
+| v1.6 | 2026-03-09 | UI 權限模板：<br>• 確認移除 BotUserProject.role 欄位<br>• 新增 UI 權限模板設計（訪客/成員/管理員）<br>• 模板只是 UI 快捷鍵，不存資料庫<br>• 保持資料模型乾淨，操作仍方便 |
 
 ---
 
-*版本：v1.2*
+*版本：v1.6*
 *依賴：P1 多頻道架構*

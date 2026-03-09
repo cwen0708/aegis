@@ -8,7 +8,9 @@ from ..types import InboundMessage
 from ..bot_user import (
     get_or_create_bot_user, check_permission, verify_invite_code,
     create_invite_code, get_user_info, list_users, set_user_level,
-    ban_user, assign_member, switch_member, get_available_members
+    ban_user, assign_member, switch_member, get_available_members,
+    # P2: 專案權限檢查
+    get_user_projects, can_user_view_project, can_user_create_card, can_user_run_task,
 )
 from app.database import engine
 from app.models.core import Card, StageList, Project, ChannelBinding, BotUser, Member
@@ -103,13 +105,24 @@ async def _handle_card_create(cmd: ParsedCommand, msg: InboundMessage, bot_user:
         return "❌ 標題不可為空"
 
     with Session(engine) as session:
-        # 找預設專案的 Backlog
-        project = session.exec(
-            select(Project).where(Project.is_system == False)
-        ).first()
+        # 找用戶可建卡的專案（優先用預設專案）
+        user_projects = get_user_projects(bot_user.id)
+        project = None
 
-        if not project:
-            return "❌ 找不到可用專案"
+        # 管理員可以建任何專案
+        if bot_user.level >= 3:
+            project = session.exec(
+                select(Project).where(Project.is_system == False)
+            ).first()
+        else:
+            # 找用戶可建卡的專案
+            for p in user_projects:
+                if can_user_create_card(bot_user.id, p.id):
+                    project = p
+                    break
+
+            if not project:
+                return "🔒 您沒有權限在任何專案建立卡片"
 
         backlog = session.exec(
             select(StageList).where(
@@ -139,11 +152,36 @@ async def _handle_card_create(cmd: ParsedCommand, msg: InboundMessage, bot_user:
 
 
 async def _handle_card_list(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
-    """列出最近卡片"""
+    """列出最近卡片（只顯示用戶有權限的專案）"""
     with Session(engine) as session:
-        cards = session.exec(
-            select(Card).order_by(Card.updated_at.desc()).limit(10)
-        ).all()
+        # 管理員看所有卡片
+        if bot_user.level >= 3:
+            cards = session.exec(
+                select(Card).order_by(Card.updated_at.desc()).limit(10)
+            ).all()
+        else:
+            # 只顯示用戶可存取的專案的卡片
+            user_projects = get_user_projects(bot_user.id)
+            if not user_projects:
+                return "📭 您沒有可存取的專案"
+
+            project_ids = [p.id for p in user_projects]
+
+            # 找出這些專案的所有 StageList
+            stage_lists = session.exec(
+                select(StageList).where(StageList.project_id.in_(project_ids))
+            ).all()
+            list_ids = [s.id for s in stage_lists]
+
+            if not list_ids:
+                return "📭 目前沒有卡片"
+
+            cards = session.exec(
+                select(Card)
+                .where(Card.list_id.in_(list_ids))
+                .order_by(Card.updated_at.desc())
+                .limit(10)
+            ).all()
 
         if not cards:
             return "📭 目前沒有卡片"
@@ -173,6 +211,13 @@ async def _handle_card_view(cmd: ParsedCommand, msg: InboundMessage, bot_user: B
         if not card:
             return f"❌ 找不到卡片 #{card_id}"
 
+        # 取得卡片所屬專案
+        stage_list = session.get(StageList, card.list_id)
+        if stage_list:
+            # 專案權限檢查（管理員跳過）
+            if bot_user.level < 3 and not can_user_view_project(bot_user.id, stage_list.project_id):
+                return f"🔒 您沒有權限查看此專案的卡片"
+
         status_text = {
             "idle": "閒置",
             "pending": "等待中",
@@ -200,6 +245,12 @@ async def _handle_task_run(cmd: ParsedCommand, msg: InboundMessage, bot_user: Bo
         card = session.get(Card, card_id)
         if not card:
             return f"❌ 找不到卡片 #{card_id}"
+
+        # 取得卡片所屬專案並檢查權限
+        stage_list = session.get(StageList, card.list_id)
+        if stage_list and bot_user.level < 3:
+            if not can_user_run_task(bot_user.id, stage_list.project_id):
+                return f"🔒 您沒有權限執行此專案的任務"
 
         if card.status == "running":
             return f"⚠️ 卡片 #{card_id} 已在執行中"
@@ -413,37 +464,115 @@ async def _handle_verify(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotU
 
 
 async def _handle_invite(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
-    """產生邀請碼"""
-    # 解析參數
-    target_level = 1  # 預設訪客
-    note = ""
+    """
+    產生邀請碼
 
-    if len(cmd.args) >= 1:
+    語法：
+        /invite                              → 訪客，無專案
+        /invite 2                            → 成員，無專案
+        /invite 1 王小華                     → 訪客，有名稱
+        /invite 1 王小華 "案場業主" 1,2      → 完整設定
+        /invite 1 王小華 "案場業主" 1,2 成員  → 使用模板
+    """
+    import shlex
+
+    # 預設值
+    target_level = 1
+    user_display_name = ""
+    user_description = ""
+    allowed_projects = None
+    # 預設權限（訪客模板）
+    can_view = True
+    can_create = False
+    can_run = False
+    can_sensitive = False
+
+    # 權限模板
+    templates = {
+        "訪客": (True, False, False, False, "外部人員，僅可查看專案進度"),
+        "成員": (True, True, True, False, "內部成員，可查看、建立卡片和執行任務"),
+        "管理員": (True, True, True, True, "專案管理員，擁有完整權限"),
+    }
+
+    # 用 shlex 解析參數（正確處理引號）
+    args = []
+    if cmd.args and cmd.args[0]:
         try:
-            target_level = int(cmd.args[0])
+            args = shlex.split(cmd.args[0])
+        except ValueError as e:
+            return f"❌ 參數格式錯誤: {e}\n用法: /invite [等級] [名稱] [\"描述\"] [專案IDs] [模板]"
+
+    # arg[0]: 等級
+    if len(args) >= 1:
+        try:
+            target_level = int(args[0])
             if target_level < 1 or target_level > 3:
                 return "❌ 等級必須是 1-3"
         except ValueError:
-            return "❌ 等級必須是數字"
+            return "❌ 等級必須是數字\n用法: /invite [等級] [名稱] [\"描述\"] [專案IDs] [模板]"
 
-    if len(cmd.args) >= 2:
-        note = cmd.args[1]
+    # arg[1]: 名稱
+    if len(args) >= 2:
+        user_display_name = args[1]
+
+    # arg[2]: 描述
+    if len(args) >= 3:
+        user_description = args[2]
+
+    # arg[3]: 專案 IDs（逗號分隔）
+    if len(args) >= 4:
+        try:
+            allowed_projects = [int(x.strip()) for x in args[3].split(",")]
+        except ValueError:
+            return "❌ 專案 ID 格式錯誤（用逗號分隔數字，如: 1,2,3）"
+
+    # arg[4]: 模板（覆蓋權限和描述）
+    if len(args) >= 5:
+        template_name = args[4]
+        if template_name in templates:
+            can_view, can_create, can_run, can_sensitive, default_desc = templates[template_name]
+            if not user_description:
+                user_description = default_desc
+        else:
+            return f"❌ 未知模板: {template_name}\n可用: 訪客, 成員, 管理員"
+
+    # 根據等級自動套用模板（如果沒指定）
+    if len(args) < 5:
+        if target_level == 2:
+            can_view, can_create, can_run, can_sensitive, _ = templates["成員"]
+        elif target_level == 3:
+            can_view, can_create, can_run, can_sensitive, _ = templates["管理員"]
 
     code = create_invite_code(
         created_by=bot_user.id,
         target_level=target_level,
-        note=note,
+        allowed_projects=allowed_projects,
+        user_display_name=user_display_name,
+        user_description=user_description,
+        default_can_view=can_view,
+        default_can_create_card=can_create,
+        default_can_run_task=can_run,
+        default_can_access_sensitive=can_sensitive,
     )
 
     level_names = {1: "訪客", 2: "成員", 3: "管理員"}
-    return (
-        f"🎟️ 邀請碼已產生\n\n"
-        f"*{code}*\n\n"
-        f"權限等級: {level_names.get(target_level, '未知')}\n"
-        f"有效期: 7 天\n"
-        f"使用次數: 1 次\n"
-        f"{f'備註: {note}' if note else ''}"
-    )
+
+    lines = [
+        f"🎟️ 邀請碼已產生\n",
+        f"*{code}*\n",
+        f"權限等級: {level_names.get(target_level, '未知')}",
+    ]
+
+    if user_display_name:
+        lines.append(f"用戶名稱: {user_display_name}")
+    if user_description:
+        lines.append(f"身份描述: {user_description[:50]}{'...' if len(user_description) > 50 else ''}")
+    if allowed_projects:
+        lines.append(f"可存取專案: {', '.join(map(str, allowed_projects))}")
+
+    lines.append(f"\n有效期: 7 天 | 使用次數: 1 次")
+
+    return "\n".join(lines)
 
 
 # ===== P2: 用戶管理命令 =====

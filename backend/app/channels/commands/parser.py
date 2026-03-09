@@ -79,7 +79,7 @@ COMMAND_PATTERNS: list[tuple[str, CommandType]] = [
     # P2: 用戶驗證
     (r"^/verify\s+(\S+)$", CommandType.VERIFY),      # /verify ABC123
     (r"^/invite$", CommandType.INVITE),              # /invite (產生預設邀請碼)
-    (r"^/invite\s+(\d+)(?:\s+(.+))?$", CommandType.INVITE),  # /invite 2 給客戶A
+    (r"^/invite\s+(.+)$", CommandType.INVITE),       # /invite 1 王小華 "描述" 1,2
 
     # P2: 用戶管理
     (r"^/me$", CommandType.ME),

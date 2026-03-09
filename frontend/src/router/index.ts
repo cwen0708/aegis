@@ -13,6 +13,7 @@ import SettingsAI from '../views/settings/SettingsAI.vue'
 import SettingsChannels from '../views/settings/SettingsChannels.vue'
 import SettingsProjects from '../views/settings/SettingsProjects.vue'
 import SettingsArchive from '../views/settings/SettingsArchive.vue'
+import SettingsInvitations from '../views/settings/SettingsInvitations.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -32,6 +33,7 @@ const router = createRouter({
         { path: 'ai', component: SettingsAI },
         { path: 'channels', component: SettingsChannels },
         { path: 'projects', component: SettingsProjects },
+        { path: 'invitations', component: SettingsInvitations },
         { path: 'archive', component: SettingsArchive },
         { path: 'team', component: Team },
         { path: 'agents', component: Agents },
