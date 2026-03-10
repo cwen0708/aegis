@@ -407,7 +407,7 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
             logger.info(f"[Task {card_id}] Using Claude OAuth Token")
     elif provider_name == "gemini":
         if auth_type == 'api_key' and auth_info.get('api_key'):
-            env["GOOGLE_API_KEY"] = auth_info['api_key']
+            env["GEMINI_API_KEY"] = auth_info['api_key']
             logger.info(f"[Task {card_id}] Using Gemini API Key")
         # Gemini CLI 模式使用本機認證檔案，無需設定環境變數
     elif provider_name == "openai":
