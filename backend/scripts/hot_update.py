@@ -83,19 +83,8 @@ def main():
                 update_status("failed", 50, "前端建構失敗", err)
                 return 1
 
-        update_status("applying", 70, "正在同步系統資料...")
-
-        # 執行 seed.py 同步新的系統排程等資料
-        # 使用 sudo -u cwen0 確保以正確用戶執行（避免 DB 權限問題）
-        python_cmd = str(venv_python) if venv_python.exists() else "python3"
-        ret, out, err = run_command(
-            ["sudo", "-u", "cwen0", python_cmd, "seed.py"],
-            cwd=str(BACKEND_DIR)
-        )
-        if ret != 0:
-            print(f"Warning: seed.py failed: {err}")
-
         update_status("applying", 80, "正在重啟服務...")
+        # 注意：系統排程同步由 main.py 啟動時自動執行，無需在此執行 seed.py
 
         # 先標記完成（因為重啟後這個進程也會被殺掉）
         update_status("done", 100, "更新完成，服務重啟中...")
