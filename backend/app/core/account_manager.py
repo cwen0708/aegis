@@ -453,3 +453,158 @@ def update_claude_credentials(credentials_json: str) -> bool:
     except Exception as e:
         logger.error(f"Failed to update Claude credentials: {e}")
         raise Exception(f"更新 credentials 失敗：{str(e)}")
+
+
+# 暫存進行中的 Claude 認證 session
+_pending_claude_sessions: Dict[str, Dict] = {}
+
+
+def start_claude_auth() -> Tuple[str, str]:
+    """
+    啟動 Claude setup-token 引導式登入
+    使用 pty 模組提供 pseudo-TTY
+    回傳 (session_id, auth_url)
+    """
+    import uuid
+    import pty
+    import os
+    import select
+    import time
+
+    session_id = uuid.uuid4().hex
+
+    try:
+        # 建立 pseudo-terminal
+        master, slave = pty.openpty()
+
+        # 執行 claude setup-token
+        proc = subprocess.Popen(
+            ["/usr/local/bin/claude", "setup-token"],
+            stdin=slave,
+            stdout=slave,
+            stderr=slave,
+            env={**os.environ, "HOME": str(Path.home()), "TERM": "xterm-256color"},
+        )
+
+        os.close(slave)
+
+        # 讀取輸出直到找到 URL（最多等 20 秒）
+        auth_url = ""
+        output = []
+        start_time = time.time()
+
+        while time.time() - start_time < 20:
+            if select.select([master], [], [], 0.5)[0]:
+                try:
+                    data = os.read(master, 4096)
+                    if data:
+                        text = data.decode("utf-8", errors="replace")
+                        output.append(text)
+
+                        # 找 Claude OAuth URL
+                        url_match = re.search(r"https://claude\.ai/oauth/authorize\?[^\s\x1b]+", text)
+                        if url_match:
+                            auth_url = url_match.group(0)
+                            break
+                except OSError:
+                    break
+            if proc.poll() is not None:
+                break
+
+        if not auth_url:
+            os.close(master)
+            proc.terminate()
+            raise Exception(f"找不到授權 URL。輸出：{''.join(output)[-500:]}")
+
+        # 保存 session（包含 master fd 和 process）
+        _pending_claude_sessions[session_id] = {
+            "master": master,
+            "proc": proc,
+        }
+        logger.info(f"Started Claude auth session: {session_id}")
+
+        return session_id, auth_url
+
+    except FileNotFoundError:
+        raise Exception("找不到 Claude CLI。請先安裝 Claude Code。")
+    except Exception as e:
+        raise Exception(f"啟動認證失敗：{str(e)}")
+
+
+def complete_claude_auth(session_id: str, auth_code: str) -> bool:
+    """
+    完成 Claude 認證：將授權碼輸入到等待中的 process
+    """
+    import os
+    import time
+    import select
+
+    session = _pending_claude_sessions.get(session_id)
+    if not session:
+        raise Exception("找不到此認證 session。可能已過期，請重新開始。")
+
+    master = session["master"]
+    proc = session["proc"]
+
+    try:
+        # 寫入授權碼
+        os.write(master, (auth_code + "\n").encode())
+
+        # 等待完成（最多 30 秒）
+        output = []
+        start_time = time.time()
+
+        while time.time() - start_time < 30:
+            if select.select([master], [], [], 0.5)[0]:
+                try:
+                    data = os.read(master, 4096)
+                    if data:
+                        text = data.decode("utf-8", errors="replace")
+                        output.append(text)
+                        # 檢查成功訊息
+                        if "successfully" in text.lower() or "token" in text.lower():
+                            break
+                except OSError:
+                    break
+            if proc.poll() is not None:
+                break
+
+        # 清理
+        os.close(master)
+        proc.wait(timeout=5)
+        del _pending_claude_sessions[session_id]
+
+        if proc.returncode == 0:
+            logger.info(f"Claude auth completed for session: {session_id}")
+            return True
+        else:
+            raise Exception(f"認證失敗（返回碼 {proc.returncode}）")
+
+    except subprocess.TimeoutExpired:
+        proc.terminate()
+        del _pending_claude_sessions[session_id]
+        raise Exception("認證超時。請重試。")
+    except Exception as e:
+        if session_id in _pending_claude_sessions:
+            try:
+                os.close(master)
+                proc.terminate()
+            except:
+                pass
+            del _pending_claude_sessions[session_id]
+        raise
+
+
+def cancel_claude_auth(session_id: str):
+    """取消進行中的 Claude 認證"""
+    import os
+
+    session = _pending_claude_sessions.get(session_id)
+    if session:
+        try:
+            os.close(session["master"])
+            session["proc"].terminate()
+        except:
+            pass
+        del _pending_claude_sessions[session_id]
+        logger.info(f"Cancelled Claude auth session: {session_id}")

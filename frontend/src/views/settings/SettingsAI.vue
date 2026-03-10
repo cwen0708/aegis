@@ -37,6 +37,8 @@ const claudeStatus = ref<{
   expired: boolean;
   hours_until_expiry: number | null;
 } | null>(null)
+const claudeAuthSession = ref<{ session_id: string; auth_url: string; instructions: string[] } | null>(null)
+const claudeAuthCode = ref('')
 const claudeCredentials = ref('')
 const claudeLoading = ref(false)
 const claudeError = ref('')
@@ -93,6 +95,71 @@ async function fetchClaudeStatus() {
   }
 }
 
+async function startClaudeAuth() {
+  claudeLoading.value = true
+  claudeError.value = ''
+  claudeSuccess.value = ''
+  try {
+    const res = await fetch(`${API}/api/v1/claude/auth/init`, { method: 'POST' })
+    if (!res.ok) {
+      const data = await res.json()
+      throw new Error(data.detail || '啟動認證失敗')
+    }
+    claudeAuthSession.value = await res.json()
+  } catch (e: any) {
+    claudeError.value = e.message
+  } finally {
+    claudeLoading.value = false
+  }
+}
+
+async function completeClaudeAuth() {
+  if (!claudeAuthSession.value || !claudeAuthCode.value.trim()) return
+  claudeLoading.value = true
+  claudeError.value = ''
+  try {
+    const res = await fetch(`${API}/api/v1/claude/auth/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: claudeAuthSession.value.session_id,
+        auth_code: claudeAuthCode.value.trim(),
+      }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.detail || '認證失敗')
+    claudeSuccess.value = data.message || '登入成功！'
+    claudeAuthSession.value = null
+    claudeAuthCode.value = ''
+    await fetchClaudeStatus()
+  } catch (e: any) {
+    claudeError.value = e.message
+  } finally {
+    claudeLoading.value = false
+  }
+}
+
+function cancelClaudeAuth() {
+  if (claudeAuthSession.value) {
+    fetch(`${API}/api/v1/claude/auth/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: claudeAuthSession.value.session_id }),
+    })
+  }
+  claudeAuthSession.value = null
+  claudeAuthCode.value = ''
+  claudeError.value = ''
+}
+
+function copyClaudeUrl() {
+  if (claudeAuthSession.value?.auth_url) {
+    navigator.clipboard.writeText(claudeAuthSession.value.auth_url)
+    claudeCopied.value = true
+    setTimeout(() => claudeCopied.value = false, 2000)
+  }
+}
+
 async function updateClaudeCredentials() {
   if (!claudeCredentials.value.trim()) return
   claudeLoading.value = true
@@ -114,16 +181,6 @@ async function updateClaudeCredentials() {
   } finally {
     claudeLoading.value = false
   }
-}
-
-function copyClaudePath() {
-  const isWindows = navigator.userAgent.includes('Windows')
-  const path = isWindows
-    ? '%USERPROFILE%\\.claude\\.credentials.json'
-    : '~/.claude/.credentials.json'
-  navigator.clipboard.writeText(path)
-  claudeCopied.value = true
-  setTimeout(() => claudeCopied.value = false, 2000)
 }
 
 async function fetchGcloudStatus() {
@@ -405,7 +462,7 @@ onMounted(async () => {
 
           <!-- 過期警告 -->
           <div v-if="claudeStatus?.expired" class="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400">
-            Token 已過期！請從您的本地電腦同步 credentials。
+            Token 已過期！請重新認證。
           </div>
 
           <!-- 訊息 -->
@@ -416,41 +473,80 @@ onMounted(async () => {
             {{ claudeError }}
           </div>
 
-          <!-- 同步 Credentials -->
-          <div class="space-y-3">
-            <div class="text-xs font-medium text-slate-300">同步 Credentials（從本地電腦）</div>
+          <!-- 引導式登入（始終顯示） -->
+          <div v-if="claudeStatus?.installed" class="space-y-3">
+            <div class="text-xs font-medium text-slate-300">引導式登入（setup-token）</div>
+
+            <!-- 認證流程說明 -->
             <div class="p-3 bg-slate-900 rounded-lg space-y-2">
-              <div class="text-xs text-slate-400">1. 在您的本地電腦找到 credentials 檔案：</div>
-              <div class="flex gap-2">
-                <code class="flex-1 text-xs text-amber-300 bg-slate-800 px-2 py-1 rounded font-mono">~/.claude/.credentials.json</code>
-                <button @click="copyClaudePath" class="px-2 py-1 bg-slate-700 hover:bg-slate-600 rounded transition-colors">
-                  <Check v-if="claudeCopied" class="w-3 h-3 text-emerald-400" />
-                  <Copy v-else class="w-3 h-3 text-slate-300" />
-                </button>
-              </div>
-              <div class="text-xs text-slate-400">2. 複製檔案內容，貼到下方：</div>
+              <div class="text-xs text-slate-400">1. 點擊下方按鈕啟動認證</div>
+              <div class="text-xs text-slate-400">2. 複製授權網址，在瀏覽器開啟並登入 Claude</div>
+              <div class="text-xs text-slate-400">3. 將授權碼貼回下方完成登入</div>
             </div>
 
-            <textarea
-              v-model="claudeCredentials"
-              placeholder='{"claudeAiOauth": {...}}'
-              rows="3"
-              class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-amber-500 outline-none text-xs font-mono resize-none"
-            ></textarea>
+            <!-- 未啟動認證：顯示啟動按鈕 -->
+            <div v-if="!claudeAuthSession">
+              <button
+                @click="startClaudeAuth"
+                :disabled="claudeLoading"
+                class="flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded-lg font-bold text-sm transition-all"
+              >
+                <Loader2 v-if="claudeLoading" class="w-4 h-4 animate-spin" />
+                <Sparkles v-else class="w-4 h-4" />
+                {{ claudeStatus?.authenticated ? '重新認證' : '開始認證' }}
+              </button>
+            </div>
 
-            <button
-              @click="updateClaudeCredentials"
-              :disabled="claudeLoading || !claudeCredentials.trim()"
-              class="flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded-lg font-bold text-sm transition-all"
-            >
-              <Loader2 v-if="claudeLoading" class="w-4 h-4 animate-spin" />
-              更新 Credentials
-            </button>
+            <!-- 已啟動認證：顯示 URL 和授權碼輸入 -->
+            <template v-else>
+              <div>
+                <label class="block text-xs font-medium text-slate-400 mb-1.5">授權網址</label>
+                <div class="flex gap-2">
+                  <input :value="claudeAuthSession.auth_url" readonly class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 text-xs font-mono truncate" />
+                  <button @click="copyClaudeUrl" class="px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors">
+                    <Check v-if="claudeCopied" class="w-4 h-4 text-emerald-400" />
+                    <Copy v-else class="w-4 h-4 text-slate-300" />
+                  </button>
+                  <a :href="claudeAuthSession.auth_url" target="_blank" class="px-3 py-2 bg-amber-500 hover:bg-amber-600 rounded-lg transition-colors">
+                    <ExternalLink class="w-4 h-4 text-white" />
+                  </a>
+                </div>
+              </div>
+
+              <div>
+                <label class="block text-xs font-medium text-slate-400 mb-1.5">授權碼</label>
+                <input
+                  v-model="claudeAuthCode"
+                  type="text"
+                  placeholder="貼上 Claude 給您的授權碼..."
+                  class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-amber-500 outline-none text-sm font-mono"
+                  @keyup.enter="completeClaudeAuth"
+                />
+              </div>
+
+              <div class="flex gap-2">
+                <button
+                  @click="completeClaudeAuth"
+                  :disabled="claudeLoading || !claudeAuthCode.trim()"
+                  class="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded-lg font-bold text-sm transition-all"
+                >
+                  <Loader2 v-if="claudeLoading" class="w-4 h-4 animate-spin" />
+                  完成登入
+                </button>
+                <button @click="cancelClaudeAuth" class="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg font-bold text-sm transition-all">
+                  取消
+                </button>
+              </div>
+            </template>
+
+            <p class="text-[11px] text-slate-500">
+              使用 setup-token 可取得長期 token，無需每 8 小時重新認證。
+            </p>
           </div>
 
-          <p class="text-[11px] text-slate-500">
-            Claude 使用 OAuth 認證，token 約 8 小時過期。在 headless 伺服器上需要手動同步 credentials。
-          </p>
+          <div v-else class="text-xs text-slate-500">
+            請先安裝 Claude CLI。
+          </div>
         </template>
       </div>
     </div>

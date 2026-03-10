@@ -1901,6 +1901,56 @@ def update_claude_creds(data: ClaudeCredentialsRequest):
     return {"ok": True, "message": "Credentials 已更新！"}
 
 
+@router.post("/claude/auth/init")
+def init_claude_auth():
+    """啟動 Claude 引導式登入，回傳授權 URL"""
+    from app.core.account_manager import start_claude_auth
+    try:
+        session_id, auth_url = start_claude_auth()
+        return {
+            "session_id": session_id,
+            "auth_url": auth_url,
+            "instructions": [
+                "1. 點擊上方連結在瀏覽器開啟",
+                "2. 使用 Claude 帳號登入並授權",
+                "3. 複製頁面顯示的授權碼",
+                "4. 將授權碼貼到下方完成登入",
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class ClaudeAuthCompleteRequest(BaseModel):
+    session_id: str
+    auth_code: str
+
+
+@router.post("/claude/auth/complete")
+def complete_claude_auth_api(data: ClaudeAuthCompleteRequest):
+    """完成 Claude 引導式登入"""
+    from app.core.account_manager import complete_claude_auth
+    try:
+        success = complete_claude_auth(data.session_id, data.auth_code)
+        if not success:
+            raise HTTPException(status_code=400, detail="登入失敗")
+        return {"ok": True, "message": "登入成功！長期 token 已設定。"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class ClaudeAuthCancelRequest(BaseModel):
+    session_id: str
+
+
+@router.post("/claude/auth/cancel")
+def cancel_claude_auth_api(data: ClaudeAuthCancelRequest):
+    """取消 Claude 引導式登入"""
+    from app.core.account_manager import cancel_claude_auth
+    cancel_claude_auth(data.session_id)
+    return {"ok": True}
+
+
 # ==========================================
 # Guided CLI Login (引導式 CLI 登入)
 # ==========================================
