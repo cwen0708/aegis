@@ -100,8 +100,8 @@ async function fetchAccounts() {
 }
 
 function openAddAccount(provider: 'claude' | 'gemini' | 'openai') {
-  // Claude/Gemini 預設 CLI，OpenAI 預設 API Key
-  const defaultAuthType = provider === 'openai' ? 'api_key' : 'cli'
+  // Claude 預設 CLI Token，Gemini/OpenAI 預設 API Key（遠端伺服器推薦）
+  const defaultAuthType = provider === 'claude' ? 'cli' : 'api_key'
   accountForm.value = {
     provider,
     name: '',
@@ -720,8 +720,8 @@ function formatResetTime(isoStr: string) {
             {{ accountError }}
           </div>
 
-          <!-- 認證類型選擇（Claude/Gemini 有 CLI 選項） -->
-          <div v-if="accountForm.provider !== 'openai'" class="space-y-2">
+          <!-- Claude 認證類型選擇 -->
+          <div v-if="accountForm.provider === 'claude'" class="space-y-2">
             <label class="block text-xs text-slate-400">認證方式</label>
             <div class="flex gap-2">
               <button
@@ -744,6 +744,35 @@ function formatResetTime(isoStr: string) {
               >
                 <Key class="w-4 h-4" />
                 API Key
+              </button>
+            </div>
+          </div>
+
+          <!-- Gemini 認證類型選擇 -->
+          <div v-if="accountForm.provider === 'gemini'" class="space-y-2">
+            <label class="block text-xs text-slate-400">認證方式</label>
+            <div class="flex gap-2">
+              <button
+                @click="accountForm.auth_type = 'api_key'"
+                class="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border text-xs font-medium transition-all"
+                :class="accountForm.auth_type === 'api_key'
+                  ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
+                  : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-600'"
+              >
+                <Key class="w-4 h-4" />
+                API Key
+                <span class="text-[9px] px-1 py-0.5 bg-emerald-500/20 text-emerald-400 rounded">推薦</span>
+              </button>
+              <button
+                @click="accountForm.auth_type = 'cli'"
+                class="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border text-xs font-medium transition-all"
+                :class="accountForm.auth_type === 'cli'
+                  ? 'bg-purple-500/20 border-purple-500/50 text-purple-300'
+                  : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-600'"
+              >
+                <Terminal class="w-4 h-4" />
+                CLI
+                <span class="text-[9px] px-1 py-0.5 bg-slate-600 text-slate-400 rounded">本地</span>
               </button>
             </div>
           </div>
@@ -773,22 +802,23 @@ function formatResetTime(isoStr: string) {
             </div>
           </template>
 
-          <!-- Gemini CLI Token 說明與輸入 -->
+          <!-- Gemini CLI 說明（僅本地開發） -->
           <template v-if="accountForm.provider === 'gemini' && accountForm.auth_type === 'cli'">
+            <div class="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+              <p class="text-[11px] text-amber-400 font-medium mb-1">僅適用於本地開發</p>
+              <p class="text-[10px] text-slate-400">
+                Gemini CLI 需要在本機執行 <code class="text-blue-300">gemini auth login</code> 完成瀏覽器登入。
+                遠端伺服器請改用 <span class="text-amber-300">API Key</span> 方式。
+              </p>
+            </div>
             <div class="p-3 bg-slate-900/80 rounded-lg space-y-1.5 border border-slate-700/50">
               <div class="text-[11px] text-slate-400">
-                <span class="text-blue-400 font-medium">步驟 1</span>：在<span class="text-blue-300">本地電腦</span>的終端機執行：
+                在 <span class="text-blue-300">本地電腦</span>（有瀏覽器）的終端機執行：
               </div>
               <code class="block bg-slate-800 px-2 py-1.5 rounded text-blue-300 text-xs font-mono">gemini auth login</code>
-              <div class="text-[11px] text-slate-400">
-                <span class="text-blue-400 font-medium">步驟 2</span>：依指示在瀏覽器完成 Google 登入
+              <div class="text-[11px] text-slate-500">
+                登入完成後，認證資訊會儲存在本機，無需額外設定。
               </div>
-              <div class="text-[11px] text-slate-400">
-                <span class="text-blue-400 font-medium">步驟 3</span>：登入完成後，認證資訊會自動儲存（無需手動複製）
-              </div>
-            </div>
-            <div class="p-2 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-              <p class="text-[11px] text-blue-400">Gemini CLI 認證會自動使用本機的認證檔案，只需輸入帳號名稱即可。</p>
             </div>
           </template>
 
