@@ -1313,9 +1313,11 @@ from app.core.account_manager import (
 
 
 class AccountCreateRequest(BaseModel):
-    provider: str  # "claude" | "gemini"
+    provider: str  # "claude" | "gemini" | "openai"
     name: str
-    oauth_token: Optional[str] = None  # 可選：直接提供 OAuth Token
+    auth_type: str = "cli"  # "api_key" | "cli"
+    api_key: Optional[str] = None  # API Key
+    oauth_token: Optional[str] = None  # CLI OAuth Token
 
 
 @router.get("/accounts")
@@ -1326,66 +1328,68 @@ def list_accounts(session: Session = Depends(get_session)):
     result = []
     for a in accounts:
         data = a.model_dump()
-        # 計算 token 過期時間
-        if a.oauth_token and a.oauth_token_set_at:
+        # 計算 CLI token 過期時間
+        if a.auth_type == "cli" and a.oauth_token and a.oauth_token_set_at:
             expires_at_ts = a.oauth_token_set_at / 1000 + 365 * 24 * 3600
             expires_at = datetime.fromtimestamp(expires_at_ts)
             now = datetime.now()
             data["expires_at"] = expires_at.isoformat()
             data["expired"] = expires_at < now
             data["hours_until_expiry"] = round((expires_at - now).total_seconds() / 3600, 2)
-            data["has_oauth_token"] = True
         else:
-            data["has_oauth_token"] = bool(a.oauth_token)
             data["expires_at"] = None
             data["expired"] = False
             data["hours_until_expiry"] = None
-        # 隱藏實際 token 值（安全性）
+        # 隱藏實際值（安全性）
         data["oauth_token"] = "***" if a.oauth_token else ""
+        data["api_key"] = a.api_key[:12] + "..." if a.api_key and len(a.api_key) > 12 else ""
+        data["has_oauth_token"] = bool(a.oauth_token)
+        data["has_api_key"] = bool(a.api_key)
         result.append(data)
     return result
 
 
 @router.post("/accounts")
 def create_account(data: AccountCreateRequest, session: Session = Depends(get_session)):
-    """新增帳號（支援 OAuth Token 或從 CLI 擷取）"""
-    import re, time as _t
+    """新增帳號（支援 API Key 或 CLI Token）"""
+    import time as _t
 
-    # 方式 1：使用 OAuth Token（推薦）
-    if data.oauth_token:
-        token = data.oauth_token.strip()
-        if data.provider == "claude" and not token.startswith("sk-ant-oat01-"):
-            raise HTTPException(status_code=400, detail="無效的 Claude Token 格式（應以 sk-ant-oat01- 開頭）")
+    # 驗證
+    if data.auth_type == "api_key":
+        if not data.api_key or not data.api_key.strip():
+            raise HTTPException(status_code=400, detail="請提供 API Key")
+        api_key = data.api_key.strip()
+        # 格式驗證
+        if data.provider == "claude" and not api_key.startswith("sk-ant-api"):
+            raise HTTPException(status_code=400, detail="無效的 Claude API Key（應以 sk-ant-api 開頭）")
+        if data.provider == "gemini" and not api_key.startswith("AIza"):
+            raise HTTPException(status_code=400, detail="無效的 Gemini API Key（應以 AIza 開頭）")
+        if data.provider == "openai" and not api_key.startswith("sk-"):
+            raise HTTPException(status_code=400, detail="無效的 OpenAI API Key（應以 sk- 開頭）")
 
         account = Account(
             provider=data.provider,
             name=data.name,
+            auth_type="api_key",
+            api_key=api_key,
+            subscription="api_key",
+        )
+    else:  # CLI
+        if not data.oauth_token or not data.oauth_token.strip():
+            raise HTTPException(status_code=400, detail="請提供 OAuth Token")
+        token = data.oauth_token.strip()
+        if data.provider == "claude" and not token.startswith("sk-ant-oat01-"):
+            raise HTTPException(status_code=400, detail="無效的 Claude Token（應以 sk-ant-oat01- 開頭）")
+
+        account = Account(
+            provider=data.provider,
+            name=data.name,
+            auth_type="cli",
             oauth_token=token,
             oauth_token_set_at=int(_t.time() * 1000),
-            subscription="oauth_token",
+            subscription="cli",
         )
-        session.add(account)
-        session.commit()
-        session.refresh(account)
-        return account.model_dump()
 
-    # 方式 2：從 CLI 擷取（舊方式）
-    safe_name = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fff]', '-', data.name).strip('-').lower()
-    profile_name = f"{data.provider}-{safe_name}-{int(_t.time())}"
-    filename = capture_current_credential(data.provider, profile_name)
-    if not filename:
-        raise HTTPException(status_code=400, detail=f"找不到 {data.provider} 的登入憑證。請提供 OAuth Token。")
-
-    email = get_account_email(data.provider, filename)
-    subscription = get_subscription_type(data.provider, filename)
-
-    account = Account(
-        provider=data.provider,
-        name=data.name,
-        credential_file=filename,
-        subscription=subscription,
-        email=email,
-    )
     session.add(account)
     session.commit()
     session.refresh(account)

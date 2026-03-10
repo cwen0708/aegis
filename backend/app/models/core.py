@@ -110,17 +110,21 @@ class SystemSetting(SQLModel, table=True):
 # 多帳號管理 (Multi-Account)
 # ==========================================
 class Account(SQLModel, table=True):
-    """AI 帳號（實體的 CLI 登入憑證）"""
+    """AI 帳號（支援 API Key 或 CLI Token 兩種認證方式）"""
     id: Optional[int] = Field(default=None, primary_key=True)
-    provider: str  # "claude" | "gemini" | "codex" | "ollama"
+    provider: str  # "claude" | "gemini" | "openai"
     name: str  # 顯示名稱，如 "Max 小良"
-    credential_file: str = ""  # profile 檔名，如 "claude-max-a.json"（舊方式，可空）
+    auth_type: str = "cli"  # "api_key" | "cli"
+    # API Key 認證
+    api_key: str = ""  # sk-ant-api... 或 AIza... 或 sk-proj-...
+    # CLI 認證（OAuth Token）
+    oauth_token: str = ""  # sk-ant-oat01-... 或空
+    oauth_token_set_at: int = Field(default=0)  # 時間戳（毫秒）
+    # 舊欄位（向後相容）
+    credential_file: str = ""  # profile 檔名（舊方式）
     subscription: str = ""  # "max" / "pro" / "ai-pro"
     email: str = ""
     is_healthy: bool = Field(default=True)
-    # OAuth Token（新方式，長期 token）
-    oauth_token: str = ""  # sk-ant-oat01-... 或空
-    oauth_token_set_at: int = Field(default=0)  # 時間戳（毫秒）
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
