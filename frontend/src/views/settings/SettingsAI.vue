@@ -39,7 +39,6 @@ const claudeStatus = ref<{
 } | null>(null)
 const claudeAuthSession = ref<{ session_id: string; auth_url: string; instructions: string[] } | null>(null)
 const claudeAuthCode = ref('')
-const claudeCredentials = ref('')
 const claudeLoading = ref(false)
 const claudeError = ref('')
 const claudeSuccess = ref('')
@@ -157,29 +156,6 @@ function copyClaudeUrl() {
     navigator.clipboard.writeText(claudeAuthSession.value.auth_url)
     claudeCopied.value = true
     setTimeout(() => claudeCopied.value = false, 2000)
-  }
-}
-
-async function updateClaudeCredentials() {
-  if (!claudeCredentials.value.trim()) return
-  claudeLoading.value = true
-  claudeError.value = ''
-  claudeSuccess.value = ''
-  try {
-    const res = await fetch(`${API}/api/v1/claude/credentials`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ credentials: claudeCredentials.value.trim() }),
-    })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.detail || '更新失敗')
-    claudeSuccess.value = data.message || '已更新！'
-    claudeCredentials.value = ''
-    await fetchClaudeStatus()
-  } catch (e: any) {
-    claudeError.value = e.message
-  } finally {
-    claudeLoading.value = false
   }
 }
 
