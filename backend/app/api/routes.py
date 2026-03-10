@@ -541,6 +541,26 @@ def create_cron_job(data: CronJobCreateRequest, session: Session = Depends(get_s
     return job
 
 
+@router.post("/cron-jobs/fix-schedules")
+def fix_cron_schedules(session: Session = Depends(get_session)):
+    """修復所有排程的 next_scheduled_at（重新計算下次執行時間）"""
+    jobs = session.exec(select(CronJob).where(CronJob.is_enabled == True)).all()
+    fixed_count = 0
+    for job in jobs:
+        try:
+            cron = croniter(job.cron_expression, datetime.now(timezone.utc))
+            next_time = cron.get_next(datetime)
+            if next_time.tzinfo is None:
+                next_time = next_time.replace(tzinfo=timezone.utc)
+            job.next_scheduled_at = next_time
+            session.add(job)
+            fixed_count += 1
+        except Exception as e:
+            pass
+    session.commit()
+    return {"ok": True, "fixed_count": fixed_count}
+
+
 # ==========================================
 # Delete Endpoints
 # ==========================================
