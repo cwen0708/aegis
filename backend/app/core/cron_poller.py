@@ -146,6 +146,25 @@ async def poll_local_cron_jobs():
             session.refresh(ops_tag)
 
         for job in due_jobs:
+            # 用 cron_{job_id} 作為識別碼，避免重複建卡
+            cron_tag = f"cron_{job.id}"
+
+            # 檢查是否已存在相同 cron job 的待處理卡片
+            existing = session.exec(
+                select(CardIndex)
+                .where(CardIndex.title.contains(cron_tag))
+                .where(CardIndex.status.in_(["pending", "running"]))
+            ).first()
+            if existing:
+                logger.info(f"[Cron Poller] Skip {job.name} ({cron_tag}) - existing card {existing.card_id} is {existing.status}")
+                # 仍然更新下次執行時間
+                next_time = _calculate_next_time(job.cron_expression)
+                if next_time:
+                    job.next_scheduled_at = next_time
+                    session.add(job)
+                    session.commit()
+                continue
+
             # 找到專案的 Scheduled 列表（排程專用）
             sched_list = session.exec(
                 select(StageList)
@@ -180,7 +199,7 @@ async def poll_local_cron_jobs():
             card_data = CardData(
                 id=card_id,
                 list_id=sched_list.id,
-                title=f"[排程] {job.name}",
+                title=f"[{cron_tag}] {job.name}",
                 description=job.description or 'Auto-generated from Aegis Cron',
                 content=full_content,
                 status="pending",
