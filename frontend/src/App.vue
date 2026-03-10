@@ -13,6 +13,19 @@ const store = useAegisStore()
 // 初始化 WebSocket
 useWebSocket()
 
+// 手機版檢測
+const isMobile = ref(false)
+function checkMobile() {
+  isMobile.value = window.innerWidth < 768
+}
+onMounted(() => {
+  checkMobile()
+  window.addEventListener('resize', checkMobile)
+})
+onUnmounted(() => {
+  window.removeEventListener('resize', checkMobile)
+})
+
 // 側邊欄模式（provide 給子頁面控制）
 const sidebarMode = ref<'menu' | 'projects'>('menu')
 provide('sidebarMode', sidebarMode)
@@ -88,13 +101,27 @@ function navClass(path: string) {
     active ? 'bg-emerald-500/10 text-emerald-400' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50',
   ]
 }
+
+// 手機版底部導航
+const mobileNavItems = [
+  { path: '/kanban', icon: ListTodo, label: '看板' },
+  { path: '/cron', icon: Clock, label: '排程' },
+  { path: '/office', icon: Building2, label: '辦公室', isCenter: true },
+  { path: '/tasks', icon: Zap, label: '任務' },
+  { path: '/settings', icon: Settings, label: '設定' },
+]
+
+function mobileNavClass(path: string) {
+  const active = route.path === path || route.path.startsWith(path + '/')
+  return active ? 'text-emerald-400' : 'text-slate-500'
+}
 </script>
 
 <template>
   <div class="h-screen bg-slate-900 text-slate-100 font-sans flex overflow-hidden">
 
-    <!-- Sidebar -->
-    <aside :class="sidebarCollapsed ? 'w-14' : 'w-64'" class="bg-slate-800 border-r border-slate-700 flex flex-col transition-all duration-200">
+    <!-- Sidebar (Desktop Only) -->
+    <aside v-if="!isMobile" :class="sidebarCollapsed ? 'w-14' : 'w-64'" class="bg-slate-800 border-r border-slate-700 flex flex-col transition-all duration-200">
       <!-- Logo Area -->
       <div class="h-16 flex items-center border-b border-slate-700" :class="sidebarCollapsed ? 'justify-center px-2' : 'px-6'">
         <div class="flex items-center gap-2 text-emerald-400">
@@ -276,10 +303,46 @@ function navClass(path: string) {
       <!-- Workspace with Background Glow -->
       <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-emerald-900/20 via-slate-900 to-slate-900 pointer-events-none"></div>
 
-      <div class="flex-1 overflow-hidden relative z-0">
+      <div class="flex-1 overflow-hidden relative z-0" :class="{ 'pb-20': isMobile }">
         <router-view></router-view>
       </div>
     </main>
+
+    <!-- Mobile Bottom Navigation -->
+    <nav v-if="isMobile" class="fixed bottom-0 left-0 right-0 z-50 bg-slate-800/95 backdrop-blur-lg border-t border-slate-700/50 safe-area-bottom">
+      <div class="flex items-end justify-around px-2 pt-2 pb-2">
+        <template v-for="item in mobileNavItems" :key="item.path">
+          <!-- 中央辦公室按鈕（突出） -->
+          <router-link
+            v-if="item.isCenter"
+            :to="item.path"
+            class="flex flex-col items-center -mt-6"
+          >
+            <div
+              class="w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all"
+              :class="route.path === item.path
+                ? 'bg-emerald-500 text-white shadow-emerald-500/30'
+                : 'bg-slate-700 text-slate-300 hover:bg-slate-600'"
+            >
+              <component :is="item.icon" class="w-7 h-7" />
+            </div>
+            <span class="text-[10px] mt-1" :class="route.path === item.path ? 'text-emerald-400' : 'text-slate-500'">
+              {{ item.label }}
+            </span>
+          </router-link>
+
+          <!-- 一般導航項目 -->
+          <router-link
+            v-else
+            :to="item.path"
+            class="flex flex-col items-center py-1 px-3"
+          >
+            <component :is="item.icon" class="w-5 h-5" :class="mobileNavClass(item.path)" />
+            <span class="text-[10px] mt-1" :class="mobileNavClass(item.path)">{{ item.label }}</span>
+          </router-link>
+        </template>
+      </div>
+    </nav>
 
     <!-- Toast Notifications -->
     <ToastNotification />
@@ -331,5 +394,10 @@ function navClass(path: string) {
 * {
   scrollbar-width: thin;
   scrollbar-color: #475569 transparent;
+}
+
+/* Safe area for mobile (iPhone notch/home indicator) */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 </style>
