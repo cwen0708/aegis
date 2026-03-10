@@ -50,6 +50,14 @@ export class OfficeScene extends Phaser.Scene {
   private camStartX = 0
   private camStartY = 0
 
+  // Pinch zoom
+  private isPinching = false
+  private pinchStartDist = 0
+  private pinchStartZoom = 1
+  private currentZoom = 1
+  private readonly MIN_ZOOM = 0.5
+  private readonly MAX_ZOOM = 2.0
+
   // Tracked objects
   private characterSprites: Map<string, Phaser.GameObjects.Container> = new Map()
   private bubbleContainers: Map<number, Phaser.GameObjects.Container> = new Map()
@@ -166,20 +174,68 @@ export class OfficeScene extends Phaser.Scene {
 
   // ── Camera ────────────────────────────────────────────────────
   private setupCameraDrag() {
+    // Single pointer drag
     this.input.on('pointerdown', (p: Phaser.Input.Pointer, objs: Phaser.GameObjects.GameObject[]) => {
       // Don't start drag if clicking on an interactive object
       if (objs.length > 0) return
+      // Don't start drag if pinching
+      if (this.isPinching) return
       this.isDragging = true
       this.dragStartX = p.x; this.dragStartY = p.y
       this.camStartX = this.cameras.main.scrollX
       this.camStartY = this.cameras.main.scrollY
     })
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
-      if (!this.isDragging) return
+      // Handle pinch zoom
+      if (this.input.pointer1.isDown && this.input.pointer2.isDown) {
+        this.handlePinchMove()
+        return
+      }
+      if (!this.isDragging || this.isPinching) return
       this.cameras.main.scrollX = this.camStartX - (p.x - this.dragStartX)
       this.cameras.main.scrollY = this.camStartY - (p.y - this.dragStartY)
     })
-    this.input.on('pointerup', () => { this.isDragging = false })
+    this.input.on('pointerup', () => {
+      this.isDragging = false
+      // Check if pinch ended
+      if (!this.input.pointer1.isDown || !this.input.pointer2.isDown) {
+        this.isPinching = false
+      }
+    })
+
+    // Enable multi-touch
+    this.input.addPointer(1) // Allow 2 pointers total
+  }
+
+  private handlePinchMove() {
+    const p1 = this.input.pointer1
+    const p2 = this.input.pointer2
+
+    const dist = Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y)
+
+    if (!this.isPinching) {
+      // Start pinching
+      this.isPinching = true
+      this.isDragging = false
+      this.pinchStartDist = dist
+      this.pinchStartZoom = this.currentZoom
+    } else {
+      // Update zoom based on pinch distance change
+      const scale = dist / this.pinchStartDist
+      let newZoom = this.pinchStartZoom * scale
+
+      // Clamp zoom
+      newZoom = Phaser.Math.Clamp(newZoom, this.MIN_ZOOM, this.MAX_ZOOM)
+
+      this.currentZoom = newZoom
+      this.cameras.main.setZoom(newZoom)
+    }
+  }
+
+  // Public method to reset zoom
+  resetZoom() {
+    this.currentZoom = 1
+    this.cameras.main.setZoom(1)
   }
 
   // ── Helpers ───────────────────────────────────────────────────

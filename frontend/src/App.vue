@@ -106,7 +106,7 @@ function navClass(path: string) {
 const mobileNavItems = [
   { path: '/kanban', icon: ListTodo, label: '看板' },
   { path: '/cron', icon: Clock, label: '排程' },
-  { path: '/office', icon: Building2, label: '辦公室', isCenter: true },
+  { path: '/office', icon: Shield, label: 'Aegis', isCenter: true },
   { path: '/tasks', icon: Zap, label: '任務' },
   { path: '/settings', icon: Settings, label: '設定' },
 ]
