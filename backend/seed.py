@@ -12,6 +12,13 @@ from app.core.default_office_layout import get_default_office_layout_json
 from app.core.member_profile import get_member_dir
 from app.core.card_index import sync_card_to_index
 from datetime import datetime, timezone
+from croniter import croniter
+
+
+def _calculate_next_scheduled_at(cron_expression: str) -> datetime:
+    """計算下一次執行時間"""
+    cron = croniter(cron_expression, datetime.now(timezone.utc))
+    return cron.get_next(datetime).replace(tzinfo=timezone.utc)
 
 # 範例立繪路徑
 EXAMPLE_PORTRAITS_DIR = Path(__file__).parent / "uploads" / "portraits"
@@ -100,6 +107,7 @@ def _sync_system_cron_jobs(session: Session):
 
     # 心跳檢查
     if "心跳檢查" not in existing_crons:
+        cron_expr = "*/30 * * * *"
         crons_to_add.append(CronJob(
             project_id=aegis.id,
             name="心跳檢查",
@@ -118,13 +126,15 @@ def _sync_system_cron_jobs(session: Session):
                 "3. 是否建議暫停分派（系統過載）？\n\n"
                 "以 Markdown 格式回覆，簡潔扼要。"
             ),
-            cron_expression="*/30 * * * *",
+            cron_expression=cron_expr,
+            next_scheduled_at=_calculate_next_scheduled_at(cron_expr),
             is_enabled=True,
             is_system=True,
         ))
 
     # 每日狀態報告
     if "每日狀態報告" not in existing_crons:
+        cron_expr = "0 9 * * *"
         crons_to_add.append(CronJob(
             project_id=aegis.id,
             name="每日狀態報告",
@@ -141,13 +151,15 @@ def _sync_system_cron_jobs(session: Session):
                 "4. 建議事項\n\n"
                 "以 Markdown 格式回覆。"
             ),
-            cron_expression="0 9 * * *",
+            cron_expression=cron_expr,
+            next_scheduled_at=_calculate_next_scheduled_at(cron_expr),
             is_enabled=True,
             is_system=True,
         ))
 
     # 記憶整理
     if "記憶整理" not in existing_crons:
+        cron_expr = "0 */4 * * *"
         crons_to_add.append(CronJob(
             project_id=aegis.id,
             name="記憶整理",
@@ -166,7 +178,8 @@ def _sync_system_cron_jobs(session: Session):
                 "---LONG_TERM---\n（長期記憶更新，或「無需更新」）\n"
                 "---LONG_TERM_FILE---\n（目標檔名，如 recurring-issues.md）"
             ),
-            cron_expression="0 */4 * * *",
+            cron_expression=cron_expr,
+            next_scheduled_at=_calculate_next_scheduled_at(cron_expr),
             is_enabled=True,
             is_system=True,
         ))
@@ -176,6 +189,7 @@ def _sync_system_cron_jobs(session: Session):
         auto_time = session.get(SystemSetting, "auto_update_time")
         time_str = auto_time.value if auto_time else "03:00"
         hour, minute = map(int, time_str.split(":"))
+        cron_expr = f"{minute} {hour} * * *"
         crons_to_add.append(CronJob(
             project_id=aegis.id,
             name="系統更新檢查",
@@ -189,13 +203,15 @@ def _sync_system_cron_jobs(session: Session):
                 "5. 如果更新失敗，記錄錯誤訊息\n\n"
                 "注意：更新過程會自動等待執行中的任務完成。"
             ),
-            cron_expression=f"{minute} {hour} * * *",
+            cron_expression=cron_expr,
+            next_scheduled_at=_calculate_next_scheduled_at(cron_expr),
             is_enabled=False,  # 預設關閉
             is_system=True,
         ))
 
     # 短期記憶清理
     if "短期記憶清理" not in existing_crons:
+        cron_expr = "0 4 * * *"
         crons_to_add.append(CronJob(
             project_id=aegis.id,
             name="短期記憶清理",
@@ -208,7 +224,8 @@ def _sync_system_cron_jobs(session: Session):
                 "4. 回報清理結果：刪除了多少檔案、釋放了多少空間\n\n"
                 "注意：長期記憶（long-term/）目錄不要清理。"
             ),
-            cron_expression="0 4 * * *",
+            cron_expression=cron_expr,
+            next_scheduled_at=_calculate_next_scheduled_at(cron_expr),
             is_enabled=True,
             is_system=True,
         ))

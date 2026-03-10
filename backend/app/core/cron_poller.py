@@ -72,12 +72,16 @@ def _render_template(template: str, variables: dict) -> str:
 
 
 def _calculate_next_time(cron_expression: str) -> datetime:
-    """計算下一次執行時間"""
+    """計算下一次執行時間（返回 aware datetime）"""
     if not cron_expression:
         return None
     try:
         cron = croniter(cron_expression, datetime.now(timezone.utc))
-        return cron.get_next(datetime)
+        next_dt = cron.get_next(datetime)
+        # 確保返回 aware datetime
+        if next_dt.tzinfo is None:
+            next_dt = next_dt.replace(tzinfo=timezone.utc)
+        return next_dt
     except Exception as e:
         logger.error(f"Invalid cron expression: {cron_expression}, error: {e}")
         return None
@@ -111,7 +115,13 @@ async def poll_local_cron_jobs():
         # 過濾出到期的任務
         due_jobs = []
         for job in enabled_jobs:
-            next_time = _parse_datetime(job.next_scheduled_at) if isinstance(job.next_scheduled_at, str) else job.next_scheduled_at
+            if isinstance(job.next_scheduled_at, str):
+                next_time = _parse_datetime(job.next_scheduled_at)
+            elif isinstance(job.next_scheduled_at, datetime):
+                # 確保是 aware datetime
+                next_time = job.next_scheduled_at if job.next_scheduled_at.tzinfo else job.next_scheduled_at.replace(tzinfo=timezone.utc)
+            else:
+                next_time = None
             if next_time and next_time <= now:
                 due_jobs.append(job)
 
