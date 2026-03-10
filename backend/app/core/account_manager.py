@@ -462,66 +462,47 @@ _pending_claude_sessions: Dict[str, Dict] = {}
 def start_claude_auth() -> Tuple[str, str]:
     """
     啟動 Claude setup-token 引導式登入
-    使用 pty 模組提供 pseudo-TTY
+    使用 pexpect 提供完整 TTY 模擬（支援 Ink CLI）
     回傳 (session_id, auth_url)
     """
     import uuid
-    import pty
+    import pexpect
     import os
-    import select
-    import time
 
     session_id = uuid.uuid4().hex
 
     try:
-        # 建立 pseudo-terminal
-        master, slave = pty.openpty()
+        # 使用 pexpect 啟動，提供完整 TTY
+        env = os.environ.copy()
+        env["HOME"] = str(Path.home())
+        env["TERM"] = "xterm-256color"
 
-        # 執行 claude setup-token
-        proc = subprocess.Popen(
-            ["/usr/local/bin/claude", "setup-token"],
-            stdin=slave,
-            stdout=slave,
-            stderr=slave,
-            env={**os.environ, "HOME": str(Path.home()), "TERM": "xterm-256color"},
+        child = pexpect.spawn(
+            "/usr/local/bin/claude",
+            ["setup-token"],
+            env=env,
+            encoding="utf-8",
+            timeout=30,
         )
 
-        os.close(slave)
+        # 等待 URL 出現（最多 30 秒）
+        try:
+            child.expect(r"https://claude\.ai/oauth/authorize\?[^\s\x1b]+", timeout=30)
+            auth_url = child.match.group(0)
+        except pexpect.TIMEOUT:
+            output = child.before if child.before else ""
+            child.terminate(force=True)
+            raise Exception(f"等待授權 URL 超時。輸出：{output[-500:]}")
+        except pexpect.EOF:
+            output = child.before if child.before else ""
+            child.terminate(force=True)
+            raise Exception(f"進程意外結束。輸出：{output[-500:]}")
 
-        # 讀取輸出直到找到 URL（最多等 20 秒）
-        auth_url = ""
-        output = []
-        start_time = time.time()
-
-        while time.time() - start_time < 20:
-            if select.select([master], [], [], 0.5)[0]:
-                try:
-                    data = os.read(master, 4096)
-                    if data:
-                        text = data.decode("utf-8", errors="replace")
-                        output.append(text)
-
-                        # 找 Claude OAuth URL
-                        url_match = re.search(r"https://claude\.ai/oauth/authorize\?[^\s\x1b]+", text)
-                        if url_match:
-                            auth_url = url_match.group(0)
-                            break
-                except OSError:
-                    break
-            if proc.poll() is not None:
-                break
-
-        if not auth_url:
-            os.close(master)
-            proc.terminate()
-            raise Exception(f"找不到授權 URL。輸出：{''.join(output)[-500:]}")
-
-        # 保存 session（包含 master fd 和 process）
+        # 保存 session
         _pending_claude_sessions[session_id] = {
-            "master": master,
-            "proc": proc,
+            "child": child,
         }
-        logger.info(f"Started Claude auth session: {session_id}")
+        logger.info(f"Started Claude auth session: {session_id}, URL found")
 
         return session_id, auth_url
 
@@ -533,18 +514,15 @@ def start_claude_auth() -> Tuple[str, str]:
 
 def complete_claude_auth(session_id: str, auth_code: str) -> bool:
     """
-    完成 Claude 認證：將授權碼輸入到等待中的 process
+    完成 Claude 認證：將授權碼輸入到等待中的 pexpect session
     """
-    import os
-    import time
-    import select
+    import pexpect
 
     session = _pending_claude_sessions.get(session_id)
     if not session:
         raise Exception("找不到此認證 session。可能已過期，請重新開始。")
 
-    master = session["master"]
-    proc = session["proc"]
+    child = session["child"]
 
     # 清理授權碼：移除 # 後面的 state 參數、URL 參數、空白等
     clean_code = auth_code.strip()
@@ -552,90 +530,68 @@ def complete_claude_auth(session_id: str, auth_code: str) -> bool:
         clean_code = clean_code.split("#")[0]
     if "code=" in clean_code:
         # 如果用戶貼了完整 URL，提取 code 參數
-        import re
         match = re.search(r"code=([^&\s#]+)", clean_code)
         if match:
             clean_code = match.group(1)
 
     try:
         # 檢查進程是否還活著
-        if proc.poll() is not None:
+        if not child.isalive():
             del _pending_claude_sessions[session_id]
-            raise Exception(f"認證進程已結束（返回碼 {proc.returncode}）。請重新開始。")
+            raise Exception("認證進程已結束。請重新開始。")
 
         logger.info(f"Writing auth code to session {session_id}: {clean_code[:10]}...")
 
-        # 寫入授權碼
-        os.write(master, (clean_code + "\n").encode())
+        # 發送授權碼
+        child.sendline(clean_code)
 
-        # 等待完成（最多 30 秒）
-        output = []
-        start_time = time.time()
-        success = False
-
-        while time.time() - start_time < 30:
-            if select.select([master], [], [], 0.5)[0]:
-                try:
-                    data = os.read(master, 4096)
-                    if data:
-                        text = data.decode("utf-8", errors="replace")
-                        output.append(text)
-                        logger.debug(f"Claude auth output: {text[:200]}")
-                        # 檢查成功訊息
-                        if "successfully" in text.lower() or "saved" in text.lower():
-                            success = True
-                            break
-                        # 檢查錯誤訊息
-                        if "error" in text.lower() or "invalid" in text.lower() or "failed" in text.lower():
-                            break
-                except OSError:
-                    break
-            if proc.poll() is not None:
-                break
-
-        # 清理
+        # 等待成功或失敗訊息
         try:
-            os.close(master)
-        except OSError:
-            pass
+            index = child.expect(
+                [
+                    r"(?i)successfully",
+                    r"(?i)saved",
+                    r"(?i)invalid",
+                    r"(?i)error",
+                    r"(?i)failed",
+                    r"(?i)expired",
+                    pexpect.TIMEOUT,
+                    pexpect.EOF,
+                ],
+                timeout=30,
+            )
 
-        # 等待進程結束
-        try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            logger.warning(f"Claude auth process didn't exit, terminating...")
-            proc.terminate()
-            proc.wait(timeout=5)
+            output = child.before if child.before else ""
+            logger.info(f"Claude auth result index={index}, output: {output[-300:]}")
 
-        del _pending_claude_sessions[session_id]
-
-        output_text = "".join(output)
-        logger.info(f"Claude auth output for {session_id}: {output_text[-500:]}")
-
-        if success or proc.returncode == 0:
-            logger.info(f"Claude auth completed for session: {session_id}")
-            return True
-        else:
-            # 從輸出中提取錯誤訊息
-            error_msg = "認證失敗"
-            if "invalid" in output_text.lower():
-                error_msg = "授權碼無效"
-            elif "expired" in output_text.lower():
-                error_msg = "授權碼已過期"
-            elif "error" in output_text.lower():
-                error_msg = f"認證錯誤：{output_text[-200:]}"
-            raise Exception(error_msg)
-
-    except subprocess.TimeoutExpired:
-        if session_id in _pending_claude_sessions:
-            proc.terminate()
+            # 清理
+            child.terminate(force=True)
             del _pending_claude_sessions[session_id]
-        raise Exception("認證超時。請重試。")
+
+            if index in [0, 1]:  # successfully, saved
+                logger.info(f"Claude auth completed for session: {session_id}")
+                return True
+            elif index == 2:  # invalid
+                raise Exception("授權碼無效")
+            elif index in [3, 4]:  # error, failed
+                raise Exception(f"認證失敗：{output[-200:]}")
+            elif index == 5:  # expired
+                raise Exception("授權碼已過期")
+            elif index == 6:  # TIMEOUT
+                raise Exception("等待回應超時")
+            else:  # EOF
+                raise Exception(f"進程意外結束：{output[-200:]}")
+
+        except pexpect.ExceptionPexpect as e:
+            child.terminate(force=True)
+            if session_id in _pending_claude_sessions:
+                del _pending_claude_sessions[session_id]
+            raise Exception(f"認證過程出錯：{str(e)}")
+
     except Exception as e:
         if session_id in _pending_claude_sessions:
             try:
-                os.close(master)
-                proc.terminate()
+                child.terminate(force=True)
             except:
                 pass
             del _pending_claude_sessions[session_id]
@@ -644,13 +600,10 @@ def complete_claude_auth(session_id: str, auth_code: str) -> bool:
 
 def cancel_claude_auth(session_id: str):
     """取消進行中的 Claude 認證"""
-    import os
-
     session = _pending_claude_sessions.get(session_id)
     if session:
         try:
-            os.close(session["master"])
-            session["proc"].terminate()
+            session["child"].terminate(force=True)
         except:
             pass
         del _pending_claude_sessions[session_id]
