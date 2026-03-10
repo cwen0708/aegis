@@ -1901,6 +1901,38 @@ def update_claude_creds(data: ClaudeCredentialsRequest):
     return {"ok": True, "message": "Credentials 已更新！"}
 
 
+class ClaudeTokenRequest(BaseModel):
+    token: str
+
+
+@router.post("/claude/token")
+def save_claude_token(data: ClaudeTokenRequest):
+    """
+    儲存 Claude OAuth Token（長期 token，1 年有效）
+    用戶在本地執行 `claude setup-token` 取得 token 後貼上
+    """
+    token = data.token.strip()
+    if not token.startswith("sk-ant-oat01-"):
+        raise HTTPException(status_code=400, detail="無效的 Token 格式。Token 應以 sk-ant-oat01- 開頭。")
+
+    # 儲存到 .env 檔案
+    env_file = Path(__file__).parent.parent.parent / ".env"
+    env_content = ""
+    if env_file.exists():
+        env_content = env_file.read_text()
+
+    # 更新或新增 CLAUDE_CODE_OAUTH_TOKEN
+    lines = env_content.strip().split("\n") if env_content.strip() else []
+    new_lines = [line for line in lines if not line.startswith("CLAUDE_CODE_OAUTH_TOKEN=")]
+    new_lines.append(f"CLAUDE_CODE_OAUTH_TOKEN={token}")
+    env_file.write_text("\n".join(new_lines) + "\n")
+
+    # 同時設定到環境變數（讓當前進程立即生效）
+    os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = token
+
+    return {"ok": True, "message": "Token 已儲存！請重啟 Worker 服務使其生效。"}
+
+
 @router.post("/claude/auth/init")
 def init_claude_auth():
     """啟動 Claude 引導式登入，回傳授權 URL"""

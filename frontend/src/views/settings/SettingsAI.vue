@@ -36,6 +36,7 @@ const claudeStatus = ref<{
   expires_at: string | null;
   expired: boolean;
   hours_until_expiry: number | null;
+  has_oauth_token?: boolean;
 } | null>(null)
 const claudeAuthSession = ref<{ session_id: string; auth_url: string; instructions: string[] } | null>(null)
 const claudeAuthCode = ref('')
@@ -43,6 +44,9 @@ const claudeLoading = ref(false)
 const claudeError = ref('')
 const claudeSuccess = ref('')
 const claudeCopied = ref(false)
+// 長期 Token
+const claudeToken = ref('')
+const claudeTokenSaving = ref(false)
 
 // Gcloud 狀態
 const gcloudStatusLoading = ref(true)
@@ -156,6 +160,29 @@ function copyClaudeUrl() {
     navigator.clipboard.writeText(claudeAuthSession.value.auth_url)
     claudeCopied.value = true
     setTimeout(() => claudeCopied.value = false, 2000)
+  }
+}
+
+async function saveClaudeToken() {
+  if (!claudeToken.value.trim()) return
+  claudeTokenSaving.value = true
+  claudeError.value = ''
+  claudeSuccess.value = ''
+  try {
+    const res = await fetch(`${API}/api/v1/claude/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: claudeToken.value.trim() }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.detail || '儲存失敗')
+    claudeSuccess.value = data.message || 'Token 已儲存！'
+    claudeToken.value = ''
+    await fetchClaudeStatus()
+  } catch (e: any) {
+    claudeError.value = e.message
+  } finally {
+    claudeTokenSaving.value = false
   }
 }
 
@@ -427,10 +454,14 @@ onMounted(async () => {
             <div class="flex-1">
               <div class="text-sm text-slate-200">
                 {{ claudeStatus?.expired ? '已過期' : claudeStatus?.authenticated ? '已認證' : '未認證' }}
-                <span v-if="claudeStatus?.subscription_type" class="text-xs text-purple-400 ml-2">{{ claudeStatus.subscription_type }}</span>
+                <span v-if="claudeStatus?.has_oauth_token" class="text-xs text-emerald-400 ml-2">長期 Token</span>
+                <span v-else-if="claudeStatus?.subscription_type" class="text-xs text-purple-400 ml-2">{{ claudeStatus.subscription_type }}</span>
               </div>
               <div v-if="claudeStatus?.email" class="text-xs text-slate-400">{{ claudeStatus.email }}</div>
-              <div v-if="claudeStatus?.authenticated && !claudeStatus?.expired && claudeStatus?.hours_until_expiry !== null" class="text-xs" :class="claudeStatus.hours_until_expiry < 2 ? 'text-amber-400' : 'text-slate-500'">
+              <div v-if="claudeStatus?.has_oauth_token" class="text-xs text-emerald-500">
+                Token 有效期約 1 年
+              </div>
+              <div v-else-if="claudeStatus?.authenticated && !claudeStatus?.expired && claudeStatus?.hours_until_expiry !== null" class="text-xs" :class="claudeStatus.hours_until_expiry < 2 ? 'text-amber-400' : 'text-slate-500'">
                 {{ claudeStatus.hours_until_expiry < 1 ? `${Math.round(claudeStatus.hours_until_expiry * 60)} 分鐘後過期` : `${claudeStatus.hours_until_expiry} 小時後過期` }}
               </div>
             </div>
@@ -449,74 +480,43 @@ onMounted(async () => {
             {{ claudeError }}
           </div>
 
-          <!-- 引導式登入（始終顯示） -->
+          <!-- 長期 Token 設定（推薦方式） -->
           <div v-if="claudeStatus?.installed" class="space-y-3">
-            <div class="text-xs font-medium text-slate-300">引導式登入（setup-token）</div>
+            <div class="text-xs font-medium text-slate-300">長期 Token（推薦，1 年有效）</div>
 
-            <!-- 認證流程說明 -->
+            <!-- 取得 Token 說明 -->
             <div class="p-3 bg-slate-900 rounded-lg space-y-2">
-              <div class="text-xs text-slate-400">1. 點擊下方按鈕啟動認證</div>
-              <div class="text-xs text-slate-400">2. 複製授權網址，在瀏覽器開啟並登入 Claude</div>
-              <div class="text-xs text-slate-400">3. 將授權碼貼回下方完成登入</div>
+              <div class="text-xs text-slate-400">1. 在<span class="text-amber-400">本地電腦</span>的終端機執行：<code class="bg-slate-800 px-1.5 py-0.5 rounded text-amber-300">claude setup-token</code></div>
+              <div class="text-xs text-slate-400">2. 依指示在瀏覽器完成 Claude 登入</div>
+              <div class="text-xs text-slate-400">3. 複製取得的 Token（<code class="bg-slate-800 px-1 rounded text-xs">sk-ant-oat01-...</code>）</div>
+              <div class="text-xs text-slate-400">4. 貼到下方儲存</div>
             </div>
 
-            <!-- 未啟動認證：顯示啟動按鈕 -->
-            <div v-if="!claudeAuthSession">
-              <button
-                @click="startClaudeAuth"
-                :disabled="claudeLoading"
-                class="flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded-lg font-bold text-sm transition-all"
-              >
-                <Loader2 v-if="claudeLoading" class="w-4 h-4 animate-spin" />
-                <Sparkles v-else class="w-4 h-4" />
-                {{ claudeStatus?.authenticated ? '重新認證' : '開始認證' }}
-              </button>
+            <!-- Token 輸入 -->
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1.5">OAuth Token</label>
+              <input
+                v-model="claudeToken"
+                type="password"
+                placeholder="sk-ant-oat01-..."
+                class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-amber-500 outline-none text-sm font-mono"
+                @keyup.enter="saveClaudeToken"
+              />
             </div>
 
-            <!-- 已啟動認證：顯示 URL 和授權碼輸入 -->
-            <template v-else>
-              <div>
-                <label class="block text-xs font-medium text-slate-400 mb-1.5">授權網址</label>
-                <div class="flex gap-2">
-                  <input :value="claudeAuthSession.auth_url" readonly class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 text-xs font-mono truncate" />
-                  <button @click="copyClaudeUrl" class="px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors">
-                    <Check v-if="claudeCopied" class="w-4 h-4 text-emerald-400" />
-                    <Copy v-else class="w-4 h-4 text-slate-300" />
-                  </button>
-                  <a :href="claudeAuthSession.auth_url" target="_blank" class="px-3 py-2 bg-amber-500 hover:bg-amber-600 rounded-lg transition-colors">
-                    <ExternalLink class="w-4 h-4 text-white" />
-                  </a>
-                </div>
-              </div>
-
-              <div>
-                <label class="block text-xs font-medium text-slate-400 mb-1.5">授權碼</label>
-                <input
-                  v-model="claudeAuthCode"
-                  type="text"
-                  placeholder="貼上 Claude 給您的授權碼..."
-                  class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-amber-500 outline-none text-sm font-mono"
-                  @keyup.enter="completeClaudeAuth"
-                />
-              </div>
-
-              <div class="flex gap-2">
-                <button
-                  @click="completeClaudeAuth"
-                  :disabled="claudeLoading || !claudeAuthCode.trim()"
-                  class="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded-lg font-bold text-sm transition-all"
-                >
-                  <Loader2 v-if="claudeLoading" class="w-4 h-4 animate-spin" />
-                  完成登入
-                </button>
-                <button @click="cancelClaudeAuth" class="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg font-bold text-sm transition-all">
-                  取消
-                </button>
-              </div>
-            </template>
+            <button
+              @click="saveClaudeToken"
+              :disabled="claudeTokenSaving || !claudeToken.trim()"
+              class="flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded-lg font-bold text-sm transition-all"
+            >
+              <Loader2 v-if="claudeTokenSaving" class="w-4 h-4 animate-spin" />
+              <Save v-else class="w-4 h-4" />
+              儲存 Token
+            </button>
 
             <p class="text-[11px] text-slate-500">
-              使用 setup-token 可取得長期 token，無需每 8 小時重新認證。
+              使用 <code class="bg-slate-800 px-1 rounded">setup-token</code> 取得的長期 Token，有效期約 1 年。
+              由於伺服器為無頭環境，請在有瀏覽器的本地電腦執行認證。
             </p>
           </div>
 
