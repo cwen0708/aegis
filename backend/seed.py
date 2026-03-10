@@ -87,11 +87,149 @@ def _seed_member_profiles():
     )
 
 
+def _sync_system_cron_jobs(session: Session):
+    """同步系統排程（可重複執行，只新增不存在的排程）"""
+    # 找 AEGIS 系統專案
+    aegis = session.exec(select(Project).where(Project.is_system == True)).first()
+    if not aegis:
+        print("  AEGIS system project not found, skipping cron sync.")
+        return
+
+    existing_crons = {c.name for c in session.exec(select(CronJob).where(CronJob.project_id == aegis.id)).all()}
+    crons_to_add = []
+
+    # 心跳檢查
+    if "心跳檢查" not in existing_crons:
+        crons_to_add.append(CronJob(
+            project_id=aegis.id,
+            name="心跳檢查",
+            description="每 30 分鐘檢查系統狀態，判斷是否有異常需要處理。",
+            prompt_template=(
+                "你是 Aegis 系統的心跳檢查 AI。請根據以下系統狀態進行判斷：\n\n"
+                "## 系統指標\n"
+                "- CPU: {cpu_percent}%\n"
+                "- RAM: {mem_percent}% (可用 {mem_available_gb} GB)\n"
+                "- 運行中任務: {running_count}/{max_workstations}\n\n"
+                "## 待處理卡片\n{pending_cards_summary}\n\n"
+                "## 最近失敗的任務\n{recent_failures}\n\n"
+                "請判斷：\n"
+                "1. 系統是否健康？\n"
+                "2. 是否有需要關注的異常？\n"
+                "3. 是否建議暫停分派（系統過載）？\n\n"
+                "以 Markdown 格式回覆，簡潔扼要。"
+            ),
+            cron_expression="*/30 * * * *",
+            is_enabled=True,
+            is_system=True,
+        ))
+
+    # 每日狀態報告
+    if "每日狀態報告" not in existing_crons:
+        crons_to_add.append(CronJob(
+            project_id=aegis.id,
+            name="每日狀態報告",
+            description="每天早上 9 點產出昨日任務摘要與 Token 消耗分析。",
+            prompt_template=(
+                "你是 Aegis 系統的每日報告 AI。請根據以下數據產出昨日摘要：\n\n"
+                "## 昨日任務統計\n{yesterday_stats}\n\n"
+                "## Token 消耗\n{token_usage_summary}\n\n"
+                "## 失敗任務列表\n{failed_tasks}\n\n"
+                "請產出簡潔的每日報告，包含：\n"
+                "1. 任務完成率\n"
+                "2. 異常事件摘要\n"
+                "3. Token 成本分析\n"
+                "4. 建議事項\n\n"
+                "以 Markdown 格式回覆。"
+            ),
+            cron_expression="0 9 * * *",
+            is_enabled=True,
+            is_system=True,
+        ))
+
+    # 記憶整理
+    if "記憶整理" not in existing_crons:
+        crons_to_add.append(CronJob(
+            project_id=aegis.id,
+            name="記憶整理",
+            description="每 4 小時回顧系統事件，整理短期記憶並更新長期記憶。",
+            prompt_template=(
+                "你是 Aegis 系統的記憶管理 AI。請根據以下資料整理系統記憶。\n\n"
+                "## 過去 4 小時的事件\n{recent_task_logs}\n\n"
+                "## 過去 4 小時的心跳報告摘要\n{recent_heartbeat_summaries}\n\n"
+                "## 現有短期記憶（最近 7 天）\n{short_term_memories}\n\n"
+                "## 現有長期記憶\n{long_term_memories}\n\n"
+                "請執行：\n"
+                "1. **短期記憶**：用 Markdown 整理這 4 小時發生的重要事實\n"
+                "2. **長期記憶更新**：判斷是否有反覆出現的模式或趨勢\n\n"
+                "回覆格式：\n"
+                "---SHORT_TERM---\n（短期記憶內容）\n"
+                "---LONG_TERM---\n（長期記憶更新，或「無需更新」）\n"
+                "---LONG_TERM_FILE---\n（目標檔名，如 recurring-issues.md）"
+            ),
+            cron_expression="0 */4 * * *",
+            is_enabled=True,
+            is_system=True,
+        ))
+
+    # 系統更新檢查
+    if "系統更新檢查" not in existing_crons:
+        auto_time = session.get(SystemSetting, "auto_update_time")
+        time_str = auto_time.value if auto_time else "03:00"
+        hour, minute = map(int, time_str.split(":"))
+        crons_to_add.append(CronJob(
+            project_id=aegis.id,
+            name="系統更新檢查",
+            description="自動檢查並套用 Aegis 系統更新。",
+            prompt_template=(
+                "你是 Aegis 系統的更新管理 AI。請執行以下步驟：\n\n"
+                "1. 呼叫 GET /api/v1/update/status 檢查更新狀態\n"
+                "2. 如果 has_update=true 且 is_deployed=true，呼叫 POST /api/v1/update/apply 執行更新\n"
+                "3. 如果沒有更新，回報「已是最新版本」\n"
+                "4. 如果更新成功，回報新版本號\n"
+                "5. 如果更新失敗，記錄錯誤訊息\n\n"
+                "注意：更新過程會自動等待執行中的任務完成。"
+            ),
+            cron_expression=f"{minute} {hour} * * *",
+            is_enabled=False,  # 預設關閉
+            is_system=True,
+        ))
+
+    # 短期記憶清理
+    if "短期記憶清理" not in existing_crons:
+        crons_to_add.append(CronJob(
+            project_id=aegis.id,
+            name="短期記憶清理",
+            description="每天凌晨清理超過保留天數的短期記憶檔案。",
+            prompt_template=(
+                "你是 Aegis 系統的記憶清理 AI。請執行以下步驟：\n\n"
+                "1. 讀取系統設定 memory_short_term_days（短期記憶保留天數）\n"
+                "2. 掃描 .aegis/memory/ 目錄下的短期記憶檔案\n"
+                "3. 刪除超過保留天數的檔案\n"
+                "4. 回報清理結果：刪除了多少檔案、釋放了多少空間\n\n"
+                "注意：長期記憶（long-term/）目錄不要清理。"
+            ),
+            cron_expression="0 4 * * *",
+            is_enabled=True,
+            is_system=True,
+        ))
+
+    if crons_to_add:
+        session.add_all(crons_to_add)
+        session.commit()
+        print(f"  - Added {len(crons_to_add)} system cron jobs: {[c.name for c in crons_to_add]}")
+    else:
+        print("  - All system cron jobs already exist.")
+
+
 def seed_data():
     init_db()
     with Session(engine) as session:
-        if session.exec(select(Project)).first():
-            print("Database already has data. Skipping seed.")
+        has_existing_data = session.exec(select(Project)).first() is not None
+
+        if has_existing_data:
+            print("Database has existing data. Syncing system cron jobs...")
+            _sync_system_cron_jobs(session)
+            print("Sync completed!")
             return
 
         print("Seeding initial data...")
@@ -225,133 +363,8 @@ def seed_data():
             session.commit()
             session.refresh(aegis_scheduled)
 
-        # ── 4. AEGIS 系統排程（不可刪除） ──
-        heartbeat_prompt = (
-            "你是 Aegis 系統的心跳檢查 AI。請根據以下系統狀態進行判斷：\n\n"
-            "## 系統指標\n"
-            "- CPU: {cpu_percent}%\n"
-            "- RAM: {mem_percent}% (可用 {mem_available_gb} GB)\n"
-            "- 運行中任務: {running_count}/{max_workstations}\n\n"
-            "## 待處理卡片\n{pending_cards_summary}\n\n"
-            "## 最近失敗的任務\n{recent_failures}\n\n"
-            "請判斷：\n"
-            "1. 系統是否健康？\n"
-            "2. 是否有需要關注的異常？\n"
-            "3. 是否建議暫停分派（系統過載）？\n\n"
-            "以 Markdown 格式回覆，簡潔扼要。"
-        )
-        daily_report_prompt = (
-            "你是 Aegis 系統的每日報告 AI。請根據以下數據產出昨日摘要：\n\n"
-            "## 昨日任務統計\n{yesterday_stats}\n\n"
-            "## Token 消耗\n{token_usage_summary}\n\n"
-            "## 失敗任務列表\n{failed_tasks}\n\n"
-            "請產出簡潔的每日報告，包含：\n"
-            "1. 任務完成率\n"
-            "2. 異常事件摘要\n"
-            "3. Token 成本分析\n"
-            "4. 建議事項\n\n"
-            "以 Markdown 格式回覆。"
-        )
-
-        memory_prompt = (
-            "你是 Aegis 系統的記憶管理 AI。請根據以下資料整理系統記憶。\n\n"
-            "## 過去 4 小時的事件\n{recent_task_logs}\n\n"
-            "## 過去 4 小時的心跳報告摘要\n{recent_heartbeat_summaries}\n\n"
-            "## 現有短期記憶（最近 7 天）\n{short_term_memories}\n\n"
-            "## 現有長期記憶\n{long_term_memories}\n\n"
-            "請執行：\n"
-            "1. **短期記憶**：用 Markdown 整理這 4 小時發生的重要事實\n"
-            "2. **長期記憶更新**：判斷是否有反覆出現的模式或趨勢\n\n"
-            "回覆格式：\n"
-            "---SHORT_TERM---\n（短期記憶內容）\n"
-            "---LONG_TERM---\n（長期記憶更新，或「無需更新」）\n"
-            "---LONG_TERM_FILE---\n（目標檔名，如 recurring-issues.md）"
-        )
-
-        # ── 4. AEGIS 系統排程（跳過已存在）──
-        existing_crons = {c.name for c in session.exec(select(CronJob).where(CronJob.project_id == aegis.id)).all()}
-        crons_to_add = []
-
-        if "心跳檢查" not in existing_crons:
-            crons_to_add.append(CronJob(
-                project_id=aegis.id,
-                name="心跳檢查",
-                description="每 30 分鐘檢查系統狀態，判斷是否有異常需要處理。",
-                prompt_template=heartbeat_prompt,
-                cron_expression="*/30 * * * *",
-                is_enabled=True,
-                is_system=True,
-            ))
-        if "每日狀態報告" not in existing_crons:
-            crons_to_add.append(CronJob(
-                project_id=aegis.id,
-                name="每日狀態報告",
-                description="每天早上 9 點產出昨日任務摘要與 Token 消耗分析。",
-                prompt_template=daily_report_prompt,
-                cron_expression="0 9 * * *",
-                is_enabled=True,
-                is_system=True,
-            ))
-        if "記憶整理" not in existing_crons:
-            crons_to_add.append(CronJob(
-                project_id=aegis.id,
-                name="記憶整理",
-                description="每 4 小時回顧系統事件，整理短期記憶並更新長期記憶。",
-                prompt_template=memory_prompt,
-                cron_expression="0 */4 * * *",
-                is_enabled=True,
-                is_system=True,
-            ))
-
-        # 系統更新檢查
-        update_prompt = (
-            "你是 Aegis 系統的更新管理 AI。請執行以下步驟：\n\n"
-            "1. 呼叫 GET /api/v1/update/status 檢查更新狀態\n"
-            "2. 如果 has_update=true 且 is_deployed=true，呼叫 POST /api/v1/update/apply 執行更新\n"
-            "3. 如果沒有更新，回報「已是最新版本」\n"
-            "4. 如果更新成功，回報新版本號\n"
-            "5. 如果更新失敗，記錄錯誤訊息\n\n"
-            "注意：更新過程會自動等待執行中的任務完成。"
-        )
-        if "系統更新檢查" not in existing_crons:
-            # 讀取自動更新時間設定
-            auto_time = session.get(SystemSetting, "auto_update_time")
-            time_str = auto_time.value if auto_time else "03:00"
-            hour, minute = map(int, time_str.split(":"))
-            crons_to_add.append(CronJob(
-                project_id=aegis.id,
-                name="系統更新檢查",
-                description="自動檢查並套用 Aegis 系統更新。",
-                prompt_template=update_prompt,
-                cron_expression=f"{minute} {hour} * * *",
-                is_enabled=False,  # 預設關閉，需在設定頁面開啟
-                is_system=True,
-            ))
-
-        # 短期記憶清理
-        memory_cleanup_prompt = (
-            "你是 Aegis 系統的記憶清理 AI。請執行以下步驟：\n\n"
-            "1. 讀取系統設定 memory_short_term_days（短期記憶保留天數）\n"
-            "2. 掃描 .aegis/memory/ 目錄下的短期記憶檔案\n"
-            "3. 刪除超過保留天數的檔案\n"
-            "4. 回報清理結果：刪除了多少檔案、釋放了多少空間\n\n"
-            "注意：長期記憶（long-term/）目錄不要清理。"
-        )
-        if "短期記憶清理" not in existing_crons:
-            crons_to_add.append(CronJob(
-                project_id=aegis.id,
-                name="短期記憶清理",
-                description="每天凌晨清理超過保留天數的短期記憶檔案。",
-                prompt_template=memory_cleanup_prompt,
-                cron_expression="0 4 * * *",
-                is_enabled=True,
-                is_system=True,
-            ))
-
-        if crons_to_add:
-            session.add_all(crons_to_add)
-            session.commit()
-            print(f"  - Added {len(crons_to_add)} cron jobs")
+        # ── 4. AEGIS 系統排程 ──
+        _sync_system_cron_jobs(session)
 
         # ── 5. Demo 專案（跳過已存在）──
         p1 = session.exec(select(Project).where(Project.name == "Aegis Demo")).first()

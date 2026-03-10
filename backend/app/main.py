@@ -284,6 +284,29 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to rebuild card index on startup: {e}")
 
+    # 清除更新狀態（服務重啟後重置）
+    try:
+        from app.database import engine as _engine
+        from app.models.core import SystemSetting
+        from sqlmodel import Session as _Session
+
+        with _Session(_engine) as session:
+            for key in ["update_stage", "update_progress", "update_message", "update_error", "update_is_updating"]:
+                setting = session.get(SystemSetting, key)
+                if setting:
+                    if key == "update_stage":
+                        setting.value = "idle"
+                    elif key in ("update_progress",):
+                        setting.value = "0"
+                    elif key == "update_is_updating":
+                        setting.value = "false"
+                    else:
+                        setting.value = ""
+                    session.add(setting)
+            session.commit()
+    except Exception as e:
+        logger.warning(f"Failed to clear update status: {e}")
+
     # 注意：AI Task Poller 已移到獨立的 worker.py 程序
     # 系統排程（更新檢查、記憶清理等）由 seed.py 建立
     # 透過 dev.bat 啟動，避免阻塞 FastAPI event loop
