@@ -546,9 +546,20 @@ def complete_claude_auth(session_id: str, auth_code: str) -> bool:
     master = session["master"]
     proc = session["proc"]
 
+    # 清理授權碼：移除 # 後面的 state 參數、URL 參數、空白等
+    clean_code = auth_code.strip()
+    if "#" in clean_code:
+        clean_code = clean_code.split("#")[0]
+    if "code=" in clean_code:
+        # 如果用戶貼了完整 URL，提取 code 參數
+        import re
+        match = re.search(r"code=([^&\s#]+)", clean_code)
+        if match:
+            clean_code = match.group(1)
+
     try:
         # 寫入授權碼
-        os.write(master, (auth_code + "\n").encode())
+        os.write(master, (clean_code + "\n").encode())
 
         # 等待完成（最多 30 秒）
         output = []
