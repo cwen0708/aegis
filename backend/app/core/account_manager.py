@@ -517,6 +517,7 @@ def complete_claude_auth(session_id: str, auth_code: str) -> bool:
     完成 Claude 認證：將授權碼輸入到等待中的 pexpect session
     """
     import pexpect
+    import time
 
     session = _pending_claude_sessions.get(session_id)
     if not session:
@@ -540,53 +541,81 @@ def complete_claude_auth(session_id: str, auth_code: str) -> bool:
             del _pending_claude_sessions[session_id]
             raise Exception("認證進程已結束。請重新開始。")
 
-        logger.info(f"Writing auth code to session {session_id}: {clean_code[:10]}...")
+        logger.info(f"Writing auth code to session {session_id}: {clean_code[:20]}...")
 
         # 發送授權碼
         child.sendline(clean_code)
 
-        # 等待成功或失敗訊息
+        # 等待進程結束或輸出關鍵字（最多 60 秒）
+        output_chunks = []
+        start_time = time.time()
+        success = False
+        error_msg = ""
+
+        while time.time() - start_time < 60:
+            if not child.isalive():
+                logger.info(f"Process exited with status {child.exitstatus}")
+                break
+
+            try:
+                chunk = child.read_nonblocking(4096, timeout=2)
+                if chunk:
+                    output_chunks.append(chunk)
+                    chunk_lower = chunk.lower()
+
+                    # 檢查成功/失敗關鍵字
+                    if "successfully" in chunk_lower or "saved" in chunk_lower:
+                        success = True
+                        break
+                    if "invalid" in chunk_lower:
+                        error_msg = "授權碼無效"
+                        break
+                    if "expired" in chunk_lower:
+                        error_msg = "授權碼已過期"
+                        break
+                    if "error" in chunk_lower or "failed" in chunk_lower:
+                        error_msg = "認證失敗"
+                        break
+            except pexpect.TIMEOUT:
+                continue
+            except pexpect.EOF:
+                logger.info("Process EOF")
+                break
+
+        # 收集剩餘輸出
         try:
-            index = child.expect(
-                [
-                    r"(?i)successfully",
-                    r"(?i)saved",
-                    r"(?i)invalid",
-                    r"(?i)error",
-                    r"(?i)failed",
-                    r"(?i)expired",
-                    pexpect.TIMEOUT,
-                    pexpect.EOF,
-                ],
-                timeout=30,
-            )
+            remaining = child.read_nonblocking(4096, timeout=1)
+            if remaining:
+                output_chunks.append(remaining)
+        except:
+            pass
 
-            output = child.before if child.before else ""
-            logger.info(f"Claude auth result index={index}, output: {output[-300:]}")
+        output = "".join(output_chunks)
+        # 移除 ANSI 控制碼
+        clean_output = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", output)
+        clean_output = re.sub(r"\[\?[0-9;]*[a-zA-Z]", "", clean_output)
+        logger.info(f"Claude auth output: {clean_output[-500:]}")
 
-            # 清理
-            child.terminate(force=True)
-            del _pending_claude_sessions[session_id]
+        # 清理
+        child.terminate(force=True)
+        del _pending_claude_sessions[session_id]
 
-            if index in [0, 1]:  # successfully, saved
-                logger.info(f"Claude auth completed for session: {session_id}")
-                return True
-            elif index == 2:  # invalid
+        # 判斷結果
+        if success or (child.exitstatus == 0 and not error_msg):
+            logger.info(f"Claude auth completed for session: {session_id}")
+            return True
+        elif error_msg:
+            raise Exception(error_msg)
+        elif time.time() - start_time >= 60:
+            raise Exception("等待回應超時（60秒）")
+        else:
+            # 檢查輸出中是否有錯誤訊息
+            if "invalid" in clean_output.lower():
                 raise Exception("授權碼無效")
-            elif index in [3, 4]:  # error, failed
-                raise Exception(f"認證失敗：{output[-200:]}")
-            elif index == 5:  # expired
+            elif "expired" in clean_output.lower():
                 raise Exception("授權碼已過期")
-            elif index == 6:  # TIMEOUT
-                raise Exception("等待回應超時")
-            else:  # EOF
-                raise Exception(f"進程意外結束：{output[-200:]}")
-
-        except pexpect.ExceptionPexpect as e:
-            child.terminate(force=True)
-            if session_id in _pending_claude_sessions:
-                del _pending_claude_sessions[session_id]
-            raise Exception(f"認證過程出錯：{str(e)}")
+            else:
+                raise Exception(f"認證失敗：{clean_output[-200:]}")
 
     except Exception as e:
         if session_id in _pending_claude_sessions:
