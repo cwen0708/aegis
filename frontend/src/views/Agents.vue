@@ -100,8 +100,8 @@ async function fetchAccounts() {
 }
 
 function openAddAccount(provider: 'claude' | 'gemini' | 'openai') {
-  // Claude 預設 CLI（OAuth Token），其他預設 API Key
-  const defaultAuthType = provider === 'claude' ? 'cli' : 'api_key'
+  // Claude/Gemini 預設 CLI，OpenAI 預設 API Key
+  const defaultAuthType = provider === 'openai' ? 'api_key' : 'cli'
   accountForm.value = {
     provider,
     name: '',
@@ -720,8 +720,8 @@ function formatResetTime(isoStr: string) {
             {{ accountError }}
           </div>
 
-          <!-- 認證類型選擇（僅 Claude 有 CLI 選項） -->
-          <div v-if="accountForm.provider === 'claude'" class="space-y-2">
+          <!-- 認證類型選擇（Claude/Gemini 有 CLI 選項） -->
+          <div v-if="accountForm.provider !== 'openai'" class="space-y-2">
             <label class="block text-xs text-slate-400">認證方式</label>
             <div class="flex gap-2">
               <button
@@ -773,8 +773,27 @@ function formatResetTime(isoStr: string) {
             </div>
           </template>
 
+          <!-- Gemini CLI Token 說明與輸入 -->
+          <template v-if="accountForm.provider === 'gemini' && accountForm.auth_type === 'cli'">
+            <div class="p-3 bg-slate-900/80 rounded-lg space-y-1.5 border border-slate-700/50">
+              <div class="text-[11px] text-slate-400">
+                <span class="text-blue-400 font-medium">步驟 1</span>：在<span class="text-blue-300">本地電腦</span>的終端機執行：
+              </div>
+              <code class="block bg-slate-800 px-2 py-1.5 rounded text-blue-300 text-xs font-mono">gemini auth login</code>
+              <div class="text-[11px] text-slate-400">
+                <span class="text-blue-400 font-medium">步驟 2</span>：依指示在瀏覽器完成 Google 登入
+              </div>
+              <div class="text-[11px] text-slate-400">
+                <span class="text-blue-400 font-medium">步驟 3</span>：登入完成後，認證資訊會自動儲存（無需手動複製）
+              </div>
+            </div>
+            <div class="p-2 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+              <p class="text-[11px] text-blue-400">Gemini CLI 認證會自動使用本機的認證檔案，只需輸入帳號名稱即可。</p>
+            </div>
+          </template>
+
           <!-- API Key 輸入（Claude API / Gemini / OpenAI） -->
-          <template v-if="accountForm.auth_type === 'api_key'">
+          <template v-if="accountForm.auth_type === 'api_key' || accountForm.provider === 'openai'">
             <div class="p-3 bg-slate-900/80 rounded-lg space-y-1.5 border border-slate-700/50">
               <div class="text-[11px] text-slate-400">
                 <template v-if="accountForm.provider === 'claude'">

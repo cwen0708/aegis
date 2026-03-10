@@ -184,8 +184,13 @@ def get_pending_cards() -> list:
 
 
 def get_primary_provider(member_id: int) -> tuple:
-    """從成員的主帳號取得 provider 和 model
-    回傳 (provider, model)
+    """從成員的主帳號取得 provider、model 和認證資訊
+    回傳 (provider, model, auth_info)
+    auth_info = {
+        'auth_type': 'cli' | 'api_key',
+        'oauth_token': str,  # CLI Token
+        'api_key': str,      # API Key
+    }
     """
     with Session(engine) as session:
         stmt = select(MemberAccount).where(
@@ -195,13 +200,18 @@ def get_primary_provider(member_id: int) -> tuple:
         if binding:
             account = session.get(Account, binding.account_id)
             if account:
-                return account.provider, binding.model or ""
-    return None, ""
+                auth_info = {
+                    'auth_type': getattr(account, 'auth_type', 'cli'),
+                    'oauth_token': getattr(account, 'oauth_token', '') or '',
+                    'api_key': getattr(account, 'api_key', '') or '',
+                }
+                return account.provider, binding.model or "", auth_info
+    return None, "", {}
 
 
 def resolve_member(stage_list_id: int, phase: str) -> tuple:
     """解析任務應該由哪個成員執行
-    回傳 (member_id, provider, model, member_slug)
+    回傳 (member_id, provider, model, member_slug, auth_info)
     """
     with Session(engine) as session:
         # 1. 列表級指派
@@ -209,9 +219,9 @@ def resolve_member(stage_list_id: int, phase: str) -> tuple:
         if stage_list and stage_list.member_id:
             member = session.get(Member, stage_list.member_id)
             if member:
-                provider, model = get_primary_provider(member.id)
+                provider, model, auth_info = get_primary_provider(member.id)
                 logger.info(f"[Router] List '{stage_list.name}' → {member.name} ({provider}/{model})")
-                return member.id, provider, model, member.slug
+                return member.id, provider, model, member.slug, auth_info
 
         # 2. 全域預設
         setting = session.get(SystemSetting, f"phase_routing.{phase}")
@@ -219,13 +229,13 @@ def resolve_member(stage_list_id: int, phase: str) -> tuple:
             try:
                 member = session.get(Member, int(setting.value))
                 if member:
-                    provider, model = get_primary_provider(member.id)
-                    return member.id, provider, model, member.slug
+                    provider, model, auth_info = get_primary_provider(member.id)
+                    return member.id, provider, model, member.slug, auth_info
             except (ValueError, TypeError):
                 pass
 
         # 3. 無指派
-        return None, None, "", None
+        return None, None, "", None, {}
 
 
 # ==========================================
@@ -343,8 +353,16 @@ def save_task_log(card_id: int, card_title: str, project_name: str, provider: st
 # ==========================================
 def run_task(card_id: int, project_path: str, prompt: str, phase: str,
              forced_provider: Optional[str], forced_model: str, card_title: str,
-             project_name: str, member_id: Optional[int]) -> Dict[str, Any]:
-    """執行單一 AI 任務（使用 PTY 實現即時輸出串流）"""
+             project_name: str, member_id: Optional[int],
+             auth_info: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    """執行單一 AI 任務（使用 PTY 實現即時輸出串流）
+
+    auth_info: 帳號認證資訊
+        - auth_type: 'cli' | 'api_key'
+        - oauth_token: CLI OAuth Token
+        - api_key: API Key
+    """
+    auth_info = auth_info or {}
 
     provider_name = forced_provider if forced_provider and forced_provider in PROVIDERS else PHASE_ROUTING.get(phase, "gemini")
     config = PROVIDERS.get(provider_name, PROVIDERS["gemini"])
@@ -373,10 +391,29 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
 
     # 完全隔離環境變數，避免干擾當前的 Claude Code session
     env = os.environ.copy()
-    claude_env_keys = [k for k in env.keys() if k.upper().startswith(("CLAUDE", "ANTHROPIC"))]
+    claude_env_keys = [k for k in env.keys() if k.upper().startswith(("CLAUDE", "ANTHROPIC", "GOOGLE", "GEMINI", "OPENAI"))]
     for key in claude_env_keys:
         env.pop(key, None)
     env["CLAUDE_CODE_ENTRY_POINT"] = "worker"
+
+    # 根據帳號認證資訊設定環境變數
+    auth_type = auth_info.get('auth_type', 'cli')
+    if provider_name == "claude":
+        if auth_type == 'api_key' and auth_info.get('api_key'):
+            env["ANTHROPIC_API_KEY"] = auth_info['api_key']
+            logger.info(f"[Task {card_id}] Using Anthropic API Key")
+        elif auth_info.get('oauth_token'):
+            env["CLAUDE_CODE_OAUTH_TOKEN"] = auth_info['oauth_token']
+            logger.info(f"[Task {card_id}] Using Claude OAuth Token")
+    elif provider_name == "gemini":
+        if auth_type == 'api_key' and auth_info.get('api_key'):
+            env["GOOGLE_API_KEY"] = auth_info['api_key']
+            logger.info(f"[Task {card_id}] Using Gemini API Key")
+        # Gemini CLI 模式使用本機認證檔案，無需設定環境變數
+    elif provider_name == "openai":
+        if auth_info.get('api_key'):
+            env["OPENAI_API_KEY"] = auth_info['api_key']
+            logger.info(f"[Task {card_id}] Using OpenAI API Key")
 
     logger.info(f"[Task {card_id}] Executing {provider_name} in {project_path} (PTY mode)")
     logger.info(f"[Task {card_id}] Command: {' '.join(cmd_parts[:3])}...")
@@ -788,7 +825,7 @@ def process_pending_cards():
             continue
 
         # 解析成員
-        member_id, forced_provider, forced_model, member_slug = resolve_member(idx.list_id, list_name.upper())
+        member_id, forced_provider, forced_model, member_slug, auth_info = resolve_member(idx.list_id, list_name.upper())
 
         # 成員忙碌檢查
         if member_id and is_member_busy(member_id):
@@ -839,6 +876,7 @@ def process_pending_cards():
             card_title=idx.title,
             project_name=project_name,
             member_id=member_id,
+            auth_info=auth_info,
         )
 
         # 更新卡片狀態
