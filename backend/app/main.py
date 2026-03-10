@@ -284,6 +284,81 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to rebuild card index on startup: {e}")
 
+    # 建立系統更新排程（如果不存在）
+    try:
+        from app.database import engine as _engine
+        from app.models.core import CronJob, Project, StageList, SystemSetting
+        from sqlmodel import Session as _Session, select as _select
+        from datetime import datetime, timezone
+        from croniter import croniter
+
+        with _Session(_engine) as session:
+            # 找 AEGIS 系統專案
+            aegis_project = session.exec(
+                _select(Project).where(Project.is_system == True)
+            ).first()
+
+            if aegis_project:
+                # 檢查是否已有系統更新排程
+                existing = session.exec(
+                    _select(CronJob).where(
+                        CronJob.project_id == aegis_project.id,
+                        CronJob.name == "系統更新檢查"
+                    )
+                ).first()
+
+                if not existing:
+                    # 讀取自動更新設定
+                    auto_enabled = session.get(SystemSetting, "auto_update_enabled")
+                    auto_time = session.get(SystemSetting, "auto_update_time")
+                    time_str = auto_time.value if auto_time else "03:00"
+                    hour, minute = map(int, time_str.split(":"))
+
+                    # 建立 Scheduled 清單（如果不存在）
+                    sched_list = session.exec(
+                        _select(StageList).where(
+                            StageList.project_id == aegis_project.id,
+                            StageList.name == "Scheduled"
+                        )
+                    ).first()
+                    if not sched_list:
+                        sched_list = StageList(
+                            project_id=aegis_project.id,
+                            name="Scheduled",
+                            position=0,
+                            stage_type="auto_process",
+                            is_ai_stage=True
+                        )
+                        session.add(sched_list)
+                        session.commit()
+
+                    # 建立系統更新排程
+                    cron_expr = f"{minute} {hour} * * *"  # 每天指定時間
+                    cron = croniter(cron_expr, datetime.now(timezone.utc))
+
+                    update_job = CronJob(
+                        project_id=aegis_project.id,
+                        name="系統更新檢查",
+                        description="自動檢查並套用 Aegis 系統更新",
+                        system_instruction="你是 Aegis 系統管理員。請檢查是否有可用的系統更新，如果有則執行更新流程。",
+                        prompt_template="""請執行以下步驟：
+1. 呼叫 GET /api/v1/update/status 檢查更新狀態
+2. 如果 has_update=true 且 is_deployed=true，呼叫 POST /api/v1/update/apply 執行更新
+3. 如果沒有更新或更新成功，回報結果
+4. 如果更新失敗，記錄錯誤訊息
+
+注意：更新過程會自動等待執行中的任務完成。""",
+                        cron_expression=cron_expr,
+                        is_enabled=auto_enabled.value == "true" if auto_enabled else False,
+                        is_system=True,
+                        next_scheduled_at=cron.get_next(datetime),
+                    )
+                    session.add(update_job)
+                    session.commit()
+                    logger.info(f"Created system update cron job (enabled={update_job.is_enabled})")
+    except Exception as e:
+        logger.warning(f"Failed to create system update cron job: {e}")
+
     # 注意：AI Task Poller 已移到獨立的 worker.py 程序
     # 透過 dev.bat 啟動，避免阻塞 FastAPI event loop
 

@@ -2494,3 +2494,229 @@ async def receive_node_task(
         "project": project.name,
         "stage": stage_list.name,
     }
+
+
+# ==========================================
+# System Update API
+# ==========================================
+from app.core import updater
+
+
+class UpdateSettingsPayload(BaseModel):
+    auto_update_enabled: Optional[bool] = None
+    auto_update_time: Optional[str] = None
+    update_keep_versions: Optional[int] = None
+
+
+class ApplyUpdatePayload(BaseModel):
+    version: Optional[str] = None
+    wait_timeout: int = 300
+
+
+class RollbackPayload(BaseModel):
+    version: Optional[str] = None
+
+
+@router.get("/update/status")
+async def get_update_status(session: Session = Depends(get_session)):
+    """取得更新狀態"""
+    state = updater.get_update_state()
+
+    # 讀取更新設定
+    auto_enabled = session.get(SystemSetting, "auto_update_enabled")
+    auto_time = session.get(SystemSetting, "auto_update_time")
+    keep_versions = session.get(SystemSetting, "update_keep_versions")
+
+    return {
+        "current_version": state.current_version,
+        "latest_version": state.latest_version,
+        "has_update": state.has_update,
+        "is_updating": state.is_updating,
+        "update_stage": state.stage,
+        "progress": state.progress,
+        "message": state.message,
+        "error": state.error,
+        "available_versions": state.available_versions,
+        "is_deployed": updater.is_deployed_environment(),
+        "auto_update_enabled": auto_enabled.value == "true" if auto_enabled else False,
+        "auto_update_time": auto_time.value if auto_time else "03:00",
+        "update_keep_versions": int(keep_versions.value) if keep_versions else 3,
+    }
+
+
+@router.post("/update/check")
+async def check_for_updates():
+    """檢查是否有新版本"""
+    state = await updater.check_for_updates()
+    return {
+        "current_version": state.current_version,
+        "latest_version": state.latest_version,
+        "has_update": state.has_update,
+        "available_versions": state.available_versions,
+        "message": state.message,
+        "error": state.error,
+    }
+
+
+@router.post("/update/download")
+async def download_update(version: Optional[str] = None):
+    """下載指定版本"""
+    if not updater.is_deployed_environment():
+        raise HTTPException(status_code=400, detail="本地開發環境不支援熱更新")
+
+    state = updater.get_update_state()
+    target_version = version or state.latest_version
+
+    if not target_version:
+        raise HTTPException(status_code=400, detail="未指定版本且無可用更新")
+
+    success = await updater.download_version(target_version)
+    return {
+        "ok": success,
+        "version": target_version,
+        "message": state.message,
+        "error": state.error,
+    }
+
+
+@router.post("/update/build")
+async def build_update(version: str):
+    """建構指定版本"""
+    if not updater.is_deployed_environment():
+        raise HTTPException(status_code=400, detail="本地開發環境不支援熱更新")
+
+    success = await updater.build_version(version)
+    state = updater.get_update_state()
+    return {
+        "ok": success,
+        "version": version,
+        "message": state.message,
+        "error": state.error,
+    }
+
+
+@router.post("/update/apply")
+async def apply_update(payload: ApplyUpdatePayload, session: Session = Depends(get_session)):
+    """套用更新（完整流程）"""
+    if not updater.is_deployed_environment():
+        raise HTTPException(status_code=400, detail="本地開發環境不支援熱更新")
+
+    # 檢查是否有執行中的任務
+    running = session.exec(
+        select(CardIndex).where(CardIndex.status == "running")
+    ).all()
+
+    if running and payload.wait_timeout == 0:
+        raise HTTPException(
+            status_code=409,
+            detail=f"有 {len(running)} 個任務執行中，請等待完成或設定 wait_timeout"
+        )
+
+    success = await updater.full_update(
+        version=payload.version,
+        wait_timeout=payload.wait_timeout
+    )
+    state = updater.get_update_state()
+    return {
+        "ok": success,
+        "version": state.current_version,
+        "message": state.message,
+        "error": state.error,
+    }
+
+
+@router.post("/update/rollback")
+async def rollback_update(payload: RollbackPayload):
+    """回滾到指定版本"""
+    if not updater.is_deployed_environment():
+        raise HTTPException(status_code=400, detail="本地開發環境不支援回滾")
+
+    success = await updater.rollback(payload.version)
+    state = updater.get_update_state()
+    return {
+        "ok": success,
+        "version": state.current_version,
+        "message": state.message,
+        "error": state.error,
+    }
+
+
+@router.put("/update/settings")
+async def update_settings(payload: UpdateSettingsPayload, session: Session = Depends(get_session)):
+    """更新自動更新設定（同時同步 CronJob）"""
+    if payload.auto_update_enabled is not None:
+        setting = session.get(SystemSetting, "auto_update_enabled")
+        if setting:
+            setting.value = "true" if payload.auto_update_enabled else "false"
+        else:
+            setting = SystemSetting(key="auto_update_enabled", value="true" if payload.auto_update_enabled else "false")
+        session.add(setting)
+
+    if payload.auto_update_time is not None:
+        setting = session.get(SystemSetting, "auto_update_time")
+        if setting:
+            setting.value = payload.auto_update_time
+        else:
+            setting = SystemSetting(key="auto_update_time", value=payload.auto_update_time)
+        session.add(setting)
+
+    if payload.update_keep_versions is not None:
+        setting = session.get(SystemSetting, "update_keep_versions")
+        if setting:
+            setting.value = str(payload.update_keep_versions)
+        else:
+            setting = SystemSetting(key="update_keep_versions", value=str(payload.update_keep_versions))
+        session.add(setting)
+
+    # 同步更新 CronJob
+    aegis_project = session.exec(
+        select(Project).where(Project.is_system == True)
+    ).first()
+
+    if aegis_project:
+        update_job = session.exec(
+            select(CronJob).where(
+                CronJob.project_id == aegis_project.id,
+                CronJob.name == "系統更新檢查"
+            )
+        ).first()
+
+        if update_job:
+            if payload.auto_update_enabled is not None:
+                update_job.is_enabled = payload.auto_update_enabled
+
+            if payload.auto_update_time is not None:
+                hour, minute = map(int, payload.auto_update_time.split(":"))
+                update_job.cron_expression = f"{minute} {hour} * * *"
+                # 重新計算下次執行時間
+                from datetime import datetime, timezone
+                cron = croniter(update_job.cron_expression, datetime.now(timezone.utc))
+                update_job.next_scheduled_at = cron.get_next(datetime)
+
+            session.add(update_job)
+
+    session.commit()
+    return {"ok": True}
+
+
+@router.get("/update/versions")
+async def list_versions():
+    """列出可用版本"""
+    if not updater.is_deployed_environment():
+        return {"versions": [], "current": updater.get_current_version()}
+
+    paths = updater.get_deployment_paths()
+    releases_dir = paths["releases"]
+
+    versions = []
+    if releases_dir and releases_dir.exists():
+        versions = sorted(
+            [d.name for d in releases_dir.iterdir() if d.is_dir()],
+            key=updater.parse_version,
+            reverse=True
+        )
+
+    return {
+        "versions": versions,
+        "current": updater.get_current_version(),
+    }
