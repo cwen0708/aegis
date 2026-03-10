@@ -1308,6 +1308,7 @@ from app.core.account_manager import (
     get_account_email, get_subscription_type,
     get_member_with_accounts, select_best_account,
     start_gcloud_auth, complete_gcloud_auth, cancel_gcloud_auth, check_gcloud_status,
+    check_claude_status, update_claude_credentials,
 )
 
 
@@ -1966,6 +1967,29 @@ def cancel_gcloud_auth_api(data: GcloudAuthCancelRequest):
     """取消 gcloud 引導式登入"""
     cancel_gcloud_auth(data.session_id)
     return {"ok": True}
+
+
+# ==========================================
+# Claude Auth Status (Claude 認證狀態)
+# ==========================================
+@router.get("/claude/status")
+def get_claude_status():
+    """檢查 Claude CLI 狀態和 token 過期時間"""
+    return check_claude_status()
+
+
+class ClaudeCredentialsRequest(BaseModel):
+    credentials: str  # JSON string
+
+
+@router.post("/claude/credentials")
+def update_claude_credentials_api(data: ClaudeCredentialsRequest):
+    """更新 Claude credentials 檔案（從其他機器同步）"""
+    try:
+        update_claude_credentials(data.credentials)
+        return {"ok": True, "message": "Credentials 已更新"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ==========================================

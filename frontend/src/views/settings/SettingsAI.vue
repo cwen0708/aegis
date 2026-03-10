@@ -26,6 +26,23 @@ const cliInstalling = ref<'claude' | 'gemini' | 'codex' | 'ollama' | null>(null)
 const cliError = ref('')
 const cliSuccess = ref('')
 
+// Claude 狀態
+const claudeStatusLoading = ref(true)
+const claudeStatus = ref<{
+  installed: boolean;
+  authenticated: boolean;
+  email: string | null;
+  subscription_type: string | null;
+  expires_at: string | null;
+  expired: boolean;
+  hours_until_expiry: number | null;
+} | null>(null)
+const claudeCredentials = ref('')
+const claudeLoading = ref(false)
+const claudeError = ref('')
+const claudeSuccess = ref('')
+const claudeCopied = ref(false)
+
 // Gcloud 狀態
 const gcloudStatusLoading = ref(true)
 const gcloudStatus = ref<{ installed: boolean; authenticated: boolean; account: string | null } | null>(null)
@@ -61,6 +78,52 @@ async function installCli(type: 'claude' | 'gemini' | 'codex') {
   } finally {
     cliInstalling.value = null
   }
+}
+
+// Claude 認證
+async function fetchClaudeStatus() {
+  claudeStatusLoading.value = true
+  try {
+    const res = await fetch(`${API}/api/v1/claude/status`)
+    if (res.ok) claudeStatus.value = await res.json()
+  } catch {
+    claudeStatus.value = null
+  } finally {
+    claudeStatusLoading.value = false
+  }
+}
+
+async function updateClaudeCredentials() {
+  if (!claudeCredentials.value.trim()) return
+  claudeLoading.value = true
+  claudeError.value = ''
+  claudeSuccess.value = ''
+  try {
+    const res = await fetch(`${API}/api/v1/claude/credentials`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credentials: claudeCredentials.value.trim() }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.detail || '更新失敗')
+    claudeSuccess.value = data.message || '已更新！'
+    claudeCredentials.value = ''
+    await fetchClaudeStatus()
+  } catch (e: any) {
+    claudeError.value = e.message
+  } finally {
+    claudeLoading.value = false
+  }
+}
+
+function copyClaudePath() {
+  const isWindows = navigator.userAgent.includes('Windows')
+  const path = isWindows
+    ? '%USERPROFILE%\\.claude\\.credentials.json'
+    : '~/.claude/.credentials.json'
+  navigator.clipboard.writeText(path)
+  claudeCopied.value = true
+  setTimeout(() => claudeCopied.value = false, 2000)
 }
 
 async function fetchGcloudStatus() {
@@ -152,6 +215,7 @@ async function saveSettings() {
 onMounted(async () => {
   // 並行載入
   fetchCliStatus()
+  fetchClaudeStatus()
   fetchGcloudStatus()
 
   await store.fetchSettings()
@@ -304,6 +368,89 @@ onMounted(async () => {
           </div>
 
           <p class="text-[11px] text-slate-500">CLI 工具用於執行 AI 任務。Claude/Gemini/Codex 可透過 npm 安裝，Ollama 需從官網下載。</p>
+        </template>
+      </div>
+    </div>
+
+    <!-- Claude 認證 -->
+    <div class="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
+      <div class="px-6 py-4 border-b border-slate-700/50">
+        <div class="flex items-center gap-2">
+          <Sparkles class="w-4 h-4 text-amber-400" />
+          <h2 class="text-sm font-semibold text-slate-200">Claude 認證</h2>
+          <Loader2 v-if="claudeStatusLoading" class="w-4 h-4 text-slate-500 animate-spin ml-auto" />
+        </div>
+      </div>
+      <div class="p-6 space-y-4">
+        <div v-if="claudeStatusLoading" class="text-sm text-slate-500">讀取中...</div>
+        <template v-else>
+          <!-- 狀態 -->
+          <div class="flex items-center gap-3">
+            <div :class="[
+              'w-2.5 h-2.5 rounded-full',
+              claudeStatus?.expired ? 'bg-red-400' :
+              claudeStatus?.authenticated ? 'bg-emerald-400' : 'bg-slate-500'
+            ]"></div>
+            <div class="flex-1">
+              <div class="text-sm text-slate-200">
+                {{ claudeStatus?.expired ? '已過期' : claudeStatus?.authenticated ? '已認證' : '未認證' }}
+                <span v-if="claudeStatus?.subscription_type" class="text-xs text-purple-400 ml-2">{{ claudeStatus.subscription_type }}</span>
+              </div>
+              <div v-if="claudeStatus?.email" class="text-xs text-slate-400">{{ claudeStatus.email }}</div>
+              <div v-if="claudeStatus?.authenticated && !claudeStatus?.expired && claudeStatus?.hours_until_expiry !== null" class="text-xs" :class="claudeStatus.hours_until_expiry < 2 ? 'text-amber-400' : 'text-slate-500'">
+                {{ claudeStatus.hours_until_expiry < 1 ? `${Math.round(claudeStatus.hours_until_expiry * 60)} 分鐘後過期` : `${claudeStatus.hours_until_expiry} 小時後過期` }}
+              </div>
+            </div>
+          </div>
+
+          <!-- 過期警告 -->
+          <div v-if="claudeStatus?.expired" class="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400">
+            Token 已過期！請從您的本地電腦同步 credentials。
+          </div>
+
+          <!-- 訊息 -->
+          <div v-if="claudeSuccess" class="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-sm text-emerald-400">
+            {{ claudeSuccess }}
+          </div>
+          <div v-if="claudeError" class="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400">
+            {{ claudeError }}
+          </div>
+
+          <!-- 同步 Credentials -->
+          <div class="space-y-3">
+            <div class="text-xs font-medium text-slate-300">同步 Credentials（從本地電腦）</div>
+            <div class="p-3 bg-slate-900 rounded-lg space-y-2">
+              <div class="text-xs text-slate-400">1. 在您的本地電腦找到 credentials 檔案：</div>
+              <div class="flex gap-2">
+                <code class="flex-1 text-xs text-amber-300 bg-slate-800 px-2 py-1 rounded font-mono">~/.claude/.credentials.json</code>
+                <button @click="copyClaudePath" class="px-2 py-1 bg-slate-700 hover:bg-slate-600 rounded transition-colors">
+                  <Check v-if="claudeCopied" class="w-3 h-3 text-emerald-400" />
+                  <Copy v-else class="w-3 h-3 text-slate-300" />
+                </button>
+              </div>
+              <div class="text-xs text-slate-400">2. 複製檔案內容，貼到下方：</div>
+            </div>
+
+            <textarea
+              v-model="claudeCredentials"
+              placeholder='{"claudeAiOauth": {...}}'
+              rows="3"
+              class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-amber-500 outline-none text-xs font-mono resize-none"
+            ></textarea>
+
+            <button
+              @click="updateClaudeCredentials"
+              :disabled="claudeLoading || !claudeCredentials.trim()"
+              class="flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded-lg font-bold text-sm transition-all"
+            >
+              <Loader2 v-if="claudeLoading" class="w-4 h-4 animate-spin" />
+              更新 Credentials
+            </button>
+          </div>
+
+          <p class="text-[11px] text-slate-500">
+            Claude 使用 OAuth 認證，token 約 8 小時過期。在 headless 伺服器上需要手動同步 credentials。
+          </p>
         </template>
       </div>
     </div>

@@ -375,3 +375,81 @@ def check_gcloud_status() -> Dict[str, Any]:
         pass
 
     return result
+
+
+# ==========================================
+# Claude Auth Status (Claude 認證狀態)
+# ==========================================
+def check_claude_status() -> Dict[str, Any]:
+    """檢查 Claude CLI 狀態和 token 過期時間"""
+    from datetime import datetime
+    result = {
+        "installed": False,
+        "version": None,
+        "authenticated": False,
+        "email": None,
+        "subscription_type": None,
+        "expires_at": None,
+        "expired": False,
+        "hours_until_expiry": None,
+    }
+
+    # 檢查是否安裝
+    try:
+        ver_result = subprocess.run(
+            "claude --version",
+            shell=True, capture_output=True, text=True, timeout=10
+        )
+        if ver_result.returncode == 0:
+            result["installed"] = True
+            result["version"] = ver_result.stdout.strip()
+    except Exception:
+        pass
+
+    # 檢查 credentials 檔案
+    if CLAUDE_CREDS_FILE.exists():
+        try:
+            with open(CLAUDE_CREDS_FILE, encoding="utf-8") as f:
+                creds = json.load(f)
+            oauth = creds.get("claudeAiOauth", {})
+
+            if oauth.get("accessToken"):
+                result["authenticated"] = True
+                result["email"] = oauth.get("email")
+                result["subscription_type"] = oauth.get("subscriptionType")
+
+                # 檢查過期時間（毫秒時間戳）
+                expires_at_ms = oauth.get("expiresAt", 0)
+                if expires_at_ms:
+                    expires_at = datetime.fromtimestamp(expires_at_ms / 1000)
+                    now = datetime.now()
+                    result["expires_at"] = expires_at.isoformat()
+                    result["expired"] = expires_at < now
+                    hours = (expires_at - now).total_seconds() / 3600
+                    result["hours_until_expiry"] = round(hours, 2)
+        except Exception as e:
+            logger.warning(f"Failed to read Claude credentials: {e}")
+
+    return result
+
+
+def update_claude_credentials(credentials_json: str) -> bool:
+    """更新 Claude credentials 檔案"""
+    try:
+        # 驗證 JSON 格式
+        creds = json.loads(credentials_json)
+        if "claudeAiOauth" not in creds:
+            raise ValueError("Invalid credentials format: missing claudeAiOauth")
+
+        # 確保目錄存在
+        CLAUDE_CREDS_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+        # 寫入檔案
+        with open(CLAUDE_CREDS_FILE, "w", encoding="utf-8") as f:
+            json.dump(creds, f, indent=2)
+
+        logger.info("Claude credentials updated successfully")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to update Claude credentials: {e}")
+        raise Exception(f"更新 credentials 失敗：{str(e)}")
