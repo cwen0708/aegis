@@ -1911,6 +1911,7 @@ def save_claude_token(data: ClaudeTokenRequest):
     儲存 Claude OAuth Token（長期 token，1 年有效）
     用戶在本地執行 `claude setup-token` 取得 token 後貼上
     """
+    import time
     token = data.token.strip()
     if not token.startswith("sk-ant-oat01-"):
         raise HTTPException(status_code=400, detail="無效的 Token 格式。Token 應以 sk-ant-oat01- 開頭。")
@@ -1921,14 +1922,19 @@ def save_claude_token(data: ClaudeTokenRequest):
     if env_file.exists():
         env_content = env_file.read_text()
 
-    # 更新或新增 CLAUDE_CODE_OAUTH_TOKEN
+    # 記錄設定時間（Unix 時間戳，毫秒）
+    token_set_at = int(time.time() * 1000)
+
+    # 更新或新增 CLAUDE_CODE_OAUTH_TOKEN 和 CLAUDE_CODE_OAUTH_TOKEN_SET_AT
     lines = env_content.strip().split("\n") if env_content.strip() else []
-    new_lines = [line for line in lines if not line.startswith("CLAUDE_CODE_OAUTH_TOKEN=")]
+    new_lines = [line for line in lines if not line.startswith("CLAUDE_CODE_OAUTH_TOKEN")]
     new_lines.append(f"CLAUDE_CODE_OAUTH_TOKEN={token}")
+    new_lines.append(f"CLAUDE_CODE_OAUTH_TOKEN_SET_AT={token_set_at}")
     env_file.write_text("\n".join(new_lines) + "\n")
 
     # 同時設定到環境變數（讓當前進程立即生效）
     os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = token
+    os.environ["CLAUDE_CODE_OAUTH_TOKEN_SET_AT"] = str(token_set_at)
 
     return {"ok": True, "message": "Token 已儲存！請重啟 Worker 服務使其生效。"}
 

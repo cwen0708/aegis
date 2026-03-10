@@ -390,7 +390,11 @@ onMounted(async () => {
                 <span v-else-if="claudeStatus?.subscription_type" class="text-xs text-purple-400 ml-2">{{ claudeStatus.subscription_type }}</span>
               </div>
               <div v-if="claudeStatus?.email" class="text-xs text-slate-400">{{ claudeStatus.email }}</div>
-              <div v-if="claudeStatus?.has_oauth_token" class="text-xs text-emerald-500">
+              <div v-if="claudeStatus?.has_oauth_token && claudeStatus?.expires_at" class="text-xs text-emerald-500">
+                有效至 {{ new Date(claudeStatus.expires_at).toLocaleDateString('zh-TW') }}
+                <span class="text-slate-500">（約 {{ Math.round((claudeStatus.hours_until_expiry || 0) / 24) }} 天）</span>
+              </div>
+              <div v-else-if="claudeStatus?.has_oauth_token" class="text-xs text-emerald-500">
                 Token 有效期約 1 年
               </div>
               <div v-else-if="claudeStatus?.authenticated && !claudeStatus?.expired && claudeStatus?.hours_until_expiry !== null" class="text-xs" :class="claudeStatus.hours_until_expiry < 2 ? 'text-amber-400' : 'text-slate-500'">

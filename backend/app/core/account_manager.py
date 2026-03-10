@@ -414,8 +414,28 @@ def check_claude_status() -> Dict[str, Any]:
         result["has_oauth_token"] = True
         result["authenticated"] = True
         result["subscription_type"] = "oauth_token"
-        result["expired"] = False
-        result["hours_until_expiry"] = 8760  # 約 1 年
+
+        # 計算實際過期時間（設定時間 + 1 年）
+        token_set_at_str = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN_SET_AT", "")
+        if token_set_at_str:
+            try:
+                token_set_at_ms = int(token_set_at_str)
+                token_set_at = datetime.fromtimestamp(token_set_at_ms / 1000)
+                # Token 有效期 1 年
+                expires_at = datetime.fromtimestamp(token_set_at_ms / 1000 + 365 * 24 * 3600)
+                now = datetime.now()
+                result["expires_at"] = expires_at.isoformat()
+                result["expired"] = expires_at < now
+                hours = (expires_at - now).total_seconds() / 3600
+                result["hours_until_expiry"] = round(hours, 2)
+            except (ValueError, TypeError):
+                # 無法解析時間戳，使用預設值
+                result["expired"] = False
+                result["hours_until_expiry"] = 8760
+        else:
+            # 沒有設定時間記錄，使用預設值
+            result["expired"] = False
+            result["hours_until_expiry"] = 8760
 
     # 檢查 credentials 檔案（如果沒有長期 token）
     if not result["has_oauth_token"] and CLAUDE_CREDS_FILE.exists():
