@@ -541,6 +541,7 @@ def complete_claude_auth(session_id: str, auth_code: str) -> bool:
             del _pending_claude_sessions[session_id]
             raise Exception("認證進程已結束。請重新開始。")
 
+        print(f"[Claude Auth] Writing code to session {session_id[:8]}: {clean_code[:20]}...")
         logger.info(f"Writing auth code to session {session_id}: {clean_code[:20]}...")
 
         # 發送授權碼
@@ -607,7 +608,8 @@ def complete_claude_auth(session_id: str, auth_code: str) -> bool:
         elif error_msg:
             raise Exception(error_msg)
         elif time.time() - start_time >= 60:
-            raise Exception("等待回應超時（60秒）")
+            print(f"[Claude Auth] Timeout. Output: {clean_output[-300:]}")
+            raise Exception("等待回應超時。請確認：1) 使用的是上方顯示的新 URL 授權 2) 授權碼正確且完整")
         else:
             # 檢查輸出中是否有錯誤訊息
             if "invalid" in clean_output.lower():
