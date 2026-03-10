@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { Sparkles, CloudCog, Terminal, Save, Loader2, ExternalLink, Copy, Check, Download } from 'lucide-vue-next'
+// Note: Some icons used in gcloud section
 import { useAegisStore } from '../../stores/aegis'
 
 import { config } from '../../config'
@@ -38,12 +39,8 @@ const claudeStatus = ref<{
   hours_until_expiry: number | null;
   has_oauth_token?: boolean;
 } | null>(null)
-const claudeAuthSession = ref<{ session_id: string; auth_url: string; instructions: string[] } | null>(null)
-const claudeAuthCode = ref('')
-const claudeLoading = ref(false)
 const claudeError = ref('')
 const claudeSuccess = ref('')
-const claudeCopied = ref(false)
 // 長期 Token
 const claudeToken = ref('')
 const claudeTokenSaving = ref(false)
@@ -95,71 +92,6 @@ async function fetchClaudeStatus() {
     claudeStatus.value = null
   } finally {
     claudeStatusLoading.value = false
-  }
-}
-
-async function startClaudeAuth() {
-  claudeLoading.value = true
-  claudeError.value = ''
-  claudeSuccess.value = ''
-  try {
-    const res = await fetch(`${API}/api/v1/claude/auth/init`, { method: 'POST' })
-    if (!res.ok) {
-      const data = await res.json()
-      throw new Error(data.detail || '啟動認證失敗')
-    }
-    claudeAuthSession.value = await res.json()
-  } catch (e: any) {
-    claudeError.value = e.message
-  } finally {
-    claudeLoading.value = false
-  }
-}
-
-async function completeClaudeAuth() {
-  if (!claudeAuthSession.value || !claudeAuthCode.value.trim()) return
-  claudeLoading.value = true
-  claudeError.value = ''
-  try {
-    const res = await fetch(`${API}/api/v1/claude/auth/complete`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session_id: claudeAuthSession.value.session_id,
-        auth_code: claudeAuthCode.value.trim(),
-      }),
-    })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.detail || '認證失敗')
-    claudeSuccess.value = data.message || '登入成功！'
-    claudeAuthSession.value = null
-    claudeAuthCode.value = ''
-    await fetchClaudeStatus()
-  } catch (e: any) {
-    claudeError.value = e.message
-  } finally {
-    claudeLoading.value = false
-  }
-}
-
-function cancelClaudeAuth() {
-  if (claudeAuthSession.value) {
-    fetch(`${API}/api/v1/claude/auth/cancel`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: claudeAuthSession.value.session_id }),
-    })
-  }
-  claudeAuthSession.value = null
-  claudeAuthCode.value = ''
-  claudeError.value = ''
-}
-
-function copyClaudeUrl() {
-  if (claudeAuthSession.value?.auth_url) {
-    navigator.clipboard.writeText(claudeAuthSession.value.auth_url)
-    claudeCopied.value = true
-    setTimeout(() => claudeCopied.value = false, 2000)
   }
 }
 
