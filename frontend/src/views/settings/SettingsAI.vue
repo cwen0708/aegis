@@ -485,67 +485,75 @@ onMounted(async () => {
             {{ gcloudError }}
           </div>
 
-          <!-- 引導式登入流程 -->
-          <div v-if="gcloudAuthSession" class="space-y-4">
-            <div class="p-4 bg-slate-900 rounded-lg space-y-3">
-              <div class="text-xs font-medium text-slate-300">請完成以下步驟：</div>
-              <ol class="text-xs text-slate-400 space-y-1.5 list-decimal list-inside">
-                <li v-for="(step, i) in gcloudAuthSession.instructions" :key="i">{{ step }}</li>
-              </ol>
+          <!-- 引導式登入（始終顯示） -->
+          <div v-if="gcloudStatus?.installed" class="space-y-3">
+            <div class="text-xs font-medium text-slate-300">引導式登入（Gemini CLI）</div>
+
+            <!-- 認證流程說明 -->
+            <div class="p-3 bg-slate-900 rounded-lg space-y-2">
+              <div class="text-xs text-slate-400">1. 點擊下方按鈕啟動認證</div>
+              <div class="text-xs text-slate-400">2. 複製授權網址，在瀏覽器開啟並登入 Google</div>
+              <div class="text-xs text-slate-400">3. 將授權碼貼回下方完成登入</div>
             </div>
 
-            <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1.5">授權網址</label>
-              <div class="flex gap-2">
-                <input :value="gcloudAuthSession.auth_url" readonly class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 text-xs font-mono truncate" />
-                <button @click="copyUrl" class="px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors">
-                  <Check v-if="copied" class="w-4 h-4 text-emerald-400" />
-                  <Copy v-else class="w-4 h-4 text-slate-300" />
-                </button>
-                <a :href="gcloudAuthSession.auth_url" target="_blank" class="px-3 py-2 bg-sky-500 hover:bg-sky-600 rounded-lg transition-colors">
-                  <ExternalLink class="w-4 h-4 text-white" />
-                </a>
-              </div>
-            </div>
-
-            <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1.5">授權碼</label>
-              <input
-                v-model="gcloudAuthCode"
-                type="text"
-                placeholder="貼上 Google 給您的授權碼..."
-                class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-sky-500 outline-none text-sm font-mono"
-                @keyup.enter="completeGcloudAuth"
-              />
-            </div>
-
-            <div class="flex gap-2">
+            <!-- 未啟動認證：顯示啟動按鈕 -->
+            <div v-if="!gcloudAuthSession">
               <button
-                @click="completeGcloudAuth"
-                :disabled="gcloudLoading || !gcloudAuthCode.trim()"
-                class="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-sky-500 hover:bg-sky-600 disabled:opacity-50 text-white rounded-lg font-bold text-sm transition-all"
+                @click="startGcloudAuth"
+                :disabled="gcloudLoading"
+                class="flex items-center gap-2 px-4 py-2 bg-sky-500 hover:bg-sky-600 disabled:opacity-50 text-white rounded-lg font-bold text-sm transition-all"
               >
                 <Loader2 v-if="gcloudLoading" class="w-4 h-4 animate-spin" />
-                完成登入
-              </button>
-              <button @click="cancelGcloudAuth" class="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg font-bold text-sm transition-all">
-                取消
+                <CloudCog v-else class="w-4 h-4" />
+                {{ gcloudStatus?.authenticated ? '重新認證' : '開始認證' }}
               </button>
             </div>
-          </div>
 
-          <!-- 開始登入按鈕 -->
-          <div v-else-if="gcloudStatus?.installed">
-            <button
-              @click="startGcloudAuth"
-              :disabled="gcloudLoading"
-              class="flex items-center gap-2 px-4 py-2.5 bg-sky-500 hover:bg-sky-600 disabled:opacity-50 text-white rounded-lg font-bold text-sm transition-all"
-            >
-              <Loader2 v-if="gcloudLoading" class="w-4 h-4 animate-spin" />
-              <CloudCog v-else class="w-4 h-4" />
-              {{ gcloudStatus?.authenticated ? '重新登入' : '引導式登入' }}
-            </button>
-            <p class="text-[11px] text-slate-500 mt-2">在此伺服器上登入 Google 帳號，用於 Gemini CLI 等服務。</p>
+            <!-- 已啟動認證：顯示 URL 和授權碼輸入 -->
+            <template v-else>
+              <div>
+                <label class="block text-xs font-medium text-slate-400 mb-1.5">授權網址</label>
+                <div class="flex gap-2">
+                  <input :value="gcloudAuthSession.auth_url" readonly class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 text-xs font-mono truncate" />
+                  <button @click="copyUrl" class="px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors">
+                    <Check v-if="copied" class="w-4 h-4 text-emerald-400" />
+                    <Copy v-else class="w-4 h-4 text-slate-300" />
+                  </button>
+                  <a :href="gcloudAuthSession.auth_url" target="_blank" class="px-3 py-2 bg-sky-500 hover:bg-sky-600 rounded-lg transition-colors">
+                    <ExternalLink class="w-4 h-4 text-white" />
+                  </a>
+                </div>
+              </div>
+
+              <div>
+                <label class="block text-xs font-medium text-slate-400 mb-1.5">授權碼</label>
+                <input
+                  v-model="gcloudAuthCode"
+                  type="text"
+                  placeholder="貼上 Google 給您的授權碼..."
+                  class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-sky-500 outline-none text-sm font-mono"
+                  @keyup.enter="completeGcloudAuth"
+                />
+              </div>
+
+              <div class="flex gap-2">
+                <button
+                  @click="completeGcloudAuth"
+                  :disabled="gcloudLoading || !gcloudAuthCode.trim()"
+                  class="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-sky-500 hover:bg-sky-600 disabled:opacity-50 text-white rounded-lg font-bold text-sm transition-all"
+                >
+                  <Loader2 v-if="gcloudLoading" class="w-4 h-4 animate-spin" />
+                  完成登入
+                </button>
+                <button @click="cancelGcloudAuth" class="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg font-bold text-sm transition-all">
+                  取消
+                </button>
+              </div>
+            </template>
+
+            <p class="text-[11px] text-slate-500">
+              gcloud 認證用於 Gemini CLI。認證資訊儲存在伺服器上，不會過期。
+            </p>
           </div>
 
           <div v-else class="text-xs text-slate-500">
