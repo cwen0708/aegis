@@ -114,10 +114,13 @@ class Account(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     provider: str  # "claude" | "gemini" | "codex" | "ollama"
     name: str  # 顯示名稱，如 "Max 小良"
-    credential_file: str  # profile 檔名，如 "claude-max-a.json"
+    credential_file: str = ""  # profile 檔名，如 "claude-max-a.json"（舊方式，可空）
     subscription: str = ""  # "max" / "pro" / "ai-pro"
     email: str = ""
     is_healthy: bool = Field(default=True)
+    # OAuth Token（新方式，長期 token）
+    oauth_token: str = ""  # sk-ant-oat01-... 或空
+    oauth_token_set_at: int = Field(default=0)  # 時間戳（毫秒）
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 

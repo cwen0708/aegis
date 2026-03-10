@@ -1315,25 +1315,66 @@ from app.core.account_manager import (
 class AccountCreateRequest(BaseModel):
     provider: str  # "claude" | "gemini"
     name: str
+    oauth_token: Optional[str] = None  # 可選：直接提供 OAuth Token
 
 
 @router.get("/accounts")
 def list_accounts(session: Session = Depends(get_session)):
-    """列出所有帳號"""
+    """列出所有帳號（含 token 過期資訊）"""
+    from datetime import datetime
     accounts = session.exec(select(Account).order_by(Account.provider, Account.id)).all()
-    return [a.model_dump() for a in accounts]
+    result = []
+    for a in accounts:
+        data = a.model_dump()
+        # 計算 token 過期時間
+        if a.oauth_token and a.oauth_token_set_at:
+            expires_at_ts = a.oauth_token_set_at / 1000 + 365 * 24 * 3600
+            expires_at = datetime.fromtimestamp(expires_at_ts)
+            now = datetime.now()
+            data["expires_at"] = expires_at.isoformat()
+            data["expired"] = expires_at < now
+            data["hours_until_expiry"] = round((expires_at - now).total_seconds() / 3600, 2)
+            data["has_oauth_token"] = True
+        else:
+            data["has_oauth_token"] = bool(a.oauth_token)
+            data["expires_at"] = None
+            data["expired"] = False
+            data["hours_until_expiry"] = None
+        # 隱藏實際 token 值（安全性）
+        data["oauth_token"] = "***" if a.oauth_token else ""
+        result.append(data)
+    return result
 
 
 @router.post("/accounts")
 def create_account(data: AccountCreateRequest, session: Session = Depends(get_session)):
-    """從目前 CLI 登入狀態新增帳號"""
+    """新增帳號（支援 OAuth Token 或從 CLI 擷取）"""
     import re, time as _t
-    # 自動產生 profile name: provider-name-timestamp
+
+    # 方式 1：使用 OAuth Token（推薦）
+    if data.oauth_token:
+        token = data.oauth_token.strip()
+        if data.provider == "claude" and not token.startswith("sk-ant-oat01-"):
+            raise HTTPException(status_code=400, detail="無效的 Claude Token 格式（應以 sk-ant-oat01- 開頭）")
+
+        account = Account(
+            provider=data.provider,
+            name=data.name,
+            oauth_token=token,
+            oauth_token_set_at=int(_t.time() * 1000),
+            subscription="oauth_token",
+        )
+        session.add(account)
+        session.commit()
+        session.refresh(account)
+        return account.model_dump()
+
+    # 方式 2：從 CLI 擷取（舊方式）
     safe_name = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fff]', '-', data.name).strip('-').lower()
     profile_name = f"{data.provider}-{safe_name}-{int(_t.time())}"
     filename = capture_current_credential(data.provider, profile_name)
     if not filename:
-        raise HTTPException(status_code=400, detail=f"找不到 {data.provider} 的登入憑證")
+        raise HTTPException(status_code=400, detail=f"找不到 {data.provider} 的登入憑證。請提供 OAuth Token。")
 
     email = get_account_email(data.provider, filename)
     subscription = get_subscription_type(data.provider, filename)

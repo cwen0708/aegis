@@ -50,14 +50,21 @@ interface AccountInfo {
   subscription: string
   email: string
   is_healthy: boolean
+  oauth_token?: string
+  has_oauth_token?: boolean
+  expires_at?: string | null
+  expired?: boolean
+  hours_until_expiry?: number | null
 }
 
 const accounts = ref<AccountInfo[]>([])
 const showAccountDialog = ref(false)
 const showEditAccountDialog = ref(false)
 const editingAccount = ref<AccountInfo | null>(null)
-const accountForm = ref({ provider: 'claude', name: '' })
+const accountForm = ref({ provider: 'claude', name: '', oauth_token: '' })
 const editAccountForm = ref({ name: '' })
+const accountCreating = ref(false)
+const accountError = ref('')
 
 async function fetchAccounts() {
   try {
@@ -68,16 +75,26 @@ async function fetchAccounts() {
 }
 
 function openAddAccount(provider: string) {
-  accountForm.value = { provider, name: '' }
+  accountForm.value = { provider, name: '', oauth_token: '' }
+  accountError.value = ''
   showAccountDialog.value = true
 }
 
 async function createAccount() {
+  accountCreating.value = true
+  accountError.value = ''
   try {
+    const payload: any = {
+      provider: accountForm.value.provider,
+      name: accountForm.value.name,
+    }
+    if (accountForm.value.oauth_token.trim()) {
+      payload.oauth_token = accountForm.value.oauth_token.trim()
+    }
     const res = await fetch(`${API}/api/v1/accounts`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(accountForm.value),
+      body: JSON.stringify(payload),
     })
     if (!res.ok) {
       const err = await res.json()
@@ -86,8 +103,13 @@ async function createAccount() {
     store.addToast('帳號已新增', 'success')
     showAccountDialog.value = false
     await fetchAccounts()
+    // 重新載入用量（新帳號可能影響顯示）
+    if (accountForm.value.provider === 'claude') fetchClaudeUsage()
+    if (accountForm.value.provider === 'gemini') fetchGeminiUsage()
   } catch (e: any) {
-    store.addToast(e.message || '新增失敗', 'error')
+    accountError.value = e.message || '新增失敗'
+  } finally {
+    accountCreating.value = false
   }
 }
 
@@ -283,12 +305,19 @@ function formatResetTime(isoStr: string) {
                     <div class="text-sm font-semibold text-slate-100 truncate">
                       {{ getDbAccountsByProvider('claude').find(a => a.credential_file === account.name + '.json')?.name || account.name }}
                     </div>
-                    <div class="flex items-center gap-1.5 text-[10px] text-slate-500 font-mono">
+                    <div class="flex items-center gap-1.5 text-[10px] text-slate-500 font-mono flex-wrap">
                       <span>{{ account.subscriptionType || 'unknown' }}</span>
                       <span v-if="account.is_active" class="flex items-center gap-1 text-emerald-400">
                         <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></span>
                         使用中
                       </span>
+                      <!-- Token 過期狀態 -->
+                      <template v-if="getDbAccountsByProvider('claude').find(a => a.credential_file === account.name + '.json')?.has_oauth_token">
+                        <span v-if="getDbAccountsByProvider('claude').find(a => a.credential_file === account.name + '.json')?.expired" class="text-red-400">Token 已過期</span>
+                        <span v-else-if="getDbAccountsByProvider('claude').find(a => a.credential_file === account.name + '.json')?.expires_at" class="text-emerald-500">
+                          有效至 {{ new Date(getDbAccountsByProvider('claude').find(a => a.credential_file === account.name + '.json')?.expires_at!).toLocaleDateString('zh-TW') }}
+                        </span>
+                      </template>
                     </div>
                   </div>
                   <button
@@ -533,16 +562,59 @@ function formatResetTime(isoStr: string) {
     <!-- Add Account Dialog -->
     <Teleport to="body">
       <div v-if="showAccountDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" @click.self="showAccountDialog = false">
-        <div class="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-sm p-6 space-y-4">
+        <div class="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-md p-6 space-y-4">
           <h3 class="text-sm font-bold text-slate-200">新增 {{ accountForm.provider === 'claude' ? 'Claude' : 'Gemini' }} 帳號</h3>
-          <p class="text-[11px] text-slate-500">請先在 CLI 登入目標帳號，再填寫名稱擷取憑證。</p>
+
+          <!-- 錯誤訊息 -->
+          <div v-if="accountError" class="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400">
+            {{ accountError }}
+          </div>
+
+          <!-- Claude Token 說明 -->
+          <div v-if="accountForm.provider === 'claude'" class="p-3 bg-slate-900/80 rounded-lg space-y-1.5 border border-slate-700/50">
+            <div class="text-[11px] text-slate-400">
+              <span class="text-amber-400 font-medium">步驟 1</span>：在<span class="text-amber-300">本地電腦</span>的終端機執行：
+            </div>
+            <code class="block bg-slate-800 px-2 py-1.5 rounded text-amber-300 text-xs font-mono">claude setup-token</code>
+            <div class="text-[11px] text-slate-400">
+              <span class="text-amber-400 font-medium">步驟 2</span>：依指示在瀏覽器完成 Claude 登入
+            </div>
+            <div class="text-[11px] text-slate-400">
+              <span class="text-amber-400 font-medium">步驟 3</span>：複製產生的 Token（<code class="text-[10px]">sk-ant-oat01-...</code>）貼到下方
+            </div>
+          </div>
+
+          <!-- Token 輸入 -->
+          <div v-if="accountForm.provider === 'claude'">
+            <label class="block text-xs text-slate-400 mb-1">OAuth Token <span class="text-emerald-400">（推薦，1 年有效）</span></label>
+            <input
+              v-model="accountForm.oauth_token"
+              type="password"
+              class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 font-mono outline-none focus:ring-2 focus:ring-amber-500/50"
+              placeholder="sk-ant-oat01-..."
+            />
+          </div>
+
+          <!-- 帳號名稱 -->
           <div>
             <label class="block text-xs text-slate-400 mb-1">顯示名稱</label>
-            <input v-model="accountForm.name" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-slate-200 outline-none" placeholder="例：Max 小良" />
+            <input
+              v-model="accountForm.name"
+              class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 outline-none focus:ring-2 focus:ring-emerald-500/50"
+              placeholder="例：Max 帳號A"
+            />
           </div>
+
           <div class="flex justify-end gap-2 pt-2">
             <button @click="showAccountDialog = false" class="px-4 py-2 text-xs text-slate-400 hover:text-slate-200 transition-colors">取消</button>
-            <button @click="createAccount" :disabled="!accountForm.name" class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-all">確認新增</button>
+            <button
+              @click="createAccount"
+              :disabled="!accountForm.name || accountCreating"
+              class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-2"
+            >
+              <RefreshCw v-if="accountCreating" class="w-3 h-3 animate-spin" />
+              確認新增
+            </button>
           </div>
         </div>
       </div>
