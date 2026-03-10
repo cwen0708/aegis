@@ -383,6 +383,7 @@ def check_gcloud_status() -> Dict[str, Any]:
 def check_claude_status() -> Dict[str, Any]:
     """檢查 Claude CLI 狀態和 token 過期時間"""
     from datetime import datetime
+    import os
     result = {
         "installed": False,
         "version": None,
@@ -392,6 +393,7 @@ def check_claude_status() -> Dict[str, Any]:
         "expires_at": None,
         "expired": False,
         "hours_until_expiry": None,
+        "has_oauth_token": False,  # 是否有長期 OAuth Token
     }
 
     # 檢查是否安裝
@@ -406,8 +408,17 @@ def check_claude_status() -> Dict[str, Any]:
     except Exception:
         pass
 
-    # 檢查 credentials 檔案
-    if CLAUDE_CREDS_FILE.exists():
+    # 檢查 CLAUDE_CODE_OAUTH_TOKEN 環境變數（長期 token，1 年有效）
+    oauth_token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")
+    if oauth_token.startswith("sk-ant-oat01-"):
+        result["has_oauth_token"] = True
+        result["authenticated"] = True
+        result["subscription_type"] = "oauth_token"
+        result["expired"] = False
+        result["hours_until_expiry"] = 8760  # 約 1 年
+
+    # 檢查 credentials 檔案（如果沒有長期 token）
+    if not result["has_oauth_token"] and CLAUDE_CREDS_FILE.exists():
         try:
             with open(CLAUDE_CREDS_FILE, encoding="utf-8") as f:
                 creds = json.load(f)
