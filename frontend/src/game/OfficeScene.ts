@@ -14,7 +14,7 @@ import { findPath, simplifyPath } from './pathfinding'
 // ── Constants ───────────────────────────────────────────────────
 const CHAR_FRAME_W = 16
 const CHAR_FRAME_H = 32
-const MAX_CHAR_COUNT = 6  // 最大可用角色圖數量（preload 用）
+const MAX_CHAR_COUNT = 7  // 最大可用角色圖數量（preload 用）
 
 
 // ── Types ───────────────────────────────────────────────────────

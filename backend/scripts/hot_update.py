@@ -81,13 +81,20 @@ def main():
             node_env = os.environ.copy()
             node_env["NODE_OPTIONS"] = "--max-old-space-size=512"
 
-            proc = subprocess.run(
-                ["npm", "install", "--prefer-offline"],
-                cwd=str(frontend_dir),
-                env=node_env,
-                capture_output=True,
-                text=True
+            # 檢查 package.json 是否有變動，有才跑 npm install
+            ret, diff_out, _ = run_command(
+                ["git", "diff", "--name-only", "HEAD~1", "HEAD", "--", "frontend/package.json"],
+                cwd=str(PROJECT_ROOT)
             )
+            if "package.json" in diff_out:
+                update_status("building", 55, "正在安裝前端依賴...")
+                proc = subprocess.run(
+                    ["npm", "install", "--prefer-offline"],
+                    cwd=str(frontend_dir),
+                    env=node_env,
+                    capture_output=True,
+                    text=True
+                )
 
             update_status("building", 65, "正在建構前端（這可能需要幾分鐘）...")
 
