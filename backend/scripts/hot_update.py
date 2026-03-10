@@ -77,9 +77,9 @@ def main():
         # Frontend build（限制記憶體避免 OOM）
         frontend_dir = PROJECT_ROOT / "frontend"
         if (frontend_dir / "package.json").exists():
-            # 設定 Node.js 記憶體限制（512MB），避免在低記憶體 VM 上 OOM
+            # 設定 Node.js 記憶體限制（1024MB），Vite build 需要較多記憶體
             node_env = os.environ.copy()
-            node_env["NODE_OPTIONS"] = "--max-old-space-size=512"
+            node_env["NODE_OPTIONS"] = "--max-old-space-size=1024"
 
             # 檢查 package.json 是否有變動，有才跑 npm install
             ret, diff_out, _ = run_command(
