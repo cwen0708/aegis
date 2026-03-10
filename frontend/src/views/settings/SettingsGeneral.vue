@@ -3,8 +3,10 @@ import { ref, onMounted } from 'vue'
 import { Globe, Cpu, Save, Loader2, Lock } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 
+import { config } from '../../config'
+
 const store = useAegisStore()
-const API = import.meta.env.DEV ? 'http://localhost:8899' : ''
+const API = config.apiUrl
 
 const loading = ref(true)
 const saving = ref(false)

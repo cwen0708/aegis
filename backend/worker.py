@@ -391,33 +391,110 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
 
 
 def parse_stream_json_line(line: str) -> Optional[str]:
-    """解析 stream-json 行，提取文字內容"""
+    """解析 stream-json 行，提取簡化的輸出摘要
+
+    輸出規則：
+    - system/init: 跳過
+    - assistant/text: 回傳文字
+    - assistant/tool_use: 回傳工具摘要（如 "🔧 Read: /path..."）
+    - user/tool_result: 跳過（太冗長）
+    - result: 回傳結果
+    """
     try:
         data = json.loads(line.strip())
         msg_type = data.get("type")
 
-        # assistant 類型：檢查 content 陣列中的 text block
-        if msg_type == "assistant":
-            content = data.get("content", [])
-            if content and isinstance(content, list):
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        return block.get("text", "")
-            # 也檢查 message.content（嵌套結構）
-            msg = data.get("message", {})
-            content = msg.get("content", [])
-            if content and isinstance(content, list):
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        return block.get("text", "")
+        # 跳過 system 訊息
+        if msg_type == "system":
+            return None
 
-        # result 類型：最終結果（備用）
+        # 跳過 user 訊息（通常是工具結果，太冗長）
+        if msg_type == "user":
+            return None
+
+        # assistant 類型：處理 text 和 tool_use
+        if msg_type == "assistant":
+            # 檢查頂層 content
+            content = data.get("content", [])
+            # 也檢查 message.content（嵌套結構）
+            if not content:
+                msg = data.get("message", {})
+                content = msg.get("content", [])
+
+            if content and isinstance(content, list):
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    block_type = block.get("type")
+
+                    # 文字輸出
+                    if block_type == "text":
+                        text = block.get("text", "")
+                        if text:
+                            return text
+
+                    # 工具呼叫：顯示簡短摘要
+                    if block_type == "tool_use":
+                        tool_name = block.get("name", "unknown")
+                        tool_input = block.get("input", {})
+                        # 提取關鍵參數作為摘要
+                        summary = _format_tool_summary(tool_name, tool_input)
+                        return summary
+
+        # result 類型：最終結果
         if msg_type == "result":
             return data.get("result", "")
 
     except (json.JSONDecodeError, KeyError, TypeError):
         pass
     return None
+
+
+def _format_tool_summary(tool_name: str, tool_input: dict) -> str:
+    """格式化工具呼叫摘要"""
+    # 常見工具的關鍵參數
+    if tool_name == "Read":
+        path = tool_input.get("file_path", "")
+        return f"📖 Read: {_truncate_path(path)}"
+    elif tool_name == "Write":
+        path = tool_input.get("file_path", "")
+        return f"✏️ Write: {_truncate_path(path)}"
+    elif tool_name == "Edit":
+        path = tool_input.get("file_path", "")
+        return f"🔧 Edit: {_truncate_path(path)}"
+    elif tool_name == "Bash":
+        cmd = tool_input.get("command", "")[:50]
+        return f"💻 Bash: {cmd}{'...' if len(tool_input.get('command', '')) > 50 else ''}"
+    elif tool_name == "Glob":
+        pattern = tool_input.get("pattern", "")
+        return f"🔍 Glob: {pattern}"
+    elif tool_name == "Grep":
+        pattern = tool_input.get("pattern", "")
+        return f"🔍 Grep: {pattern}"
+    elif tool_name == "TodoWrite":
+        return "📋 更新待辦清單"
+    elif tool_name == "Agent":
+        desc = tool_input.get("description", "")
+        return f"🤖 Agent: {desc}"
+    elif tool_name == "WebFetch":
+        url = tool_input.get("url", "")[:40]
+        return f"🌐 Fetch: {url}..."
+    elif tool_name == "WebSearch":
+        query = tool_input.get("query", "")
+        return f"🔎 Search: {query}"
+    else:
+        return f"🔧 {tool_name}"
+
+
+def _truncate_path(path: str, max_len: int = 50) -> str:
+    """截斷過長的路徑"""
+    if len(path) <= max_len:
+        return path
+    # 保留檔名和部分路徑
+    parts = path.replace("\\", "/").split("/")
+    if len(parts) <= 2:
+        return path[:max_len] + "..."
+    return f".../{'/'.join(parts[-2:])}"
 
 
 def run_task_pty_windows(

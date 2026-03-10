@@ -82,20 +82,38 @@ def _calculate_next_time(cron_expression: str) -> datetime:
         logger.error(f"Invalid cron expression: {cron_expression}, error: {e}")
         return None
 
+def _parse_datetime(dt_str: str) -> datetime | None:
+    """解析各種格式的日期字串為 datetime（統一處理格式不一致問題）"""
+    if not dt_str:
+        return None
+    # 移除尾部 +00:00 或 Z
+    dt_str = dt_str.replace("+00:00", "").replace("Z", "").strip()
+    for fmt in ["%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"]:
+        try:
+            return datetime.strptime(dt_str, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
 async def poll_local_cron_jobs():
     """輪詢本地的 CronJob 表，將到期的排程轉化為待執行的 Card"""
     global last_check_at
     now = datetime.now(timezone.utc)
     last_check_at = now.isoformat()
-    now_str = now.isoformat()  # SQLite 需要 ISO 字串比較
 
     with Session(engine) as session:
-        # 找出啟用且到期的任務 (next_scheduled_at <= now)
-        due_jobs = session.exec(
-            select(CronJob)
-            .where(CronJob.is_enabled == True)
-            .where(CronJob.next_scheduled_at <= now_str)
+        # 先取所有啟用的任務，然後在 Python 層比較時間（避免 SQLite 字串比較 bug）
+        enabled_jobs = session.exec(
+            select(CronJob).where(CronJob.is_enabled == True)
         ).all()
+
+        # 過濾出到期的任務
+        due_jobs = []
+        for job in enabled_jobs:
+            next_time = _parse_datetime(job.next_scheduled_at) if isinstance(job.next_scheduled_at, str) else job.next_scheduled_at
+            if next_time and next_time <= now:
+                due_jobs.append(job)
 
         if not due_jobs:
             print(f"[Cron Poller] {now.strftime('%H:%M:%S')} - No due jobs")

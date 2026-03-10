@@ -4,8 +4,10 @@ import { FolderKanban, Plus, Edit3, Trash2, FolderOpen, Lock, Loader2 } from 'lu
 import { useAegisStore } from '../../stores/aegis'
 import ConfirmDialog from '../../components/ConfirmDialog.vue'
 
+import { config } from '../../config'
+
 const store = useAegisStore()
-const API = import.meta.env.DEV ? 'http://localhost:8899' : ''
+const API = config.apiUrl
 
 interface MemberOption {
   id: number
@@ -261,7 +263,7 @@ function formatDate(dateStr: string) {
         @click.self="showDialog = false"
       >
         <div class="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-md p-6 space-y-4">
-          <h3 class="text-lg font-semibold">
+          <h3 class="text-sm font-bold text-slate-200">
             {{ editingProject ? '編輯專案' : '新增專案' }}
           </h3>
 

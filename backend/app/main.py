@@ -19,6 +19,7 @@ from app.core.ws_manager import websocket_clients, periodic_broadcast, broadcast
 from app.core.card_watcher import start_card_watcher, stop_card_watcher
 from app.core.card_index import rebuild_index
 from app.core.card_file import read_card, write_card
+from app.core.onestack_connector import start_onestack_connector, stop_onestack_connector
 from app.models.core import CardIndex, Project
 from app.channels import channel_manager
 import os
@@ -145,6 +146,26 @@ async def _register_channels_from_config():
 async def lifespan(app: FastAPI):
     # 啟動時初始化資料庫
     init_db()
+
+    # 更新系統版本號
+    try:
+        from app.database import engine
+        from app.models.core import SystemSetting
+        from sqlmodel import Session as DBSession
+        version_file = Path(__file__).parent.parent / "VERSION"
+        if version_file.exists():
+            version = version_file.read_text().strip()
+            with DBSession(engine) as session:
+                setting = session.get(SystemSetting, "app_version")
+                if setting:
+                    setting.value = version
+                else:
+                    setting = SystemSetting(key="app_version", value=version)
+                session.add(setting)
+                session.commit()
+            logger.info(f"Aegis version: {version}")
+    except Exception as e:
+        logger.warning(f"Failed to update app_version: {e}")
 
     # 從 DB 讀取工作台數量設定
     try:
@@ -282,8 +303,13 @@ async def lifespan(app: FastAPI):
     await _register_channels_from_config()
     await channel_manager.start_all()
 
+    # 啟動 OneStack 連接器（可選，環境變數控制）
+    await start_onestack_connector()
+
     yield
 
+    # Cleanup
+    await stop_onestack_connector()
     await channel_manager.stop_all()
     await stop_card_watcher()
     cron_poller_task.cancel()

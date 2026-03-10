@@ -3,8 +3,10 @@ import { ref, onMounted } from 'vue'
 import { Sparkles, CloudCog, Terminal, Save, Loader2, ExternalLink, Copy, Check, Download } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 
+import { config } from '../../config'
+
 const store = useAegisStore()
-const API = import.meta.env.DEV ? 'http://localhost:8899' : ''
+const API = config.apiUrl
 
 // Gemini API Key
 const settingsLoading = ref(true)

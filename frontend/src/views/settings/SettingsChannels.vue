@@ -4,8 +4,10 @@ import { MessageSquare, Loader2, RefreshCw } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 import ChannelCard from '../../components/ChannelCard.vue'
 
+import { config } from '../../config'
+
 const store = useAegisStore()
-const API = import.meta.env.DEV ? 'http://localhost:8899' : ''
+const API = config.apiUrl
 
 // 頻道設定狀態
 interface ChannelConfig {

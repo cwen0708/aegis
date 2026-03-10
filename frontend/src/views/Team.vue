@@ -4,8 +4,10 @@ import { Plus, UserPlus, Save, Edit3, Upload, Sparkles, Image, BookOpen, Chevron
 import { useAegisStore } from '../stores/aegis'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 
+import { config } from '../config'
+
 const store = useAegisStore()
-const API = import.meta.env.DEV ? 'http://localhost:8899' : ''
+const API = config.apiUrl
 
 const modelOptions: Record<string, { value: string; label: string }[]> = {
   claude: [

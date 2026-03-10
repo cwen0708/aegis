@@ -4,8 +4,10 @@ import { Mail, Plus, Copy, Trash2, Loader2, Clock, Users, Eye, PenTool, Play, Sh
 import { useAegisStore } from '../../stores/aegis'
 import ConfirmDialog from '../../components/ConfirmDialog.vue'
 
+import { config } from '../../config'
+
 const store = useAegisStore()
-const API = import.meta.env.DEV ? 'http://localhost:8899' : ''
+const API = config.apiUrl
 
 interface ProjectOption {
   id: number
@@ -420,7 +422,7 @@ function getLevelText(level: number) {
         @click.self="showDialog = false"
       >
         <div class="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-lg p-6 space-y-4 max-h-[90vh] overflow-y-auto">
-          <h3 class="text-lg font-semibold">
+          <h3 class="text-sm font-bold text-slate-200">
             {{ editingInvitation ? '編輯邀請碼' : '新增邀請碼' }}
           </h3>
 

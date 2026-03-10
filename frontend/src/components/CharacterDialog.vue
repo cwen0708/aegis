@@ -131,7 +131,7 @@ function providerLabel(provider: string): string {
 
     <!-- Character portrait - large, left side -->
     <!-- 智能適配：正方形/半身像用 cover+top，全身立繪用 contain+bottom -->
-    <div class="absolute left-0 sm:left-8 bottom-0 w-[280px] sm:w-[500px] h-[60vh] sm:h-[85vh]">
+    <div class="absolute left-0 sm:left-8 bottom-0 w-[280px] sm:w-[570px] h-[60vh] sm:h-[85vh]">
       <template v-if="portrait">
         <img
           :src="portrait.startsWith('http') ? portrait : `${portrait}`"

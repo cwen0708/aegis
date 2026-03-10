@@ -16,6 +16,7 @@ import app.core.cron_poller as cron_module
 from app.core.ws_manager import websocket_clients
 from app.core.card_file import CardData, read_card as read_card_md, write_card, card_file_path
 from app.core.card_index import sync_card_to_index, remove_card_from_index, query_board, next_card_id, rebuild_index
+from app.core.auth import require_api_key
 from croniter import croniter
 import asyncio
 import subprocess
@@ -573,6 +574,76 @@ def delete_card(card_id: int, session: Session = Depends(get_session)):
     return {"ok": True}
 
 
+@router.delete("/cards/cleanup/duplicates")
+def cleanup_duplicate_cards(
+    project_id: int,
+    dry_run: bool = True,
+    session: Session = Depends(get_session)
+):
+    """清理指定專案的重複卡片（保留每個標題最舊的一張）
+
+    Args:
+        project_id: 專案 ID
+        dry_run: True=只顯示會刪除的卡片，False=實際刪除
+    """
+    from sqlmodel import select, func
+
+    # 找出重複的標題
+    stmt = (
+        select(CardIndex.title, func.min(CardIndex.card_id).label("keep_id"), func.count().label("cnt"))
+        .where(CardIndex.project_id == project_id)
+        .group_by(CardIndex.title)
+        .having(func.count() > 1)
+    )
+    duplicates = session.exec(stmt).all()
+
+    if not duplicates:
+        return {"ok": True, "message": "No duplicates found", "deleted": 0}
+
+    # 收集要刪除的卡片
+    cards_to_delete = []
+    for title, keep_id, cnt in duplicates:
+        # 找出同標題但不是保留的卡片
+        dup_cards = session.exec(
+            select(CardIndex)
+            .where(CardIndex.project_id == project_id)
+            .where(CardIndex.title == title)
+            .where(CardIndex.card_id != keep_id)
+        ).all()
+        cards_to_delete.extend(dup_cards)
+
+    if dry_run:
+        return {
+            "ok": True,
+            "dry_run": True,
+            "would_delete": len(cards_to_delete),
+            "duplicate_titles": len(duplicates),
+            "preview": [{"card_id": c.card_id, "title": c.title[:50]} for c in cards_to_delete[:20]]
+        }
+
+    # 實際刪除
+    deleted_count = 0
+    for idx in cards_to_delete:
+        if idx.status == "running":
+            continue  # 跳過運行中的
+        # 刪除 MD 檔案
+        if idx.file_path:
+            md_path = Path(idx.file_path)
+            if md_path.exists():
+                md_path.unlink()
+        # 刪除 ORM Card
+        orm_card = session.get(Card, idx.card_id)
+        if orm_card:
+            session.delete(orm_card)
+        # 刪除 CardIndex
+        session.delete(idx)
+        _card_locks.pop(idx.card_id, None)
+        deleted_count += 1
+
+    session.commit()
+    return {"ok": True, "deleted": deleted_count, "duplicate_titles": len(duplicates)}
+
+
 @router.delete("/cron-jobs/{job_id}")
 def delete_cron_job(job_id: int, session: Session = Depends(get_session)):
     job = session.get(CronJob, job_id)
@@ -822,11 +893,16 @@ def runner_status(session: Session = Depends(get_session)):
     paused_setting = session.get(SystemSetting, "worker_paused")
     is_paused = paused_setting and paused_setting.value == "true"
 
+    # 讀取版本號
+    version_setting = session.get(SystemSetting, "app_version")
+    app_version = version_setting.value if version_setting else "unknown"
+
     return {
         "is_paused": is_paused,
         "running_tasks": tasks_data,
         "workstations_used": len(tasks_data),
         "workstations_total": max_workstations,
+        "version": app_version,
     }
 
 
@@ -2257,3 +2333,164 @@ def delete_invitation(invitation_id: int, session: Session = Depends(get_session
     session.delete(invitation)
     session.commit()
     return {"ok": True}
+
+
+# ==========================================
+# OneStack Node API（供 OneStack 查詢/派發任務）
+# ==========================================
+
+
+class NodeTaskPayload(BaseModel):
+    """OneStack 派發的任務"""
+    task_id: str
+    title: str
+    description: str
+    project_name: Optional[str] = None
+    member_slug: Optional[str] = None
+    priority: int = 0
+
+
+@router.get("/node/info")
+def get_node_info(
+    session: Session = Depends(get_session),
+    _: bool = Depends(require_api_key)
+):
+    """
+    取得節點資訊（供 OneStack 查詢）
+
+    返回此 Aegis 實例的狀態、版本、工作台使用情況等
+    """
+    # 讀取版本
+    version = "unknown"
+    version_file = Path(__file__).parent.parent.parent / "VERSION"
+    if version_file.exists():
+        version = version_file.read_text().strip()
+
+    # 取得 OneStack 連接資訊
+    onestack_device_id = os.getenv("ONESTACK_DEVICE_ID", "")
+    onestack_device_name = os.getenv("ONESTACK_DEVICE_NAME", "Aegis")
+
+    # 工作台狀態
+    max_ws_setting = session.get(SystemSetting, "max_workstations")
+    max_workstations = int(max_ws_setting.value) if max_ws_setting else 3
+
+    # 統計 running 卡片數量
+    running_count = len(list(session.exec(
+        select(CardIndex).where(CardIndex.status == "running")
+    ).all()))
+
+    # 可用的 AI 提供者
+    providers = []
+    accounts = session.exec(select(Account)).all()
+    for acc in accounts:
+        if acc.provider not in providers:
+            providers.append(acc.provider)
+
+    # 專案列表
+    projects = session.exec(
+        select(Project).where(Project.is_active == True)
+    ).all()
+    project_list = [{"id": p.id, "name": p.name, "path": p.path} for p in projects]
+
+    return {
+        "device_id": onestack_device_id,
+        "device_name": onestack_device_name,
+        "version": version,
+        "status": "online",
+        "workstations": {
+            "used": running_count,
+            "total": max_workstations,
+        },
+        "providers": providers,
+        "projects": project_list,
+    }
+
+
+@router.post("/node/task")
+async def receive_node_task(
+    payload: NodeTaskPayload,
+    session: Session = Depends(get_session),
+    _: bool = Depends(require_api_key)
+):
+    """
+    接收 OneStack 派發的任務
+
+    建立卡片並排入處理佇列
+    """
+    # 找到目標專案
+    project = None
+    if payload.project_name:
+        project = session.exec(
+            select(Project).where(
+                Project.name == payload.project_name,
+                Project.is_active == True
+            )
+        ).first()
+
+    if not project:
+        # 使用第一個活躍專案
+        project = session.exec(
+            select(Project).where(Project.is_active == True)
+        ).first()
+
+    if not project:
+        raise HTTPException(status_code=400, detail="No active project available")
+
+    # 找到目標成員
+    member = None
+    if payload.member_slug:
+        member = session.exec(
+            select(Member).where(Member.slug == payload.member_slug)
+        ).first()
+
+    # 使用專案預設成員或第一個可用成員
+    member_id = None
+    if member:
+        member_id = member.id
+    elif project.default_member_id:
+        member_id = project.default_member_id
+    else:
+        first_member = session.exec(select(Member)).first()
+        if first_member:
+            member_id = first_member.id
+
+    # 找到「待處理」清單（position=0 或第一個清單）
+    stage_list = session.exec(
+        select(StageList).where(
+            StageList.project_id == project.id
+        ).order_by(StageList.position)
+    ).first()
+
+    if not stage_list:
+        raise HTTPException(status_code=400, detail="No stage list found in project")
+
+    # 建立卡片
+    card_id = next_card_id(session, project.id)
+
+    card_data = CardData(
+        card_id=card_id,
+        title=payload.title,
+        content=payload.description,
+        status="pending",
+        priority=payload.priority,
+        stage=stage_list.name,
+        stage_id=stage_list.id,
+        member_id=member_id,
+        source="onestack",
+        metadata={"onestack_task_id": payload.task_id},
+    )
+
+    # 寫入 MD 檔案
+    fpath = card_file_path(project.path, card_id)
+    write_card(fpath, card_data)
+
+    # 同步到索引
+    sync_card_to_index(session, card_data, project.id, str(fpath))
+    session.commit()
+
+    return {
+        "ok": True,
+        "card_id": card_id,
+        "project": project.name,
+        "stage": stage_list.name,
+    }
