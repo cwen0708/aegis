@@ -86,8 +86,10 @@ def main():
         update_status("applying", 70, "正在同步系統資料...")
 
         # 執行 seed.py 同步新的系統排程等資料
+        # 使用 sudo -u cwen0 確保以正確用戶執行（避免 DB 權限問題）
+        python_cmd = str(venv_python) if venv_python.exists() else "python3"
         ret, out, err = run_command(
-            [str(venv_python) if venv_python.exists() else "python3", "seed.py"],
+            ["sudo", "-u", "cwen0", python_cmd, "seed.py"],
             cwd=str(BACKEND_DIR)
         )
         if ret != 0:
