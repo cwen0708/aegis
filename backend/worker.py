@@ -68,7 +68,7 @@ PROVIDERS = {
     "claude": {
         "cmd_base": ["claude"],
         # 使用 stream-json + verbose 實現即時串流輸出
-        "args": ["-p", "{prompt}", "--dangerously-skip-permissions", "--model", "opus",
+        "args": ["-p", "{prompt}", "--dangerously-skip-permissions", "--model", "sonnet",
                  "--output-format", "stream-json", "--verbose"],
         "json_output": False,
         "stream_json": True,  # 標記需要解析 stream-json
@@ -174,8 +174,10 @@ def get_pending_cards() -> list:
         return list(session.exec(stmt).all())
 
 
-def get_primary_provider(member_id: int) -> Optional[str]:
-    """從成員的主帳號取得 provider"""
+def get_primary_provider(member_id: int) -> tuple:
+    """從成員的主帳號取得 provider 和 model
+    回傳 (provider, model)
+    """
     with Session(engine) as session:
         stmt = select(MemberAccount).where(
             MemberAccount.member_id == member_id
@@ -184,13 +186,13 @@ def get_primary_provider(member_id: int) -> Optional[str]:
         if binding:
             account = session.get(Account, binding.account_id)
             if account:
-                return account.provider
-    return None
+                return account.provider, binding.model or ""
+    return None, ""
 
 
 def resolve_member(stage_list_id: int, phase: str) -> tuple:
     """解析任務應該由哪個成員執行
-    回傳 (member_id, provider, member_slug)
+    回傳 (member_id, provider, model, member_slug)
     """
     with Session(engine) as session:
         # 1. 列表級指派
@@ -198,9 +200,9 @@ def resolve_member(stage_list_id: int, phase: str) -> tuple:
         if stage_list and stage_list.member_id:
             member = session.get(Member, stage_list.member_id)
             if member:
-                provider = get_primary_provider(member.id)
-                logger.info(f"[Router] List '{stage_list.name}' → {member.name} ({provider})")
-                return member.id, provider, member.slug
+                provider, model = get_primary_provider(member.id)
+                logger.info(f"[Router] List '{stage_list.name}' → {member.name} ({provider}/{model})")
+                return member.id, provider, model, member.slug
 
         # 2. 全域預設
         setting = session.get(SystemSetting, f"phase_routing.{phase}")
@@ -208,13 +210,13 @@ def resolve_member(stage_list_id: int, phase: str) -> tuple:
             try:
                 member = session.get(Member, int(setting.value))
                 if member:
-                    provider = get_primary_provider(member.id)
-                    return member.id, provider, member.slug
+                    provider, model = get_primary_provider(member.id)
+                    return member.id, provider, model, member.slug
             except (ValueError, TypeError):
                 pass
 
         # 3. 無指派
-        return None, None, None
+        return None, None, "", None
 
 
 # ==========================================
@@ -331,15 +333,16 @@ def save_task_log(card_id: int, card_title: str, project_name: str, provider: st
 # 任務執行（PTY 模式，即時串流輸出）
 # ==========================================
 def run_task(card_id: int, project_path: str, prompt: str, phase: str,
-             forced_provider: Optional[str], card_title: str, project_name: str,
-             member_id: Optional[int]) -> Dict[str, Any]:
+             forced_provider: Optional[str], forced_model: str, card_title: str,
+             project_name: str, member_id: Optional[int]) -> Dict[str, Any]:
     """執行單一 AI 任務（使用 PTY 實現即時輸出串流）"""
 
     provider_name = forced_provider if forced_provider and forced_provider in PROVIDERS else PHASE_ROUTING.get(phase, "gemini")
     config = PROVIDERS.get(provider_name, PROVIDERS["gemini"])
 
-    # 建構命令
-    model = config.get("default_model", "")
+    # 建構命令，支援成員指定的模型
+    default_model = config.get("default_model", "")
+    model = forced_model if forced_model else default_model
     cmd_parts = list(config["cmd_base"])
     for arg in config["args"]:
         if "{prompt}" in arg:
@@ -347,7 +350,15 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
         elif "{model}" in arg:
             cmd_parts.append(arg.replace("{model}", model))
         else:
+            # 動態替換 --model 參數值
             cmd_parts.append(arg)
+
+    # 如果成員有指定模型，替換 args 中的 --model 值
+    if forced_model:
+        for i, arg in enumerate(cmd_parts):
+            if arg == "--model" and i + 1 < len(cmd_parts):
+                cmd_parts[i + 1] = forced_model
+                break
 
     stdin_prompt = config.get("stdin_prompt", False)
 
@@ -768,7 +779,7 @@ def process_pending_cards():
             continue
 
         # 解析成員
-        member_id, forced_provider, member_slug = resolve_member(idx.list_id, list_name.upper())
+        member_id, forced_provider, forced_model, member_slug = resolve_member(idx.list_id, list_name.upper())
 
         # 成員忙碌檢查
         if member_id and is_member_busy(member_id):
@@ -815,6 +826,7 @@ def process_pending_cards():
             prompt=effective_prompt,
             phase=list_name.upper(),
             forced_provider=forced_provider,
+            forced_model=forced_model,
             card_title=idx.title,
             project_name=project_name,
             member_id=member_id,

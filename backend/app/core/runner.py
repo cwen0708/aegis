@@ -141,7 +141,7 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str, 
     provider_name = forced_provider if forced_provider and forced_provider in PROVIDERS else PHASE_ROUTING.get(phase, "gemini")
     config = PROVIDERS[provider_name]
 
-    # 決定模型（Ollama 等需要指定模型的 provider）
+    # 決定模型（支援成員指定的 model）
     model = model_override or config.get("default_model", "")
 
     cmd = list(config["cmd_base"])
@@ -152,6 +152,13 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str, 
             cmd.append(arg.replace("{model}", model))
         else:
             cmd.append(arg)
+
+    # 如果有 model_override，替換 args 中的 --model 值（支援 claude/gemini）
+    if model_override:
+        for i, arg in enumerate(cmd):
+            if arg == "--model" and i + 1 < len(cmd):
+                cmd[i + 1] = model_override
+                break
 
     # Ollama 等使用 stdin 傳 prompt 的 provider
     stdin_prompt = config.get("stdin_prompt", False)

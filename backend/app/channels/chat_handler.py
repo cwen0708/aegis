@@ -1,6 +1,7 @@
 """
 AI 對話處理器 — 處理非命令訊息，與 AI 角色對話
 """
+import re
 import logging
 from datetime import datetime, timezone
 from typing import Optional, List
@@ -9,8 +10,10 @@ from sqlmodel import Session, select
 from app.database import engine
 from app.models.core import (
     BotUser, Member, MemberAccount, Account,
-    ChatSession, ChatMessage, BotUserProject, Project
+    ChatSession, ChatMessage, BotUserProject, Project, StageList
 )
+from app.core.card_file import CardData, write_card, card_file_path
+from app.core.card_index import sync_card_to_index, next_card_id
 from app.core.member_profile import get_soul_content, list_skills, get_skill_content
 from app.core.runner import run_ai_task
 from .types import InboundMessage
@@ -97,11 +100,21 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser) -> Optional[str]:
         user_message=msg.text,
         user_context=user_context,
         accessible_projects=accessible_projects,
+        user_level=bot_user.level,
+        chat_id=msg.chat_id,
+        platform=bot_user.platform,
     )
 
-    # 9. 取得 AI 帳號
-    account = _get_primary_account(member.id)
+    # 9. 取得 AI 帳號和模型
+    account, model = _get_primary_account(member.id)
     provider = account.provider if account else "claude"
+
+    # Bot 聊天預設用快速模型（成員有設定則覆蓋）
+    if not model:
+        if provider == "gemini":
+            model = "gemini-flash"
+        elif provider == "claude":
+            model = "haiku"
 
     # 10. 呼叫 AI
     try:
@@ -114,6 +127,7 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser) -> Optional[str]:
             card_title=f"Chat with {bot_user.username or bot_user.platform_user_id}",
             project_name="Aegis Bot",
             member_id=member.id,
+            model_override=model,
         )
     except Exception as e:
         logger.error(f"[Chat] AI task failed: {e}")
@@ -124,6 +138,33 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser) -> Optional[str]:
 
     output = result.get("output", "")
     token_info = result.get("token_info", {})
+
+    # 10.5 檢查是否要建立任務卡片
+    task_match = re.search(r'\[CREATE_TASK:(\d+):([^:]+):([^\]]+)\]', output)
+    if task_match and bot_user.level >= 2:
+        project_id = int(task_match.group(1))
+        task_title = task_match.group(2).strip()
+        task_desc = task_match.group(3).strip()
+
+        # 驗證用戶有權限存取該專案
+        if any(p.id == project_id for p in accessible_projects):
+            card_id = _create_task_card(
+                project_id=project_id,
+                title=task_title,
+                content=task_desc,
+                chat_id=msg.chat_id,
+                platform=bot_user.platform,
+            )
+            if card_id:
+                # 移除 [CREATE_TASK:...] 標記，加上成功訊息
+                output = re.sub(r'\[CREATE_TASK:[^\]]+\]', '', output).strip()
+                output += f"\n\n✅ 已建立任務卡片 #{card_id}，完成後會通知你。"
+            else:
+                output = re.sub(r'\[CREATE_TASK:[^\]]+\]', '', output).strip()
+                output += "\n\n⚠️ 建立任務失敗，請稍後再試。"
+        else:
+            output = re.sub(r'\[CREATE_TASK:[^\]]+\]', '', output).strip()
+            output += "\n\n⚠️ 你沒有該專案的存取權限。"
 
     # 11. 儲存對話訊息
     _save_message(session_obj.id, "user", msg.text, token_info.get("input_tokens", 0), 0)
@@ -182,8 +223,10 @@ def _get_recent_messages(session_id: int, limit: int = 10) -> List[ChatMessage]:
         return list(reversed(messages))
 
 
-def _get_primary_account(member_id: int) -> Optional[Account]:
-    """取得 Member 的主要帳號"""
+def _get_primary_account(member_id: int) -> tuple:
+    """取得 Member 的主要帳號和模型
+    回傳 (Account, model)
+    """
     with Session(engine) as session:
         stmt = (
             select(MemberAccount)
@@ -192,8 +235,9 @@ def _get_primary_account(member_id: int) -> Optional[Account]:
         )
         ma = session.exec(stmt).first()
         if ma:
-            return session.get(Account, ma.account_id)
-    return None
+            account = session.get(Account, ma.account_id)
+            return account, ma.model or ""
+    return None, ""
 
 
 def _build_chat_prompt(
@@ -204,6 +248,9 @@ def _build_chat_prompt(
     user_message: str,
     user_context: Optional[BotUserProject] = None,
     accessible_projects: Optional[List[Project]] = None,
+    user_level: int = 0,
+    chat_id: str = "",
+    platform: str = "",
 ) -> str:
     """
     組合完整 prompt = 靈魂 + 技能 + 用戶身份 + 專案範圍 + 歷史 + 新訊息
@@ -216,6 +263,9 @@ def _build_chat_prompt(
         user_message: 用戶訊息
         user_context: 用戶身份上下文（含 display_name, description）
         accessible_projects: 用戶可存取的專案列表
+        user_level: 用戶權限等級（>=2 可建立任務）
+        chat_id: 聊天 ID（用於任務回覆）
+        platform: 平台（telegram/line）
     """
     lines = []
 
@@ -266,6 +316,16 @@ def _build_chat_prompt(
             lines.append(f"{role}：{content}")
         lines.append("")
 
+    # 任務建立引導（權限 >= 2 的用戶可建立任務）
+    if user_level >= 2 and accessible_projects:
+        lines.append("## 複雜任務處理")
+        lines.append("如果用戶的請求太複雜（需要寫程式、分析大量資料、多步驟操作等），")
+        lines.append("你可以詢問用戶是否要建立任務卡片，讓更強大的 AI 來處理。")
+        lines.append("回覆格式範例：「這個任務比較複雜，需要 [說明原因]。要幫你建立任務卡片嗎？」")
+        lines.append("如果用戶同意，回覆：[CREATE_TASK:專案ID:任務標題:任務描述]")
+        lines.append(f"任務描述最後請加上：「完成後請透過 {platform} 通知 chat_id={chat_id}」")
+        lines.append("")
+
     # 當前訊息
     lines.append(f"用戶：{user_message}")
     lines.append("")
@@ -298,3 +358,68 @@ def _update_session_stats(session_id: int, token_info: dict):
             chat_session.message_count += 2  # user + assistant
             chat_session.last_message_at = datetime.now(timezone.utc)
             session.commit()
+
+
+def _create_task_card(
+    project_id: int,
+    title: str,
+    content: str,
+    chat_id: str,
+    platform: str,
+) -> Optional[int]:
+    """
+    建立任務卡片（放到 Scheduled 列表，等待 Worker 執行）
+
+    Returns:
+        card_id if success, None if failed
+    """
+    try:
+        with Session(engine) as session:
+            # 取得專案
+            project = session.get(Project, project_id)
+            if not project:
+                logger.error(f"[CreateTask] Project {project_id} not found")
+                return None
+
+            # 找 Scheduled 列表
+            stmt = select(StageList).where(
+                StageList.project_id == project_id,
+                StageList.name == "Scheduled"
+            )
+            stage_list = session.exec(stmt).first()
+            if not stage_list:
+                logger.error(f"[CreateTask] Scheduled list not found in project {project_id}")
+                return None
+
+            # 取得下一個 card ID
+            card_id = next_card_id(session, project_id)
+
+            # 建立卡片資料
+            now = datetime.now(timezone.utc)
+            card_data = CardData(
+                id=card_id,
+                list_id=stage_list.id,
+                title=title,
+                description=f"來自 {platform} 聊天建立的任務",
+                content=content,
+                status="pending",  # 讓 Worker 自動執行
+                tags=[],
+                created_at=now,
+                updated_at=now,
+            )
+
+            # 寫入 MD 檔案
+            fpath = card_file_path(project.path, card_id)
+            fpath.parent.mkdir(parents=True, exist_ok=True)
+            write_card(fpath, card_data)
+
+            # 同步到索引
+            sync_card_to_index(session, card_data, project_id, str(fpath))
+            session.commit()
+
+            logger.info(f"[CreateTask] Created card #{card_id} in project {project.name}")
+            return card_id
+
+    except Exception as e:
+        logger.error(f"[CreateTask] Failed: {e}")
+        return None
