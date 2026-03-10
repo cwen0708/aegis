@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { Bot, User, RefreshCw, Sparkles, Plus, Edit3, Zap, Key, Terminal } from 'lucide-vue-next'
+import { Bot, User, RefreshCw, Sparkles, Plus, Edit3, Zap, Key, Terminal, ExternalLink, Copy, Loader2, CheckCircle } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 
@@ -99,9 +99,93 @@ async function fetchAccounts() {
   } catch { /* silent */ }
 }
 
+// ==========================================
+// gcloud Auth（Gemini CLI 用）
+// ==========================================
+const gcloudStatus = ref<{ installed: boolean; authenticated: boolean; account: string | null } | null>(null)
+const gcloudAuthSession = ref<{ session_id: string; auth_url: string; instructions: string[] } | null>(null)
+const gcloudAuthCode = ref('')
+const gcloudLoading = ref(false)
+const gcloudError = ref('')
+const gcloudSuccess = ref('')
+
+async function fetchGcloudStatus() {
+  try {
+    const res = await fetch(`${API}/api/v1/gcloud/status`)
+    if (res.ok) gcloudStatus.value = await res.json()
+    else gcloudStatus.value = { installed: false, authenticated: false, account: null }
+  } catch {
+    gcloudStatus.value = { installed: false, authenticated: false, account: null }
+  }
+}
+
+async function startGcloudAuth() {
+  gcloudLoading.value = true
+  gcloudError.value = ''
+  gcloudSuccess.value = ''
+  try {
+    const res = await fetch(`${API}/api/v1/gcloud/auth/init`, { method: 'POST' })
+    if (!res.ok) {
+      const err = await res.json()
+      throw new Error(err.detail || '啟動認證失敗')
+    }
+    gcloudAuthSession.value = await res.json()
+  } catch (e: any) {
+    gcloudError.value = e.message
+  } finally {
+    gcloudLoading.value = false
+  }
+}
+
+async function completeGcloudAuth() {
+  if (!gcloudAuthSession.value || !gcloudAuthCode.value.trim()) return
+  gcloudLoading.value = true
+  gcloudError.value = ''
+  try {
+    const res = await fetch(`${API}/api/v1/gcloud/auth/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: gcloudAuthSession.value.session_id,
+        auth_code: gcloudAuthCode.value.trim(),
+      }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.detail || '認證失敗')
+    gcloudSuccess.value = data.message || '登入成功！'
+    gcloudAuthSession.value = null
+    gcloudAuthCode.value = ''
+    await fetchGcloudStatus()
+  } catch (e: any) {
+    gcloudError.value = e.message
+  } finally {
+    gcloudLoading.value = false
+  }
+}
+
+function cancelGcloudAuth() {
+  if (gcloudAuthSession.value) {
+    fetch(`${API}/api/v1/gcloud/auth/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: gcloudAuthSession.value.session_id }),
+    }).catch(() => {})
+  }
+  gcloudAuthSession.value = null
+  gcloudAuthCode.value = ''
+  gcloudError.value = ''
+}
+
+async function copyGcloudAuthUrl() {
+  if (gcloudAuthSession.value?.auth_url) {
+    await navigator.clipboard.writeText(gcloudAuthSession.value.auth_url)
+    store.addToast('已複製連結', 'success')
+  }
+}
+
 function openAddAccount(provider: 'claude' | 'gemini' | 'openai') {
-  // Claude 預設 CLI Token，Gemini/OpenAI 預設 API Key（遠端伺服器推薦）
-  const defaultAuthType = provider === 'claude' ? 'cli' : 'api_key'
+  // Claude/Gemini 預設 CLI，OpenAI 預設 API Key
+  const defaultAuthType = provider === 'openai' ? 'api_key' : 'cli'
   accountForm.value = {
     provider,
     name: '',
@@ -110,6 +194,15 @@ function openAddAccount(provider: 'claude' | 'gemini' | 'openai') {
     api_key: '',
   }
   accountError.value = ''
+  // Gemini CLI 需要檢查 gcloud 狀態
+  if (provider === 'gemini') {
+    fetchGcloudStatus()
+    // 重置 gcloud auth 狀態
+    gcloudAuthSession.value = null
+    gcloudAuthCode.value = ''
+    gcloudError.value = ''
+    gcloudSuccess.value = ''
+  }
   showAccountDialog.value = true
 }
 
@@ -753,6 +846,17 @@ function formatResetTime(isoStr: string) {
             <label class="block text-xs text-slate-400">認證方式</label>
             <div class="flex gap-2">
               <button
+                @click="accountForm.auth_type = 'cli'"
+                class="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border text-xs font-medium transition-all"
+                :class="accountForm.auth_type === 'cli'
+                  ? 'bg-blue-500/20 border-blue-500/50 text-blue-300'
+                  : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-600'"
+              >
+                <Terminal class="w-4 h-4" />
+                gcloud 認證
+                <span class="text-[9px] px-1 py-0.5 bg-emerald-500/20 text-emerald-400 rounded">推薦</span>
+              </button>
+              <button
                 @click="accountForm.auth_type = 'api_key'"
                 class="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border text-xs font-medium transition-all"
                 :class="accountForm.auth_type === 'api_key'
@@ -761,18 +865,6 @@ function formatResetTime(isoStr: string) {
               >
                 <Key class="w-4 h-4" />
                 API Key
-                <span class="text-[9px] px-1 py-0.5 bg-emerald-500/20 text-emerald-400 rounded">推薦</span>
-              </button>
-              <button
-                @click="accountForm.auth_type = 'cli'"
-                class="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border text-xs font-medium transition-all"
-                :class="accountForm.auth_type === 'cli'
-                  ? 'bg-purple-500/20 border-purple-500/50 text-purple-300'
-                  : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-600'"
-              >
-                <Terminal class="w-4 h-4" />
-                CLI
-                <span class="text-[9px] px-1 py-0.5 bg-slate-600 text-slate-400 rounded">本地</span>
               </button>
             </div>
           </div>
@@ -802,22 +894,105 @@ function formatResetTime(isoStr: string) {
             </div>
           </template>
 
-          <!-- Gemini CLI 說明（僅本地開發） -->
+          <!-- Gemini CLI（gcloud 引導式登入） -->
           <template v-if="accountForm.provider === 'gemini' && accountForm.auth_type === 'cli'">
-            <div class="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
-              <p class="text-[11px] text-amber-400 font-medium mb-1">僅適用於本地開發</p>
-              <p class="text-[10px] text-slate-400">
-                Gemini CLI 需要在本機執行 <code class="text-blue-300">gemini auth login</code> 完成瀏覽器登入。
-                遠端伺服器請改用 <span class="text-amber-300">API Key</span> 方式。
+            <!-- 成功訊息 -->
+            <div v-if="gcloudSuccess" class="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg flex items-center gap-2">
+              <CheckCircle class="w-4 h-4 text-emerald-400 shrink-0" />
+              <span class="text-sm text-emerald-400">{{ gcloudSuccess }}</span>
+            </div>
+
+            <!-- 錯誤訊息 -->
+            <div v-if="gcloudError" class="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400">
+              {{ gcloudError }}
+            </div>
+
+            <!-- gcloud 狀態顯示 -->
+            <div v-if="gcloudStatus" class="p-3 bg-slate-900/80 rounded-lg border border-slate-700/50">
+              <div class="flex items-center gap-2 mb-2">
+                <div :class="['w-2.5 h-2.5 rounded-full', gcloudStatus.authenticated ? 'bg-emerald-400' : 'bg-slate-500']"></div>
+                <span class="text-sm text-slate-200">{{ gcloudStatus.authenticated ? '已認證' : '未認證' }}</span>
+                <span v-if="gcloudStatus.account" class="text-xs text-slate-400">{{ gcloudStatus.account }}</span>
+              </div>
+              <p v-if="!gcloudStatus.installed" class="text-[11px] text-amber-400">
+                伺服器未安裝 gcloud CLI。請先安裝 <a href="https://cloud.google.com/sdk/docs/install" target="_blank" class="text-sky-400 hover:underline">Google Cloud SDK</a>。
+              </p>
+              <p v-else-if="gcloudStatus.authenticated" class="text-[11px] text-slate-500">
+                已登入 Google 帳號，可直接使用 Gemini CLI。
               </p>
             </div>
-            <div class="p-3 bg-slate-900/80 rounded-lg space-y-1.5 border border-slate-700/50">
-              <div class="text-[11px] text-slate-400">
-                在 <span class="text-blue-300">本地電腦</span>（有瀏覽器）的終端機執行：
+
+            <!-- 引導式登入流程 -->
+            <div v-if="gcloudStatus?.installed && !gcloudAuthSession" class="space-y-3">
+              <button
+                @click="startGcloudAuth"
+                :disabled="gcloudLoading"
+                class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all"
+                :class="gcloudStatus?.authenticated
+                  ? 'bg-slate-700 hover:bg-slate-600 text-slate-300'
+                  : 'bg-blue-500 hover:bg-blue-600 text-white'"
+              >
+                <Loader2 v-if="gcloudLoading" class="w-4 h-4 animate-spin" />
+                <Terminal v-else class="w-4 h-4" />
+                {{ gcloudStatus?.authenticated ? '重新認證' : '開始認證' }}
+              </button>
+              <p class="text-[10px] text-slate-500 text-center">
+                認證資訊儲存在伺服器上，不會過期。
+              </p>
+            </div>
+
+            <!-- 認證中：顯示 URL 和授權碼輸入 -->
+            <div v-if="gcloudAuthSession" class="space-y-3">
+              <div class="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg space-y-2">
+                <p class="text-[11px] text-blue-400 font-medium">步驟 1：在瀏覽器中開啟以下連結</p>
+                <div class="flex gap-2">
+                  <input
+                    :value="gcloudAuthSession.auth_url"
+                    readonly
+                    class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-slate-200 text-xs font-mono truncate"
+                  />
+                  <button
+                    @click="copyGcloudAuthUrl"
+                    class="px-2.5 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors"
+                    title="複製連結"
+                  >
+                    <Copy class="w-3.5 h-3.5 text-slate-300" />
+                  </button>
+                  <a
+                    :href="gcloudAuthSession.auth_url"
+                    target="_blank"
+                    class="px-2.5 py-2 bg-sky-500 hover:bg-sky-600 rounded-lg transition-colors"
+                    title="開啟連結"
+                  >
+                    <ExternalLink class="w-3.5 h-3.5 text-white" />
+                  </a>
+                </div>
               </div>
-              <code class="block bg-slate-800 px-2 py-1.5 rounded text-blue-300 text-xs font-mono">gemini auth login</code>
-              <div class="text-[11px] text-slate-500">
-                登入完成後，認證資訊會儲存在本機，無需額外設定。
+
+              <div class="p-3 bg-slate-900/80 border border-slate-700/50 rounded-lg space-y-2">
+                <p class="text-[11px] text-slate-400">步驟 2：完成 Google 登入後，將授權碼貼到下方</p>
+                <input
+                  v-model="gcloudAuthCode"
+                  class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-slate-200 text-sm font-mono outline-none focus:ring-2 focus:ring-blue-500/50"
+                  placeholder="貼上授權碼..."
+                />
+              </div>
+
+              <div class="flex gap-2">
+                <button
+                  @click="cancelGcloudAuth"
+                  class="flex-1 px-4 py-2 text-xs text-slate-400 hover:text-slate-200 border border-slate-700 rounded-lg transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  @click="completeGcloudAuth"
+                  :disabled="gcloudLoading || !gcloudAuthCode.trim()"
+                  class="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-all"
+                >
+                  <Loader2 v-if="gcloudLoading" class="w-3.5 h-3.5 animate-spin" />
+                  完成認證
+                </button>
               </div>
             </div>
           </template>
