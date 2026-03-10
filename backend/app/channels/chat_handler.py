@@ -11,7 +11,7 @@ from app.models.core import (
     BotUser, Member, MemberAccount, Account,
     ChatSession, ChatMessage, BotUserProject, Project
 )
-from app.core.member_profile import get_soul_content
+from app.core.member_profile import get_soul_content, list_skills, get_skill_content
 from app.core.runner import run_ai_task
 from .types import InboundMessage
 from .bot_user import get_user_projects, get_user_context, get_default_project
@@ -65,6 +65,19 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser) -> Optional[str]:
     if member.slug:
         soul = get_soul_content(member.slug)
 
+    # 5.5 載入技能檔案
+    skills_content = ""
+    if member.slug:
+        skills_list = list_skills(member.slug)
+        if skills_list:
+            skill_texts = []
+            for skill in skills_list:
+                content = get_skill_content(member.slug, skill["name"])
+                if content:
+                    skill_texts.append(content)
+            if skill_texts:
+                skills_content = "\n\n---\n\n".join(skill_texts)
+
     # 6. 載入最近對話歷史
     history = _get_recent_messages(session_obj.id, limit=MAX_HISTORY_MESSAGES)
 
@@ -78,6 +91,7 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser) -> Optional[str]:
     # 8. 建構 prompt（含用戶身份和專案範圍）
     prompt = _build_chat_prompt(
         soul=soul,
+        skills=skills_content,
         member=member,
         history=history,
         user_message=msg.text,
@@ -184,6 +198,7 @@ def _get_primary_account(member_id: int) -> Optional[Account]:
 
 def _build_chat_prompt(
     soul: str,
+    skills: str,
     member: Member,
     history: List[ChatMessage],
     user_message: str,
@@ -191,10 +206,11 @@ def _build_chat_prompt(
     accessible_projects: Optional[List[Project]] = None,
 ) -> str:
     """
-    組合完整 prompt = 靈魂 + 用戶身份 + 專案範圍 + 歷史 + 新訊息
+    組合完整 prompt = 靈魂 + 技能 + 用戶身份 + 專案範圍 + 歷史 + 新訊息
 
     Args:
         soul: 靈魂檔案內容
+        skills: 技能檔案內容（合併後）
         member: AI 成員
         history: 對話歷史
         user_message: 用戶訊息
@@ -212,6 +228,12 @@ def _build_chat_prompt(
         lines.append(f"你是 {member.name}，{member.role}。")
         if member.description:
             lines.append(member.description)
+        lines.append("")
+
+    # 技能知識（API、查詢方法等）
+    if skills:
+        lines.append("## 你的技能與知識")
+        lines.append(skills.strip())
         lines.append("")
 
     # 用戶身份描述（讓 AI 知道在跟誰說話）
