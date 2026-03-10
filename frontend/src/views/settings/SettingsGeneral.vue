@@ -32,6 +32,7 @@ const updateStatus = ref({
   auto_update_enabled: false,
   auto_update_time: '03:00',
   update_keep_versions: 3,
+  update_channel: 'development' as 'development' | 'stable',
 })
 const checkingUpdate = ref(false)
 const applyingUpdate = ref(false)
@@ -148,11 +149,19 @@ async function saveAutoUpdateSettings() {
         auto_update_enabled: updateStatus.value.auto_update_enabled,
         auto_update_time: updateStatus.value.auto_update_time,
         update_keep_versions: updateStatus.value.update_keep_versions,
+        update_channel: updateStatus.value.update_channel,
       }),
     })
   } catch (e) {
     console.error('Failed to save auto update settings:', e)
   }
+}
+
+async function changeChannel(channel: 'development' | 'stable') {
+  updateStatus.value.update_channel = channel
+  await saveAutoUpdateSettings()
+  // 切換頻道後自動檢查更新
+  await checkForUpdates()
 }
 
 // 密碼修改
@@ -237,6 +246,9 @@ onMounted(async () => {
     applyingUpdate.value = true
     startPolling()
   }
+
+  // 頁面載入時自動檢查更新
+  checkForUpdates()
 })
 
 onUnmounted(() => {
@@ -338,6 +350,32 @@ async function saveSettings() {
         </div>
       </div>
       <div class="p-6 space-y-4">
+        <!-- 更新頻道選擇 -->
+        <div class="flex gap-2">
+          <button
+            @click="changeChannel('development')"
+            :disabled="checkingUpdate"
+            class="flex-1 px-4 py-2.5 rounded-lg border text-xs font-medium transition-all"
+            :class="updateStatus.update_channel === 'development'
+              ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400'
+              : 'bg-slate-700/50 border-slate-600 text-slate-400 hover:border-slate-500'"
+          >
+            <div class="font-bold">開發版</div>
+            <div class="text-[10px] opacity-70 mt-0.5">最新功能，可能不穩定</div>
+          </button>
+          <button
+            @click="changeChannel('stable')"
+            :disabled="checkingUpdate"
+            class="flex-1 px-4 py-2.5 rounded-lg border text-xs font-medium transition-all"
+            :class="updateStatus.update_channel === 'stable'
+              ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400'
+              : 'bg-slate-700/50 border-slate-600 text-slate-400 hover:border-slate-500'"
+          >
+            <div class="font-bold">穩定版</div>
+            <div class="text-[10px] opacity-70 mt-0.5">經過測試，較為穩定</div>
+          </button>
+        </div>
+
         <!-- 版本資訊 -->
         <div class="flex items-center justify-between">
           <div>

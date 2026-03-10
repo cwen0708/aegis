@@ -2622,6 +2622,7 @@ class UpdateSettingsPayload(BaseModel):
     auto_update_enabled: Optional[bool] = None
     auto_update_time: Optional[str] = None
     update_keep_versions: Optional[int] = None
+    update_channel: Optional[str] = None  # "development" | "stable"
 
 
 class ApplyUpdatePayload(BaseModel):
@@ -2642,6 +2643,7 @@ async def get_update_status(session: Session = Depends(get_session)):
     auto_enabled = session.get(SystemSetting, "auto_update_enabled")
     auto_time = session.get(SystemSetting, "auto_update_time")
     keep_versions = session.get(SystemSetting, "update_keep_versions")
+    channel = session.get(SystemSetting, "update_channel")
 
     return {
         "current_version": state.current_version,
@@ -2657,13 +2659,25 @@ async def get_update_status(session: Session = Depends(get_session)):
         "auto_update_enabled": auto_enabled.value == "true" if auto_enabled else False,
         "auto_update_time": auto_time.value if auto_time else "03:00",
         "update_keep_versions": int(keep_versions.value) if keep_versions else 3,
+        "update_channel": channel.value if channel else "development",
     }
 
 
+class CheckUpdatePayload(BaseModel):
+    channel: Optional[str] = None  # 若未指定則從 DB 讀取
+
+
 @router.post("/update/check")
-async def check_for_updates():
+async def check_for_updates(payload: CheckUpdatePayload = None, session: Session = Depends(get_session)):
     """檢查是否有新版本"""
-    state = await updater.check_for_updates()
+    # 決定使用的頻道：payload > DB 設定 > 預設
+    if payload and payload.channel:
+        channel = payload.channel
+    else:
+        channel_setting = session.get(SystemSetting, "update_channel")
+        channel = channel_setting.value if channel_setting else "development"
+
+    state = await updater.check_for_updates(channel=channel)
     return {
         "current_version": state.current_version,
         "latest_version": state.latest_version,
@@ -2671,6 +2685,7 @@ async def check_for_updates():
         "available_versions": state.available_versions,
         "message": state.message,
         "error": state.error,
+        "channel": channel,
     }
 
 
@@ -2782,6 +2797,17 @@ async def update_settings(payload: UpdateSettingsPayload, session: Session = Dep
             setting.value = str(payload.update_keep_versions)
         else:
             setting = SystemSetting(key="update_keep_versions", value=str(payload.update_keep_versions))
+        session.add(setting)
+
+    if payload.update_channel is not None:
+        # 驗證頻道值
+        if payload.update_channel not in ("development", "stable"):
+            raise HTTPException(status_code=400, detail="無效的更新頻道")
+        setting = session.get(SystemSetting, "update_channel")
+        if setting:
+            setting.value = payload.update_channel
+        else:
+            setting = SystemSetting(key="update_channel", value=payload.update_channel)
         session.add(setting)
 
     # 同步更新 CronJob

@@ -68,10 +68,15 @@ def is_newer_version(latest: str, current: str) -> bool:
     return parse_version(latest) > parse_version(current)
 
 
-async def check_for_updates(repo: str = "cwen0708/aegis") -> UpdateState:
+async def check_for_updates(repo: str = "cwen0708/aegis", channel: str = "development") -> UpdateState:
     """
     檢查 GitHub 是否有新版本
-    只拉取 v*.*.* 格式的 stable tag
+
+    Args:
+        repo: GitHub 倉庫路徑
+        channel: 更新頻道
+            - "development": 所有 v*.*.* 版本（開發版）
+            - "stable": 僅 v*.*.*-stable 版本（穩定版）
     """
     global _state
     _state.stage = UPDATE_STAGE_CHECKING
@@ -96,26 +101,36 @@ async def check_for_updates(repo: str = "cwen0708/aegis") -> UpdateState:
 
             tags = resp.json()
 
-        # 過濾 stable tags (v*.*.*)
-        stable_pattern = re.compile(r"^v\d+\.\d+\.\d+$")
-        stable_tags = [t["name"] for t in tags if stable_pattern.match(t["name"])]
+        # 根據頻道過濾 tags
+        if channel == "stable":
+            # 穩定版：僅 v*.*.*-stable
+            tag_pattern = re.compile(r"^v\d+\.\d+\.\d+-stable$")
+            channel_name = "穩定版"
+        else:
+            # 開發版（預設）：所有 v*.*.*（不含 -stable 後綴）
+            tag_pattern = re.compile(r"^v\d+\.\d+\.\d+$")
+            channel_name = "開發版"
 
-        if not stable_tags:
+        filtered_tags = [t["name"] for t in tags if tag_pattern.match(t["name"])]
+
+        if not filtered_tags:
             _state.latest_version = _state.current_version
             _state.has_update = False
-            _state.message = "已是最新版本"
+            _state.message = f"已是最新{channel_name}"
             _state.available_versions = []
         else:
             # 排序取得最新版本
-            stable_tags.sort(key=parse_version, reverse=True)
-            _state.latest_version = stable_tags[0].lstrip("v")
+            filtered_tags.sort(key=parse_version, reverse=True)
+            # 穩定版去掉 -stable 後綴來比較版本號
+            latest_tag = filtered_tags[0]
+            _state.latest_version = latest_tag.lstrip("v").replace("-stable", "")
             _state.has_update = is_newer_version(_state.latest_version, _state.current_version)
-            _state.available_versions = stable_tags[:10]  # 保留最近 10 個版本
+            _state.available_versions = filtered_tags[:10]  # 保留最近 10 個版本
 
             if _state.has_update:
-                _state.message = f"發現新版本 {_state.latest_version}"
+                _state.message = f"發現新{channel_name} {_state.latest_version}"
             else:
-                _state.message = "已是最新版本"
+                _state.message = f"已是最新{channel_name}"
 
         _state.stage = UPDATE_STAGE_IDLE
 
