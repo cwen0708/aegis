@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { Globe, Cpu, Save, Loader2, Lock, RefreshCw, Download, Clock } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 
@@ -74,6 +74,8 @@ async function checkForUpdates() {
   }
 }
 
+let pollInterval: ReturnType<typeof setInterval> | null = null
+
 async function applyUpdate() {
   if (!confirm(`確定要更新到 v${updateStatus.value.latest_version}？\n\n執行中的任務會等待完成後再套用更新。`)) {
     return
@@ -88,16 +90,52 @@ async function applyUpdate() {
     })
     const data = await res.json()
     if (data.ok) {
-      alert('更新成功！頁面即將重新載入。')
-      setTimeout(() => window.location.reload(), 2000)
+      // 開始輪詢更新狀態
+      startPolling()
     } else {
       alert(`更新失敗：${data.error || data.detail}`)
+      applyingUpdate.value = false
     }
   } catch (e) {
     console.error('Failed to apply update:', e)
     alert('更新失敗，請檢查伺服器狀態。')
-  } finally {
     applyingUpdate.value = false
+  }
+}
+
+function startPolling() {
+  if (pollInterval) return
+
+  pollInterval = setInterval(async () => {
+    try {
+      const res = await fetch(`${API}/api/v1/update/status`)
+      if (res.ok) {
+        const data = await res.json()
+        updateStatus.value = { ...updateStatus.value, ...data }
+
+        // 檢查是否完成
+        if (data.update_stage === 'done') {
+          stopPolling()
+          applyingUpdate.value = false
+          alert('更新成功！頁面即將重新載入。')
+          setTimeout(() => window.location.reload(), 2000)
+        } else if (data.update_stage === 'failed') {
+          stopPolling()
+          applyingUpdate.value = false
+          alert(`更新失敗：${data.error}`)
+        }
+      }
+    } catch {
+      // 服務重啟中，等待恢復
+      updateStatus.value.message = '服務重啟中，等待恢復...'
+    }
+  }, 2000)
+}
+
+function stopPolling() {
+  if (pollInterval) {
+    clearInterval(pollInterval)
+    pollInterval = null
   }
 }
 
@@ -193,6 +231,16 @@ onMounted(async () => {
   form.value.max_workstations = store.settings.max_workstations || '3'
   form.value.memory_short_term_days = store.settings.memory_short_term_days || '30'
   loading.value = false
+
+  // 如果正在更新中，恢復輪詢
+  if (updateStatus.value.is_updating) {
+    applyingUpdate.value = true
+    startPolling()
+  }
+})
+
+onUnmounted(() => {
+  stopPolling()
 })
 
 async function saveSettings() {

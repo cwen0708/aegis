@@ -129,8 +129,32 @@ async def check_for_updates(repo: str = "cwen0708/aegis") -> UpdateState:
 
 
 def get_update_state() -> UpdateState:
-    """取得當前更新狀態"""
+    """取得當前更新狀態（從 DB 讀取）"""
+    from app.database import engine
+    from app.models.core import SystemSetting
+    from sqlmodel import Session
+
     _state.current_version = get_current_version()
+
+    # 從 DB 讀取更新狀態（供獨立腳本更新）
+    with Session(engine) as session:
+        stage = session.get(SystemSetting, "update_stage")
+        progress = session.get(SystemSetting, "update_progress")
+        message = session.get(SystemSetting, "update_message")
+        error = session.get(SystemSetting, "update_error")
+        is_updating = session.get(SystemSetting, "update_is_updating")
+
+        if stage:
+            _state.stage = stage.value
+        if progress:
+            _state.progress = int(progress.value)
+        if message:
+            _state.message = message.value
+        if error:
+            _state.error = error.value
+        if is_updating:
+            _state.is_updating = is_updating.value == "true"
+
     return _state
 
 
@@ -614,9 +638,32 @@ async def cleanup_old_versions(keep: int = 3) -> int:
 # ==========================================
 # Git Pull 更新流程（非符號連結架構）
 # ==========================================
+def _update_db_status(stage: str, progress: int, message: str, error: str = "", is_updating: bool = True):
+    """更新 DB 中的狀態"""
+    from app.database import engine
+    from app.models.core import SystemSetting
+    from sqlmodel import Session
+
+    with Session(engine) as session:
+        for key, value in [
+            ("update_stage", stage),
+            ("update_progress", str(progress)),
+            ("update_message", message),
+            ("update_error", error),
+            ("update_is_updating", "true" if is_updating else "false"),
+        ]:
+            setting = session.get(SystemSetting, key)
+            if setting:
+                setting.value = value
+            else:
+                setting = SystemSetting(key=key, value=value)
+            session.add(setting)
+        session.commit()
+
+
 async def git_pull_update() -> bool:
     """
-    執行 git pull 更新流程（適用於直接 clone 部署的環境）
+    啟動獨立的熱更新腳本（與主進程分離）
     """
     global _state
 
@@ -625,94 +672,41 @@ async def git_pull_update() -> bool:
         _state.stage = UPDATE_STAGE_FAILED
         return False
 
-    _state.stage = UPDATE_STAGE_DOWNLOADING
-    _state.progress = 0
-    _state.message = "正在拉取最新代碼..."
-
     try:
-        # 取得專案根目錄
-        project_root = Path(__file__).parent.parent.parent.parent
+        import subprocess
 
-        # git pull
-        proc = await asyncio.create_subprocess_exec(
-            "git", "pull", "--ff-only",
-            cwd=str(project_root),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+        # 更新初始狀態
+        _update_db_status(UPDATE_STAGE_DOWNLOADING, 0, "正在啟動更新程序...")
+        _state.stage = UPDATE_STAGE_DOWNLOADING
+        _state.progress = 0
+        _state.message = "正在啟動更新程序..."
+        _state.is_updating = True
+
+        # 取得更新腳本路徑
+        script_path = Path(__file__).parent.parent.parent / "scripts" / "hot_update.py"
+        venv_python = Path(__file__).parent.parent.parent / "venv" / "bin" / "python"
+
+        if not script_path.exists():
+            raise Exception(f"更新腳本不存在: {script_path}")
+
+        python_cmd = str(venv_python) if venv_python.exists() else "python3"
+
+        # 啟動獨立進程執行更新（與當前進程分離）
+        subprocess.Popen(
+            [python_cmd, str(script_path)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,  # 分離進程組
         )
-        stdout, stderr = await proc.communicate()
 
-        if proc.returncode != 0:
-            raise Exception(f"git pull 失敗: {stderr.decode()}")
-
-        _state.progress = 30
-        _state.message = "正在安裝依賴..."
-
-        # pip install
-        backend_dir = project_root / "backend"
-        venv_python = backend_dir / "venv" / "bin" / "python"
-        if venv_python.exists():
-            proc = await asyncio.create_subprocess_exec(
-                str(venv_python), "-m", "pip", "install", "-r", "requirements.txt", "-q",
-                cwd=str(backend_dir),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            await proc.communicate()
-
-        _state.progress = 50
-        _state.message = "正在建構前端..."
-
-        # npm install + build
-        frontend_dir = project_root / "frontend"
-        if (frontend_dir / "package.json").exists():
-            proc = await asyncio.create_subprocess_exec(
-                "npm", "install",
-                cwd=str(frontend_dir),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            await proc.communicate()
-
-            proc = await asyncio.create_subprocess_exec(
-                "npm", "run", "build",
-                cwd=str(frontend_dir),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await proc.communicate()
-            if proc.returncode != 0:
-                raise Exception(f"前端建構失敗: {stderr.decode()}")
-
-        _state.progress = 80
-        _state.message = "正在重啟服務..."
-
-        # 重啟 systemd 服務
-        proc = await asyncio.create_subprocess_exec(
-            "sudo", "systemctl", "restart", "aegis",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        await proc.communicate()
-
-        proc = await asyncio.create_subprocess_exec(
-            "sudo", "systemctl", "restart", "aegis-worker",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        await proc.communicate()
-
-        _state.progress = 100
-        _state.stage = UPDATE_STAGE_DONE
-        _state.message = "更新完成"
-        _state.current_version = get_current_version()
-
+        logger.info("Hot update script started in background")
         return True
 
     except Exception as e:
-        logger.error(f"Git pull 更新失敗: {e}")
+        logger.error(f"啟動更新腳本失敗: {e}")
         _state.error = str(e)
         _state.stage = UPDATE_STAGE_FAILED
+        _update_db_status(UPDATE_STAGE_FAILED, 0, "啟動更新腳本失敗", str(e), False)
         return False
 
 
