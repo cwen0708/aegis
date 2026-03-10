@@ -135,8 +135,14 @@ def get_update_state() -> UpdateState:
 
 
 def is_deployed_environment() -> bool:
-    """判斷是否為部署環境（有 releases 目錄結構）"""
-    # 部署環境: /home/cwen0/repos/Aegis/current -> releases/vX.X.X/
+    """判斷是否為部署環境（Linux 伺服器）"""
+    import platform
+    # Linux = 部署環境，Windows = 本地開發
+    return platform.system() == "Linux"
+
+
+def is_symlink_deployment() -> bool:
+    """判斷是否為符號連結部署架構"""
     current_link = Path(__file__).parent.parent.parent.parent / "current"
     releases_dir = Path(__file__).parent.parent.parent.parent / "releases"
     return current_link.is_symlink() or releases_dir.exists()
@@ -606,11 +612,118 @@ async def cleanup_old_versions(keep: int = 3) -> int:
 
 
 # ==========================================
+# Git Pull 更新流程（非符號連結架構）
+# ==========================================
+async def git_pull_update() -> bool:
+    """
+    執行 git pull 更新流程（適用於直接 clone 部署的環境）
+    """
+    global _state
+
+    if not is_deployed_environment():
+        _state.error = "本地開發環境不支援熱更新"
+        _state.stage = UPDATE_STAGE_FAILED
+        return False
+
+    _state.stage = UPDATE_STAGE_DOWNLOADING
+    _state.progress = 0
+    _state.message = "正在拉取最新代碼..."
+
+    try:
+        # 取得專案根目錄
+        project_root = Path(__file__).parent.parent.parent.parent
+
+        # git pull
+        proc = await asyncio.create_subprocess_exec(
+            "git", "pull", "--ff-only",
+            cwd=str(project_root),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await proc.communicate()
+
+        if proc.returncode != 0:
+            raise Exception(f"git pull 失敗: {stderr.decode()}")
+
+        _state.progress = 30
+        _state.message = "正在安裝依賴..."
+
+        # pip install
+        backend_dir = project_root / "backend"
+        venv_python = backend_dir / "venv" / "bin" / "python"
+        if venv_python.exists():
+            proc = await asyncio.create_subprocess_exec(
+                str(venv_python), "-m", "pip", "install", "-r", "requirements.txt", "-q",
+                cwd=str(backend_dir),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            await proc.communicate()
+
+        _state.progress = 50
+        _state.message = "正在建構前端..."
+
+        # npm install + build
+        frontend_dir = project_root / "frontend"
+        if (frontend_dir / "package.json").exists():
+            proc = await asyncio.create_subprocess_exec(
+                "npm", "install",
+                cwd=str(frontend_dir),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            await proc.communicate()
+
+            proc = await asyncio.create_subprocess_exec(
+                "npm", "run", "build",
+                cwd=str(frontend_dir),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                raise Exception(f"前端建構失敗: {stderr.decode()}")
+
+        _state.progress = 80
+        _state.message = "正在重啟服務..."
+
+        # 重啟 systemd 服務
+        proc = await asyncio.create_subprocess_exec(
+            "sudo", "systemctl", "restart", "aegis",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await proc.communicate()
+
+        proc = await asyncio.create_subprocess_exec(
+            "sudo", "systemctl", "restart", "aegis-worker",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await proc.communicate()
+
+        _state.progress = 100
+        _state.stage = UPDATE_STAGE_DONE
+        _state.message = "更新完成"
+        _state.current_version = get_current_version()
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Git pull 更新失敗: {e}")
+        _state.error = str(e)
+        _state.stage = UPDATE_STAGE_FAILED
+        return False
+
+
+# ==========================================
 # 完整更新流程
 # ==========================================
 async def full_update(version: str = None, wait_timeout: int = 300) -> bool:
     """
-    執行完整更新流程：下載 → 建構 → 等待任務 → 套用
+    執行完整更新流程
+    - 符號連結架構：下載 → 建構 → 等待任務 → 套用
+    - Git 架構：git pull → 建構 → 重啟
     """
     global _state
 
@@ -622,28 +735,29 @@ async def full_update(version: str = None, wait_timeout: int = 300) -> bool:
         if not version:
             await check_for_updates()
             if not _state.has_update:
+                _state.message = "已是最新版本"
                 _state.is_updating = False
                 return True
             version = _state.latest_version
 
-        # 2. 下載
-        if not await download_version(version):
-            return False
-
-        # 3. 建構
-        if not await build_version(version):
-            return False
-
-        # 4. 等待任務完成
+        # 2. 等待任務完成
         if not await wait_for_tasks_completion(wait_timeout):
             return False
 
-        # 5. 套用更新
-        if not await apply_update(version):
-            return False
-
-        # 6. 清理舊版本
-        await cleanup_old_versions()
+        # 3. 根據部署架構選擇更新方式
+        if is_symlink_deployment():
+            # 符號連結架構
+            if not await download_version(version):
+                return False
+            if not await build_version(version):
+                return False
+            if not await apply_update(version):
+                return False
+            await cleanup_old_versions()
+        else:
+            # Git 架構
+            if not await git_pull_update():
+                return False
 
         return True
 

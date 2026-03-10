@@ -345,9 +345,9 @@ async function saveSettings() {
           </button>
         </div>
 
-        <!-- 非部署環境提示 -->
+        <!-- 本地開發環境提示 -->
         <div v-if="!updateStatus.is_deployed" class="text-xs text-slate-500 bg-slate-700/30 rounded-lg px-3 py-2">
-          本地開發環境不支援熱更新，請使用 git pull 手動更新。
+          本地開發環境請使用 <code class="bg-slate-600 px-1 rounded">git pull</code> 手動更新。
         </div>
 
         <!-- 自動更新設定（僅部署環境顯示） -->
