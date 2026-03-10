@@ -74,13 +74,32 @@ def main():
 
         update_status("building", 50, "正在建構前端...")
 
-        # Frontend build
+        # Frontend build（限制記憶體避免 OOM）
         frontend_dir = PROJECT_ROOT / "frontend"
         if (frontend_dir / "package.json").exists():
-            run_command(["npm", "install"], cwd=str(frontend_dir))
-            ret, out, err = run_command(["npm", "run", "build"], cwd=str(frontend_dir))
-            if ret != 0:
-                update_status("failed", 50, "前端建構失敗", err)
+            # 設定 Node.js 記憶體限制（512MB），避免在低記憶體 VM 上 OOM
+            node_env = os.environ.copy()
+            node_env["NODE_OPTIONS"] = "--max-old-space-size=512"
+
+            proc = subprocess.run(
+                ["npm", "install", "--prefer-offline"],
+                cwd=str(frontend_dir),
+                env=node_env,
+                capture_output=True,
+                text=True
+            )
+
+            update_status("building", 65, "正在建構前端（這可能需要幾分鐘）...")
+
+            proc = subprocess.run(
+                ["npm", "run", "build"],
+                cwd=str(frontend_dir),
+                env=node_env,
+                capture_output=True,
+                text=True
+            )
+            if proc.returncode != 0:
+                update_status("failed", 50, "前端建構失敗", proc.stderr[:500])
                 return 1
 
         update_status("applying", 80, "正在重啟服務...")
