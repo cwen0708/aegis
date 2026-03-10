@@ -558,12 +558,20 @@ def complete_claude_auth(session_id: str, auth_code: str) -> bool:
             clean_code = match.group(1)
 
     try:
+        # 檢查進程是否還活著
+        if proc.poll() is not None:
+            del _pending_claude_sessions[session_id]
+            raise Exception(f"認證進程已結束（返回碼 {proc.returncode}）。請重新開始。")
+
+        logger.info(f"Writing auth code to session {session_id}: {clean_code[:10]}...")
+
         # 寫入授權碼
         os.write(master, (clean_code + "\n").encode())
 
         # 等待完成（最多 30 秒）
         output = []
         start_time = time.time()
+        success = False
 
         while time.time() - start_time < 30:
             if select.select([master], [], [], 0.5)[0]:
@@ -572,8 +580,13 @@ def complete_claude_auth(session_id: str, auth_code: str) -> bool:
                     if data:
                         text = data.decode("utf-8", errors="replace")
                         output.append(text)
+                        logger.debug(f"Claude auth output: {text[:200]}")
                         # 檢查成功訊息
-                        if "successfully" in text.lower() or "token" in text.lower():
+                        if "successfully" in text.lower() or "saved" in text.lower():
+                            success = True
+                            break
+                        # 檢查錯誤訊息
+                        if "error" in text.lower() or "invalid" in text.lower() or "failed" in text.lower():
                             break
                 except OSError:
                     break
@@ -581,19 +594,42 @@ def complete_claude_auth(session_id: str, auth_code: str) -> bool:
                 break
 
         # 清理
-        os.close(master)
-        proc.wait(timeout=5)
+        try:
+            os.close(master)
+        except OSError:
+            pass
+
+        # 等待進程結束
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            logger.warning(f"Claude auth process didn't exit, terminating...")
+            proc.terminate()
+            proc.wait(timeout=5)
+
         del _pending_claude_sessions[session_id]
 
-        if proc.returncode == 0:
+        output_text = "".join(output)
+        logger.info(f"Claude auth output for {session_id}: {output_text[-500:]}")
+
+        if success or proc.returncode == 0:
             logger.info(f"Claude auth completed for session: {session_id}")
             return True
         else:
-            raise Exception(f"認證失敗（返回碼 {proc.returncode}）")
+            # 從輸出中提取錯誤訊息
+            error_msg = "認證失敗"
+            if "invalid" in output_text.lower():
+                error_msg = "授權碼無效"
+            elif "expired" in output_text.lower():
+                error_msg = "授權碼已過期"
+            elif "error" in output_text.lower():
+                error_msg = f"認證錯誤：{output_text[-200:]}"
+            raise Exception(error_msg)
 
     except subprocess.TimeoutExpired:
-        proc.terminate()
-        del _pending_claude_sessions[session_id]
+        if session_id in _pending_claude_sessions:
+            proc.terminate()
+            del _pending_claude_sessions[session_id]
         raise Exception("認證超時。請重試。")
     except Exception as e:
         if session_id in _pending_claude_sessions:
