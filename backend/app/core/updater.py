@@ -68,7 +68,7 @@ def is_newer_version(latest: str, current: str) -> bool:
     return parse_version(latest) > parse_version(current)
 
 
-async def check_for_updates(repo: str = "cwen0708/aegis") -> UpdateState:
+async def check_for_updates(repo: str = "Yooliang/Aegis") -> UpdateState:
     """
     檢查 GitHub 是否有新版本
     只拉取 v*.*.* 格式的 stable tag
@@ -196,7 +196,7 @@ def get_deployment_paths() -> dict:
         }
 
 
-async def download_version(version: str, repo: str = "cwen0708/aegis") -> bool:
+async def download_version(version: str, repo: str = "Yooliang/Aegis") -> bool:
     """
     下載指定版本到 releases 目錄
     """

@@ -1880,6 +1880,28 @@ async def generate_portrait_api(member_id: int, file: UploadFile = File(...), se
 
 
 # ==========================================
+# Claude Auth (Claude 認證)
+# ==========================================
+@router.get("/claude/status")
+def get_claude_status():
+    """檢查 Claude CLI 狀態和 token 過期時間"""
+    from app.core.account_manager import check_claude_status
+    return check_claude_status()
+
+
+class ClaudeCredentialsRequest(BaseModel):
+    credentials: str
+
+
+@router.post("/claude/credentials")
+def update_claude_creds(data: ClaudeCredentialsRequest):
+    """更新 Claude credentials"""
+    from app.core.account_manager import update_claude_credentials
+    update_claude_credentials(data.credentials)
+    return {"ok": True, "message": "Credentials 已更新！"}
+
+
+# ==========================================
 # Guided CLI Login (引導式 CLI 登入)
 # ==========================================
 @router.get("/gcloud/status")
