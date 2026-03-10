@@ -83,6 +83,16 @@ def main():
                 update_status("failed", 50, "前端建構失敗", err)
                 return 1
 
+        update_status("applying", 70, "正在同步系統資料...")
+
+        # 執行 seed.py 同步新的系統排程等資料
+        ret, out, err = run_command(
+            [str(venv_python) if venv_python.exists() else "python3", "seed.py"],
+            cwd=str(BACKEND_DIR)
+        )
+        if ret != 0:
+            print(f"Warning: seed.py failed: {err}")
+
         update_status("applying", 80, "正在重啟服務...")
 
         # 先標記完成（因為重啟後這個進程也會被殺掉）

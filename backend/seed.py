@@ -302,6 +302,52 @@ def seed_data():
                 is_enabled=True,
                 is_system=True,
             ))
+
+        # 系統更新檢查
+        update_prompt = (
+            "你是 Aegis 系統的更新管理 AI。請執行以下步驟：\n\n"
+            "1. 呼叫 GET /api/v1/update/status 檢查更新狀態\n"
+            "2. 如果 has_update=true 且 is_deployed=true，呼叫 POST /api/v1/update/apply 執行更新\n"
+            "3. 如果沒有更新，回報「已是最新版本」\n"
+            "4. 如果更新成功，回報新版本號\n"
+            "5. 如果更新失敗，記錄錯誤訊息\n\n"
+            "注意：更新過程會自動等待執行中的任務完成。"
+        )
+        if "系統更新檢查" not in existing_crons:
+            # 讀取自動更新時間設定
+            auto_time = session.get(SystemSetting, "auto_update_time")
+            time_str = auto_time.value if auto_time else "03:00"
+            hour, minute = map(int, time_str.split(":"))
+            crons_to_add.append(CronJob(
+                project_id=aegis.id,
+                name="系統更新檢查",
+                description="自動檢查並套用 Aegis 系統更新。",
+                prompt_template=update_prompt,
+                cron_expression=f"{minute} {hour} * * *",
+                is_enabled=False,  # 預設關閉，需在設定頁面開啟
+                is_system=True,
+            ))
+
+        # 短期記憶清理
+        memory_cleanup_prompt = (
+            "你是 Aegis 系統的記憶清理 AI。請執行以下步驟：\n\n"
+            "1. 讀取系統設定 memory_short_term_days（短期記憶保留天數）\n"
+            "2. 掃描 .aegis/memory/ 目錄下的短期記憶檔案\n"
+            "3. 刪除超過保留天數的檔案\n"
+            "4. 回報清理結果：刪除了多少檔案、釋放了多少空間\n\n"
+            "注意：長期記憶（long-term/）目錄不要清理。"
+        )
+        if "短期記憶清理" not in existing_crons:
+            crons_to_add.append(CronJob(
+                project_id=aegis.id,
+                name="短期記憶清理",
+                description="每天凌晨清理超過保留天數的短期記憶檔案。",
+                prompt_template=memory_cleanup_prompt,
+                cron_expression="0 4 * * *",
+                is_enabled=True,
+                is_system=True,
+            ))
+
         if crons_to_add:
             session.add_all(crons_to_add)
             session.commit()
