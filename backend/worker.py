@@ -8,6 +8,15 @@ Aegis Worker - 獨立任務執行程序
 """
 import os
 import sys
+
+# 載入 .env 檔案（用於 CLAUDE_CODE_OAUTH_TOKEN 等環境變數）
+from pathlib import Path
+_env_file = Path(__file__).parent / ".env"
+if _env_file.exists():
+    for line in _env_file.read_text().strip().split("\n"):
+        if "=" in line and not line.startswith("#"):
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip())
 import time
 import json
 import logging
