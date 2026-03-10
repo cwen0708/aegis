@@ -155,6 +155,31 @@ class TelegramChannel(ChannelBase):
             return str(result.message_id)
 
         except Exception as e:
+            error_str = str(e)
+            # Markdown 解析失敗時，改用純文字重試
+            if "parse entities" in error_str.lower() or "can't find end" in error_str.lower():
+                logger.warning(f"[Telegram] Markdown parse failed, retrying as plain text")
+                try:
+                    if msg.edit_message_id:
+                        await self._app.bot.edit_message_text(
+                            chat_id=int(msg.chat_id),
+                            message_id=int(msg.edit_message_id),
+                            text=msg.text,
+                            parse_mode=None,
+                        )
+                        return msg.edit_message_id
+                    result = await self._app.bot.send_message(
+                        chat_id=int(msg.chat_id),
+                        text=msg.text,
+                        parse_mode=None,
+                        reply_to_message_id=(
+                            int(msg.reply_to_id) if msg.reply_to_id else None
+                        ),
+                    )
+                    return str(result.message_id)
+                except Exception as e2:
+                    logger.error(f"[Telegram] Plain text retry also failed: {e2}")
+                    return False
             logger.error(f"[Telegram] Send failed: {e}")
             return False
 
