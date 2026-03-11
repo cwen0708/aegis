@@ -41,14 +41,52 @@ jobs:
       - name: Python import check
         run: cd backend && python -c "from app.api.routes import router; print('Routes OK')"
 
+  build-frontend:
+    name: Build Frontend
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install & build frontend
+        run: |
+          cd frontend
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Package frontend dist
+        run: tar -czf frontend-dist.tar.gz -C frontend/dist .
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend-dist.tar.gz
+          retention-days: 30
+
   tag:
     name: Dev Tag + Deploy
-    needs: test
+    needs: build-frontend
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Download frontend dist
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
 
       - name: Get latest dev tag and bump
         id: version
@@ -86,6 +124,16 @@ jobs:
           git tag -a ${{ steps.version.outputs.new }} -m "CI: ${{ steps.version.outputs.new }}"
           git push origin ${{ steps.version.outputs.new }}
 
+      - name: Create GitHub Release with frontend dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create ${{ steps.version.outputs.new }} \
+            frontend-dist.tar.gz \
+            --title "${{ steps.version.outputs.new }}" \
+            --notes "CI auto-release" \
+            --prerelease
+
       - name: Trigger GCP hot update
         run: |
           RESPONSE=$(curl -s -X POST https://aegis.yooliang.com/api/v1/update/apply \
@@ -96,8 +144,8 @@ jobs:
 
       - name: Wait for deploy
         run: |
-          echo "Waiting 90s for build + restart..."
-          sleep 90
+          echo "Waiting 45s for download + restart..."
+          sleep 45
 
           for i in 1 2 3 4 5; do
             STATUS=$(curl -s https://aegis.yooliang.com/api/v1/update/status)
@@ -116,8 +164,8 @@ jobs:
               exit 1
             fi
 
-            echo "Still deploying (stage: $STAGE), waiting 30s..."
-            sleep 30
+            echo "Still deploying (stage: $STAGE), waiting 20s..."
+            sleep 20
           done
 
           echo "Deploy timeout - check manually"

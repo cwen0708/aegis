@@ -339,33 +339,65 @@ async def build_version(version: str) -> bool:
             await proc.communicate()
 
         _state.progress = 60
-        _state.message = "正在建構前端..."
+        _state.message = "正在下載前端建構產物..."
 
-        # 建構前端
+        # 從 GitHub Release 下載 CI 預建好的前端 dist
         frontend_dir = release_dir / "frontend"
-        if (frontend_dir / "package.json").exists():
-            # npm install
-            proc = await asyncio.create_subprocess_exec(
-                "npm", "install",
-                cwd=str(frontend_dir),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            await proc.communicate()
+        dist_dir = frontend_dir / "dist"
+        repo = "cwen0708/aegis"
+        tarball_url = f"https://github.com/{repo}/releases/download/{version_tag}/frontend-dist.tar.gz"
+        tarball_path = release_dir / "frontend-dist.tar.gz"
 
-            _state.progress = 80
+        dist_downloaded = False
+        try:
+            import httpx
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                resp = await client.get(tarball_url, timeout=60.0)
+                if resp.status_code == 200 and len(resp.content) > 1000:
+                    tarball_path.write_bytes(resp.content)
 
-            # npm run build
-            proc = await asyncio.create_subprocess_exec(
-                "npm", "run", "build",
-                cwd=str(frontend_dir),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await proc.communicate()
+                    if dist_dir.exists():
+                        shutil.rmtree(dist_dir)
+                    dist_dir.mkdir(parents=True, exist_ok=True)
 
-            if proc.returncode != 0:
-                raise Exception(f"前端建構失敗: {stderr.decode()}")
+                    proc = await asyncio.create_subprocess_exec(
+                        "tar", "-xzf", str(tarball_path), "-C", str(dist_dir),
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    await proc.communicate()
+                    tarball_path.unlink(missing_ok=True)
+
+                    if proc.returncode == 0:
+                        dist_downloaded = True
+                        _state.progress = 80
+        except Exception as dl_err:
+            logger.warning(f"下載前端 dist 失敗: {dl_err}")
+
+        if not dist_downloaded:
+            # Fallback：本地建構（相容舊版 Release 無 dist 的情況）
+            _state.message = "Release 無前端產物，本地建構中..."
+            if (frontend_dir / "package.json").exists():
+                proc = await asyncio.create_subprocess_exec(
+                    "npm", "install",
+                    cwd=str(frontend_dir),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                await proc.communicate()
+
+                _state.progress = 80
+
+                proc = await asyncio.create_subprocess_exec(
+                    "npm", "run", "build",
+                    cwd=str(frontend_dir),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await proc.communicate()
+
+                if proc.returncode != 0:
+                    raise Exception(f"前端建構失敗: {stderr.decode()}")
 
         _state.progress = 100
         _state.message = f"版本 {version_tag} 建構完成"

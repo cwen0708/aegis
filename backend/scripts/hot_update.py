@@ -72,22 +72,54 @@ def main():
                 cwd=str(BACKEND_DIR)
             )
 
-        update_status("building", 50, "正在建構前端...")
+        update_status("building", 50, "正在下載前端建構產物...")
 
-        # Frontend build（限制記憶體避免 OOM）
+        # 從 GitHub Release 下載 CI 預建好的前端 dist
         frontend_dir = PROJECT_ROOT / "frontend"
-        if (frontend_dir / "package.json").exists():
-            # 設定 Node.js 記憶體限制（1024MB），Vite build 需要較多記憶體
-            node_env = os.environ.copy()
-            node_env["NODE_OPTIONS"] = "--max-old-space-size=1024"
+        dist_dir = frontend_dir / "dist"
 
-            # 檢查 package.json 是否有變動，有才跑 npm install
-            ret, diff_out, _ = run_command(
-                ["git", "diff", "--name-only", "HEAD~1", "HEAD", "--", "frontend/package.json"],
-                cwd=str(PROJECT_ROOT)
+        # 取得當前 git tag
+        ret, tag_out, _ = run_command(
+            ["git", "describe", "--tags", "--abbrev=0"],
+            cwd=str(PROJECT_ROOT)
+        )
+        current_tag = tag_out.strip() if ret == 0 and tag_out.strip() else None
+
+        if current_tag:
+            dist_downloaded = False
+            repo = "cwen0708/aegis"
+            tarball_url = f"https://github.com/{repo}/releases/download/{current_tag}/frontend-dist.tar.gz"
+            tarball_path = PROJECT_ROOT / "frontend-dist.tar.gz"
+
+            update_status("building", 55, f"正在下載前端 ({current_tag})...")
+
+            ret, _, err = run_command(
+                ["curl", "-sL", "-o", str(tarball_path), "-w", "%{http_code}", tarball_url]
             )
-            if "package.json" in diff_out:
-                update_status("building", 55, "正在安裝前端依賴...")
+            if ret == 0 and tarball_path.exists() and tarball_path.stat().st_size > 1000:
+                # 清空舊 dist，解壓新的
+                import shutil
+                if dist_dir.exists():
+                    shutil.rmtree(dist_dir)
+                dist_dir.mkdir(parents=True, exist_ok=True)
+
+                ret, _, err = run_command(
+                    ["tar", "-xzf", str(tarball_path), "-C", str(dist_dir)]
+                )
+                tarball_path.unlink(missing_ok=True)
+
+                if ret == 0:
+                    dist_downloaded = True
+                    update_status("building", 70, "前端下載完成")
+                else:
+                    update_status("building", 60, f"解壓失敗，嘗試本地建構... {err[:200]}")
+
+            if not dist_downloaded:
+                # Fallback：本地建構（相容舊版 Release 無 dist 的情況）
+                update_status("building", 60, "Release 無前端產物，本地建構中...")
+                node_env = os.environ.copy()
+                node_env["NODE_OPTIONS"] = "--max-old-space-size=1024"
+
                 proc = subprocess.run(
                     ["npm", "install", "--prefer-offline"],
                     cwd=str(frontend_dir),
@@ -95,19 +127,16 @@ def main():
                     capture_output=True,
                     text=True
                 )
-
-            update_status("building", 65, "正在建構前端（這可能需要幾分鐘）...")
-
-            proc = subprocess.run(
-                ["npm", "run", "build"],
-                cwd=str(frontend_dir),
-                env=node_env,
-                capture_output=True,
-                text=True
-            )
-            if proc.returncode != 0:
-                update_status("failed", 50, "前端建構失敗", proc.stderr[:500])
-                return 1
+                proc = subprocess.run(
+                    ["npm", "run", "build"],
+                    cwd=str(frontend_dir),
+                    env=node_env,
+                    capture_output=True,
+                    text=True
+                )
+                if proc.returncode != 0:
+                    update_status("failed", 50, "前端建構失敗", proc.stderr[:500])
+                    return 1
 
         update_status("applying", 80, "正在更新版本號並重啟服務...")
 
