@@ -304,6 +304,14 @@ function getDbAccountsByProvider(provider: string) {
   return accounts.value.filter(a => a.provider === provider)
 }
 
+// 根據 DB 帳號找對應的 claude usage 資料
+function getClaudeUsage(dbAccount: any) {
+  // credential_file: "default" → usage name: "default"
+  // credential_file: "" → 沒有 usage
+  if (!dbAccount.credential_file) return null
+  return claudeAccounts.value.find(u => u.name === dbAccount.credential_file || u.name + '.json' === dbAccount.credential_file)
+}
+
 // Tab 顏色樣式
 function getTabClasses(tabId: 'claude' | 'gemini' | 'openai', isActive: boolean) {
   const colors = {
@@ -456,7 +464,7 @@ function formatResetTime(isoStr: string) {
 
     <!-- Claude Tab -->
     <div v-if="activeTab === 'claude'">
-      <div v-if="claudeAccounts.length === 0 && !loadingClaude" class="bg-slate-800/30 rounded-xl border border-slate-700/50 p-8 text-center">
+      <div v-if="accountsByProvider.claude.length === 0 && !loadingClaude" class="bg-slate-800/30 rounded-xl border border-slate-700/50 p-8 text-center">
         <Bot class="w-10 h-10 mx-auto mb-3 text-slate-600" />
         <p class="text-sm text-slate-400 mb-1">尚無 Claude 帳號</p>
         <p class="text-xs text-slate-500">點擊「新增帳號」以 OAuth Token 或 API Key 方式新增</p>
@@ -464,10 +472,9 @@ function formatResetTime(isoStr: string) {
 
       <div v-else class="space-y-3">
         <div
-          v-for="account in claudeAccounts"
-          :key="account.name"
-          class="bg-slate-800/80 rounded-xl border overflow-hidden"
-          :class="account.is_active ? 'border-slate-700' : 'border-slate-700/50 opacity-60'"
+          v-for="acc in accountsByProvider.claude"
+          :key="acc.id"
+          class="bg-slate-800/80 rounded-xl border overflow-hidden border-slate-700"
         >
           <div class="flex">
             <!-- 左：帳號 + 用量 -->
@@ -478,128 +485,128 @@ function formatResetTime(isoStr: string) {
                   <User class="w-3.5 h-3.5 text-orange-400" />
                 </div>
                 <div class="min-w-0 flex-1">
-                  <div class="text-sm font-semibold text-slate-100 truncate">
-                    {{ getDbAccountsByProvider('claude').find(a => a.credential_file === account.name + '.json')?.name || account.name }}
-                  </div>
+                  <div class="text-sm font-semibold text-slate-100 truncate">{{ acc.name }}</div>
                   <div class="flex items-center gap-1.5 text-[10px] text-slate-500 font-mono flex-wrap">
-                    <span>{{ account.subscriptionType || 'unknown' }}</span>
-                    <!-- 認證類型 Badge -->
+                    <span>{{ acc.subscription || 'unknown' }}</span>
                     <span
-                      v-if="getDbAccountsByProvider('claude').find(a => a.credential_file === account.name + '.json')?.auth_type"
                       class="px-1 py-0.5 rounded border text-[9px]"
-                      :class="authTypeBadgeClass(getDbAccountsByProvider('claude').find(a => a.credential_file === account.name + '.json')?.auth_type || 'cli')"
+                      :class="authTypeBadgeClass(acc.auth_type || 'cli')"
                     >
-                      {{ getDbAccountsByProvider('claude').find(a => a.credential_file === account.name + '.json')?.auth_type === 'api_key' ? 'API' : 'CLI' }}
+                      {{ acc.auth_type === 'api_key' ? 'API' : 'CLI' }}
                     </span>
-                    <span v-if="account.is_active" class="flex items-center gap-1 text-emerald-400">
+                    <span v-if="acc.has_oauth_token && !acc.expired" class="flex items-center gap-1 text-emerald-400">
                       <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></span>
-                      使用中
+                      OAuth 有效
                     </span>
-                    <!-- Token 過期狀態 -->
-                    <template v-if="getDbAccountsByProvider('claude').find(a => a.credential_file === account.name + '.json')?.has_oauth_token">
-                      <span v-if="getDbAccountsByProvider('claude').find(a => a.credential_file === account.name + '.json')?.expired" class="text-red-400">Token 已過期</span>
-                      <span v-else-if="getDbAccountsByProvider('claude').find(a => a.credential_file === account.name + '.json')?.expires_at" class="text-emerald-500">
-                        有效至 {{ new Date(getDbAccountsByProvider('claude').find(a => a.credential_file === account.name + '.json')?.expires_at!).toLocaleDateString('zh-TW') }}
-                      </span>
-                    </template>
+                    <span v-else-if="acc.has_oauth_token && acc.expired" class="text-red-400">Token 已過期</span>
+                    <span v-else-if="acc.credential_file" class="flex items-center gap-1 text-sky-400">
+                      <span class="w-1.5 h-1.5 rounded-full bg-sky-400 inline-block"></span>
+                      CLI 認證
+                    </span>
+                    <span v-else class="text-yellow-500">未設定認證</span>
+                    <span v-if="acc.expires_at && !acc.expired" class="text-emerald-500">
+                      有效至 {{ new Date(acc.expires_at).toLocaleDateString('zh-TW') }}
+                    </span>
                   </div>
                 </div>
                 <button
-                  v-if="getDbAccountsByProvider('claude').find(a => a.credential_file === account.name + '.json')"
-                  @click.stop="openEditAccountDialog(getDbAccountsByProvider('claude').find(a => a.credential_file === account.name + '.json')!)"
+                  @click.stop="openEditAccountDialog(acc)"
                   class="p-1.5 rounded-lg hover:bg-slate-700/50 text-slate-500 hover:text-slate-300 transition-colors shrink-0"
                 >
                   <Edit3 class="w-3.5 h-3.5" />
                 </button>
               </div>
 
-              <!-- 用量 bars -->
-              <div v-if="account.usage" class="space-y-2">
-                <div v-if="account.usage.five_hour" class="space-y-0.5">
-                  <div class="flex justify-between text-[11px]">
-                    <span class="text-slate-400">5h</span>
-                    <span :class="utilizationTextColor(account.usage.five_hour.utilization)" class="font-mono font-semibold">
-                      {{ account.usage.five_hour.utilization }}%
-                    </span>
+              <!-- 用量 bars（從 usage API 取得） -->
+              <template v-if="getClaudeUsage(acc)?.usage">
+                <div class="space-y-2">
+                  <div v-if="getClaudeUsage(acc)!.usage.five_hour" class="space-y-0.5">
+                    <div class="flex justify-between text-[11px]">
+                      <span class="text-slate-400">5h</span>
+                      <span :class="utilizationTextColor(getClaudeUsage(acc)!.usage.five_hour.utilization)" class="font-mono font-semibold">
+                        {{ getClaudeUsage(acc)!.usage.five_hour.utilization }}%
+                      </span>
+                    </div>
+                    <div class="w-full bg-slate-900/50 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        :class="utilizationColor(getClaudeUsage(acc)!.usage.five_hour.utilization)"
+                        class="h-1.5 rounded-full transition-all duration-500"
+                        :style="{ width: `${Math.min(getClaudeUsage(acc)!.usage.five_hour.utilization, 100)}%` }"
+                      ></div>
+                    </div>
+                    <div class="text-[10px] text-slate-600">{{ formatResetTime(getClaudeUsage(acc)!.usage.five_hour.resets_at) }}</div>
                   </div>
-                  <div class="w-full bg-slate-900/50 rounded-full h-1.5 overflow-hidden">
-                    <div
-                      :class="utilizationColor(account.usage.five_hour.utilization)"
-                      class="h-1.5 rounded-full transition-all duration-500"
-                      :style="{ width: `${Math.min(account.usage.five_hour.utilization, 100)}%` }"
-                    ></div>
-                  </div>
-                  <div class="text-[10px] text-slate-600">{{ formatResetTime(account.usage.five_hour.resets_at) }}</div>
-                </div>
 
-                <div v-if="account.usage.seven_day" class="space-y-0.5">
-                  <div class="flex justify-between text-[11px]">
-                    <span class="text-slate-400">7d</span>
-                    <span :class="utilizationTextColor(account.usage.seven_day.utilization)" class="font-mono font-semibold">
-                      {{ account.usage.seven_day.utilization }}%
-                    </span>
+                  <div v-if="getClaudeUsage(acc)!.usage.seven_day" class="space-y-0.5">
+                    <div class="flex justify-between text-[11px]">
+                      <span class="text-slate-400">7d</span>
+                      <span :class="utilizationTextColor(getClaudeUsage(acc)!.usage.seven_day.utilization)" class="font-mono font-semibold">
+                        {{ getClaudeUsage(acc)!.usage.seven_day.utilization }}%
+                      </span>
+                    </div>
+                    <div class="w-full bg-slate-900/50 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        :class="utilizationColor(getClaudeUsage(acc)!.usage.seven_day.utilization)"
+                        class="h-1.5 rounded-full transition-all duration-500"
+                        :style="{ width: `${Math.min(getClaudeUsage(acc)!.usage.seven_day.utilization, 100)}%` }"
+                      ></div>
+                    </div>
+                    <div class="text-[10px] text-slate-600">{{ formatResetTime(getClaudeUsage(acc)!.usage.seven_day.resets_at) }}</div>
                   </div>
-                  <div class="w-full bg-slate-900/50 rounded-full h-1.5 overflow-hidden">
-                    <div
-                      :class="utilizationColor(account.usage.seven_day.utilization)"
-                      class="h-1.5 rounded-full transition-all duration-500"
-                      :style="{ width: `${Math.min(account.usage.seven_day.utilization, 100)}%` }"
-                    ></div>
-                  </div>
-                  <div class="text-[10px] text-slate-600">{{ formatResetTime(account.usage.seven_day.resets_at) }}</div>
-                </div>
 
-                <div v-if="account.usage.seven_day_sonnet" class="space-y-0.5">
-                  <div class="flex justify-between text-[11px]">
-                    <span class="text-slate-400">Sonnet 7d</span>
-                    <span :class="utilizationTextColor(account.usage.seven_day_sonnet.utilization)" class="font-mono font-semibold">
-                      {{ account.usage.seven_day_sonnet.utilization }}%
-                    </span>
+                  <div v-if="getClaudeUsage(acc)!.usage.seven_day_sonnet" class="space-y-0.5">
+                    <div class="flex justify-between text-[11px]">
+                      <span class="text-slate-400">Sonnet 7d</span>
+                      <span :class="utilizationTextColor(getClaudeUsage(acc)!.usage.seven_day_sonnet.utilization)" class="font-mono font-semibold">
+                        {{ getClaudeUsage(acc)!.usage.seven_day_sonnet.utilization }}%
+                      </span>
+                    </div>
+                    <div class="w-full bg-slate-900/50 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        :class="utilizationColor(getClaudeUsage(acc)!.usage.seven_day_sonnet.utilization)"
+                        class="h-1.5 rounded-full transition-all duration-500"
+                        :style="{ width: `${Math.min(getClaudeUsage(acc)!.usage.seven_day_sonnet.utilization, 100)}%` }"
+                      ></div>
+                    </div>
+                    <div class="text-[10px] text-slate-600">{{ formatResetTime(getClaudeUsage(acc)!.usage.seven_day_sonnet.resets_at) }}</div>
                   </div>
-                  <div class="w-full bg-slate-900/50 rounded-full h-1.5 overflow-hidden">
-                    <div
-                      :class="utilizationColor(account.usage.seven_day_sonnet.utilization)"
-                      class="h-1.5 rounded-full transition-all duration-500"
-                      :style="{ width: `${Math.min(account.usage.seven_day_sonnet.utilization, 100)}%` }"
-                    ></div>
-                  </div>
-                  <div class="text-[10px] text-slate-600">{{ formatResetTime(account.usage.seven_day_sonnet.resets_at) }}</div>
-                </div>
 
-                <div v-if="account.usage.seven_day_opus" class="space-y-0.5">
-                  <div class="flex justify-between text-[11px]">
-                    <span class="text-slate-400">Opus 7d</span>
-                    <span :class="utilizationTextColor(account.usage.seven_day_opus.utilization)" class="font-mono font-semibold">
-                      {{ account.usage.seven_day_opus.utilization }}%
-                    </span>
+                  <div v-if="getClaudeUsage(acc)!.usage.seven_day_opus" class="space-y-0.5">
+                    <div class="flex justify-between text-[11px]">
+                      <span class="text-slate-400">Opus 7d</span>
+                      <span :class="utilizationTextColor(getClaudeUsage(acc)!.usage.seven_day_opus.utilization)" class="font-mono font-semibold">
+                        {{ getClaudeUsage(acc)!.usage.seven_day_opus.utilization }}%
+                      </span>
+                    </div>
+                    <div class="w-full bg-slate-900/50 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        :class="utilizationColor(getClaudeUsage(acc)!.usage.seven_day_opus.utilization)"
+                        class="h-1.5 rounded-full transition-all duration-500"
+                        :style="{ width: `${Math.min(getClaudeUsage(acc)!.usage.seven_day_opus.utilization, 100)}%` }"
+                      ></div>
+                    </div>
+                    <div class="text-[10px] text-slate-600">{{ formatResetTime(getClaudeUsage(acc)!.usage.seven_day_opus.resets_at) }}</div>
                   </div>
-                  <div class="w-full bg-slate-900/50 rounded-full h-1.5 overflow-hidden">
-                    <div
-                      :class="utilizationColor(account.usage.seven_day_opus.utilization)"
-                      class="h-1.5 rounded-full transition-all duration-500"
-                      :style="{ width: `${Math.min(account.usage.seven_day_opus.utilization, 100)}%` }"
-                    ></div>
-                  </div>
-                  <div class="text-[10px] text-slate-600">{{ formatResetTime(account.usage.seven_day_opus.resets_at) }}</div>
-                </div>
 
-                <div v-if="account.usage.extra_usage && account.usage.extra_usage.is_enabled" class="pt-2 border-t border-slate-700/50">
-                  <div class="flex justify-between text-[11px]">
-                    <span class="text-slate-400">超額</span>
-                    <span class="text-slate-300 font-mono text-[10px]">
-                      ${{ ((account.usage.extra_usage.used_credits ?? 0) / 100).toFixed(2) }} / ${{ ((account.usage.extra_usage.monthly_limit ?? 0) / 100).toFixed(0) }}
-                    </span>
-                  </div>
-                  <div v-if="(account.usage.extra_usage.monthly_limit ?? 0) > 0" class="mt-1 w-full bg-slate-900/50 rounded-full h-1.5 overflow-hidden">
-                    <div
-                      class="bg-sky-500 h-1.5 rounded-full transition-all duration-500"
-                      :style="{ width: `${Math.min(((account.usage.extra_usage.used_credits ?? 0) / account.usage.extra_usage.monthly_limit) * 100, 100)}%` }"
-                    ></div>
+                  <div v-if="getClaudeUsage(acc)!.usage.extra_usage?.is_enabled" class="pt-2 border-t border-slate-700/50">
+                    <div class="flex justify-between text-[11px]">
+                      <span class="text-slate-400">超額</span>
+                      <span class="text-slate-300 font-mono text-[10px]">
+                        ${{ ((getClaudeUsage(acc)!.usage.extra_usage.used_credits ?? 0) / 100).toFixed(2) }} / ${{ ((getClaudeUsage(acc)!.usage.extra_usage.monthly_limit ?? 0) / 100).toFixed(0) }}
+                      </span>
+                    </div>
+                    <div v-if="(getClaudeUsage(acc)!.usage.extra_usage.monthly_limit ?? 0) > 0" class="mt-1 w-full bg-slate-900/50 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        class="bg-sky-500 h-1.5 rounded-full transition-all duration-500"
+                        :style="{ width: `${Math.min(((getClaudeUsage(acc)!.usage.extra_usage.used_credits ?? 0) / getClaudeUsage(acc)!.usage.extra_usage.monthly_limit) * 100, 100)}%` }"
+                      ></div>
+                    </div>
                   </div>
                 </div>
+              </template>
+              <div v-else class="text-xs text-slate-500 text-center py-3">
+                {{ acc.credential_file ? '無法取得用量' : '純 OAuth Token 帳號（無 CLI 認證檔）' }}
               </div>
-
-              <div v-else class="text-xs text-slate-500 text-center py-3">無法取得用量</div>
             </div>
 
             <!-- 右：統計 -->

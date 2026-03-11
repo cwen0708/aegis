@@ -510,18 +510,6 @@ async def apply_update(version: str) -> bool:
         _state.current_version = version.lstrip("v")
         _state.has_update = False
 
-        # 恢復 Worker
-        from app.database import engine
-        from app.models.core import SystemSetting
-        from sqlmodel import Session
-
-        with Session(engine) as session:
-            paused = session.get(SystemSetting, "worker_paused")
-            if paused:
-                paused.value = "false"
-                session.add(paused)
-                session.commit()
-
         return True
 
     except Exception as e:
@@ -529,6 +517,23 @@ async def apply_update(version: str) -> bool:
         _state.error = str(e)
         _state.stage = UPDATE_STAGE_FAILED
         return False
+
+    finally:
+        # 無論成功或失敗，都恢復 Worker
+        try:
+            from app.database import engine
+            from app.models.core import SystemSetting
+            from sqlmodel import Session
+
+            with Session(engine) as session:
+                paused = session.get(SystemSetting, "worker_paused")
+                if paused and paused.value == "true":
+                    paused.value = "false"
+                    session.add(paused)
+                    session.commit()
+                    logger.info("Worker 已自動恢復")
+        except Exception as resume_err:
+            logger.error(f"恢復 Worker 失敗: {resume_err}")
 
 
 async def rollback(version: str = None) -> bool:
@@ -772,3 +777,18 @@ async def full_update(version: str = None, wait_timeout: int = 300) -> bool:
 
     finally:
         _state.is_updating = False
+        # 無論成功或失敗，確保 Worker 恢復運作
+        try:
+            from app.database import engine as _engine
+            from app.models.core import SystemSetting
+            from sqlmodel import Session as _Session
+
+            with _Session(_engine) as _s:
+                paused = _s.get(SystemSetting, "worker_paused")
+                if paused and paused.value == "true":
+                    paused.value = "false"
+                    _s.add(paused)
+                    _s.commit()
+                    logger.info("[full_update] Worker 已自動恢復")
+        except Exception as e:
+            logger.error(f"[full_update] 恢復 Worker 失敗: {e}")
