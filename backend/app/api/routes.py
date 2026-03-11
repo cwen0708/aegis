@@ -2667,44 +2667,46 @@ def get_node_info(
     }
 
 
-@router.post("/node/task")
-async def receive_node_task(
-    payload: NodeTaskPayload,
-    session: Session = Depends(get_session),
-    _: bool = Depends(require_api_key)
-):
+def create_card_from_onestack_task(
+    session: Session,
+    task_id: str,
+    title: str,
+    description: str,
+    project_name: Optional[str] = None,
+    member_slug: Optional[str] = None,
+) -> dict:
     """
-    接收 OneStack 派發的任務
+    從 OneStack 任務建立 Aegis 卡片（共用邏輯）
 
-    建立卡片並排入處理佇列
+    供 /node/task API 和 Supabase polling callback 共用。
+    回傳 {"ok": True, "card_id": ..., "project": ..., "stage": ...}
+    失敗時回傳 {"ok": False, "error": ...}
     """
     # 找到目標專案
     project = None
-    if payload.project_name:
+    if project_name:
         project = session.exec(
             select(Project).where(
-                Project.name == payload.project_name,
+                Project.name == project_name,
                 Project.is_active == True
             )
         ).first()
 
     if not project:
-        # 使用第一個活躍專案
         project = session.exec(
             select(Project).where(Project.is_active == True)
         ).first()
 
     if not project:
-        raise HTTPException(status_code=400, detail="No active project available")
+        return {"ok": False, "error": "No active project available"}
 
     # 找到目標成員
     member = None
-    if payload.member_slug:
+    if member_slug:
         member = session.exec(
-            select(Member).where(Member.slug == payload.member_slug)
+            select(Member).where(Member.slug == member_slug)
         ).first()
 
-    # 使用專案預設成員或第一個可用成員
     member_id = None
     if member:
         member_id = member.id
@@ -2715,7 +2717,7 @@ async def receive_node_task(
         if first_member:
             member_id = first_member.id
 
-    # 找到「待處理」清單（position=0 或第一個清單）
+    # 找到「待處理」清單
     stage_list = session.exec(
         select(StageList).where(
             StageList.project_id == project.id
@@ -2723,31 +2725,27 @@ async def receive_node_task(
     ).first()
 
     if not stage_list:
-        raise HTTPException(status_code=400, detail="No stage list found in project")
+        return {"ok": False, "error": "No stage list found in project"}
 
     # 建立卡片
     card_id = next_card_id(session)
 
-    # 將 OneStack 元資料寫入 markdown body
-    body_lines = [payload.description]
-    body_lines.append(f"\n\n<!-- onestack_task_id: {payload.task_id} -->")
-    if payload.member_slug:
-        body_lines.append(f"<!-- member_slug: {payload.member_slug} -->")
+    body_lines = [description]
+    body_lines.append(f"\n\n<!-- onestack_task_id: {task_id} -->")
+    if member_slug:
+        body_lines.append(f"<!-- member_slug: {member_slug} -->")
 
     card_data = CardData(
         id=card_id,
         list_id=stage_list.id,
-        title=payload.title,
-        description=payload.description[:200] if payload.description else None,
+        title=title,
+        description=description[:200] if description else None,
         content="\n".join(body_lines),
         status="pending",
     )
 
-    # 寫入 MD 檔案
     fpath = card_file_path(project.path, card_id)
     write_card(fpath, card_data)
-
-    # 同步到索引
     sync_card_to_index(session, card_data, project.id, str(fpath))
     session.commit()
 
@@ -2757,6 +2755,26 @@ async def receive_node_task(
         "project": project.name,
         "stage": stage_list.name,
     }
+
+
+@router.post("/node/task")
+async def receive_node_task(
+    payload: NodeTaskPayload,
+    session: Session = Depends(get_session),
+    _: bool = Depends(require_api_key)
+):
+    """接收 OneStack 派發的任務（直連 API）"""
+    result = create_card_from_onestack_task(
+        session=session,
+        task_id=payload.task_id,
+        title=payload.title,
+        description=payload.description,
+        project_name=payload.project_name,
+        member_slug=payload.member_slug,
+    )
+    if not result["ok"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
 
 
 # ==========================================

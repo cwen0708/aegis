@@ -643,11 +643,72 @@ class OneStackConnector:
 connector = OneStackConnector()
 
 
+async def _handle_onestack_task(task: Dict[str, Any]):
+    """
+    處理從 OneStack 輪詢到的任務：建立 Aegis 卡片
+
+    task 結構（來自 cli_tasks）：
+    - id: UUID
+    - task_type: str
+    - payload: {title, description, project_name, member_slug, ...}
+    - owner_id: UUID
+    """
+    task_id = task.get("id", "")
+    payload = task.get("payload", {}) or {}
+    title = payload.get("title") or task.get("title") or "OneStack Task"
+    description = payload.get("description") or task.get("description") or ""
+    project_name = payload.get("project_name") or task.get("project_name")
+    member_slug = payload.get("member_slug") or task.get("member_slug")
+
+    logger.info(f"[OneStack] Processing task: {task_id[:8]}... - {title}")
+
+    # 標記為 processing
+    await connector.update_task_status(task_id, "processing")
+
+    # 建立 Aegis 卡片
+    try:
+        from sqlmodel import Session as _Ses
+        from app.database import engine as _eng
+        from app.api.routes import create_card_from_onestack_task
+
+        with _Ses(_eng) as session:
+            result = create_card_from_onestack_task(
+                session=session,
+                task_id=task_id,
+                title=title,
+                description=description,
+                project_name=project_name,
+                member_slug=member_slug,
+            )
+
+        if result.get("ok"):
+            logger.info(
+                f"[OneStack] Card created: #{result['card_id']} "
+                f"in {result['project']}/{result['stage']}"
+            )
+        else:
+            error = result.get("error", "Unknown error")
+            logger.error(f"[OneStack] Failed to create card: {error}")
+            await connector.update_task_status(
+                task_id, "failed", error_message=error
+            )
+
+    except Exception as e:
+        logger.error(f"[OneStack] Task processing error: {e}")
+        await connector.update_task_status(
+            task_id, "failed", error_message=str(e)[:500]
+        )
+
+
 async def start_onestack_connector():
     """啟動 OneStack 連接器（供 main.py 呼叫）"""
     if connector.enabled:
         await connector.register_device()
         connector.start_heartbeat()
+
+        # 註冊任務回調 + 啟動輪詢
+        connector.on_task(_handle_onestack_task)
+        connector.start_polling()
 
         # 讀取 Email digest 設定
         try:
