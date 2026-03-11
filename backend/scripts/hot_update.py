@@ -109,7 +109,18 @@ def main():
                 update_status("failed", 50, "前端建構失敗", proc.stderr[:500])
                 return 1
 
-        update_status("applying", 80, "正在重啟服務...")
+        update_status("applying", 80, "正在更新版本號並重啟服務...")
+
+        # 從 git tag 更新 VERSION 檔
+        ret, tag_out, _ = run_command(
+            ["git", "describe", "--tags", "--abbrev=0"],
+            cwd=str(PROJECT_ROOT)
+        )
+        if ret == 0 and tag_out.strip():
+            version_str = tag_out.strip().lstrip("v")
+            version_file = BACKEND_DIR / "VERSION"
+            version_file.write_text(version_str)
+
         # 注意：系統排程同步由 main.py 啟動時自動執行，無需在此執行 seed.py
 
         # 先標記完成（因為重啟後這個進程也會被殺掉）
