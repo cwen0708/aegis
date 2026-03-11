@@ -324,6 +324,35 @@ async function assignMember(memberId: number | null) {
 const showProjectDropdown = ref(false)
 useEscapeKey(showProjectDropdown, () => { showProjectDropdown.value = false })
 
+// 手機版：Trello 風格單列顯示
+const mobileStageIndex = ref(0)
+const currentMobileStage = computed(() => boardData.value[mobileStageIndex.value] || null)
+
+// 當 boardData 改變時，確保 index 不超出範圍
+watch(boardData, (newData) => {
+  if (mobileStageIndex.value >= newData.length) {
+    mobileStageIndex.value = Math.max(0, newData.length - 1)
+  }
+})
+
+function goToStage(index: number) {
+  if (index >= 0 && index < boardData.value.length) {
+    mobileStageIndex.value = index
+  }
+}
+
+function prevStage() {
+  if (mobileStageIndex.value > 0) {
+    mobileStageIndex.value--
+  }
+}
+
+function nextStage() {
+  if (mobileStageIndex.value < boardData.value.length - 1) {
+    mobileStageIndex.value++
+  }
+}
+
 function switchToProjectsSidebar() {
   if (isMobile) {
     showProjectDropdown.value = !showProjectDropdown.value
@@ -557,12 +586,56 @@ async function unarchiveCard(cardId: number) {
       </div>
     </div>
 
+    <!-- Mobile Stage Navigator -->
+    <div v-if="isMobile && boardData.length > 0" class="shrink-0 bg-slate-900/50 border-b border-slate-800 px-2 py-2">
+      <div class="flex items-center justify-between gap-2">
+        <!-- Prev Button -->
+        <button
+          @click="prevStage"
+          :disabled="mobileStageIndex === 0"
+          class="p-2 rounded-lg transition-colors"
+          :class="mobileStageIndex === 0 ? 'text-slate-700' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'"
+        >
+          <ChevronLeft class="w-5 h-5" />
+        </button>
+
+        <!-- Stage Dots -->
+        <div class="flex-1 flex items-center justify-center gap-1.5 overflow-x-auto">
+          <button
+            v-for="(stage, idx) in boardData"
+            :key="stage.id"
+            @click="goToStage(idx)"
+            class="flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium transition-all"
+            :class="idx === mobileStageIndex
+              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+              : 'text-slate-500 hover:text-slate-300'"
+          >
+            <span class="w-1.5 h-1.5 rounded-full" :class="idx === mobileStageIndex ? 'bg-emerald-400' : 'bg-slate-600'"></span>
+            <span class="truncate max-w-[60px]">{{ stage.name }}</span>
+            <span v-if="stage.cards.length > 0" class="text-[10px] opacity-70">({{ stage.cards.length }})</span>
+          </button>
+        </div>
+
+        <!-- Next Button -->
+        <button
+          @click="nextStage"
+          :disabled="mobileStageIndex >= boardData.length - 1"
+          class="p-2 rounded-lg transition-colors"
+          :class="mobileStageIndex >= boardData.length - 1 ? 'text-slate-700' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'"
+        >
+          <ChevronRight class="w-5 h-5" />
+        </button>
+      </div>
+    </div>
+
     <!-- Kanban Board -->
+    <!-- Desktop: Show all columns -->
     <div
-      class="flex gap-3 sm:gap-5 flex-1 items-start overflow-x-auto px-2 sm:px-6 py-2 sm:py-4 custom-scrollbar transition-opacity duration-300"
+      v-if="!isMobile"
+      class="flex gap-5 flex-1 items-start overflow-x-auto px-6 py-4 custom-scrollbar transition-opacity duration-300"
       :class="{'opacity-50 grayscale pointer-events-none select-none': currentProject?.is_active === false}"
     >
-      <div v-for="stage in boardData" :key="stage.id" class="w-72 sm:w-80 shrink-0 bg-slate-800/40 rounded-xl p-3 sm:p-4 border border-slate-700/50 flex flex-col max-h-full">
+      <div v-for="stage in boardData" :key="stage.id" class="w-80 shrink-0 bg-slate-800/40 rounded-xl p-4 border border-slate-700/50 flex flex-col max-h-full">
         <div class="flex items-center justify-between mb-4 px-1">
           <h3 class="font-medium text-slate-200 flex items-center gap-2">
             <!-- Stage Type Icon -->
@@ -613,16 +686,15 @@ async function unarchiveCard(cardId: number) {
           @change="onDragChange($event, stage.id)"
           ghost-class="opacity-50"
           :move="checkMove"
-          :disabled="isMobile"
         >
           <template #item="{ element: card }">
             <div
               @click="openCardDetail(card.id)"
-              class="bg-slate-800 p-3 sm:p-4 rounded-xl border border-slate-700 shadow-sm transition-colors group relative"
+              class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-sm transition-colors group relative cursor-grab hover:border-emerald-500/50"
               :class="[
                 card.status === 'running' || card.status === 'pending'
                   ? 'cursor-not-allowed border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.1)]'
-                  : isMobile ? 'cursor-pointer hover:border-emerald-500/50' : 'cursor-grab hover:border-emerald-500/50'
+                  : ''
               ]"
             >
               <!-- Card Menu Button -->
@@ -697,6 +769,148 @@ async function unarchiveCard(cardId: number) {
           </template>
         </draggable>
       </div>
+    </div>
+
+    <!-- Mobile: Single column view (Trello style) -->
+    <div
+      v-else-if="currentMobileStage"
+      class="flex-1 flex flex-col overflow-hidden px-2 py-2 transition-opacity duration-300"
+      :class="{'opacity-50 grayscale pointer-events-none select-none': currentProject?.is_active === false}"
+    >
+      <!-- Stage Header -->
+      <div class="flex items-center justify-between mb-3 px-1">
+        <h3 class="font-medium text-slate-200 flex items-center gap-2">
+          <component
+            :is="getStageTypeIcon(currentMobileStage.stage_type)"
+            class="w-4 h-4"
+            :class="{
+              'text-slate-500': currentMobileStage.stage_type === 'manual',
+              'text-emerald-400': currentMobileStage.stage_type === 'auto_process',
+              'text-blue-400': currentMobileStage.stage_type === 'auto_review',
+              'text-slate-600': currentMobileStage.stage_type === 'terminal',
+            }"
+          />
+          {{ currentMobileStage.name }}
+          <span class="text-xs text-slate-500">({{ currentMobileStage.cards.length }})</span>
+          <span v-if="currentMobileStage.cards.some((c: any) => c.status === 'running')" class="relative flex h-2 w-2 ml-1">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+          </span>
+        </h3>
+        <div class="flex items-center gap-1.5">
+          <button
+            @click.stop="openAssignDialog(currentMobileStage)"
+            class="flex items-center justify-center w-7 h-7 rounded-full transition-colors"
+            :class="currentMobileStage.member ? 'bg-slate-700 hover:bg-slate-600' : 'text-slate-600 hover:text-slate-400 hover:bg-slate-700/50'"
+          >
+            <span v-if="currentMobileStage.member" class="text-sm">{{ currentMobileStage.member.avatar || '🤖' }}</span>
+            <UserCircle v-else class="w-4 h-4" />
+          </button>
+          <button
+            @click.stop="openStageConfigDialog(currentMobileStage)"
+            class="flex items-center justify-center w-7 h-7 rounded-full text-slate-600 hover:text-slate-400 hover:bg-slate-700/50 transition-colors"
+          >
+            <Settings2 class="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      <!-- Cards List -->
+      <div class="flex-1 overflow-y-auto space-y-2 custom-scrollbar">
+        <div
+          v-for="card in currentMobileStage.cards"
+          :key="card.id"
+          @click="openCardDetail(card.id)"
+          class="bg-slate-800 p-3 rounded-xl border border-slate-700 shadow-sm transition-colors group relative cursor-pointer active:bg-slate-750"
+          :class="[
+            card.status === 'running' || card.status === 'pending'
+              ? 'border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.1)]'
+              : 'hover:border-emerald-500/50'
+          ]"
+        >
+          <!-- Card Menu Button -->
+          <div class="absolute top-3 right-3">
+            <button
+              @click.stop="openMenuCardId = openMenuCardId === card.id ? null : card.id"
+              class="text-slate-500 hover:text-slate-300 p-1"
+            >
+              <MoreVertical class="w-4 h-4" />
+            </button>
+            <!-- Dropdown Menu -->
+            <div v-if="openMenuCardId === card.id" @click.stop class="absolute right-0 mt-1 w-36 bg-slate-700 rounded-lg border border-slate-600 shadow-xl z-10 py-1">
+              <button
+                @click.stop="handleTrigger(card.id)"
+                class="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-slate-200 hover:bg-slate-600 transition-colors"
+                :class="{ 'opacity-50 cursor-not-allowed': card.status === 'running' }"
+                :disabled="card.status === 'running'"
+              >
+                <Zap class="w-4 h-4 text-amber-400" /> 手動觸發
+              </button>
+              <button
+                @click.stop="archiveCard(card.id)"
+                class="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-slate-300 hover:bg-slate-600 transition-colors"
+                :class="{ 'opacity-50 cursor-not-allowed': card.status === 'running' || card.status === 'pending' }"
+                :disabled="card.status === 'running' || card.status === 'pending'"
+              >
+                <Archive class="w-4 h-4 text-slate-400" /> 封存
+              </button>
+              <button
+                @click.stop="requestDeleteCard(card.id)"
+                class="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-red-400 hover:bg-slate-600 transition-colors"
+                :class="{ 'opacity-50 cursor-not-allowed': card.status === 'running' }"
+                :disabled="card.status === 'running'"
+              >
+                <Trash2 class="w-4 h-4" /> 刪除卡片
+              </button>
+            </div>
+          </div>
+
+          <div class="flex gap-2 mb-2">
+            <span class="bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider">C-{{ card.id }}</span>
+            <span v-if="card.status !== 'idle'" class="text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider border"
+              :class="{
+                'bg-emerald-500/10 border-emerald-500/20 text-emerald-400': card.status === 'running',
+                'bg-amber-500/10 border-amber-500/20 text-amber-400': card.status === 'pending',
+                'bg-green-500/10 border-green-500/20 text-green-400': card.status === 'completed',
+                'bg-red-500/10 border-red-500/20 text-red-400': card.status === 'failed',
+              }"
+            >{{ card.status }}</span>
+          </div>
+
+          <h4 class="text-sm font-medium text-slate-100 pr-8">{{ card.title }}</h4>
+
+          <!-- AI Execution Indicator -->
+          <div v-if="card.status === 'pending' || card.status === 'running'" class="mt-3 bg-slate-900/50 rounded-lg p-2 flex items-center justify-between border border-slate-700/50">
+            <div class="flex items-center gap-2">
+              <div class="w-4 h-4 rounded-full bg-emerald-500/20 flex items-center justify-center border border-emerald-500/30">
+                <div class="w-1 h-1 rounded-full bg-emerald-400" :class="{'animate-pulse': card.status === 'running'}"></div>
+              </div>
+              <span class="text-[10px] text-slate-400 font-medium font-mono">
+                {{ card.status === 'running' ? '執行中...' : '等待中...' }}
+              </span>
+            </div>
+            <span v-if="card.status === 'running' && elapsedTimers.get(card.id)" class="text-[10px] text-emerald-400 font-mono mr-1">
+              {{ elapsedTimers.get(card.id) }}
+            </span>
+            <button v-if="card.status === 'running'" @click.stop="handleAbort(card.id)" class="text-red-400 hover:text-red-300 p-1" title="中止任務">
+              <Square class="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+
+        <!-- Empty State -->
+        <div v-if="currentMobileStage.cards.length === 0" class="flex flex-col items-center justify-center py-12 text-slate-500">
+          <div class="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center mb-3">
+            <FolderOpen class="w-6 h-6" />
+          </div>
+          <p class="text-sm">此階段沒有卡片</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- No stages fallback -->
+    <div v-else-if="isMobile && boardData.length === 0" class="flex-1 flex items-center justify-center">
+      <p class="text-slate-500 text-sm">尚未建立任何階段</p>
     </div>
   </div>
 
