@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
-import { Globe, Cpu, Save, Loader2, Lock, RefreshCw, Download, Clock } from 'lucide-vue-next'
+import { Globe, Cpu, Save, Loader2, Lock, RefreshCw, Download, Clock, Link } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 
 import { config } from '../../config'
@@ -15,6 +15,7 @@ const form = ref({
   timezone: 'Asia/Taipei',
   max_workstations: '3',
   memory_short_term_days: '30',
+  onestack_owner_id: '',
 })
 
 // 更新狀態
@@ -239,6 +240,7 @@ onMounted(async () => {
   form.value.timezone = store.settings.timezone || 'Asia/Taipei'
   form.value.max_workstations = store.settings.max_workstations || '3'
   form.value.memory_short_term_days = store.settings.memory_short_term_days || '30'
+  form.value.onestack_owner_id = store.settings.onestack_owner_id || ''
   loading.value = false
 
   // 如果正在更新中，恢復輪詢
@@ -262,6 +264,7 @@ async function saveSettings() {
       timezone: form.value.timezone,
       max_workstations: form.value.max_workstations,
       memory_short_term_days: form.value.memory_short_term_days,
+      onestack_owner_id: form.value.onestack_owner_id,
     })
   } finally {
     saving.value = false
@@ -325,6 +328,28 @@ async function saveSettings() {
             class="w-32 bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-mono"
           />
           <p class="text-[11px] text-slate-500 mt-1">AEGIS 系統短期記憶的保留天數，超過自動清理</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- OneStack 整合 -->
+    <div class="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
+      <div class="px-6 py-4 border-b border-slate-700/50">
+        <div class="flex items-center gap-2">
+          <Link class="w-4 h-4 text-violet-400" />
+          <h2 class="text-sm font-semibold text-slate-200">OneStack 整合</h2>
+        </div>
+      </div>
+      <div class="p-6 space-y-4">
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1.5">Owner ID</label>
+          <input
+            v-model="form.onestack_owner_id"
+            type="text"
+            placeholder="填入 OneStack 個人頁面上的序號（UUID）"
+            class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-violet-500 outline-none text-sm font-mono"
+          />
+          <p class="text-[11px] text-slate-500 mt-1">Aegis 會將高價值 Email 摘要轉發到 OneStack 指揮中心</p>
         </div>
       </div>
     </div>

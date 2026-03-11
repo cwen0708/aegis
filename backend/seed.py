@@ -230,6 +230,48 @@ def _sync_system_cron_jobs(session: Session):
             is_system=True,
         ))
 
+    # Email 分類轉發（OneStack 列表）
+    if "Email 分類轉發" not in existing_crons:
+        cron_expr = "*/15 * * * *"
+        crons_to_add.append(CronJob(
+            project_id=aegis.id,
+            name="Email 分類轉發",
+            description="分類未處理 email，actionable 信件轉發到 OneStack。",
+            prompt_template=(
+                "你是 Aegis 郵件助手。以下是 {unclassified_email_count} 封未分類的郵件：\n\n"
+                "{unclassified_emails}\n\n"
+                "請執行以下步驟：\n\n"
+                "1. 對每封郵件分類（category: actionable/informational/spam/newsletter）\n"
+                "2. 評估緊急程度（urgency: high/medium/low）\n"
+                "3. 產生 1-3 句摘要\n"
+                "4. 呼叫 Aegis API 批次更新分類結果：\n"
+                "   POST http://localhost:8899/api/v1/emails/classify-batch\n"
+                "   Content-Type: application/json\n"
+                '   Body: [{{"id": <ID>, "category": "...", "urgency": "...", "summary": "...", "suggested_action": "..."}}]\n\n'
+                "5. 若有 actionable 且 urgency 為 high 或 medium 的郵件，\n"
+                "   且 OneStack 已設定（owner_id: {onestack_owner_id}），\n"
+                "   則呼叫 OneStack API 轉發：\n"
+                "   POST {onestack_supabase_url}/rest/v1/ai_suggestions\n"
+                "   Headers: apikey: {onestack_supabase_key}, Authorization: Bearer {onestack_supabase_key}\n"
+                "   Content-Type: application/json\n"
+                '   Body: {{\n'
+                '     "owner_id": "{onestack_owner_id}",\n'
+                '     "suggestion_type": "action",\n'
+                '     "title": "[Email] <subject>",\n'
+                '     "content": "From: <sender>\\nSummary: <摘要>\\nAction: <建議動作>",\n'
+                '     "priority": "<high|medium>",\n'
+                '     "metadata": {{"source": "aegis_email", "email_id": <ID>}}\n'
+                "   }}\n\n"
+                "如果沒有需要分類的郵件，回覆「無待分類郵件」。\n"
+                "如果 onestack_owner_id 為空，跳過步驟 5。"
+            ),
+            cron_expression=cron_expr,
+            next_scheduled_at=_calculate_next_scheduled_at(cron_expr),
+            is_enabled=False,  # 需設定 Email 頻道後手動啟用
+            is_system=True,
+            metadata_json='{"target_list": "OneStack"}',
+        ))
+
     if crons_to_add:
         session.add_all(crons_to_add)
         session.commit()
@@ -341,7 +383,12 @@ def seed_data():
             session.add(office_layout_setting)
             print("  - Added office_layout setting")
 
-        # ── 2d. 管理員設定（跳過已存在）──
+        # ── 2d. OneStack Owner ID（跳過已存在）──
+        if not session.get(SystemSetting, "onestack_owner_id"):
+            session.add(SystemSetting(key="onestack_owner_id", value=""))
+            print("  - Added onestack_owner_id setting (empty)")
+
+        # ── 2e. 管理員設定（跳過已存在）──
         import os
         admin_ids = os.getenv("AEGIS_ADMIN_USER_IDS", "")
         if admin_ids and not session.get(SystemSetting, "admin_user_ids"):
@@ -368,17 +415,17 @@ def seed_data():
             session.refresh(aegis)
             print("  - Added AEGIS system project")
 
-            # AEGIS 只有 Scheduled 列表（用於排程任務）
-            aegis_scheduled = StageList(
-                project_id=aegis.id,
-                name="Scheduled",
-                position=0,
-                stage_type="auto_process",
-                is_ai_stage=True,
-            )
-            session.add(aegis_scheduled)
+            # AEGIS 系統列表
+            for pos, list_name in enumerate(["Scheduled", "OneStack"]):
+                sl = StageList(
+                    project_id=aegis.id,
+                    name=list_name,
+                    position=pos,
+                    stage_type="auto_process",
+                    is_ai_stage=True,
+                )
+                session.add(sl)
             session.commit()
-            session.refresh(aegis_scheduled)
 
         # ── 4. AEGIS 系統排程 ──
         _sync_system_cron_jobs(session)

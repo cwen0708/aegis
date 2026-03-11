@@ -75,6 +75,10 @@ def _get_template_variables(session: Session) -> dict:
         unclassified_emails_text = "（無未分類郵件）"
         unclassified_count = "0"
 
+    # OneStack 相關變數
+    owner_id_setting = session.get(SystemSetting, "onestack_owner_id")
+    onestack_owner_id = owner_id_setting.value if owner_id_setting else ""
+
     return {
         "cpu_percent": f"{metrics['cpu_percent']:.1f}",
         "mem_percent": f"{metrics['memory_percent']:.1f}",
@@ -84,6 +88,9 @@ def _get_template_variables(session: Session) -> dict:
         "recent_failures": recent_failures,
         "unclassified_emails": unclassified_emails_text,
         "unclassified_email_count": unclassified_count,
+        "onestack_owner_id": onestack_owner_id,
+        "onestack_supabase_url": os.getenv("ONESTACK_SUPABASE_URL", ""),
+        "onestack_supabase_key": os.getenv("ONESTACK_SUPABASE_KEY", ""),
     }
 
 
@@ -189,19 +196,20 @@ async def poll_local_cron_jobs():
                     session.commit()
                 continue
 
-            # 找到專案的 Scheduled 列表（排程專用）
+            # 組合 prompt 內容（替換變數）
+            metadata = json.loads(job.metadata_json) if job.metadata_json else {}
+
+            # 找目標列表（metadata 可指定，預設 Scheduled）
+            target_list_name = metadata.get("target_list", "Scheduled")
             sched_list = session.exec(
                 select(StageList)
                 .where(StageList.project_id == job.project_id)
-                .where(StageList.name == "Scheduled")
+                .where(StageList.name == target_list_name)
             ).first()
 
             if not sched_list:
-                logger.error(f"Cannot find Scheduled list for project {job.project_id}")
+                logger.error(f"Cannot find '{target_list_name}' list for project {job.project_id}")
                 continue
-
-            # 組合 prompt 內容（替換變數）
-            metadata = json.loads(job.metadata_json) if job.metadata_json else {}
             template_vars = _get_template_variables(session)
 
             rendered_prompt = _render_template(job.prompt_template, template_vars)

@@ -66,6 +66,7 @@ PHASE_ROUTING = {
     "DEVELOPING": "claude",
     "VERIFYING": "claude",
     "SCHEDULED": "claude",
+    "ONESTACK": "claude",
 }
 
 PROVIDERS = {
@@ -882,7 +883,7 @@ def process_pending_cards():
             project = session.get(Project, idx.project_id)
 
         # 只處理特定列表
-        if list_name not in ["Planning", "Developing", "Verifying", "Scheduled"]:
+        if list_name not in ["Planning", "Developing", "Verifying", "Scheduled", "OneStack"]:
             # 不需要 AI 的列表，清除 pending 狀態
             update_card_status(idx.card_id, "idle")
             continue
@@ -911,7 +912,7 @@ def process_pending_cards():
         except Exception as e:
             logger.error(f"[Worker] Failed to read card {idx.card_id}: {e}")
             cron_job_id = _parse_cron_job_id(idx.title)
-            if cron_job_id is not None and list_name == "Scheduled":
+            if cron_job_id is not None and list_name in ("Scheduled", "OneStack"):
                 # 排程卡片讀取失敗：寫 CronLog + 刪除卡片
                 with Session(engine) as session:
                     from app.models.core import CronJob as CJ
@@ -956,7 +957,7 @@ def process_pending_cards():
 
         # 判斷是否為排程卡片
         cron_job_id = _parse_cron_job_id(idx.title)
-        is_cron_card = cron_job_id is not None and list_name == "Scheduled"
+        is_cron_card = cron_job_id is not None and list_name in ("Scheduled", "OneStack")
 
         new_status = "completed" if result["status"] == "success" else "failed"
         token_info = result.get("token_info", {})
