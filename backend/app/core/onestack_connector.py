@@ -317,30 +317,26 @@ class OneStackConnector:
             # 實際 onestack_task_id 存在卡片建立時的 metadata 中
             # 由 /node/task 端點設定在 card 的 description 或 tags
 
-        # 從 MD 檔讀 frontmatter metadata
+        # 從 MD 檔讀 onestack_task_id（寫在 HTML comment 中）
+        import re
         from app.models.core import Project
+        from app.core.card_file import card_file_path
+
         with DBSession(engine) as session:
             project = session.get(Project, card.project_id) if card else None
             if not project or not project.path:
                 return
 
-        md_path = Path(project.path) / "cards" / f"{card_id}.md"
+        md_path = card_file_path(project.path, card_id)
         if md_path.exists():
             try:
                 text = md_path.read_text(encoding="utf-8")
-                if text.startswith("---"):
-                    parts = text.split("---", 2)
-                    if len(parts) >= 3:
-                        import yaml
-                        fm = yaml.safe_load(parts[1])
-                        if isinstance(fm, dict):
-                            meta = fm.get("metadata", {})
-                            if isinstance(meta, str):
-                                meta = _json.loads(meta)
-                            if isinstance(meta, dict):
-                                onestack_task_id = meta.get("onestack_task_id")
+                # 從 HTML comment 中提取 onestack_task_id
+                match = re.search(r'<!--\s*onestack_task_id:\s*(\S+)\s*-->', text)
+                if match:
+                    onestack_task_id = match.group(1)
             except Exception as e:
-                logger.debug(f"[OneStack] Failed to parse card metadata: {e}")
+                logger.debug(f"[OneStack] Failed to parse card: {e}")
 
         if not onestack_task_id:
             return

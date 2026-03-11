@@ -2728,17 +2728,19 @@ async def receive_node_task(
     # 建立卡片
     card_id = next_card_id(session)
 
+    # 將 OneStack 元資料寫入 markdown body
+    body_lines = [payload.description]
+    body_lines.append(f"\n\n<!-- onestack_task_id: {payload.task_id} -->")
+    if payload.member_slug:
+        body_lines.append(f"<!-- member_slug: {payload.member_slug} -->")
+
     card_data = CardData(
-        card_id=card_id,
+        id=card_id,
+        list_id=stage_list.id,
         title=payload.title,
-        content=payload.description,
+        description=payload.description[:200] if payload.description else None,
+        content="\n".join(body_lines),
         status="pending",
-        priority=payload.priority,
-        stage=stage_list.name,
-        stage_id=stage_list.id,
-        member_id=member_id,
-        source="onestack",
-        metadata={"onestack_task_id": payload.task_id},
     )
 
     # 寫入 MD 檔案
