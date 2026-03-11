@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { Clock, Play, Pause, Trash2, AlertCircle, Plus, X, FolderOpen, Pencil, ChevronDown, ChevronRight } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
+import { useEscapeKey } from '../composables/useEscapeKey'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 
 const route = useRoute()
@@ -14,6 +15,7 @@ const cronPausedProjects = ref<number[]>([])
 
 // Modal 狀態
 const showAddModal = ref(false)
+useEscapeKey(showAddModal, () => { showAddModal.value = false })
 const newJobForm = ref({
   project_id: null as number | null,
   name: '',
@@ -25,6 +27,7 @@ const newJobForm = ref({
 // 編輯 Modal
 const showEditModal = ref(false)
 const editJobForm = ref<any>(null)
+useEscapeKey(showEditModal, () => { showEditModal.value = false })
 
 function openEditModal(job: any) {
   editJobForm.value = { ...job }

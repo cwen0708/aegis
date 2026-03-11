@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { Plus, Play, Pause, Square, Clock, Trash2, Zap, MoreVertical, ChevronDown, ChevronLeft, ChevronRight, FolderOpen, Eye, UserCircle, Settings2, Bot, Hand, CheckCircle, XCircle, Archive, RotateCcw, Loader2 } from 'lucide-vue-next'
 import draggable from 'vuedraggable'
 import { useAegisStore } from '../stores/aegis'
+import { useEscapeKey } from '../composables/useEscapeKey'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import TerminalViewer from '../components/TerminalViewer.vue'
 
@@ -55,6 +56,7 @@ const boardData = ref<any[]>([])
 // Modal 狀態
 const showNewTaskModal = ref(false)
 const newTaskForm = ref({ title: '', description: '' })
+useEscapeKey(showNewTaskModal, () => { showNewTaskModal.value = false })
 
 // 卡片選單
 const openMenuCardId = ref<number | null>(null)
@@ -282,6 +284,7 @@ const allMembers = ref<MemberOption[]>([])
 const showAssignDialog = ref(false)
 const assigningListId = ref<number | null>(null)
 const assigningListName = ref('')
+useEscapeKey(showAssignDialog, () => { showAssignDialog.value = false })
 
 async function fetchMembers() {
   try {
@@ -327,6 +330,7 @@ const stageConfigForm = ref({
   stage_type: 'auto_process',
   is_ai_stage: true,
 })
+useEscapeKey(showStageConfigDialog, () => { showStageConfigDialog.value = false })
 
 const stageTypeOptions = [
   { value: 'manual', label: '手動', icon: Hand, desc: '不自動執行，需手動觸發' },
@@ -404,6 +408,7 @@ function canMoveStage(direction: 'up' | 'down'): boolean {
 const showArchivePanel = ref(false)
 const archivedCards = ref<any[]>([])
 const archiveLoading = ref(false)
+useEscapeKey(showArchivePanel, () => { showArchivePanel.value = false })
 const unarchiveLoading = ref<number | null>(null)
 
 async function fetchArchivedCards() {

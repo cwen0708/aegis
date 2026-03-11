@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { Plus, UserPlus, Save, Edit3, Upload, Sparkles, Image, BookOpen, ChevronLeft, Trash2 } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
+import { useEscapeKey } from '../composables/useEscapeKey'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 
 import { config } from '../config'
@@ -70,6 +71,11 @@ const bindingMemberId = ref<number | null>(null)
 const editingBinding = ref<{ memberId: number; acc: MemberAccount } | null>(null)
 const editBindForm = ref({ model: '', priority: 0 })
 
+// ESC key handling for dialogs
+useEscapeKey(showMemberDialog, () => { showMemberDialog.value = false })
+useEscapeKey(showBindDialog, () => { showBindDialog.value = false })
+useEscapeKey(showEditBindDialog, () => { showEditBindDialog.value = false })
+
 const memberForm = ref({ name: '', avatar: '🤖', role: '', description: '', sprite_index: 0, portrait: '' })
 const bindForm = ref({ account_id: 0, priority: 0, model: '' })
 
@@ -90,6 +96,11 @@ const skillEditContent = ref('')
 const savingSkill = ref(false)
 const showNewSkillDialog = ref(false)
 const newSkillForm = ref({ name: '', content: '' })
+
+// ESC key handling for skill dialogs
+useEscapeKey(showSkillsDialog, () => { showSkillsDialog.value = false })
+useEscapeKey(showSkillDetailDialog, () => { showSkillDetailDialog.value = false; showSkillsDialog.value = true })
+useEscapeKey(showNewSkillDialog, () => { showNewSkillDialog.value = false })
 
 // 綁定時根據選的帳號 provider 提供 model 選項
 const bindAccountProvider = computed(() => {
