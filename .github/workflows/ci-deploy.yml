@@ -63,17 +63,18 @@ jobs:
           # 從穩定版取 base
           STABLE_VER=${LATEST_STABLE#v}
           IFS='.' read -r MAJOR MINOR PATCH <<< "$STABLE_VER"
+          NEXT_PATCH=$((PATCH + 1))
 
-          # 計算下一個 dev 編號
-          if echo "$LATEST_DEV" | grep -q "v${MAJOR}.${MINOR}.$((PATCH + 1))-dev\."; then
-            DEV_NUM=$(echo "$LATEST_DEV" | grep -o 'dev\.[0-9]*' | cut -d. -f2)
+          # 找同 base 版本的最大 dev 編號
+          MAX_DEV=$(git tag -l "v${MAJOR}.${MINOR}.${NEXT_PATCH}-dev.*" --sort=-v:refname | head -1)
+          if [ -n "$MAX_DEV" ]; then
+            DEV_NUM=$(echo "$MAX_DEV" | grep -o 'dev\.[0-9]*' | cut -d. -f2)
             DEV_NUM=$((DEV_NUM + 1))
           else
-            PATCH=$((PATCH + 1))
             DEV_NUM=1
           fi
 
-          NEW="v${MAJOR}.${MINOR}.${PATCH}-dev.${DEV_NUM}"
+          NEW="v${MAJOR}.${MINOR}.${NEXT_PATCH}-dev.${DEV_NUM}"
           echo "new=$NEW" >> "$GITHUB_OUTPUT"
           echo "new_bare=${MAJOR}.${MINOR}.${PATCH}-dev.${DEV_NUM}" >> "$GITHUB_OUTPUT"
           echo "Tagging: $NEW"
