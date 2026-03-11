@@ -102,6 +102,19 @@ def _sync_system_cron_jobs(session: Session):
         print("  AEGIS system project not found, skipping cron sync.")
         return
 
+    # 補建缺少的系統列表（如 OneStack）
+    existing_lists = {sl.name for sl in session.exec(
+        select(StageList).where(StageList.project_id == aegis.id)
+    ).all()}
+    for pos, list_name in enumerate(["Scheduled", "OneStack"]):
+        if list_name not in existing_lists:
+            session.add(StageList(
+                project_id=aegis.id, name=list_name, position=pos,
+                stage_type="auto_process", is_ai_stage=True,
+            ))
+            print(f"  - Added missing system list: {list_name}")
+    session.commit()
+
     existing_crons = {c.name for c in session.exec(select(CronJob).where(CronJob.project_id == aegis.id)).all()}
     crons_to_add = []
 
@@ -389,8 +402,8 @@ def seed_data():
             session.add(SystemSetting(key="onestack_owner_id", value=""))
             print("  - Added onestack_owner_id setting (empty)")
         if not session.get(SystemSetting, "onestack_endpoint"):
-            session.add(SystemSetting(key="onestack_endpoint", value=""))
-            print("  - Added onestack_endpoint setting (empty)")
+            session.add(SystemSetting(key="onestack_endpoint", value="https://avioqoteujivjkpnvyyo.supabase.co/functions/v1/receive-suggestion"))
+            print("  - Added onestack_endpoint setting")
 
         # ── 2e. 管理員設定（跳過已存在）──
         import os
