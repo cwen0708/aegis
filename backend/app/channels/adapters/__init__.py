@@ -10,6 +10,7 @@ __all__ = [
     "SlackChannel",
     "WeComChannel",
     "FeishuChannel",
+    "EmailChannel",
 ]
 
 
@@ -22,6 +23,7 @@ def __getattr__(name: str):
         "SlackChannel": ".slack",
         "WeComChannel": ".wecom",
         "FeishuChannel": ".feishu",
+        "EmailChannel": ".email",
     }
     if name in _map:
         import importlib

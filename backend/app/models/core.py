@@ -372,3 +372,37 @@ class ChatMessage(SQLModel, table=True):
     output_tokens: int = Field(default=0)
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# ==========================================
+# Email 頻道
+# ==========================================
+class EmailMessage(SQLModel, table=True):
+    """收到的 Email 紀錄（含 AI 分類結果）"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    # IMAP 信封
+    uid: str = Field(index=True, unique=True)     # IMAP UID — 去重 key
+    message_id: str = Field(default="")            # RFC Message-ID header
+    in_reply_to: str = Field(default="")           # 串連用
+    from_address: str = Field(default="")
+    from_name: str = Field(default="")
+    to_address: str = Field(default="")
+    subject: str = Field(default="")
+    date: Optional[datetime] = None
+    body_text: str = Field(default="")             # 純文字（截斷）
+    attachment_names: str = Field(default="[]")    # JSON array
+
+    # AI 分類
+    category: str = Field(default="unclassified")  # actionable / informational / spam / newsletter
+    urgency: str = Field(default="unknown")        # high / medium / low
+    summary: str = Field(default="")               # AI 摘要 1-3 句
+    suggested_action: str = Field(default="")      # AI 建議動作
+    project_id: Optional[int] = Field(default=None)
+
+    # 處理狀態
+    is_processed: bool = Field(default=False)
+    is_synced_to_onestack: bool = Field(default=False)
+    card_id: Optional[int] = Field(default=None)
+
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

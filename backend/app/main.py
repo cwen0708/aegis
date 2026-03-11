@@ -39,7 +39,8 @@ async def _register_channels_from_config():
     channel_configs = {}
     with DBSession(engine) as session:
         for key in ["channel_telegram", "channel_line", "channel_discord",
-                    "channel_slack", "channel_wecom", "channel_feishu"]:
+                    "channel_slack", "channel_wecom", "channel_feishu",
+                    "channel_email"]:
             setting = session.get(SystemSetting, key)
             if setting:
                 try:
@@ -140,6 +141,35 @@ async def _register_channels_from_config():
                 logger.info("Feishu channel registered")
     except ImportError as e:
         logger.warning(f"Feishu adapter unavailable: {e}")
+
+    # Email: DB 設定（無 env 備援，IMAP 憑證必須存在 DB）
+    try:
+        email_config = channel_configs.get("channel_email", {})
+        if email_config.get("enabled") and email_config.get("imap_host"):
+            from app.channels.adapters.email import EmailChannel
+            channel_manager.register(EmailChannel(
+                imap_host=email_config["imap_host"],
+                imap_port=email_config.get("imap_port", 993),
+                imap_user=email_config.get("imap_user", ""),
+                imap_pass=email_config.get("imap_pass", ""),
+                imap_use_ssl=email_config.get("imap_use_ssl", True),
+                smtp_host=email_config.get("smtp_host", ""),
+                smtp_port=email_config.get("smtp_port", 587),
+                smtp_user=email_config.get("smtp_user", ""),
+                smtp_pass=email_config.get("smtp_pass", ""),
+                smtp_use_tls=email_config.get("smtp_use_tls", True),
+                smtp_use_ssl=email_config.get("smtp_use_ssl", False),
+                poll_interval=email_config.get("poll_interval", 60),
+                mark_seen=email_config.get("mark_seen", True),
+                max_body_chars=email_config.get("max_body_chars", 5000),
+                auto_reply_enabled=email_config.get("auto_reply_enabled", False),
+                sender_allowlist=email_config.get("sender_allowlist", []),
+                folders=email_config.get("folders", ["INBOX"]),
+                ai_classify_enabled=email_config.get("ai_classify_enabled", True),
+            ))
+            logger.info("Email channel registered")
+    except ImportError as e:
+        logger.warning(f"Email adapter unavailable: {e}")
 
 
 @asynccontextmanager

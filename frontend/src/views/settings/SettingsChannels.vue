@@ -82,6 +82,25 @@ const channelDefs = [
       { key: 'is_lark', label: '使用 Lark 國際版', type: 'checkbox' as const },
     ],
   },
+  {
+    name: 'email',
+    label: 'Email (IMAP/SMTP)',
+    icon: '📧',
+    iconColor: 'bg-amber-500/20',
+    fields: [
+      { key: 'imap_host', label: 'IMAP Host', type: 'text' as const, placeholder: 'imap.gmail.com' },
+      { key: 'imap_port', label: 'IMAP Port', type: 'text' as const, placeholder: '993' },
+      { key: 'imap_user', label: 'IMAP 帳號', type: 'text' as const, placeholder: 'user@example.com' },
+      { key: 'imap_pass', label: 'IMAP 密碼', type: 'password' as const, placeholder: '' },
+      { key: 'smtp_host', label: 'SMTP Host', type: 'text' as const, placeholder: 'smtp.gmail.com' },
+      { key: 'smtp_port', label: 'SMTP Port', type: 'text' as const, placeholder: '587' },
+      { key: 'smtp_user', label: 'SMTP 帳號', type: 'text' as const, placeholder: '' },
+      { key: 'smtp_pass', label: 'SMTP 密碼', type: 'password' as const, placeholder: '' },
+      { key: 'poll_interval', label: '輪詢間隔 (秒)', type: 'text' as const, placeholder: '60' },
+      { key: 'auto_reply_enabled', label: '啟用自動回覆', type: 'checkbox' as const },
+      { key: 'ai_classify_enabled', label: '啟用 AI 分類摘要', type: 'checkbox' as const },
+    ],
+  },
 ]
 
 async function fetchChannelConfigs() {

@@ -39,6 +39,8 @@ class OneStackConnector:
         self.device_id = ONESTACK_DEVICE_ID
         self.device_name = ONESTACK_DEVICE_NAME
         self._heartbeat_task: Optional[asyncio.Task] = None
+        self._email_digest_task: Optional[asyncio.Task] = None
+        self._email_digest_interval_hours: int = 6
 
         if self.enabled:
             if not self.supabase_url or not self.supabase_key:
@@ -282,6 +284,92 @@ class OneStackConnector:
             }
         )
 
+    # ===== Email Digest Sync =====
+
+    async def sync_email_digest(self):
+        """批次同步未同步的高價值 email 到 OneStack ai_suggestions 表"""
+        if not self.enabled:
+            return
+
+        from sqlmodel import Session as DBSession, select
+        from app.database import engine
+        from app.models.core import EmailMessage
+
+        with DBSession(engine) as session:
+            emails = session.exec(
+                select(EmailMessage).where(
+                    EmailMessage.is_processed == True,
+                    EmailMessage.is_synced_to_onestack == False,
+                    EmailMessage.category == "actionable",
+                )
+            ).all()
+
+            if not emails:
+                return
+
+            synced_ids = []
+            for email_msg in emails:
+                result = await self._request(
+                    "POST",
+                    "ai_suggestions",
+                    json_data={
+                        "device_id": self.device_id,
+                        "suggestion_type": "email_digest",
+                        "title": f"[Email] {email_msg.subject[:80]}",
+                        "content": (
+                            f"From: {email_msg.from_name} <{email_msg.from_address}>\n"
+                            f"Summary: {email_msg.summary}\n"
+                            f"Action: {email_msg.suggested_action}"
+                        ),
+                        "priority": "high" if email_msg.urgency == "high" else "medium",
+                        "metadata": {
+                            "source": "aegis_email",
+                            "email_message_id": email_msg.id,
+                            "from_address": email_msg.from_address,
+                            "subject": email_msg.subject,
+                            "date": str(email_msg.date or ""),
+                        },
+                    }
+                )
+                if result is not None:
+                    synced_ids.append(email_msg.id)
+
+            # 標記已同步
+            if synced_ids:
+                for eid in synced_ids:
+                    em = session.get(EmailMessage, eid)
+                    if em:
+                        em.is_synced_to_onestack = True
+                session.commit()
+
+            logger.info(f"[OneStack] Email digest synced: {len(synced_ids)} emails")
+
+    async def _email_digest_loop(self):
+        """定時 Email 摘要同步循環"""
+        interval = self._email_digest_interval_hours * 3600
+        while True:
+            try:
+                await asyncio.sleep(interval)
+                await self.sync_email_digest()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"[OneStack] Email digest error: {e}")
+
+    def start_email_digest(self):
+        """啟動 Email 摘要同步"""
+        if not self.enabled:
+            return
+        if self._email_digest_task is None or self._email_digest_task.done():
+            self._email_digest_task = asyncio.create_task(self._email_digest_loop())
+            logger.info(f"[OneStack] Email digest started (every {self._email_digest_interval_hours}h)")
+
+    def stop_email_digest(self):
+        """停止 Email 摘要同步"""
+        if self._email_digest_task and not self._email_digest_task.done():
+            self._email_digest_task.cancel()
+            logger.info("[OneStack] Email digest stopped")
+
     async def set_offline(self):
         """設定設備為離線狀態"""
         if not self.enabled:
@@ -330,9 +418,26 @@ async def start_onestack_connector():
         await connector.register_device()
         connector.start_heartbeat()
 
+        # 讀取 Email digest 設定
+        try:
+            import json as _json
+            from sqlmodel import Session as _Ses
+            from app.database import engine as _eng
+            from app.models.core import SystemSetting as _SS
+            with _Ses(_eng) as _s:
+                setting = _s.get(_SS, "channel_email")
+                if setting:
+                    cfg = _json.loads(setting.value)
+                    if cfg.get("onestack_digest_enabled"):
+                        connector._email_digest_interval_hours = cfg.get("onestack_digest_interval_hours", 6)
+                        connector.start_email_digest()
+        except Exception as e:
+            logger.debug(f"[OneStack] Email digest config not loaded: {e}")
+
 
 async def stop_onestack_connector():
     """停止 OneStack 連接器"""
     if connector.enabled:
+        connector.stop_email_digest()
         connector.stop_heartbeat()
         await connector.set_offline()

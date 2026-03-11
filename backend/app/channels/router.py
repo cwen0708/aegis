@@ -64,6 +64,11 @@ class MessageRouter:
         """處理單一訊息"""
         logger.debug(f"[Router] Processing: [{msg.platform}] {msg.text[:50]}")
 
+        # Email 走專用處理流程（AI 分類 + 摘要，不走一般對話）
+        if msg.platform == "email":
+            await self._handle_email(msg)
+            return
+
         # P2: 取得或建立 BotUser
         bot_user = get_or_create_bot_user(msg.platform, msg.user_id, msg.user_name)
 
@@ -125,6 +130,15 @@ class MessageRouter:
             edit_message_id=str(message_id),
         )
         await channel.send(edit_msg)
+
+    async def _handle_email(self, msg: InboundMessage):
+        """
+        Email 專用處理：收信已存入 DB，AI 分類由 CronJob 排程處理。
+        此處只做日誌記錄，不走一般 AI 對話流程。
+        """
+        email_db_id = msg.raw_data.get("email_message_db_id")
+        logger.info(f"[Router] Email received and stored (db_id={email_db_id}), "
+                     f"AI classification will run via CronJob")
 
 
 # 全域 Router 實例

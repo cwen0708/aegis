@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timezone
 from sqlmodel import Session, select
 from app.database import engine
-from app.models.core import Card, StageList, Project, Tag, CardTagLink, CronJob, CardIndex, SystemSetting, TaskLog
+from app.models.core import Card, StageList, Project, Tag, CardTagLink, CronJob, CardIndex, SystemSetting, TaskLog, EmailMessage
 from app.core.card_file import CardData, write_card, card_file_path
 from app.core.card_index import sync_card_to_index, next_card_id
 from app.core.telemetry import get_system_metrics
@@ -53,6 +53,28 @@ def _get_template_variables(session: Session) -> dict:
     else:
         recent_failures = "無"
 
+    # 未分類 Email（供 email 分類排程使用）
+    unclassified_emails = session.exec(
+        select(EmailMessage)
+        .where(EmailMessage.is_processed == False)
+        .order_by(EmailMessage.created_at.desc())
+        .limit(20)
+    ).all()
+
+    if unclassified_emails:
+        email_lines = []
+        for em in unclassified_emails:
+            email_lines.append(
+                f"[ID:{em.id}] From: {em.from_name} <{em.from_address}> | "
+                f"Subject: {em.subject} | Date: {em.date}\n"
+                f"Body: {em.body_text[:800]}\n"
+            )
+        unclassified_emails_text = "\n---\n".join(email_lines)
+        unclassified_count = str(len(unclassified_emails))
+    else:
+        unclassified_emails_text = "（無未分類郵件）"
+        unclassified_count = "0"
+
     return {
         "cpu_percent": f"{metrics['cpu_percent']:.1f}",
         "mem_percent": f"{metrics['memory_percent']:.1f}",
@@ -60,6 +82,8 @@ def _get_template_variables(session: Session) -> dict:
         "max_workstations": str(max_workstations),
         "pending_cards_summary": pending_summary,
         "recent_failures": recent_failures,
+        "unclassified_emails": unclassified_emails_text,
+        "unclassified_email_count": unclassified_count,
     }
 
 

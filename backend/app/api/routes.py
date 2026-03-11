@@ -6,7 +6,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from app.database import get_session
-from app.models.core import Project, Card, StageList, CronJob, CronLog, SystemSetting, Account, Member, MemberAccount, TaskLog, CardIndex, InviteCode, BotUser, BotUserProject
+from app.models.core import Project, Card, StageList, CronJob, CronLog, SystemSetting, Account, Member, MemberAccount, TaskLog, CardIndex, InviteCode, BotUser, BotUserProject, EmailMessage
 from typing import Any
 from app.core.runner import running_tasks, abort_task
 import app.core.runner as runner_module
@@ -3007,3 +3007,100 @@ async def list_versions():
         "versions": versions,
         "current": updater.get_current_version(),
     }
+
+
+# ==========================================================
+# Email API
+# ==========================================================
+
+@router.get("/emails/")
+async def list_emails(
+    session: Session = Depends(get_session),
+    is_processed: Optional[bool] = None,
+    category: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """列出 Email 紀錄"""
+    q = select(EmailMessage).order_by(EmailMessage.created_at.desc())
+    if is_processed is not None:
+        q = q.where(EmailMessage.is_processed == is_processed)
+    if category:
+        q = q.where(EmailMessage.category == category)
+    q = q.offset(offset).limit(limit)
+    return session.exec(q).all()
+
+
+@router.get("/emails/{email_id}")
+async def get_email(email_id: int, session: Session = Depends(get_session)):
+    """取得單封 Email 詳情"""
+    em = session.get(EmailMessage, email_id)
+    if not em:
+        raise HTTPException(404, "Email not found")
+    return em
+
+
+class EmailClassifyPayload(BaseModel):
+    """AI 分類結果（供 CronJob AI 回寫）"""
+    category: str = ""       # actionable / informational / spam / newsletter
+    urgency: str = ""        # high / medium / low
+    summary: str = ""
+    suggested_action: str = ""
+    project_id: Optional[int] = None
+
+
+@router.patch("/emails/{email_id}/classify")
+async def classify_email(
+    email_id: int,
+    payload: EmailClassifyPayload,
+    session: Session = Depends(get_session),
+):
+    """更新 Email 的 AI 分類結果（供排程 AI 呼叫）"""
+    em = session.get(EmailMessage, email_id)
+    if not em:
+        raise HTTPException(404, "Email not found")
+
+    if payload.category:
+        em.category = payload.category
+    if payload.urgency:
+        em.urgency = payload.urgency
+    if payload.summary:
+        em.summary = payload.summary
+    if payload.suggested_action:
+        em.suggested_action = payload.suggested_action
+    if payload.project_id is not None:
+        em.project_id = payload.project_id
+    em.is_processed = True
+
+    session.add(em)
+    session.commit()
+    session.refresh(em)
+    return em
+
+
+@router.post("/emails/classify-batch")
+async def classify_emails_batch(
+    items: list[dict],
+    session: Session = Depends(get_session),
+):
+    """批次更新 Email 分類結果（一次處理多封）
+
+    Body: [{"id": 1, "category": "actionable", "urgency": "high", "summary": "..."}, ...]
+    """
+    updated = []
+    for item in items:
+        email_id = item.get("id")
+        if not email_id:
+            continue
+        em = session.get(EmailMessage, email_id)
+        if not em:
+            continue
+        for field in ("category", "urgency", "summary", "suggested_action", "project_id"):
+            if field in item and item[field]:
+                setattr(em, field, item[field])
+        em.is_processed = True
+        session.add(em)
+        updated.append(email_id)
+
+    session.commit()
+    return {"updated": updated, "count": len(updated)}
