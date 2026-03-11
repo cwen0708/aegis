@@ -353,6 +353,46 @@ function nextStage() {
   }
 }
 
+// 手機版：滑動手勢支援
+const touchStartX = ref(0)
+const touchEndX = ref(0)
+const isSwiping = ref(false)
+
+function onTouchStart(e: TouchEvent) {
+  const touch = e.touches[0]
+  if (touch) {
+    touchStartX.value = touch.clientX
+    touchEndX.value = touch.clientX
+    isSwiping.value = true
+  }
+}
+
+function onTouchMove(e: TouchEvent) {
+  if (!isSwiping.value) return
+  const touch = e.touches[0]
+  if (touch) {
+    touchEndX.value = touch.clientX
+  }
+}
+
+function onTouchEnd() {
+  if (!isSwiping.value) return
+  isSwiping.value = false
+
+  const diff = touchStartX.value - touchEndX.value
+  const threshold = 50 // 最小滑動距離
+
+  if (Math.abs(diff) < threshold) return
+
+  if (diff > 0) {
+    // 向左滑 → 下一個
+    nextStage()
+  } else {
+    // 向右滑 → 上一個
+    prevStage()
+  }
+}
+
 function switchToProjectsSidebar() {
   if (isMobile) {
     showProjectDropdown.value = !showProjectDropdown.value
@@ -776,6 +816,9 @@ async function unarchiveCard(cardId: number) {
       v-else-if="currentMobileStage"
       class="flex-1 flex flex-col overflow-hidden px-2 py-2 transition-opacity duration-300"
       :class="{'opacity-50 grayscale pointer-events-none select-none': currentProject?.is_active === false}"
+      @touchstart="onTouchStart"
+      @touchmove="onTouchMove"
+      @touchend="onTouchEnd"
     >
       <!-- Stage Header -->
       <div class="flex items-center justify-between mb-3 px-1">
