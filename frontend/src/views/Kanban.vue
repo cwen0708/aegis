@@ -320,9 +320,22 @@ async function assignMember(memberId: number | null) {
   }
 }
 
-// 切換到側邊欄專案模式
+// 切換到側邊欄專案模式（桌面版）或顯示專案下拉選單（手機版）
+const showProjectDropdown = ref(false)
+useEscapeKey(showProjectDropdown, () => { showProjectDropdown.value = false })
+
 function switchToProjectsSidebar() {
-  if (sidebarMode) sidebarMode.value = 'projects'
+  if (isMobile) {
+    showProjectDropdown.value = !showProjectDropdown.value
+  } else if (sidebarMode) {
+    sidebarMode.value = 'projects'
+  }
+}
+
+function selectProject(projectId: number) {
+  selectedProjectId.value = projectId
+  showProjectDropdown.value = false
+  fetchBoard()
 }
 
 // 階段配置 Dialog
@@ -455,18 +468,40 @@ async function unarchiveCard(cardId: number) {
     <div class="sticky top-0 z-10 h-14 sm:h-16 shrink-0 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 px-2 sm:px-8 flex items-center justify-between gap-2 sm:gap-4">
 
       <!-- Left: Project Name + Runner -->
-      <div class="flex items-center gap-2 sm:gap-4 min-w-0">
-        <!-- Project Name (click → sidebar projects mode) -->
+      <div class="flex items-center gap-2 sm:gap-4 min-w-0 relative">
+        <!-- Project Name (click → sidebar projects mode or mobile dropdown) -->
         <button
           @click="switchToProjectsSidebar"
           class="flex items-center gap-1.5 sm:gap-2 min-w-0 group"
         >
           <FolderOpen class="w-4 sm:w-5 h-4 sm:h-5 text-emerald-400 shrink-0" />
-          <span class="text-sm sm:text-lg font-bold text-slate-100 truncate group-hover:text-emerald-400 transition-colors max-w-[100px] sm:max-w-none">
+          <span class="text-sm sm:text-lg font-bold text-slate-100 truncate group-hover:text-emerald-400 transition-colors max-w-[120px] sm:max-w-none">
             {{ currentProject?.name || '選擇專案' }}
           </span>
-          <ChevronDown class="w-3 sm:w-4 h-3 sm:h-4 text-slate-500 shrink-0" />
+          <ChevronDown class="w-3 sm:w-4 h-3 sm:h-4 text-slate-500 shrink-0 transition-transform" :class="{ 'rotate-180': showProjectDropdown }" />
         </button>
+
+        <!-- Mobile Project Dropdown -->
+        <div
+          v-if="showProjectDropdown && isMobile"
+          class="absolute top-full left-0 mt-2 w-56 bg-slate-800 rounded-lg border border-slate-700 shadow-xl z-50 max-h-64 overflow-y-auto"
+        >
+          <button
+            v-for="p in projects"
+            :key="p.id"
+            @click="selectProject(p.id)"
+            class="w-full flex items-center gap-2 px-3 py-2.5 text-sm transition-colors"
+            :class="selectedProjectId === p.id
+              ? 'bg-emerald-500/20 text-emerald-400'
+              : 'text-slate-300 hover:bg-slate-700'"
+          >
+            <FolderOpen class="w-4 h-4 shrink-0" :class="selectedProjectId === p.id ? 'text-emerald-400' : 'text-slate-500'" />
+            <span class="truncate">{{ p.name }}</span>
+          </button>
+          <div v-if="projects.length === 0" class="px-3 py-4 text-sm text-slate-500 text-center">
+            沒有專案
+          </div>
+        </div>
 
         <!-- Runner Controls (hide on mobile) -->
         <button
