@@ -16,6 +16,7 @@ const form = ref({
   max_workstations: '3',
   memory_short_term_days: '30',
   onestack_owner_id: '',
+  onestack_endpoint: '',
 })
 
 // 更新狀態
@@ -241,6 +242,7 @@ onMounted(async () => {
   form.value.max_workstations = store.settings.max_workstations || '3'
   form.value.memory_short_term_days = store.settings.memory_short_term_days || '30'
   form.value.onestack_owner_id = store.settings.onestack_owner_id || ''
+  form.value.onestack_endpoint = store.settings.onestack_endpoint || ''
   loading.value = false
 
   // 如果正在更新中，恢復輪詢
@@ -265,6 +267,7 @@ async function saveSettings() {
       max_workstations: form.value.max_workstations,
       memory_short_term_days: form.value.memory_short_term_days,
       onestack_owner_id: form.value.onestack_owner_id,
+      onestack_endpoint: form.value.onestack_endpoint,
     })
   } finally {
     saving.value = false
@@ -342,14 +345,24 @@ async function saveSettings() {
       </div>
       <div class="p-6 space-y-4">
         <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1.5">Endpoint</label>
+          <input
+            v-model="form.onestack_endpoint"
+            type="text"
+            placeholder="https://xxx.supabase.co/functions/v1/receive-suggestion"
+            class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-violet-500 outline-none text-sm font-mono"
+          />
+          <p class="text-[11px] text-slate-500 mt-1">OneStack Edge Function URL</p>
+        </div>
+        <div>
           <label class="block text-xs font-medium text-slate-400 mb-1.5">Owner ID</label>
           <input
             v-model="form.onestack_owner_id"
             type="text"
-            placeholder="填入 OneStack 個人頁面上的序號（UUID）"
+            placeholder="OneStack 個人頁面上的序號（UUID）"
             class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-violet-500 outline-none text-sm font-mono"
           />
-          <p class="text-[11px] text-slate-500 mt-1">Aegis 會將高價值 Email 摘要轉發到 OneStack 指揮中心</p>
+          <p class="text-[11px] text-slate-500 mt-1">Aegis 會將高價值 Email 摘要轉發到此用戶的 OneStack 指揮中心</p>
         </div>
       </div>
     </div>

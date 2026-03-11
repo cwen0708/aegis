@@ -249,21 +249,22 @@ def _sync_system_cron_jobs(session: Session):
                 "   Content-Type: application/json\n"
                 '   Body: [{{"id": <ID>, "category": "...", "urgency": "...", "summary": "...", "suggested_action": "..."}}]\n\n'
                 "5. 若有 actionable 且 urgency 為 high 或 medium 的郵件，\n"
-                "   且 OneStack 已設定（owner_id: {onestack_owner_id}），\n"
-                "   則呼叫 OneStack API 轉發：\n"
-                "   POST {onestack_supabase_url}/rest/v1/ai_suggestions\n"
-                "   Headers: apikey: {onestack_supabase_key}, Authorization: Bearer {onestack_supabase_key}\n"
+                "   且 OneStack 已設定（endpoint: {onestack_endpoint}，owner_id: {onestack_owner_id}），\n"
+                "   則呼叫 OneStack Edge Function 轉發：\n"
+                "   POST {onestack_endpoint}\n"
                 "   Content-Type: application/json\n"
                 '   Body: {{\n'
                 '     "owner_id": "{onestack_owner_id}",\n'
-                '     "suggestion_type": "action",\n'
+                '     "type": "email",\n'
                 '     "title": "[Email] <subject>",\n'
-                '     "content": "From: <sender>\\nSummary: <摘要>\\nAction: <建議動作>",\n'
-                '     "priority": "<high|medium>",\n'
-                '     "metadata": {{"source": "aegis_email", "email_id": <ID>}}\n'
+                '     "summary": "<摘要>",\n'
+                '     "from": "<sender>",\n'
+                '     "urgency": "<high|medium>",\n'
+                '     "suggested_action": "<建議動作>",\n'
+                '     "source_id": <email_id>\n'
                 "   }}\n\n"
                 "如果沒有需要分類的郵件，回覆「無待分類郵件」。\n"
-                "如果 onestack_owner_id 為空，跳過步驟 5。"
+                "如果 onestack_endpoint 或 onestack_owner_id 為空，跳過步驟 5。"
             ),
             cron_expression=cron_expr,
             next_scheduled_at=_calculate_next_scheduled_at(cron_expr),
@@ -383,10 +384,13 @@ def seed_data():
             session.add(office_layout_setting)
             print("  - Added office_layout setting")
 
-        # ── 2d. OneStack Owner ID（跳過已存在）──
+        # ── 2d. OneStack 設定（跳過已存在）──
         if not session.get(SystemSetting, "onestack_owner_id"):
             session.add(SystemSetting(key="onestack_owner_id", value=""))
             print("  - Added onestack_owner_id setting (empty)")
+        if not session.get(SystemSetting, "onestack_endpoint"):
+            session.add(SystemSetting(key="onestack_endpoint", value=""))
+            print("  - Added onestack_endpoint setting (empty)")
 
         # ── 2e. 管理員設定（跳過已存在）──
         import os

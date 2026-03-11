@@ -78,6 +78,8 @@ def _get_template_variables(session: Session) -> dict:
     # OneStack 相關變數
     owner_id_setting = session.get(SystemSetting, "onestack_owner_id")
     onestack_owner_id = owner_id_setting.value if owner_id_setting else ""
+    endpoint_setting = session.get(SystemSetting, "onestack_endpoint")
+    onestack_endpoint = endpoint_setting.value if endpoint_setting else ""
 
     return {
         "cpu_percent": f"{metrics['cpu_percent']:.1f}",
@@ -89,8 +91,7 @@ def _get_template_variables(session: Session) -> dict:
         "unclassified_emails": unclassified_emails_text,
         "unclassified_email_count": unclassified_count,
         "onestack_owner_id": onestack_owner_id,
-        "onestack_supabase_url": os.getenv("ONESTACK_SUPABASE_URL", ""),
-        "onestack_supabase_key": os.getenv("ONESTACK_SUPABASE_KEY", ""),
+        "onestack_endpoint": onestack_endpoint,
     }
 
 
