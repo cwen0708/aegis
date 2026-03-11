@@ -300,7 +300,7 @@ function mobileNavClass(path: string) {
     </main>
 
     <!-- Mobile Bottom Navigation -->
-    <nav v-if="isMobile" class="fixed bottom-0 left-0 right-0 z-50 bg-slate-800/95 backdrop-blur-lg border-t border-slate-700/50 safe-area-bottom">
+    <nav v-if="isMobile" class="fixed bottom-0 left-0 right-0 z-50 bg-slate-800/95 backdrop-blur-lg border-t border-slate-700/50 safe-area-bottom" role="navigation" aria-label="主要導覽">
       <div class="flex items-end justify-around px-2 pt-2 pb-2">
         <template v-for="item in mobileNavItems" :key="item.path">
           <!-- 中央辦公室按鈕（突出） -->
@@ -308,6 +308,8 @@ function mobileNavClass(path: string) {
             v-if="item.isCenter"
             :to="item.path"
             class="flex flex-col items-center -mt-6"
+            :aria-label="item.label"
+            :aria-current="route.path === item.path ? 'page' : undefined"
           >
             <div
               class="w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all"
@@ -315,7 +317,7 @@ function mobileNavClass(path: string) {
                 ? 'bg-emerald-500 text-white shadow-emerald-500/30'
                 : 'bg-slate-700 text-slate-300 hover:bg-slate-600'"
             >
-              <component :is="item.icon" class="w-7 h-7" />
+              <component :is="item.icon" class="w-7 h-7" aria-hidden="true" />
             </div>
             <span class="text-[10px] mt-1" :class="route.path === item.path ? 'text-emerald-400' : 'text-slate-500'">
               {{ item.label }}
@@ -326,9 +328,11 @@ function mobileNavClass(path: string) {
           <router-link
             v-else
             :to="item.path"
-            class="flex flex-col items-center py-1 px-3"
+            class="flex flex-col items-center py-1 px-3 min-w-[44px] min-h-[44px]"
+            :aria-label="item.label"
+            :aria-current="route.path === item.path ? 'page' : undefined"
           >
-            <component :is="item.icon" class="w-5 h-5" :class="mobileNavClass(item.path)" />
+            <component :is="item.icon" class="w-5 h-5" :class="mobileNavClass(item.path)" aria-hidden="true" />
             <span class="text-[10px] mt-1" :class="mobileNavClass(item.path)">{{ item.label }}</span>
           </router-link>
         </template>

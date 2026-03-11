@@ -1,6 +1,38 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+/* ===== Design Tokens ===== */
+:root {
+  /* Provider Colors */
+  --color-claude: #fb923c;        /* orange-400 */
+  --color-claude-bg: rgba(251, 146, 60, 0.1);
+  --color-gemini: #60a5fa;        /* blue-400 */
+  --color-gemini-bg: rgba(96, 165, 250, 0.1);
+  --color-openai: #a855f7;        /* purple-400 */
+  --color-openai-bg: rgba(168, 85, 247, 0.1);
+
+  /* Semantic Colors */
+  --color-success: #34d399;       /* emerald-400 */
+  --color-success-bg: rgba(52, 211, 153, 0.1);
+  --color-warning: #fbbf24;       /* amber-400 */
+  --color-warning-bg: rgba(251, 191, 36, 0.1);
+  --color-error: #f87171;         /* red-400 */
+  --color-error-bg: rgba(248, 113, 113, 0.1);
+  --color-info: #60a5fa;          /* blue-400 */
+  --color-info-bg: rgba(96, 165, 250, 0.1);
+
+  /* Font Sizes (consistent scale) */
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 18px;
+
+  /* Touch Targets */
+  --touch-target-min: 44px;
+}
+
 /* Light theme override — invert the dark UI */
 html.light {
   --tw-bg-opacity: 1;
@@ -52,4 +84,12 @@ html.light canvas {
 }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: #475569;
+}
+
+/* Safe area for iPhone notch/home indicator */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+.safe-area-top {
+  padding-top: env(safe-area-inset-top, 0);
 }
