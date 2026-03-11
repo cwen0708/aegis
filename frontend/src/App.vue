@@ -294,7 +294,7 @@ function mobileNavClass(path: string) {
       <!-- Workspace with Background Glow -->
       <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-emerald-900/20 via-slate-900 to-slate-900 pointer-events-none"></div>
 
-      <div class="flex-1 overflow-hidden relative z-0" :class="{ 'pb-20': isMobile }">
+      <div class="flex-1 overflow-hidden relative z-0" :class="{ 'pb-14': isMobile }">
         <router-view></router-view>
       </div>
     </main>
