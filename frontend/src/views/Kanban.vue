@@ -613,15 +613,16 @@ async function unarchiveCard(cardId: number) {
           @change="onDragChange($event, stage.id)"
           ghost-class="opacity-50"
           :move="checkMove"
+          :disabled="isMobile"
         >
           <template #item="{ element: card }">
             <div
               @click="openCardDetail(card.id)"
-              class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-sm transition-colors group relative"
+              class="bg-slate-800 p-3 sm:p-4 rounded-xl border border-slate-700 shadow-sm transition-colors group relative"
               :class="[
                 card.status === 'running' || card.status === 'pending'
                   ? 'cursor-not-allowed border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.1)]'
-                  : 'cursor-grab hover:border-emerald-500/50'
+                  : isMobile ? 'cursor-pointer hover:border-emerald-500/50' : 'cursor-grab hover:border-emerald-500/50'
               ]"
             >
               <!-- Card Menu Button -->
