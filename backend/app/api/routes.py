@@ -2726,7 +2726,7 @@ async def receive_node_task(
         raise HTTPException(status_code=400, detail="No stage list found in project")
 
     # 建立卡片
-    card_id = next_card_id(session, project.id)
+    card_id = next_card_id(session)
 
     card_data = CardData(
         card_id=card_id,
