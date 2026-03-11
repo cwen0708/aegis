@@ -4,7 +4,10 @@ import { useRoute } from 'vue-router'
 import { Clock, Play, Pause, Trash2, AlertCircle, Plus, X, FolderOpen, Pencil, ChevronDown, ChevronRight } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 import { useEscapeKey } from '../composables/useEscapeKey'
+import { useResponsive } from '../composables/useResponsive'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+
+const { isMobile } = useResponsive()
 
 const route = useRoute()
 const store = useAegisStore()
@@ -226,35 +229,35 @@ function visibleJobs(group: { project: any; jobs: any[] }) {
 
 <template>
   <div class="h-full flex flex-col">
-    <!-- Header h-16 -->
-    <div class="sticky top-0 z-10 h-16 shrink-0 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 px-8 flex items-center justify-between">
-      <!-- Left: 排程狀態群組（與 Kanban 同風格） -->
+    <!-- Header -->
+    <div class="sticky top-0 z-10 h-14 sm:h-16 shrink-0 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 px-2 sm:px-8 flex items-center justify-between">
+      <!-- Left: 排程狀態群組 -->
       <div class="flex items-center bg-slate-700/50 rounded-lg border border-slate-600/50 overflow-hidden">
-        <div class="flex items-center gap-1.5 px-3 py-1.5">
+        <div class="flex items-center gap-1.5 px-2 sm:px-3 py-1.5">
           <Clock class="w-3.5 h-3.5" :class="hasPausedProjects ? 'text-amber-400' : 'text-emerald-400'" />
           <span class="text-xs font-medium text-slate-200">排程</span>
         </div>
         <div class="w-px h-5 bg-slate-600/50"></div>
-        <div class="flex items-center gap-1.5 px-2.5 py-1.5">
+        <div class="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5">
           <span class="text-xs font-bold text-blue-400">{{ totalEnabledJobs }}</span>
           <span class="text-[10px] text-slate-500">/{{ cronJobs.length }}</span>
         </div>
-        <div class="w-px h-5 bg-slate-600/50"></div>
-        <div class="flex items-center px-2.5 py-1.5">
+        <div v-if="!isMobile" class="w-px h-5 bg-slate-600/50"></div>
+        <div v-if="!isMobile" class="flex items-center px-2.5 py-1.5">
           <span class="text-[10px] text-slate-400 font-mono">{{ store.settings.timezone || 'Asia/Taipei' }}</span>
         </div>
       </div>
 
       <!-- Right: Actions -->
-      <div class="flex items-center gap-3">
-        <button @click="showAddModal = true" class="flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-all shadow-lg shadow-emerald-500/20">
-          <Plus class="w-3.5 h-3.5" />
-          新增排程
+      <div class="flex items-center gap-2 sm:gap-3">
+        <button @click="showAddModal = true" class="flex items-center justify-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-white p-2 sm:px-3 sm:py-1.5 rounded-lg text-xs font-medium transition-all shadow-lg shadow-emerald-500/20">
+          <Plus class="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+          <span class="hidden sm:inline">新增排程</span>
         </button>
       </div>
     </div>
 
-    <div class="flex-1 overflow-auto p-8 space-y-6">
+    <div class="flex-1 overflow-auto p-2 sm:p-8 space-y-4 sm:space-y-6">
 
     <!-- 無排程 -->
     <div v-if="cronJobs.length === 0 && !loading" class="bg-slate-800/30 rounded-2xl border border-slate-700/50 p-20 text-center">

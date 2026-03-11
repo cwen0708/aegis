@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Settings, Globe, Sparkles, MessageSquare, Users, Bot, Activity, Lock, Loader2, FolderKanban, Mail } from 'lucide-vue-next'
-import { useRoute } from 'vue-router'
+import { Settings, Globe, Sparkles, MessageSquare, Users, Bot, Activity, Lock, Loader2, FolderKanban, Mail, ChevronDown } from 'lucide-vue-next'
+import { useRoute, useRouter } from 'vue-router'
+import { useResponsive } from '../../composables/useResponsive'
 
 const route = useRoute()
+const router = useRouter()
+const { isMobile } = useResponsive()
+const showMobileMenu = ref(false)
 
 const menuItems = [
   { path: '/settings/general', label: '一般設定', icon: Globe },
@@ -63,10 +67,10 @@ async function verifyPassword() {
 <template>
   <div class="h-full flex flex-col">
     <!-- Header -->
-    <div class="sticky top-0 z-10 h-16 shrink-0 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 px-8 flex items-center">
+    <div class="sticky top-0 z-10 h-14 sm:h-16 shrink-0 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 px-2 sm:px-8 flex items-center">
       <div class="flex items-center gap-2">
         <Settings class="w-5 h-5 text-slate-400" />
-        <h1 class="text-lg font-bold text-slate-100">系統設定</h1>
+        <h1 class="text-base sm:text-lg font-bold text-slate-100">系統設定</h1>
       </div>
     </div>
 
@@ -112,9 +116,37 @@ async function verifyPassword() {
     </div>
 
     <!-- 已驗證：顯示設定內容 -->
-    <div v-else class="flex-1 flex overflow-hidden">
-      <!-- Left Menu -->
-      <div class="w-48 shrink-0 border-r border-slate-800 bg-slate-900/30 p-4">
+    <div v-else class="flex-1 flex flex-col sm:flex-row overflow-hidden">
+      <!-- Mobile: Dropdown Menu -->
+      <div v-if="isMobile" class="shrink-0 border-b border-slate-800 bg-slate-900/30 px-2 py-2">
+        <button
+          @click="showMobileMenu = !showMobileMenu"
+          class="w-full flex items-center justify-between gap-2 px-3 py-2 bg-slate-800 rounded-lg text-sm text-slate-200"
+        >
+          <div class="flex items-center gap-2">
+            <component :is="menuItems.find(m => m.path === route.path)?.icon || Globe" class="w-4 h-4 text-emerald-400" />
+            {{ menuItems.find(m => m.path === route.path)?.label || '選擇' }}
+          </div>
+          <ChevronDown class="w-4 h-4 text-slate-400" :class="{ 'rotate-180': showMobileMenu }" />
+        </button>
+        <div v-if="showMobileMenu" class="mt-2 bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
+          <button
+            v-for="item in menuItems"
+            :key="item.path"
+            @click="router.push(item.path); showMobileMenu = false"
+            class="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm transition-colors"
+            :class="route.path === item.path
+              ? 'bg-emerald-500/20 text-emerald-400'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700'"
+          >
+            <component :is="item.icon" class="w-4 h-4" />
+            {{ item.label }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Desktop: Left Menu -->
+      <div v-else class="w-48 shrink-0 border-r border-slate-800 bg-slate-900/30 p-4">
         <nav class="space-y-1">
           <router-link
             v-for="item in menuItems"
@@ -132,7 +164,7 @@ async function verifyPassword() {
       </div>
 
       <!-- Right Content -->
-      <div class="flex-1 overflow-auto p-8">
+      <div class="flex-1 overflow-auto p-2 sm:p-8">
         <router-view />
       </div>
     </div>

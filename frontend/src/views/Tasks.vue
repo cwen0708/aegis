@@ -24,17 +24,17 @@ async function handleAbort(taskId: number) {
 
 <template>
   <div class="h-full flex flex-col">
-    <!-- Header h-16 -->
-    <div class="sticky top-0 z-10 h-16 shrink-0 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 px-8 flex items-center justify-between">
-      <h1 class="text-lg font-bold text-slate-100">運行中任務</h1>
+    <!-- Header -->
+    <div class="sticky top-0 z-10 h-14 sm:h-16 shrink-0 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 px-2 sm:px-8 flex items-center justify-between">
+      <h1 class="text-base sm:text-lg font-bold text-slate-100">運行中任務</h1>
       <div class="flex items-center gap-2 text-xs text-slate-500">
         <Activity class="w-4 h-4" />
         <span>{{ store.runningTasks.length }} 個任務</span>
       </div>
     </div>
 
-    <div class="flex-1 overflow-auto p-8">
-      <div v-if="store.runningTasks.length === 0" class="bg-slate-800/30 rounded-2xl border border-slate-700/50 p-20 text-center">
+    <div class="flex-1 overflow-auto p-2 sm:p-8">
+      <div v-if="store.runningTasks.length === 0" class="bg-slate-800/30 rounded-2xl border border-slate-700/50 p-10 sm:p-20 text-center">
         <Activity class="w-10 h-10 mx-auto mb-3 text-slate-600" />
         <p class="text-sm text-slate-500">目前沒有運行中的任務</p>
       </div>

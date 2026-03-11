@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useAegisStore } from '../stores/aegis'
+import { useResponsive } from '../composables/useResponsive'
+
+const { isMobile } = useResponsive()
 import { Settings } from 'lucide-vue-next'
 import { createOfficeGame, OfficeScene } from '../game/OfficeScene'
 import OfficeEditor from '../components/OfficeEditor.vue'
@@ -369,16 +372,18 @@ watch(
         <div id="office-canvas" class="flex-1 min-h-0" @mousemove="onCanvasMouseMove" @click="copyPos"></div>
 
         <!-- Footer -->
-        <div class="flex items-center gap-4 px-3 h-6 bg-slate-800 border-t border-slate-700 z-10 shrink-0"
+        <div class="flex items-center gap-2 sm:gap-4 px-2 sm:px-3 h-6 bg-slate-800 border-t border-slate-700 z-10 shrink-0"
              style="font-family: 'Press Start 2P', monospace;">
           <span class="text-[8px] text-emerald-400">ACTIVE:{{ store.systemInfo.workstations_used }}</span>
           <span class="text-[8px] text-slate-400">IDLE:{{ restingMembers.length }}</span>
           <span class="text-[8px] text-slate-400">TOTAL:{{ members.length }}</span>
           <span class="flex-1"></span>
-          <span class="text-[8px] text-amber-400 cursor-pointer" @click.stop="copyPos" title="Click to copy">
+          <!-- Debug info: hide on mobile -->
+          <span v-if="!isMobile" class="text-[8px] text-amber-400 cursor-pointer" @click.stop="copyPos" title="Click to copy">
             row={{ hoverPos.row }}, col={{ hoverPos.col }}, frame={{ hoverPos.frame }}
           </span>
           <button
+            v-if="!isMobile"
             @click="enterEditMode"
             class="p-1 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors"
             title="裝修"

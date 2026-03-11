@@ -5,8 +5,11 @@ import { Plus, Play, Pause, Square, Clock, Trash2, Zap, MoreVertical, ChevronDow
 import draggable from 'vuedraggable'
 import { useAegisStore } from '../stores/aegis'
 import { useEscapeKey } from '../composables/useEscapeKey'
+import { useResponsive } from '../composables/useResponsive'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import TerminalViewer from '../components/TerminalViewer.vue'
+
+const { isMobile } = useResponsive()
 
 const router = useRouter()
 const route = useRoute()
@@ -448,25 +451,26 @@ async function unarchiveCard(cardId: number) {
 
 <template>
   <div class="h-full flex flex-col">
-    <!-- Sticky Header / Toolbar (h-16 = sidebar logo height) -->
-    <div class="sticky top-0 z-10 h-16 shrink-0 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 px-8 flex items-center justify-between gap-4">
+    <!-- Sticky Header / Toolbar -->
+    <div class="sticky top-0 z-10 h-14 sm:h-16 shrink-0 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 px-2 sm:px-8 flex items-center justify-between gap-2 sm:gap-4">
 
       <!-- Left: Project Name + Runner -->
-      <div class="flex items-center gap-4 min-w-0">
+      <div class="flex items-center gap-2 sm:gap-4 min-w-0">
         <!-- Project Name (click → sidebar projects mode) -->
         <button
           @click="switchToProjectsSidebar"
-          class="flex items-center gap-2 min-w-0 group"
+          class="flex items-center gap-1.5 sm:gap-2 min-w-0 group"
         >
-          <FolderOpen class="w-5 h-5 text-emerald-400 shrink-0" />
-          <span class="text-lg font-bold text-slate-100 truncate group-hover:text-emerald-400 transition-colors">
+          <FolderOpen class="w-4 sm:w-5 h-4 sm:h-5 text-emerald-400 shrink-0" />
+          <span class="text-sm sm:text-lg font-bold text-slate-100 truncate group-hover:text-emerald-400 transition-colors max-w-[100px] sm:max-w-none">
             {{ currentProject?.name || '選擇專案' }}
           </span>
-          <ChevronDown class="w-4 h-4 text-slate-500 shrink-0" />
+          <ChevronDown class="w-3 sm:w-4 h-3 sm:h-4 text-slate-500 shrink-0" />
         </button>
 
-        <!-- Runner Controls -->
+        <!-- Runner Controls (hide on mobile) -->
         <button
+          v-if="!isMobile"
           @click="toggleRunner"
           class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0"
           :class="store.systemInfo.is_paused
@@ -480,9 +484,9 @@ async function unarchiveCard(cardId: number) {
       </div>
 
       <!-- Right: Actions -->
-      <div class="flex items-center gap-2 shrink-0">
-        <!-- 排程狀態群組（per-project） -->
-        <div class="flex items-center bg-slate-700/50 rounded-lg border border-slate-600/50 overflow-hidden">
+      <div class="flex items-center gap-1 sm:gap-2 shrink-0">
+        <!-- 排程狀態群組（per-project）- hide on mobile -->
+        <div v-if="!isMobile" class="flex items-center bg-slate-700/50 rounded-lg border border-slate-600/50 overflow-hidden">
           <div class="flex items-center gap-1.5 px-3 py-1.5">
             <Clock class="w-3.5 h-3.5" :class="isCronPausedForCurrentProject ? 'text-amber-400' : 'text-emerald-400'" />
             <span class="text-xs font-medium text-slate-200">排程</span>
@@ -500,28 +504,30 @@ async function unarchiveCard(cardId: number) {
           </button>
         </div>
 
+        <!-- Archive button - icon only on mobile -->
         <button
           @click="openArchivePanel"
-          class="flex items-center gap-1.5 bg-slate-700/50 hover:bg-slate-600 text-slate-300 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border border-slate-600/50"
+          class="flex items-center justify-center gap-1.5 bg-slate-700/50 hover:bg-slate-600 text-slate-300 p-2 sm:px-3 sm:py-1.5 rounded-lg text-xs font-medium transition-colors border border-slate-600/50"
           title="封存卡片"
         >
-          <Archive class="w-3.5 h-3.5" />
-          封存
+          <Archive class="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+          <span class="hidden sm:inline">封存</span>
         </button>
 
-        <button @click="showNewTaskModal = true" class="flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shadow-lg shadow-emerald-500/20">
-          <Plus class="w-3.5 h-3.5" />
-          新增任務
+        <!-- New task button -->
+        <button @click="showNewTaskModal = true" class="flex items-center justify-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-white p-2 sm:px-3 sm:py-1.5 rounded-lg text-xs font-medium transition-colors shadow-lg shadow-emerald-500/20">
+          <Plus class="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+          <span class="hidden sm:inline">新增任務</span>
         </button>
       </div>
     </div>
 
     <!-- Kanban Board -->
     <div
-      class="flex gap-5 flex-1 items-start overflow-x-auto px-6 py-4 custom-scrollbar transition-opacity duration-300"
+      class="flex gap-3 sm:gap-5 flex-1 items-start overflow-x-auto px-2 sm:px-6 py-2 sm:py-4 custom-scrollbar transition-opacity duration-300"
       :class="{'opacity-50 grayscale pointer-events-none select-none': currentProject?.is_active === false}"
     >
-      <div v-for="stage in boardData" :key="stage.id" class="w-80 shrink-0 bg-slate-800/40 rounded-xl p-4 border border-slate-700/50 flex flex-col max-h-full">
+      <div v-for="stage in boardData" :key="stage.id" class="w-72 sm:w-80 shrink-0 bg-slate-800/40 rounded-xl p-3 sm:p-4 border border-slate-700/50 flex flex-col max-h-full">
         <div class="flex items-center justify-between mb-4 px-1">
           <h3 class="font-medium text-slate-200 flex items-center gap-2">
             <!-- Stage Type Icon -->
