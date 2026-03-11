@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Clock, Play, Pause, Pencil, X, Check, AlertCircle, CheckCircle2, XCircle, Timer, ChevronDown, ChevronRight } from 'lucide-vue-next'
+import { ArrowLeft, Clock, Play, Pause, Pencil, Check, AlertCircle, CheckCircle2, XCircle, Timer, ChevronDown, ChevronRight } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 
 const route = useRoute()
