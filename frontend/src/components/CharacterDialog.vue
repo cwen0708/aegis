@@ -131,7 +131,8 @@ function providerLabel(provider: string): string {
 
     <!-- Character portrait - large, left side -->
     <!-- 智能適配：正方形/半身像用 cover+top，全身立繪用 contain+bottom -->
-    <div class="absolute left-0 sm:left-8 bottom-0 w-[280px] sm:w-[570px] h-[60vh] sm:h-[85vh]">
+    <!-- 手機版調高避開對話框遮臉 -->
+    <div class="absolute left-0 sm:left-8 bottom-36 sm:bottom-0 w-[260px] sm:w-[570px] h-[45vh] sm:h-[85vh]">
       <template v-if="portrait">
         <img
           :src="portrait.startsWith('http') ? portrait : `${portrait}`"
@@ -234,7 +235,8 @@ function providerLabel(provider: string): string {
     </Transition>
 
     <!-- Dialog box - bottom, full width with frame -->
-    <div class="absolute bottom-4 left-2 right-2 sm:left-[50px] sm:right-[50px]">
+    <!-- 手機版調高避開底部導航列 -->
+    <div class="absolute bottom-24 sm:bottom-4 left-2 right-2 sm:left-[50px] sm:right-[50px]">
       <div class="bg-slate-900/40 backdrop-blur-sm rounded-lg border-2 border-slate-400/40 shadow-2xl">
         <!-- Name tag - positioned above the box -->
         <div class="absolute -top-4 left-6">
