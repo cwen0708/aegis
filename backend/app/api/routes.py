@@ -6,7 +6,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from app.database import get_session
-from app.models.core import Project, Card, StageList, CronJob, SystemSetting, Account, Member, MemberAccount, TaskLog, CardIndex, InviteCode, BotUser, BotUserProject
+from app.models.core import Project, Card, StageList, CronJob, CronLog, SystemSetting, Account, Member, MemberAccount, TaskLog, CardIndex, InviteCode, BotUser, BotUserProject
 from typing import Any
 from app.core.runner import running_tasks, abort_task
 import app.core.runner as runner_module
@@ -674,6 +674,56 @@ def delete_cron_job(job_id: int, session: Session = Depends(get_session)):
     session.delete(job)
     session.commit()
     return {"ok": True}
+
+
+@router.get("/cron-jobs/{job_id}")
+def get_cron_job(job_id: int, session: Session = Depends(get_session)):
+    """取得單一排程詳情"""
+    job = session.get(CronJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="CronJob not found")
+    return job
+
+
+# ==========================================
+# CronLog（排程執行記錄）
+# ==========================================
+@router.get("/cron-jobs/{job_id}/logs")
+def list_cron_logs(job_id: int, limit: int = 50, offset: int = 0, session: Session = Depends(get_session)):
+    """取得特定排程的執行記錄"""
+    logs = session.exec(
+        select(CronLog)
+        .where(CronLog.cron_job_id == job_id)
+        .order_by(CronLog.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    ).all()
+    total = session.exec(
+        select(sa_func.count()).select_from(CronLog).where(CronLog.cron_job_id == job_id)
+    ).one()
+    return {"items": logs, "total": total}
+
+
+@router.get("/cron-logs/{log_id}")
+def get_cron_log(log_id: int, session: Session = Depends(get_session)):
+    """取得單筆排程執行記錄詳情"""
+    log = session.get(CronLog, log_id)
+    if not log:
+        raise HTTPException(status_code=404, detail="CronLog not found")
+    return log
+
+
+@router.get("/cron-logs/")
+def list_all_cron_logs(limit: int = 50, offset: int = 0, project_id: Optional[int] = None, session: Session = Depends(get_session)):
+    """取得所有排程執行記錄（可按專案篩選）"""
+    query = select(CronLog)
+    count_query = select(sa_func.count()).select_from(CronLog)
+    if project_id is not None:
+        query = query.where(CronLog.project_id == project_id)
+        count_query = count_query.where(CronLog.project_id == project_id)
+    logs = session.exec(query.order_by(CronLog.created_at.desc()).offset(offset).limit(limit)).all()
+    total = session.exec(count_query).one()
+    return {"items": logs, "total": total}
 
 
 # ==========================================
@@ -1413,6 +1463,8 @@ def delete_account(account_id: int, session: Session = Depends(get_session)):
 class AccountUpdateRequest(BaseModel):
     name: Optional[str] = None
     is_healthy: Optional[bool] = None
+    oauth_token: Optional[str] = None
+    subscription: Optional[str] = None
 
 
 @router.patch("/accounts/{account_id}")
@@ -1424,6 +1476,16 @@ def update_account(account_id: int, data: AccountUpdateRequest, session: Session
         account.name = data.name
     if data.is_healthy is not None:
         account.is_healthy = data.is_healthy
+    if data.oauth_token is not None:
+        token = data.oauth_token.strip()
+        if token:
+            account.oauth_token = token
+            account.oauth_token_set_at = int(_t.time() * 1000)
+        else:
+            account.oauth_token = ""
+            account.oauth_token_set_at = 0
+    if data.subscription is not None:
+        account.subscription = data.subscription
     session.add(account)
     session.commit()
     session.refresh(account)

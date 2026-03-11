@@ -471,6 +471,10 @@ if _frontend_dist.exists() and (_frontend_dist / "index.html").exists():
     @app.get("/{full_path:path}")
     def serve_spa_catchall(full_path: str):
         """Serve index.html for any unmatched route (Vue Router history mode)"""
+        # API 路由不走 SPA fallback
+        if full_path.startswith("api/"):
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
         # Try to serve as a static file first (e.g. favicon.ico, robots.txt)
         file_path = (_frontend_dist / full_path).resolve()
         if file_path.is_relative_to(_frontend_dist.resolve()) and file_path.is_file():

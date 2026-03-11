@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Clock, Play, Pause, Trash2, AlertCircle, Plus, X, FolderOpen, Pencil, ChevronDown, ChevronRight } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 import { useEscapeKey } from '../composables/useEscapeKey'
@@ -10,6 +10,7 @@ import ConfirmDialog from '../components/ConfirmDialog.vue'
 const { isMobile } = useResponsive()
 
 const route = useRoute()
+const router = useRouter()
 const store = useAegisStore()
 const cronJobs = ref<any[]>([])
 const projects = ref<any[]>([])
@@ -309,8 +310,8 @@ function visibleJobs(group: { project: any; jobs: any[] }) {
         </thead>
         <tbody class="divide-y divide-slate-700/30">
           <tr v-for="job in visibleJobs(group)" :key="job.id" class="hover:bg-slate-700/20 transition-colors group">
-            <td class="px-6 py-3">
-              <div class="font-medium text-sm text-slate-100">{{ job.name }}</div>
+            <td class="px-6 py-3 cursor-pointer" @click="router.push(`/cron/${job.id}`)">
+              <div class="font-medium text-sm text-slate-100 hover:text-emerald-400 transition-colors">{{ job.name }}</div>
               <div v-if="job.description" class="text-xs text-slate-500 mt-0.5 truncate max-w-xs">{{ job.description }}</div>
             </td>
             <td class="px-6 py-3">

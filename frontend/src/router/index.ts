@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import Dashboard from '../views/Dashboard.vue'
 import Kanban from '../views/Kanban.vue'
 import CronJobs from '../views/CronJobs.vue'
+import CronJobDetail from '../views/CronJobDetail.vue'
 import Agents from '../views/Agents.vue'
 import Tasks from '../views/Tasks.vue'
 import Team from '../views/Team.vue'
@@ -22,6 +23,7 @@ const router = createRouter({
     { path: '/onboarding', component: Onboarding },
     { path: '/kanban', component: Kanban },
     { path: '/cron', component: CronJobs },
+    { path: '/cron/:id', component: CronJobDetail },
     { path: '/tasks', component: Tasks },
     { path: '/office', component: Office },
     {

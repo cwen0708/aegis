@@ -100,6 +100,31 @@ class CronJob(SQLModel, table=True):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+class CronLog(SQLModel, table=True):
+    """排程執行記錄（每次 CronJob 觸發產生一筆）"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    cron_job_id: int = Field(index=True)        # 來自哪個排程
+    cron_job_name: str = ""                      # 排程名稱（快照）
+    card_id: int = Field(default=0)              # 當時的卡片 ID（已刪除但留記錄）
+    card_title: str = ""
+    project_id: int = Field(default=0, index=True)
+    project_name: str = ""
+    provider: str = ""                           # claude / gemini
+    model: str = ""
+    member_id: Optional[int] = Field(default=None)
+    status: str = ""                             # success / error / timeout
+    output: str = Field(default="")              # AI 完整輸出
+    error_message: str = Field(default="")       # 錯誤訊息
+    prompt_snapshot: str = Field(default="")     # 當次實際送出的 prompt（快照）
+    duration_ms: int = Field(default=0)
+    input_tokens: int = Field(default=0)
+    output_tokens: int = Field(default=0)
+    cache_read_tokens: int = Field(default=0)
+    cache_creation_tokens: int = Field(default=0)
+    cost_usd: float = Field(default=0.0)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class SystemSetting(SQLModel, table=True):
     """系統設定 key-value store"""
     key: str = Field(primary_key=True)

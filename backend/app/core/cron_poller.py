@@ -153,7 +153,7 @@ async def poll_local_cron_jobs():
             existing = session.exec(
                 select(CardIndex)
                 .where(CardIndex.title.contains(cron_tag))
-                .where(CardIndex.status.in_(["pending", "running"]))
+                .where(CardIndex.status.in_(["pending", "running", "failed"]))
             ).first()
             if existing:
                 logger.info(f"[Cron Poller] Skip {job.name} ({cron_tag}) - existing card {existing.card_id} is {existing.status}")

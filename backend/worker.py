@@ -33,10 +33,10 @@ from sqlmodel import Session, select
 from app.database import engine
 from app.models.core import (
     Card, CardIndex, StageList, Project, SystemSetting,
-    Member, MemberAccount, Account, TaskLog
+    Member, MemberAccount, Account, TaskLog, CronLog
 )
 from app.core.card_file import CardData, read_card, write_card
-from app.core.card_index import sync_card_to_index
+from app.core.card_index import sync_card_to_index, remove_card_from_index
 from app.core.telemetry import is_system_overloaded
 from app.core.task_workspace import prepare_workspace, cleanup_workspace
 from app.core.memory_manager import write_member_short_term_memory
@@ -71,7 +71,7 @@ PHASE_ROUTING = {
 PROVIDERS = {
     "gemini": {
         "cmd_base": ["gemini"],
-        "args": ["-p", "{prompt}", "-y", "--model", "gemini-2.5-flash"],
+        "args": ["-p", "{prompt}", "-y", "--model", "gemini-3.1-pro-preview"],
         "json_output": False,
     },
     "claude": {
@@ -346,6 +346,69 @@ def save_task_log(card_id: int, card_title: str, project_name: str, provider: st
             session.commit()
     except Exception as e:
         logger.warning(f"[TaskLog] Failed to save: {e}")
+
+
+def save_cron_log(cron_job_id: int, cron_job_name: str, card_id: int, card_title: str,
+                  project_id: int, project_name: str, provider: str,
+                  member_id: Optional[int], status: str, output: str,
+                  error_message: str, prompt_snapshot: str, token_info: Dict[str, Any]):
+    """儲存排程執行記錄到 CronLog"""
+    try:
+        with Session(engine) as session:
+            log = CronLog(
+                cron_job_id=cron_job_id,
+                cron_job_name=cron_job_name,
+                card_id=card_id,
+                card_title=card_title,
+                project_id=project_id,
+                project_name=project_name,
+                provider=provider,
+                model=token_info.get("model", ""),
+                member_id=member_id,
+                status=status,
+                output=output,
+                error_message=error_message,
+                prompt_snapshot=prompt_snapshot,
+                duration_ms=token_info.get("duration_ms", 0),
+                input_tokens=token_info.get("input_tokens", 0),
+                output_tokens=token_info.get("output_tokens", 0),
+                cache_read_tokens=token_info.get("cache_read_tokens", 0),
+                cache_creation_tokens=token_info.get("cache_creation_tokens", 0),
+                cost_usd=token_info.get("cost_usd", 0),
+            )
+            session.add(log)
+            session.commit()
+            logger.info(f"[CronLog] Saved log for cron_job {cron_job_id}, status={status}")
+    except Exception as e:
+        logger.warning(f"[CronLog] Failed to save: {e}")
+
+
+def delete_card_completely(card_id: int):
+    """完全刪除卡片（MD 檔 + CardIndex + Card ORM）"""
+    try:
+        with Session(engine) as session:
+            idx = session.get(CardIndex, card_id)
+            if idx and idx.file_path:
+                md_path = Path(idx.file_path)
+                if md_path.exists():
+                    md_path.unlink()
+                remove_card_from_index(session, card_id)
+
+            orm_card = session.get(Card, card_id)
+            if orm_card:
+                session.delete(orm_card)
+
+            session.commit()
+        logger.info(f"[Worker] Card {card_id} deleted completely")
+    except Exception as e:
+        logger.warning(f"[Worker] Failed to delete card {card_id}: {e}")
+
+
+def _parse_cron_job_id(title: str) -> Optional[int]:
+    """從卡片標題解析 cron_job_id，如 '[cron_43] xxx' -> 43"""
+    import re
+    m = re.match(r'\[cron_(\d+)\]', title)
+    return int(m.group(1)) if m else None
 
 
 # ==========================================
@@ -847,7 +910,19 @@ def process_pending_cards():
             card_data = read_card(Path(idx.file_path))
         except Exception as e:
             logger.error(f"[Worker] Failed to read card {idx.card_id}: {e}")
-            update_card_status(idx.card_id, "failed", f"\n\n### Error\n無法讀取卡片: {e}")
+            cron_job_id = _parse_cron_job_id(idx.title)
+            if cron_job_id is not None and list_name == "Scheduled":
+                # 排程卡片讀取失敗：寫 CronLog + 刪除卡片
+                with Session(engine) as session:
+                    from app.models.core import CronJob as CJ
+                    cj = session.get(CJ, cron_job_id)
+                    cj_name = cj.name if cj else ""
+                save_cron_log(cron_job_id, cj_name, idx.card_id, idx.title,
+                              idx.project_id, project_name, "", None,
+                              "error", "", str(e), "", {})
+                delete_card_completely(idx.card_id)
+            else:
+                update_card_status(idx.card_id, "failed", f"\n\n---\n\n### Error\n無法讀取卡片: {e}")
             broadcast_event("task_failed", {"card_id": idx.card_id, "reason": str(e)})
             continue
 
@@ -879,15 +954,50 @@ def process_pending_cards():
             auth_info=auth_info,
         )
 
-        # 更新卡片狀態
-        if result["status"] == "success":
-            append_text = f"\n\n### AI Output ({result['provider']})\n```\n{result['output'][:1000]}...\n```"
-            new_status = "completed"
-        else:
-            append_text = f"\n\n### Error ({result['provider']})\n{result['output']}"
-            new_status = "failed"
+        # 判斷是否為排程卡片
+        cron_job_id = _parse_cron_job_id(idx.title)
+        is_cron_card = cron_job_id is not None and list_name == "Scheduled"
 
-        update_card_status(idx.card_id, new_status, append_text)
+        new_status = "completed" if result["status"] == "success" else "failed"
+        token_info = result.get("token_info", {})
+
+        if is_cron_card:
+            # === 排程卡片：寫入 CronLog + 刪除卡片 ===
+            output_text = result.get("output", "")
+            error_msg = "" if new_status == "completed" else output_text
+
+            # 取得 cron_job_name
+            with Session(engine) as session:
+                from app.models.core import CronJob
+                cron_job = session.get(CronJob, cron_job_id)
+                cron_job_name = cron_job.name if cron_job else ""
+
+            save_cron_log(
+                cron_job_id=cron_job_id,
+                cron_job_name=cron_job_name,
+                card_id=idx.card_id,
+                card_title=idx.title,
+                project_id=idx.project_id,
+                project_name=project_name,
+                provider=result.get("provider", ""),
+                member_id=member_id,
+                status="success" if new_status == "completed" else "error",
+                output=output_text,
+                error_message=error_msg,
+                prompt_snapshot=card_data.content,
+                token_info=token_info,
+            )
+
+            # 排程卡片：完成後刪除（不論成功失敗都刪，log 已記錄）
+            delete_card_completely(idx.card_id)
+        else:
+            # === 一般卡片：輸出追加在 content 後面，用分隔線隔開 ===
+            if result["status"] == "success":
+                append_text = f"\n\n---\n\n### AI Output ({result['provider']})\n```\n{result['output'][:1000]}...\n```"
+            else:
+                append_text = f"\n\n---\n\n### Error ({result['provider']})\n{result['output']}"
+
+            update_card_status(idx.card_id, new_status, append_text)
 
         # 廣播完成事件
         event = "task_completed" if new_status == "completed" else "task_failed"
@@ -908,7 +1018,7 @@ def process_pending_cards():
         if workspace_dir:
             cleanup_workspace(idx.card_id)
 
-        logger.info(f"[Worker] Card {idx.card_id} completed with status: {new_status}")
+        logger.info(f"[Worker] Card {idx.card_id} {'cron_log+deleted' if is_cron_card else new_status}")
 
 
 def main():
