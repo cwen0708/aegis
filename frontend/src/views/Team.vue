@@ -544,14 +544,14 @@ async function deleteSkill() {
                     <Edit3 class="w-3 h-3 text-slate-600" />
                   </div>
                 </div>
-                <div class="flex items-center gap-3">
-                  <button @click="openBindDialog(member.id)" class="flex items-center gap-1 px-3 py-1.5 text-[11px] text-slate-500 hover:text-emerald-400 transition-colors">
-                    <Plus class="w-3 h-3" />
-                    綁定帳號
+                <div class="flex items-center gap-2">
+                  <button @click="openBindDialog(member.id)" class="flex items-center gap-1.5 px-3 py-2 text-xs text-slate-500 hover:text-emerald-400 hover:bg-emerald-400/10 rounded-lg transition-colors">
+                    <Plus class="w-4 h-4" />
+                    <span class="hidden sm:inline">綁定帳號</span>
                   </button>
-                  <button @click="openSkillsDialog(member)" class="flex items-center gap-1 px-3 py-1.5 text-[11px] text-slate-500 hover:text-purple-400 transition-colors">
-                    <BookOpen class="w-3 h-3" />
-                    技能
+                  <button @click="openSkillsDialog(member)" class="flex items-center gap-1.5 px-3 py-2 text-xs text-slate-500 hover:text-purple-400 hover:bg-purple-400/10 rounded-lg transition-colors">
+                    <BookOpen class="w-4 h-4" />
+                    <span class="hidden sm:inline">技能</span>
                   </button>
                 </div>
               </div>

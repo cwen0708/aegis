@@ -327,32 +327,32 @@ function visibleJobs(group: { project: any; jobs: any[] }) {
               {{ formatTime(job.next_scheduled_at) }}
             </td>
             <td class="px-6 py-3 text-right">
-              <div class="flex justify-end gap-1.5">
+              <div class="flex justify-end gap-0.5 -mr-2">
                 <button
                   @click="openEditModal(job)"
-                  class="p-1.5 text-slate-500 hover:text-blue-400 hover:bg-blue-400/10 rounded-lg transition-colors"
+                  class="p-2.5 text-slate-500 hover:text-blue-400 hover:bg-blue-400/10 rounded-lg transition-colors touch-target"
                   title="編輯排程"
                 >
-                  <Pencil class="w-3.5 h-3.5" />
+                  <Pencil class="w-4 h-4" />
                 </button>
                 <button
                   @click="toggleJob(job)"
                   :class="[
-                    'p-1.5 rounded-lg transition-colors',
+                    'p-2.5 rounded-lg transition-colors touch-target',
                     job.is_enabled ? 'text-amber-400 hover:bg-amber-400/10' : 'text-emerald-400 hover:bg-emerald-400/10'
                   ]"
                   :title="job.is_enabled ? '停用此排程' : '啟用此排程'"
                 >
-                  <Pause v-if="job.is_enabled" class="w-3.5 h-3.5" />
-                  <Play v-else class="w-3.5 h-3.5" />
+                  <Pause v-if="job.is_enabled" class="w-4 h-4" />
+                  <Play v-else class="w-4 h-4" />
                 </button>
                 <button
                   v-if="!job.is_system"
                   @click="requestDelete(job.id)"
-                  class="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
+                  class="p-2.5 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors touch-target"
                   title="刪除排程"
                 >
-                  <Trash2 class="w-3.5 h-3.5" />
+                  <Trash2 class="w-4 h-4" />
                 </button>
               </div>
             </td>

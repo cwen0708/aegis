@@ -3,6 +3,7 @@ import { ref, provide, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { Shield, ListTodo, Settings, Clock, FolderOpen, Wifi, WifiOff, Sun, Moon, Zap, Building2, PanelLeftClose, PanelLeftOpen, Rocket } from 'lucide-vue-next'
 import { useWebSocket } from './composables/useWebSocket'
+import { useResponsive } from './composables/useResponsive'
 import { useAegisStore } from './stores/aegis'
 import ToastNotification from './components/ToastNotification.vue'
 
@@ -13,18 +14,8 @@ const store = useAegisStore()
 // 初始化 WebSocket
 useWebSocket()
 
-// 手機版檢測
-const isMobile = ref(false)
-function checkMobile() {
-  isMobile.value = window.innerWidth < 768
-}
-onMounted(() => {
-  checkMobile()
-  window.addEventListener('resize', checkMobile)
-})
-onUnmounted(() => {
-  window.removeEventListener('resize', checkMobile)
-})
+// 響應式檢測（使用共用 composable）
+const { isMobile } = useResponsive()
 
 // 側邊欄模式（provide 給子頁面控制）
 const sidebarMode = ref<'menu' | 'projects'>('menu')

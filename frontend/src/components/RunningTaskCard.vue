@@ -64,10 +64,10 @@ const providerColor = computed(() => {
         <span class="text-xs font-mono text-emerald-400">{{ elapsed }}</span>
         <button
           @click.stop="emit('abort', task.task_id)"
-          class="p-1 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded transition-colors opacity-0 group-hover:opacity-100"
+          class="p-2 -m-1 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded transition-colors touch-visible touch-target"
           title="中止任務"
         >
-          <Square class="w-3.5 h-3.5" />
+          <Square class="w-4 h-4" />
         </button>
       </div>
     </div>

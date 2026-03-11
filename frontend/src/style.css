@@ -15,3 +15,41 @@ html.light video,
 html.light canvas {
   filter: invert(1) hue-rotate(180deg);
 }
+
+/* ===== Touch-Friendly Utilities ===== */
+
+/* Minimum touch target - 44px as per WCAG 2.1 */
+.touch-target {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* Hover-only elements visible on touch devices */
+.touch-visible {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.group:hover .touch-visible {
+  opacity: 1;
+}
+@media (pointer: coarse) {
+  .touch-visible {
+    opacity: 1;
+  }
+}
+
+/* Custom scrollbar (global) */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}

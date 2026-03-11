@@ -262,28 +262,28 @@ function providerLabel(provider: string): string {
         </div>
 
         <!-- Action buttons - overlapping bottom border -->
-        <div class="absolute -bottom-3 right-6 flex items-center gap-2">
+        <div class="absolute -bottom-3 right-4 sm:right-6 flex items-center gap-1 sm:gap-2">
           <button
             @click="showTasks = !showTasks; if (showTasks) showSkills = false"
-            class="flex items-center gap-1 px-3 py-1 bg-slate-700 text-slate-300 hover:text-white hover:bg-slate-600 rounded transition-colors text-xs"
+            class="flex items-center justify-center gap-1 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 px-3 py-2 sm:py-1 bg-slate-700 text-slate-300 hover:text-white hover:bg-slate-600 rounded transition-colors text-xs"
             :class="showTasks ? 'bg-emerald-600 text-white' : ''"
           >
-            <ListTodo :size="12" />
+            <ListTodo :size="14" class="sm:w-3 sm:h-3" />
             <span class="hidden sm:inline">任務</span>
           </button>
           <button
             @click="showSkills = !showSkills; if (showSkills) { showTasks = false; selectedSkill = null }"
-            class="flex items-center gap-1 px-3 py-1 bg-slate-700 text-slate-300 hover:text-white hover:bg-slate-600 rounded transition-colors text-xs"
+            class="flex items-center justify-center gap-1 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 px-3 py-2 sm:py-1 bg-slate-700 text-slate-300 hover:text-white hover:bg-slate-600 rounded transition-colors text-xs"
             :class="showSkills ? 'bg-purple-600 text-white' : ''"
           >
-            <BookOpen :size="12" />
+            <BookOpen :size="14" class="sm:w-3 sm:h-3" />
             <span class="hidden sm:inline">技能</span>
           </button>
           <button
             @click="emit('close')"
-            class="flex items-center gap-1 px-3 py-1 bg-slate-700 text-slate-300 hover:text-white hover:bg-slate-600 rounded transition-colors text-xs"
+            class="flex items-center justify-center gap-1 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 px-3 py-2 sm:py-1 bg-slate-700 text-slate-300 hover:text-white hover:bg-slate-600 rounded transition-colors text-xs"
           >
-            <X :size="12" />
+            <X :size="14" class="sm:w-3 sm:h-3" />
             <span>關閉</span>
           </button>
         </div>

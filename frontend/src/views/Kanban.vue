@@ -579,7 +579,7 @@ async function unarchiveCard(cardId: number) {
               ]"
             >
               <!-- Card Menu Button -->
-              <div class="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div class="absolute top-3 right-3 touch-visible">
                 <button
                   @click.stop="openMenuCardId = openMenuCardId === card.id ? null : card.id"
                   class="text-slate-500 hover:text-slate-300 p-0.5"
@@ -998,7 +998,5 @@ async function unarchiveCard(cardId: number) {
   background: #334155;
   border-radius: 4px;
 }
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #475569;
-}
+/* Use global .custom-scrollbar and .touch-visible from style.css */
 </style>
