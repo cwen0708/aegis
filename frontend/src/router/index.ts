@@ -10,11 +10,12 @@ import Office from '../views/Office.vue'
 import Onboarding from '../views/Onboarding.vue'
 import SettingsLayout from '../views/settings/SettingsLayout.vue'
 import SettingsGeneral from '../views/settings/SettingsGeneral.vue'
-import SettingsAI from '../views/settings/SettingsAI.vue'
+import SettingsTools from '../views/settings/SettingsTools.vue'
 import SettingsChannels from '../views/settings/SettingsChannels.vue'
 import SettingsProjects from '../views/settings/SettingsProjects.vue'
 import SettingsArchive from '../views/settings/SettingsArchive.vue'
 import SettingsInvitations from '../views/settings/SettingsInvitations.vue'
+import SettingsUpdate from '../views/settings/SettingsUpdate.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -32,7 +33,7 @@ const router = createRouter({
       redirect: '/settings/general',
       children: [
         { path: 'general', component: SettingsGeneral },
-        { path: 'ai', component: SettingsAI },
+        { path: 'tools', component: SettingsTools },
         { path: 'channels', component: SettingsChannels },
         { path: 'projects', component: SettingsProjects },
         { path: 'invitations', component: SettingsInvitations },
@@ -40,6 +41,7 @@ const router = createRouter({
         { path: 'team', component: Team },
         { path: 'agents', component: Agents },
         { path: 'status', component: Dashboard },
+        { path: 'update', component: SettingsUpdate },
       ],
     },
   ]
