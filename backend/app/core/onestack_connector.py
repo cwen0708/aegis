@@ -30,6 +30,9 @@ ONESTACK_SUPABASE_ANON_KEY = os.getenv("ONESTACK_SUPABASE_ANON_KEY", "")
 if not ONESTACK_SUPABASE_ANON_KEY:
     ONESTACK_SUPABASE_ANON_KEY = os.getenv("ONESTACK_SUPABASE_KEY", "")
 ONESTACK_DEVICE_NAME = os.getenv("ONESTACK_DEVICE_NAME", "Aegis")
+# 預設裝置認證（從 OneStack 設定頁取得）
+ONESTACK_DEVICE_ID = os.getenv("ONESTACK_DEVICE_ID", "")
+ONESTACK_DEVICE_TOKEN = os.getenv("ONESTACK_DEVICE_TOKEN", "")
 
 # 裝置認證檔案路徑
 DEVICE_CREDENTIALS_FILE = Path(__file__).parent.parent.parent / ".aegis" / "onestack_device.json"
@@ -56,13 +59,24 @@ class OneStackConnector:
         self._email_digest_interval_hours: int = 6
         self._task_callback = None  # 外部註冊的任務回調
 
+        # 認證來源：env / file / auto
+        self._credentials_source: Optional[str] = None
+
         if self.enabled:
             if not self.supabase_url or not self.supabase_key:
                 logger.warning("[OneStack] Enabled but missing SUPABASE_URL or SUPABASE_ANON_KEY")
                 self.enabled = False
             else:
-                # 嘗試載入已儲存的裝置認證
-                self._load_device_credentials()
+                # 優先順序：Env Vars > 本地檔案 > 自動註冊
+                if ONESTACK_DEVICE_ID and ONESTACK_DEVICE_TOKEN:
+                    self.device_id = ONESTACK_DEVICE_ID
+                    self.device_token = ONESTACK_DEVICE_TOKEN
+                    self._credentials_source = "env"
+                    logger.info(f"[OneStack] Using env credentials: {self.device_id[:8]}... ({self.device_name})")
+                else:
+                    self._load_device_credentials()
+                    self._credentials_source = "file" if self.device_id else "auto"
+
                 if self.device_id:
                     logger.info(f"[OneStack] Connector initialized: {self.device_name} ({self.device_id[:8]}...)")
                 else:
@@ -190,12 +204,17 @@ class OneStackConnector:
                 params={"id": f"eq.{self.device_id}", "select": "id,device_name"}
             )
             if result and len(result) > 0:
-                logger.info(f"[OneStack] Device verified: {self.device_id[:8]}...")
+                logger.info(f"[OneStack] Device verified: {self.device_id[:8]}... (source: {self._credentials_source})")
                 return
             else:
+                if self._credentials_source == "env":
+                    # Env var 指定的裝置不存在 → 致命錯誤
+                    logger.error("[OneStack] Env var device credentials invalid! Check ONESTACK_DEVICE_ID/TOKEN")
+                    self.enabled = False
+                    return
                 logger.warning("[OneStack] Saved credentials invalid, re-registering...")
 
-        # 呼叫 register_device RPC
+        # 自動註冊（僅 file/auto 來源）
         metadata = self._get_metadata()
         result = await self._rpc("register_device", {
             "p_device_name": self.device_name,
@@ -206,6 +225,7 @@ class OneStackConnector:
             self.device_id = result.get("device_id")
             self.device_token = result.get("device_token")
             if self.device_id and self.device_token:
+                self._credentials_source = "auto"
                 self._save_device_credentials()
                 logger.info(f"[OneStack] Device registered: {self.device_id[:8]}... ({self.device_name})")
             else:
