@@ -1,0 +1,123 @@
+name: CI → Dev Tag → Deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install frontend dependencies
+        run: cd frontend && pnpm install --frozen-lockfile
+
+      - name: TypeScript type check
+        run: cd frontend && npx vue-tsc --noEmit
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install backend dependencies
+        run: cd backend && pip install -r requirements.txt
+
+      - name: Python import check
+        run: cd backend && python -c "from app.api.routes import router; print('Routes OK')"
+
+  tag:
+    name: Dev Tag + Deploy
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get latest dev tag and bump
+        id: version
+        run: |
+          # 找最新的 dev tag (v0.x.x-dev.N)
+          LATEST_DEV=$(git tag -l "v*-dev.*" --sort=-v:refname | head -1)
+          LATEST_STABLE=$(git describe --tags --abbrev=0 --match "v[0-9]*.[0-9]*.[0-9]" --exclude "*-*" 2>/dev/null || echo "v0.0.0")
+
+          echo "Latest stable: $LATEST_STABLE"
+          echo "Latest dev: $LATEST_DEV"
+
+          # 從穩定版取 base
+          STABLE_VER=${LATEST_STABLE#v}
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$STABLE_VER"
+
+          # 計算下一個 dev 編號
+          if echo "$LATEST_DEV" | grep -q "v${MAJOR}.${MINOR}.$((PATCH + 1))-dev\."; then
+            DEV_NUM=$(echo "$LATEST_DEV" | grep -o 'dev\.[0-9]*' | cut -d. -f2)
+            DEV_NUM=$((DEV_NUM + 1))
+          else
+            PATCH=$((PATCH + 1))
+            DEV_NUM=1
+          fi
+
+          NEW="v${MAJOR}.${MINOR}.${PATCH}-dev.${DEV_NUM}"
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+          echo "new_bare=${MAJOR}.${MINOR}.${PATCH}-dev.${DEV_NUM}" >> "$GITHUB_OUTPUT"
+          echo "Tagging: $NEW"
+
+      - name: Create dev tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a ${{ steps.version.outputs.new }} -m "CI: ${{ steps.version.outputs.new }}"
+          git push origin ${{ steps.version.outputs.new }}
+
+      - name: Trigger GCP hot update
+        run: |
+          RESPONSE=$(curl -s -X POST https://aegis.yooliang.com/api/v1/update/apply \
+            -H "Content-Type: application/json" \
+            -d "{\"version\":\"${{ steps.version.outputs.new_bare }}\"}")
+          echo "$RESPONSE"
+          echo "$RESPONSE" | grep -q '"ok":true' || (echo "Deploy trigger failed!" && exit 1)
+
+      - name: Wait for deploy
+        run: |
+          echo "Waiting 90s for build + restart..."
+          sleep 90
+
+          for i in 1 2 3 4 5; do
+            STATUS=$(curl -s https://aegis.yooliang.com/api/v1/update/status)
+            echo "Attempt $i: $STATUS"
+
+            STAGE=$(echo "$STATUS" | grep -o '"update_stage":"[^"]*"' | cut -d'"' -f4)
+            IS_UPDATING=$(echo "$STATUS" | grep -o '"is_updating":[a-z]*' | cut -d: -f2)
+
+            if [ "$STAGE" = "idle" ] && [ "$IS_UPDATING" = "false" ]; then
+              echo "Deploy successful!"
+              exit 0
+            fi
+
+            if [ "$STAGE" = "failed" ]; then
+              echo "Deploy failed!"
+              exit 1
+            fi
+
+            echo "Still deploying (stage: $STAGE), waiting 30s..."
+            sleep 30
+          done
+
+          echo "Deploy timeout - check manually"
+          exit 1
