@@ -1004,6 +1004,21 @@ def process_pending_cards():
         event = "task_completed" if new_status == "completed" else "task_failed"
         broadcast_event(event, {"card_id": idx.card_id, "status": new_status})
 
+        # OneStack 任務完成回報
+        try:
+            from app.core.onestack_connector import connector as _os_connector
+            if _os_connector.enabled:
+                import asyncio
+                asyncio.run(_os_connector.report_task_completion(
+                    card_id=idx.card_id,
+                    output=result.get("output", ""),
+                    status=result.get("status", "error"),
+                    duration_ms=token_info.get("duration_ms", 0),
+                    cost_usd=token_info.get("total_cost_usd", 0),
+                ))
+        except Exception as e:
+            logger.debug(f"[OneStack] Report completion failed: {e}")
+
         # 寫入成員記憶
         if member_slug:
             try:

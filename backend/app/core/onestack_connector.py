@@ -284,6 +284,123 @@ class OneStackConnector:
             }
         )
 
+    # ===== Task Completion Report =====
+
+    async def report_task_completion(
+        self,
+        card_id: int,
+        output: str,
+        status: str,
+        duration_ms: int = 0,
+        cost_usd: float = 0,
+    ):
+        """Card 完成時，檢查是否來自 OneStack，回報結果到 cli_tasks + ai_suggestions"""
+        if not self.enabled:
+            return
+
+        import json as _json
+        from sqlmodel import Session as DBSession
+        from app.database import engine
+        from app.models.core import CardIndex
+
+        # 讀取 card 的 metadata
+        onestack_task_id = None
+        card_title = "Task"
+
+        with DBSession(engine) as session:
+            card = session.get(CardIndex, card_id)
+            if not card:
+                return
+            card_title = card.title or card_title
+
+            # CardIndex 可能沒有 metadata，從 tags_json 或其他欄位找
+            # 實際 onestack_task_id 存在卡片建立時的 metadata 中
+            # 由 /node/task 端點設定在 card 的 description 或 tags
+
+        # 從 MD 檔讀 frontmatter metadata
+        from app.models.core import Project
+        with DBSession(engine) as session:
+            project = session.get(Project, card.project_id) if card else None
+            if not project or not project.path:
+                return
+
+        md_path = Path(project.path) / "cards" / f"{card_id}.md"
+        if md_path.exists():
+            try:
+                text = md_path.read_text(encoding="utf-8")
+                if text.startswith("---"):
+                    parts = text.split("---", 2)
+                    if len(parts) >= 3:
+                        import yaml
+                        fm = yaml.safe_load(parts[1])
+                        if isinstance(fm, dict):
+                            meta = fm.get("metadata", {})
+                            if isinstance(meta, str):
+                                meta = _json.loads(meta)
+                            if isinstance(meta, dict):
+                                onestack_task_id = meta.get("onestack_task_id")
+            except Exception as e:
+                logger.debug(f"[OneStack] Failed to parse card metadata: {e}")
+
+        if not onestack_task_id:
+            return
+
+        logger.info(f"[OneStack] Reporting task completion: {onestack_task_id}")
+
+        # 1. 更新 cli_tasks 狀態
+        task_status = "completed" if status == "success" else "failed"
+        result_data = {
+            "output": output[:5000] if output else "",
+            "duration_ms": duration_ms,
+            "cost_usd": cost_usd,
+            "card_id": card_id,
+        }
+        error_msg = output[:1000] if status != "success" and output else None
+
+        await self.update_task_status(
+            onestack_task_id,
+            task_status,
+            result=result_data,
+            error_message=error_msg,
+        )
+
+        # 2. 查 owner_id 並寫入 ai_suggestions
+        task_data = await self._request(
+            "GET",
+            "cli_tasks",
+            params={"id": f"eq.{onestack_task_id}", "select": "owner_id,title"}
+        )
+
+        owner_id = None
+        if task_data and len(task_data) > 0:
+            owner_id = task_data[0].get("owner_id")
+            task_title = task_data[0].get("title") or card_title
+
+        if owner_id:
+            summary = output[:2000] if output else "（無輸出）"
+            icon = "✓" if task_status == "completed" else "✗"
+            await self._request(
+                "POST",
+                "ai_suggestions",
+                json_data={
+                    "owner_id": owner_id,
+                    "device_id": self.device_id,
+                    "suggestion_type": "task_result",
+                    "title": f"{icon} {task_title}",
+                    "content": summary,
+                    "priority": "medium",
+                    "source_task_id": onestack_task_id,
+                    "metadata": {
+                        "source": "aegis",
+                        "card_id": card_id,
+                        "status": task_status,
+                        "duration_ms": duration_ms,
+                        "cost_usd": cost_usd,
+                    },
+                }
+            )
+            logger.info(f"[OneStack] Task result reported: {task_title} ({task_status})")
+
     # ===== Email Digest Sync =====
 
     async def sync_email_digest(self):
