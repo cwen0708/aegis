@@ -732,6 +732,9 @@ def list_all_cron_logs(limit: int = 50, offset: int = 0, project_id: Optional[in
 @router.post("/cards/{card_id}/trigger")
 def trigger_card(card_id: int, session: Session = Depends(get_session)):
     """手動觸發卡片執行（將 status 設為 pending）"""
+    import logging
+    _log = logging.getLogger("aegis.trigger")
+
     idx = session.get(CardIndex, card_id)
     orm_card = session.get(Card, card_id)
     if not idx and not orm_card:
@@ -742,14 +745,23 @@ def trigger_card(card_id: int, session: Session = Depends(get_session)):
         raise HTTPException(status_code=409, detail="Card is already running")
 
     now = datetime.now(timezone.utc)
+    md_written = False
 
     # Update MD file + index
     if idx and idx.file_path and Path(idx.file_path).exists():
+        _log.info(f"[Trigger] Card {card_id}: reading MD from {idx.file_path}")
         cd = read_card_md(Path(idx.file_path))
+        _log.info(f"[Trigger] Card {card_id}: MD status before={cd.status}")
         cd.status = "pending"
         cd.updated_at = now
         write_card(Path(idx.file_path), cd)
+        md_written = True
+        # Verify write
+        cd_verify = read_card_md(Path(idx.file_path))
+        _log.info(f"[Trigger] Card {card_id}: MD status after write={cd_verify.status}")
         sync_card_to_index(session, cd, project_id=idx.project_id, file_path=idx.file_path)
+    else:
+        _log.warning(f"[Trigger] Card {card_id}: no MD path (idx={idx is not None}, file_path={getattr(idx, 'file_path', None)})")
 
     # Dual-write: old Card ORM
     if orm_card:
@@ -758,6 +770,11 @@ def trigger_card(card_id: int, session: Session = Depends(get_session)):
         session.add(orm_card)
 
     session.commit()
+
+    # Post-commit verify
+    idx2 = session.get(CardIndex, card_id)
+    _log.info(f"[Trigger] Card {card_id}: post-commit index status={idx2.status if idx2 else 'N/A'}, md_written={md_written}")
+
     return {"ok": True, "status": "pending"}
 
 
