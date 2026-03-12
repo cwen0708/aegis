@@ -198,12 +198,50 @@ def update_project(project_id: int, update_data: ProjectUpdate, session: Session
     session.refresh(project)
     return project
 
+def _ensure_member_inboxes(session: Session, project_id: int):
+    """AEGIS 系統專案：為每個成員自動補建綁定收件匣"""
+    all_members = session.exec(select(Member)).all()
+    if not all_members:
+        return
+    bound_member_ids = set(
+        row[0] for row in session.exec(
+            select(StageList.member_id).where(
+                StageList.project_id == project_id,
+                StageList.is_member_bound == True,
+            )
+        ).all() if row[0] is not None
+    )
+    missing = [m for m in all_members if m.id not in bound_member_ids]
+    if not missing:
+        return
+    max_pos = session.exec(
+        select(StageList.position).where(StageList.project_id == project_id).order_by(StageList.position.desc())
+    ).first()
+    pos = (max_pos or 0) + 1
+    for m in missing:
+        session.add(StageList(
+            project_id=project_id,
+            name=f"{m.name} 收件匣",
+            position=pos,
+            member_id=m.id,
+            stage_type="auto_process",
+            is_ai_stage=True,
+            is_member_bound=True,
+        ))
+        pos += 1
+    session.commit()
+
+
 @router.get("/projects/{project_id}/board", response_model=List[StageListResponse])
 def read_project_board(project_id: int, session: Session = Depends(get_session)):
     """一次抓取整個看板所需的資料：列表與其中的卡片（MD-driven via CardIndex）"""
     project = session.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+
+    # AEGIS 系統專案：自動補建成員收件匣
+    if project.is_system:
+        _ensure_member_inboxes(session, project_id)
 
     lists = session.exec(
         select(StageList).where(StageList.project_id == project_id).order_by(StageList.position)
