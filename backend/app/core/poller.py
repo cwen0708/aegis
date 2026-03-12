@@ -592,12 +592,17 @@ async def _execute_and_update(
 
 async def start_poller():
     """任務監聽器的主迴圈"""
-    logger.info("Starting Aegis Task Poller...")
+    dprint("[Poller] Starting Aegis Task Poller...")
+    cycle = 0
     while True:
         try:
+            cycle += 1
+            if cycle % 20 == 1:  # 每 60 秒記一次 heartbeat
+                dprint(f"[Poller] heartbeat cycle={cycle}")
             await _process_pending_cards()
         except Exception as e:
+            dprint(f"[Poller] ERROR: {e}")
             logger.error(f"[Poller Error] {e}")
-        
+
         # 每 3 秒掃描一次
         await asyncio.sleep(3)

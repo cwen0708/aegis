@@ -28,6 +28,7 @@ def _parse_card_id_from_filename(filename: str) -> int | None:
 
 async def _handle_change(change_type: Change, path_str: str):
     """Handle a single file change event."""
+    from app.core.poller import dprint
     path = Path(path_str)
 
     # Only care about card MD files
@@ -35,10 +36,13 @@ async def _handle_change(change_type: Change, path_str: str):
     if card_id is None:
         return
 
+    dprint(f"[Watcher] Card {card_id}: {change_type.name} event for {path.name}")
+
     # 內部寫入（write_card）已標記，跳過避免競態條件
     # Windows 的 os.replace() 原子寫入會觸發 delete + added 兩個事件，
     # 必須對所有事件類型（含 deleted）都檢查 internal write 標記
     if consume_internal_write(path):
+        dprint(f"[Watcher] Card {card_id}: internal write consumed, skip")
         return
 
     if change_type == Change.deleted:
@@ -69,8 +73,10 @@ async def _handle_change(change_type: Change, path_str: str):
             return  # Internal write — mtime already synced, skip
 
         # External modification — parse and update index
+        dprint(f"[Watcher] Card {card_id}: external mod detected, mtime diff={abs((idx.file_mtime if idx else 0) - current_mtime):.4f}")
         try:
             card = read_card(path)
+            dprint(f"[Watcher] Card {card_id}: read status={card.status}, list_id={card.list_id}")
 
             # Determine project_id from existing index or directory structure
             project_id = idx.project_id if idx else 0
