@@ -159,19 +159,7 @@ def _resolve_member(stage_list, project, phase: str, session) -> tuple[int | Non
             logger.info(f"[Router] Project '{project.name}' default → {member.name} ({provider})")
             return member.id, provider
 
-    # 3. 全域預設 (SystemSetting)
-    setting = session.get(SystemSetting, f"phase_routing.{phase}")
-    if setting and setting.value:
-        try:
-            member = session.get(Member, int(setting.value))
-            if member:
-                provider = _get_primary_provider(member.id, session)
-                logger.info(f"[Router] Phase '{phase}' global default → {member.name} ({provider})")
-                return member.id, provider
-        except (ValueError, TypeError):
-            pass
-
-    # 無路由，使用第一個可用成員
+    # 3. 無路由，使用第一個可用成員
     return None, None
 
 

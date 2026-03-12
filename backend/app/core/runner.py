@@ -38,14 +38,6 @@ busy_members: set[int] = set()
 # key: card_id, value: { task_id, project, card_title, started_at, pid, process, member_id }
 running_tasks: Dict[int, Dict[str, Any]] = {}
 
-# 階段到提供者的預設路由表 (Agent Routing)
-PHASE_ROUTING = {
-    "PLANNING": "gemini",
-    "REVIEWING": "gemini",
-    "DEVELOPING": "claude",
-    "VERIFYING": "claude"
-}
-
 # 支援的 AI 提供者指令配置
 PROVIDERS = {
     "gemini": {
@@ -138,7 +130,7 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str, 
     執行單一 AI 任務，受 Semaphore 保護。
     使用 asyncio subprocess 支援即時 log streaming 和 abort。
     """
-    provider_name = forced_provider if forced_provider and forced_provider in PROVIDERS else PHASE_ROUTING.get(phase, "gemini")
+    provider_name = forced_provider if forced_provider and forced_provider in PROVIDERS else "claude"
     config = PROVIDERS[provider_name]
 
     # 決定模型（支援成員指定的 model）

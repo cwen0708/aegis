@@ -59,16 +59,6 @@ POLL_INTERVAL = 3  # 秒
 API_BASE = "http://127.0.0.1:8899/api/v1"
 MAX_WORKSTATIONS = 3  # 預設，啟動時從 DB 讀取
 
-# AI Provider 配置（從 runner.py 移植）
-PHASE_ROUTING = {
-    "PLANNING": "gemini",
-    "REVIEWING": "gemini",
-    "DEVELOPING": "claude",
-    "VERIFYING": "claude",
-    "SCHEDULED": "claude",
-    "ONESTACK": "claude",
-}
-
 PROVIDERS = {
     "gemini": {
         "cmd_base": ["gemini"],
@@ -234,18 +224,7 @@ def resolve_member(stage_list_id: int, phase: str) -> tuple:
                     logger.info(f"[Router] Project '{project.name}' default → {member.name} ({provider}/{model})")
                     return member.id, provider, model, member.slug, auth_info
 
-        # 3. 全域預設
-        setting = session.get(SystemSetting, f"phase_routing.{phase}")
-        if setting and setting.value:
-            try:
-                member = session.get(Member, int(setting.value))
-                if member:
-                    provider, model, auth_info = get_primary_provider(member.id)
-                    return member.id, provider, model, member.slug, auth_info
-            except (ValueError, TypeError):
-                pass
-
-        # 4. 無指派
+        # 3. 無指派
         return None, None, "", None, {}
 
 
@@ -472,7 +451,7 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
     """
     auth_info = auth_info or {}
 
-    provider_name = forced_provider if forced_provider and forced_provider in PROVIDERS else PHASE_ROUTING.get(phase, "gemini")
+    provider_name = forced_provider if forced_provider and forced_provider in PROVIDERS else "claude"
     config = PROVIDERS.get(provider_name, PROVIDERS["gemini"])
 
     # 建構命令，支援成員指定的模型

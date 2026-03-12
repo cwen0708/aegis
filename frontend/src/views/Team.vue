@@ -110,9 +110,6 @@ const bindAccountProvider = computed(() => {
 })
 const bindModelOptions = computed(() => modelOptions[bindAccountProvider.value] || [])
 
-// Phase routing
-const phaseRouting = ref<Record<string, string>>({})
-const phases = ['PLANNING', 'DEVELOPING', 'VERIFYING', 'REVIEWING']
 
 async function fetchAll() {
   loading.value = true
@@ -126,11 +123,6 @@ async function fetchAll() {
     accounts.value = await accRes.json()
     members.value = await memRes.json()
 
-    // Load phase routing from settings
-    await store.fetchSettings()
-    for (const phase of phases) {
-      phaseRouting.value[phase] = store.settings[`phase_routing.${phase}`] || ''
-    }
   } catch (e) {
     store.addToast('載入失敗', 'error')
   }
@@ -356,15 +348,6 @@ async function unbindAccount(memberId: number, accountId: number) {
   }
 }
 
-// Phase routing save
-async function saveRouting() {
-  const data: Record<string, string> = {}
-  for (const phase of phases) {
-    data[`phase_routing.${phase}`] = phaseRouting.value[phase] || ''
-  }
-  await store.updateSettings(data)
-}
-
 function providerBadgeClass(provider: string) {
   return provider === 'claude'
     ? 'bg-orange-500/10 text-orange-400 border-orange-500/20'
@@ -574,31 +557,6 @@ async function deleteSkill() {
           </div>
         </div>
 
-        <!-- 路由設定 -->
-        <div class="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
-          <div class="px-6 py-4 border-b border-slate-700/50">
-            <h2 class="text-sm font-semibold text-slate-200">預設路由</h2>
-            <p class="text-[11px] text-slate-500 mt-0.5">各階段的預設成員，可在專案看板中針對個別列表覆寫</p>
-          </div>
-          <div class="p-6 space-y-3">
-            <div v-for="phase in phases" :key="phase" class="flex items-center gap-4">
-              <span class="text-xs font-mono text-slate-400 w-28">{{ phase }}</span>
-              <select
-                v-model="phaseRouting[phase]"
-                class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
-              >
-                <option value="">-- 使用預設 --</option>
-                <option v-for="m in members" :key="m.id" :value="String(m.id)">{{ m.avatar }} {{ m.name }}</option>
-              </select>
-            </div>
-            <div class="flex justify-end pt-2">
-              <button @click="saveRouting" class="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg font-bold text-xs transition-all">
-                <Save class="w-3.5 h-3.5" />
-                儲存路由
-              </button>
-            </div>
-          </div>
-        </div>
       </div>
 
     <!-- Member Dialog -->
