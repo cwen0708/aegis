@@ -17,6 +17,7 @@ const menuItems = [
   { path: '/settings/team', label: '團隊管理', icon: Users },
   { path: '/settings/agents', label: '代理設定', icon: Bot },
   { path: '/settings/tools', label: '終端管理', icon: Terminal },
+  { path: '/settings/onestack', label: 'OneStack 配對', icon: Globe },
   { path: '/settings/status', label: '服務狀態', icon: Activity },
   { path: '/settings/update', label: '系統更新', icon: Download },
 ]

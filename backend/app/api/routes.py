@@ -2667,6 +2667,122 @@ def get_node_info(
     }
 
 
+class NodePairPayload(BaseModel):
+    """配對碼連線請求"""
+    supabase_url: str
+    supabase_anon_key: str
+    pairing_code: str
+    device_name: Optional[str] = None
+
+
+@router.post("/node/pair")
+async def pair_with_onestack(payload: NodePairPayload):
+    """
+    用配對碼連線到 OneStack
+
+    1. 呼叫 OneStack Supabase RPC claim_device_by_code
+    2. 取得 device_id + device_token
+    3. 儲存設定到本地 + 熱啟動 connector
+    """
+    import httpx
+
+    url = f"{payload.supabase_url}/rest/v1/rpc/claim_device_by_code"
+    headers = {
+        "apikey": payload.supabase_anon_key,
+        "Authorization": f"Bearer {payload.supabase_anon_key}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(url, headers=headers, json={
+                "p_code": payload.pairing_code.strip().upper()
+            })
+            if resp.status_code >= 400:
+                detail = resp.text
+                try:
+                    detail = resp.json().get("message", detail)
+                except Exception:
+                    pass
+                raise HTTPException(status_code=400, detail=f"Pairing failed: {detail}")
+            result = resp.json()
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"Cannot reach OneStack: {e}")
+
+    device_id = result.get("device_id")
+    device_token = result.get("device_token")
+    if not device_id or not device_token:
+        raise HTTPException(status_code=400, detail="Unexpected response from OneStack")
+
+    # 儲存設定到本地
+    from app.core.onestack_connector import connector, DEVICE_CREDENTIALS_FILE, start_onestack_connector
+    import json as _json
+
+    connector.supabase_url = payload.supabase_url
+    connector.supabase_key = payload.supabase_anon_key
+    connector.device_id = device_id
+    connector.device_token = device_token
+    connector.device_name = payload.device_name or result.get("device_name", "Aegis")
+    connector.enabled = True
+    connector._credentials_source = "paired"
+
+    # 儲存到認證檔案
+    DEVICE_CREDENTIALS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    DEVICE_CREDENTIALS_FILE.write_text(
+        _json.dumps({
+            "device_id": device_id,
+            "device_token": device_token,
+            "device_name": connector.device_name,
+            "supabase_url": payload.supabase_url,
+            "supabase_anon_key": payload.supabase_anon_key,
+            "paired_at": datetime.now().isoformat(),
+        }, indent=2),
+        encoding="utf-8",
+    )
+
+    # 同時寫入 .env（重啟後仍有效）
+    env_path = Path(__file__).parent.parent.parent / ".env"
+    env_lines = []
+    if env_path.exists():
+        env_lines = env_path.read_text(encoding="utf-8").splitlines()
+
+    onestack_vars = {
+        "ONESTACK_ENABLED": "true",
+        "ONESTACK_SUPABASE_URL": payload.supabase_url,
+        "ONESTACK_SUPABASE_ANON_KEY": payload.supabase_anon_key,
+        "ONESTACK_DEVICE_ID": device_id,
+        "ONESTACK_DEVICE_TOKEN": device_token,
+        "ONESTACK_DEVICE_NAME": connector.device_name,
+    }
+    env_lines = [l for l in env_lines if not l.startswith("ONESTACK_")]
+    env_lines.extend([f"{k}={v}" for k, v in onestack_vars.items()])
+    env_path.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
+
+    # 熱啟動 connector
+    import asyncio
+    asyncio.create_task(start_onestack_connector())
+
+    return {
+        "ok": True,
+        "device_id": device_id,
+        "device_name": connector.device_name,
+        "message": "Paired successfully. OneStack connector started.",
+    }
+
+
+@router.get("/node/pair/status")
+def get_pair_status():
+    """取得目前 OneStack 連線狀態"""
+    from app.core.onestack_connector import connector
+    return {
+        "enabled": connector.enabled,
+        "device_id": connector.device_id,
+        "device_name": connector.device_name,
+        "supabase_url": connector.supabase_url or None,
+        "connected": connector.enabled and connector.device_id is not None,
+    }
+
+
 def create_card_from_onestack_task(
     session: Session,
     task_id: str,

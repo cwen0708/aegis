@@ -16,6 +16,7 @@ import SettingsProjects from '../views/settings/SettingsProjects.vue'
 import SettingsArchive from '../views/settings/SettingsArchive.vue'
 import SettingsInvitations from '../views/settings/SettingsInvitations.vue'
 import SettingsUpdate from '../views/settings/SettingsUpdate.vue'
+import SettingsOneStack from '../views/settings/SettingsOneStack.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -41,6 +42,7 @@ const router = createRouter({
         { path: 'team', component: Team },
         { path: 'agents', component: Agents },
         { path: 'status', component: Dashboard },
+        { path: 'onestack', component: SettingsOneStack },
         { path: 'update', component: SettingsUpdate },
       ],
     },
