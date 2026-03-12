@@ -114,7 +114,26 @@ const activeCardId = computed(() => {
 
 const liveLines = computed(() => {
   if (!activeCardId.value) return []
-  return store.taskLogs.get(activeCardId.value) ?? []
+  const raw = store.taskLogs.get(activeCardId.value) ?? []
+  const parsed: string[] = []
+  for (const line of raw) {
+    try {
+      const obj = JSON.parse(line)
+      if (obj.type === 'assistant' && obj.message?.content) {
+        for (const block of obj.message.content) {
+          if (block.type === 'text' && block.text) {
+            parsed.push(block.text)
+          } else if (block.type === 'tool_use') {
+            parsed.push(`[${block.name}]`)
+          }
+        }
+      }
+    } catch {
+      // 非 JSON 行直接顯示
+      if (line.trim()) parsed.push(line)
+    }
+  }
+  return parsed
 })
 
 // WebSocket 事件：即時新增對話
