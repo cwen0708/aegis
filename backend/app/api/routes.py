@@ -870,7 +870,7 @@ def debug_worker_check():
     # 檢查 worker 進程 PID 和啟動時間
     try:
         proc = subprocess.run(
-            ["systemctl", "show", "aegis-worker", "--property=MainPID,ActiveEnterTimestamp"],
+            ["systemctl", "show", "aegis-worker", "--property=MainPID,ActiveEnterTimestamp,ExecMainStartTimestamp"],
             capture_output=True, text=True, timeout=5
         )
         for line in proc.stdout.strip().split("\n"):
@@ -878,6 +878,27 @@ def debug_worker_check():
             result[f"worker_{k}"] = v
     except Exception as e:
         result["worker_systemd_info"] = f"error: {e}"
+
+    # 讀取 systemd unit 配置
+    try:
+        proc = subprocess.run(
+            ["systemctl", "cat", "aegis-worker"],
+            capture_output=True, text=True, timeout=5
+        )
+        result["worker_unit_config"] = proc.stdout.strip()
+    except Exception as e:
+        result["worker_unit_config"] = f"error: {e}"
+
+    # 手動嘗試 restart 並記錄結果
+    try:
+        proc = subprocess.run(
+            ["sudo", "systemctl", "restart", "aegis-worker"],
+            capture_output=True, text=True, timeout=10
+        )
+        result["manual_restart_rc"] = proc.returncode
+        result["manual_restart_stderr"] = proc.stderr.strip()
+    except Exception as e:
+        result["manual_restart"] = f"error: {e}"
 
     return result
 
