@@ -35,7 +35,7 @@ onMounted(async () => {
 async function fetchStatus() {
   loading.value = true
   try {
-    const resp = await fetch(`${API}/node/pair/status`)
+    const resp = await fetch(`${API}/api/v1/node/pair/status`)
     if (resp.ok) {
       pairStatus.value = await resp.json()
     }
@@ -66,7 +66,7 @@ async function handlePair() {
 
   pairing.value = true
   try {
-    const resp = await fetch(`${API}/node/pair`, {
+    const resp = await fetch(`${API}/api/v1/node/pair`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

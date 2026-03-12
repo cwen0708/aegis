@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { Settings, Globe, Cpu, Save, Sparkles, CloudCog, ExternalLink, Copy, Check, Loader2, Terminal, Download, MessageSquare, RefreshCw } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 import ChannelCard from '../components/ChannelCard.vue'
+import SettingsOneStack from './settings/SettingsOneStack.vue'
 
 const store = useAegisStore()
 const settingsLoading = ref(true)
@@ -374,6 +375,9 @@ async function saveSettings() {
             </div>
           </div>
         </div>
+
+        <!-- OneStack 連線 -->
+        <SettingsOneStack />
 
         <!-- 執行設定 -->
         <div class="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
