@@ -2893,31 +2893,33 @@ async def build_update(version: str):
 
 @router.post("/update/apply")
 async def apply_update(payload: ApplyUpdatePayload, session: Session = Depends(get_session)):
-    """套用更新（完整流程）"""
+    """套用更新（背景執行，立即回應）"""
+    import asyncio
+
     if not updater.is_deployed_environment():
         raise HTTPException(status_code=400, detail="本地開發環境不支援熱更新")
 
-    # 檢查是否有執行中的任務
-    running = session.exec(
-        select(CardIndex).where(CardIndex.status == "running")
-    ).all()
+    # 檢查是否已在更新中
+    state = updater.get_update_state()
+    if state.is_updating:
+        return {
+            "ok": False,
+            "version": state.current_version,
+            "message": "已有更新正在進行中",
+            "error": "",
+        }
 
-    if running and payload.wait_timeout == 0:
-        raise HTTPException(
-            status_code=409,
-            detail=f"有 {len(running)} 個任務執行中，請等待完成或設定 wait_timeout"
-        )
-
-    success = await updater.full_update(
+    # 背景執行完整更新流程，API 立即回應
+    asyncio.create_task(updater.full_update(
         version=payload.version,
         wait_timeout=payload.wait_timeout
-    )
-    state = updater.get_update_state()
+    ))
+
     return {
-        "ok": success,
-        "version": state.current_version,
-        "message": state.message,
-        "error": state.error,
+        "ok": True,
+        "version": payload.version or "latest",
+        "message": "更新已觸發，請透過 /update/status 查詢進度",
+        "error": "",
     }
 
 

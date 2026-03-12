@@ -136,7 +136,7 @@ jobs:
 
       - name: Trigger GCP hot update
         run: |
-          RESPONSE=$(curl -s -X POST https://aegis.yooliang.com/api/v1/update/apply \
+          RESPONSE=$(curl -s --max-time 15 -X POST https://aegis.yooliang.com/api/v1/update/apply \
             -H "Content-Type: application/json" \
             -d "{\"version\":\"${{ steps.version.outputs.new_bare }}\"}")
           echo "$RESPONSE"
@@ -144,18 +144,25 @@ jobs:
 
       - name: Wait for deploy
         run: |
-          echo "Waiting 45s for download + restart..."
-          sleep 45
+          echo "Waiting 30s for update to start..."
+          sleep 30
 
-          for i in 1 2 3 4 5; do
-            STATUS=$(curl -s https://aegis.yooliang.com/api/v1/update/status)
+          for i in 1 2 3 4 5 6; do
+            STATUS=$(curl -s --max-time 10 https://aegis.yooliang.com/api/v1/update/status 2>/dev/null || echo '{}')
             echo "Attempt $i: $STATUS"
 
+            VERSION=$(echo "$STATUS" | grep -o '"current_version":"[^"]*"' | cut -d'"' -f4)
             STAGE=$(echo "$STATUS" | grep -o '"update_stage":"[^"]*"' | cut -d'"' -f4)
             IS_UPDATING=$(echo "$STATUS" | grep -o '"is_updating":[a-z]*' | cut -d: -f2)
 
-            if [ "$STAGE" = "idle" ] && [ "$IS_UPDATING" = "false" ]; then
-              echo "Deploy successful!"
+            # 服務重啟後版本已更新 = 成功
+            if echo "$VERSION" | grep -q "dev.${{ steps.version.outputs.new }}"; then
+              echo "Deploy successful! Version: $VERSION"
+              exit 0
+            fi
+
+            if [ "$STAGE" = "idle" ] && [ "$IS_UPDATING" = "false" ] && [ "$i" -gt 2 ]; then
+              echo "Deploy completed (stage idle). Version: $VERSION"
               exit 0
             fi
 
@@ -164,8 +171,8 @@ jobs:
               exit 1
             fi
 
-            echo "Still deploying (stage: $STAGE), waiting 20s..."
-            sleep 20
+            echo "Still deploying (stage: $STAGE, version: $VERSION), waiting 15s..."
+            sleep 15
           done
 
           echo "Deploy timeout - check manually"
