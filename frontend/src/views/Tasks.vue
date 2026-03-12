@@ -2,10 +2,13 @@
 import { ref } from 'vue'
 import { Activity } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
+import { useProjectSelector } from '../composables/useProjectSelector'
+import PageHeader from '../components/PageHeader.vue'
 import RunningTaskCard from '../components/RunningTaskCard.vue'
 import TerminalViewer from '../components/TerminalViewer.vue'
 
 const store = useAegisStore()
+useProjectSelector() // 初始化全域專案狀態
 
 const expandedTaskId = ref<number | null>(null)
 
@@ -25,13 +28,12 @@ async function handleAbort(taskId: number) {
 <template>
   <div class="h-full flex flex-col">
     <!-- Header -->
-    <div class="sticky top-0 z-10 h-14 sm:h-16 shrink-0 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 px-2 sm:px-8 flex items-center justify-between">
-      <h1 class="text-base sm:text-lg font-bold text-slate-100">運行中任務</h1>
+    <PageHeader :icon="Activity">
       <div class="flex items-center gap-2 text-xs text-slate-500">
         <Activity class="w-4 h-4" />
         <span>{{ store.runningTasks.length }} 個任務</span>
       </div>
-    </div>
+    </PageHeader>
 
     <div class="flex-1 overflow-auto p-2 sm:p-8">
       <div v-if="store.runningTasks.length === 0" class="bg-slate-800/30 rounded-2xl border border-slate-700/50 p-10 sm:p-20 text-center">

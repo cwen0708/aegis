@@ -5,6 +5,8 @@ import { Clock, Play, Pause, Trash2, AlertCircle, Plus, X, FolderOpen, Pencil, C
 import { useAegisStore } from '../stores/aegis'
 import { useEscapeKey } from '../composables/useEscapeKey'
 import { useResponsive } from '../composables/useResponsive'
+import { useProjectSelector } from '../composables/useProjectSelector'
+import PageHeader from '../components/PageHeader.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 
 const { isMobile } = useResponsive()
@@ -12,8 +14,8 @@ const { isMobile } = useResponsive()
 const route = useRoute()
 const router = useRouter()
 const store = useAegisStore()
+const { projects } = useProjectSelector()
 const cronJobs = ref<any[]>([])
-const projects = ref<any[]>([])
 const loading = ref(true)
 const cronPausedProjects = ref<number[]>([])
 
@@ -63,12 +65,6 @@ const saveEditJob = async () => {
 // 刪除確認
 const confirmDeleteVisible = ref(false)
 const deleteTargetId = ref<number | null>(null)
-
-const fetchProjects = async () => {
-  const res = await fetch('/api/v1/projects/')
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  projects.value = await res.json()
-}
 
 const fetchCronJobs = async () => {
   loading.value = true
@@ -168,7 +164,6 @@ async function toggleProjectCron(projectId: number) {
 
 onMounted(async () => {
   await fetchCronJobs()
-  await fetchProjects()
   await fetchCronPausedProjects()
   if (route.query.new === 'true') {
     showAddModal.value = true
@@ -183,8 +178,6 @@ const formatTime = (iso: string) => {
 
 // 整體排程狀態（有任何專案被暫停就算 partial）
 const totalEnabledJobs = computed(() => cronJobs.value.filter((j: any) => j.is_enabled).length)
-const hasPausedProjects = computed(() => cronPausedProjects.value.length > 0)
-
 // 按專案分組
 const jobsByProject = computed(() => {
   const map = new Map<number, { project: any; jobs: any[] }>()
@@ -231,14 +224,9 @@ function visibleJobs(group: { project: any; jobs: any[] }) {
 <template>
   <div class="h-full flex flex-col">
     <!-- Header -->
-    <div class="sticky top-0 z-10 h-14 sm:h-16 shrink-0 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 px-2 sm:px-8 flex items-center justify-between">
-      <!-- Left: 排程狀態群組 -->
+    <PageHeader :icon="Clock">
+      <!-- 排程狀態 -->
       <div class="flex items-center bg-slate-700/50 rounded-lg border border-slate-600/50 overflow-hidden">
-        <div class="flex items-center gap-1.5 px-2 sm:px-3 py-1.5">
-          <Clock class="w-3.5 h-3.5" :class="hasPausedProjects ? 'text-amber-400' : 'text-emerald-400'" />
-          <span class="text-xs font-medium text-slate-200">排程</span>
-        </div>
-        <div class="w-px h-5 bg-slate-600/50"></div>
         <div class="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5">
           <span class="text-xs font-bold text-blue-400">{{ totalEnabledJobs }}</span>
           <span class="text-[10px] text-slate-500">/{{ cronJobs.length }}</span>
@@ -249,14 +237,11 @@ function visibleJobs(group: { project: any; jobs: any[] }) {
         </div>
       </div>
 
-      <!-- Right: Actions -->
-      <div class="flex items-center gap-2 sm:gap-3">
-        <button @click="showAddModal = true" class="flex items-center justify-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-white p-2 sm:px-3 sm:py-1.5 rounded-lg text-xs font-medium transition-all shadow-lg shadow-emerald-500/20">
-          <Plus class="w-4 h-4 sm:w-3.5 sm:h-3.5" />
-          <span class="hidden sm:inline">新增排程</span>
-        </button>
-      </div>
-    </div>
+      <button @click="showAddModal = true" class="flex items-center justify-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-white p-2 sm:px-3 sm:py-1.5 rounded-lg text-xs font-medium transition-all shadow-lg shadow-emerald-500/20">
+        <Plus class="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+        <span class="hidden sm:inline">新增排程</span>
+      </button>
+    </PageHeader>
 
     <div class="flex-1 overflow-auto p-2 sm:p-8 space-y-4 sm:space-y-6">
 

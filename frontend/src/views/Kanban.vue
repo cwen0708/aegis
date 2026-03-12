@@ -1,18 +1,19 @@
 <script setup lang="ts">
-import { ref, inject, onMounted, onUnmounted, watch, computed, type Ref } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
-import { Plus, Play, Pause, Square, Clock, Trash2, Zap, MoreVertical, ChevronDown, ChevronLeft, ChevronRight, FolderOpen, Eye, UserCircle, Settings2, Bot, Hand, CheckCircle, XCircle, Archive, RotateCcw, Loader2 } from 'lucide-vue-next'
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
+import { useRouter } from 'vue-router'
+import { Plus, Play, Pause, Square, Clock, Trash2, Zap, MoreVertical, ChevronLeft, ChevronRight, FolderOpen, Eye, UserCircle, Settings2, Bot, Hand, CheckCircle, XCircle, Archive, RotateCcw, Loader2, LayoutDashboard } from 'lucide-vue-next'
 import draggable from 'vuedraggable'
 import { useAegisStore } from '../stores/aegis'
 import { useEscapeKey } from '../composables/useEscapeKey'
 import { useResponsive } from '../composables/useResponsive'
+import { useProjectSelector } from '../composables/useProjectSelector'
+import PageHeader from '../components/PageHeader.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import TerminalViewer from '../components/TerminalViewer.vue'
 
 const { isMobile } = useResponsive()
 
 const router = useRouter()
-const route = useRoute()
 const store = useAegisStore()
 
 // 排程狀態（per-project paused set）
@@ -48,12 +49,10 @@ async function toggleCron() {
   }
 }
 
-// 從 App.vue 注入側邊欄模式控制
-const sidebarMode = inject<Ref<'menu' | 'projects'>>('sidebarMode')
+// 全域專案選擇（共用 composable）
+const { projects, selectedProjectId, currentProject } = useProjectSelector()
 
 // 資料狀態
-const projects = ref<any[]>([])
-const selectedProjectId = ref<number | null>(null)
 const boardData = ref<any[]>([])
 
 // Modal 狀態
@@ -83,18 +82,6 @@ function updateElapsedTimers() {
 }
 
 // API
-const fetchProjects = async () => {
-  const res = await fetch('/api/v1/projects/')
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  projects.value = await res.json()
-  // 如果 URL 帶有 project query，使用它
-  if (route.query.project) {
-    selectedProjectId.value = Number(route.query.project)
-  } else if (projects.value.length > 0 && !selectedProjectId.value) {
-    selectedProjectId.value = projects.value[0].id
-  }
-}
-
 const fetchBoard = async () => {
   if (!selectedProjectId.value) return
   const res = await fetch(`/api/v1/projects/${selectedProjectId.value}/board`)
@@ -249,12 +236,8 @@ function onDocumentClick() {
 }
 
 watch(selectedProjectId, () => { fetchBoard() })
-watch(() => route.query.project, (val) => {
-  if (val) selectedProjectId.value = Number(val)
-})
 
 onMounted(() => {
-  fetchProjects()
   fetchCronStatus()
   elapsedInterval = setInterval(updateElapsedTimers, 1000)
   window.addEventListener('aegis:task-event', onTaskEvent)
@@ -271,9 +254,6 @@ onUnmounted(() => {
 function isCardRunning(cardId: number) {
   return store.runningTasks.some(t => t.task_id === cardId)
 }
-
-// 當前專案
-const currentProject = computed(() => projects.value.find(p => p.id === selectedProjectId.value))
 
 // 成員指派 Dialog
 interface MemberOption {
@@ -319,10 +299,6 @@ async function assignMember(memberId: number | null) {
     store.addToast(e.message || '指派失敗', 'error')
   }
 }
-
-// 切換到側邊欄專案模式（桌面版）或顯示專案下拉選單（手機版）
-const showProjectDropdown = ref(false)
-useEscapeKey(showProjectDropdown, () => { showProjectDropdown.value = false })
 
 // 手機版：Trello 風格單列顯示
 const mobileStageIndex = ref(0)
@@ -391,20 +367,6 @@ function onTouchEnd() {
     // 向右滑 → 上一個
     prevStage()
   }
-}
-
-function switchToProjectsSidebar() {
-  if (isMobile) {
-    showProjectDropdown.value = !showProjectDropdown.value
-  } else if (sidebarMode) {
-    sidebarMode.value = 'projects'
-  }
-}
-
-function selectProject(projectId: number) {
-  selectedProjectId.value = projectId
-  showProjectDropdown.value = false
-  fetchBoard()
 }
 
 // 階段配置 Dialog
@@ -533,98 +495,57 @@ async function unarchiveCard(cardId: number) {
 
 <template>
   <div class="h-full flex flex-col">
-    <!-- Sticky Header / Toolbar -->
-    <div class="sticky top-0 z-10 h-14 sm:h-16 shrink-0 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 px-2 sm:px-8 flex items-center justify-between gap-2 sm:gap-4">
+    <!-- Header -->
+    <PageHeader :icon="LayoutDashboard">
+      <!-- Runner Controls (hide on mobile) -->
+      <button
+        v-if="!isMobile"
+        @click="toggleRunner"
+        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0"
+        :class="store.systemInfo.is_paused
+          ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
+          : 'bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'"
+      >
+        <Play v-if="store.systemInfo.is_paused" class="w-3.5 h-3.5" />
+        <Pause v-else class="w-3.5 h-3.5" />
+        {{ store.systemInfo.is_paused ? '恢復' : '暫停' }}
+      </button>
 
-      <!-- Left: Project Name + Runner -->
-      <div class="flex items-center gap-2 sm:gap-4 min-w-0 relative">
-        <!-- Project Name (click → sidebar projects mode or mobile dropdown) -->
-        <button
-          @click="switchToProjectsSidebar"
-          class="flex items-center gap-1.5 sm:gap-2 min-w-0 group"
-        >
-          <FolderOpen class="w-4 sm:w-5 h-4 sm:h-5 text-emerald-400 shrink-0" />
-          <span class="text-sm sm:text-lg font-bold text-slate-100 truncate group-hover:text-emerald-400 transition-colors max-w-[120px] sm:max-w-none">
-            {{ currentProject?.name || '選擇專案' }}
-          </span>
-          <ChevronDown class="w-3 sm:w-4 h-3 sm:h-4 text-slate-500 shrink-0 transition-transform" :class="{ 'rotate-180': showProjectDropdown }" />
-        </button>
-
-        <!-- Mobile Project Dropdown -->
-        <div
-          v-if="showProjectDropdown && isMobile"
-          class="absolute top-full left-0 mt-2 w-56 bg-slate-800 rounded-lg border border-slate-700 shadow-xl z-50 max-h-64 overflow-y-auto"
-        >
-          <button
-            v-for="p in projects"
-            :key="p.id"
-            @click="selectProject(p.id)"
-            class="w-full flex items-center gap-2 px-3 py-2.5 text-sm transition-colors"
-            :class="selectedProjectId === p.id
-              ? 'bg-emerald-500/20 text-emerald-400'
-              : 'text-slate-300 hover:bg-slate-700'"
-          >
-            <FolderOpen class="w-4 h-4 shrink-0" :class="selectedProjectId === p.id ? 'text-emerald-400' : 'text-slate-500'" />
-            <span class="truncate">{{ p.name }}</span>
-          </button>
-          <div v-if="projects.length === 0" class="px-3 py-4 text-sm text-slate-500 text-center">
-            沒有專案
-          </div>
+      <!-- 排程狀態群組（per-project）- hide on mobile -->
+      <div v-if="!isMobile" class="flex items-center bg-slate-700/50 rounded-lg border border-slate-600/50 overflow-hidden">
+        <div class="flex items-center gap-1.5 px-3 py-1.5">
+          <Clock class="w-3.5 h-3.5" :class="isCronPausedForCurrentProject ? 'text-amber-400' : 'text-emerald-400'" />
+          <span class="text-xs font-medium text-slate-200">排程</span>
         </div>
-
-        <!-- Runner Controls (hide on mobile) -->
-        <button
-          v-if="!isMobile"
-          @click="toggleRunner"
-          class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0"
-          :class="store.systemInfo.is_paused
-            ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
-            : 'bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'"
-        >
-          <Play v-if="store.systemInfo.is_paused" class="w-3.5 h-3.5" />
-          <Pause v-else class="w-3.5 h-3.5" />
-          {{ store.systemInfo.is_paused ? '恢復' : '暫停' }}
+        <div class="w-px h-5 bg-slate-600/50"></div>
+        <button @click="router.push('/cron')" class="flex items-center gap-1 px-2.5 py-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-600/50 transition-colors">
+          <Eye class="w-3 h-3" />
+          <span class="text-[10px] font-medium">查看</span>
         </button>
-      </div>
-
-      <!-- Right: Actions -->
-      <div class="flex items-center gap-1 sm:gap-2 shrink-0">
-        <!-- 排程狀態群組（per-project）- hide on mobile -->
-        <div v-if="!isMobile" class="flex items-center bg-slate-700/50 rounded-lg border border-slate-600/50 overflow-hidden">
-          <div class="flex items-center gap-1.5 px-3 py-1.5">
-            <Clock class="w-3.5 h-3.5" :class="isCronPausedForCurrentProject ? 'text-amber-400' : 'text-emerald-400'" />
-            <span class="text-xs font-medium text-slate-200">排程</span>
-          </div>
-          <div class="w-px h-5 bg-slate-600/50"></div>
-          <button @click="router.push('/cron')" class="flex items-center gap-1 px-2.5 py-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-600/50 transition-colors">
-            <Eye class="w-3 h-3" />
-            <span class="text-[10px] font-medium">查看</span>
-          </button>
-          <div class="w-px h-5 bg-slate-600/50"></div>
-          <button @click="toggleCron" :title="isCronPausedForCurrentProject ? '啟動此專案的排程' : '暫停此專案的排程'" class="flex items-center gap-1 px-2.5 py-1.5 transition-colors" :class="isCronPausedForCurrentProject ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-amber-400 hover:bg-amber-500/10'">
+        <div class="w-px h-5 bg-slate-600/50"></div>
+        <button @click="toggleCron" :title="isCronPausedForCurrentProject ? '啟動此專案的排程' : '暫停此專案的排程'" class="flex items-center gap-1 px-2.5 py-1.5 transition-colors" :class="isCronPausedForCurrentProject ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-amber-400 hover:bg-amber-500/10'">
             <Play v-if="isCronPausedForCurrentProject" class="w-3 h-3" />
             <Pause v-else class="w-3 h-3" />
             <span class="text-[10px] font-medium">{{ isCronPausedForCurrentProject ? '啟動' : '暫停' }}</span>
-          </button>
-        </div>
-
-        <!-- Archive button - icon only on mobile -->
-        <button
-          @click="openArchivePanel"
-          class="flex items-center justify-center gap-1.5 bg-slate-700/50 hover:bg-slate-600 text-slate-300 p-2 sm:px-3 sm:py-1.5 rounded-lg text-xs font-medium transition-colors border border-slate-600/50"
-          title="封存卡片"
-        >
-          <Archive class="w-4 h-4 sm:w-3.5 sm:h-3.5" />
-          <span class="hidden sm:inline">封存</span>
-        </button>
-
-        <!-- New task button -->
-        <button @click="showNewTaskModal = true" class="flex items-center justify-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-white p-2 sm:px-3 sm:py-1.5 rounded-lg text-xs font-medium transition-colors shadow-lg shadow-emerald-500/20">
-          <Plus class="w-4 h-4 sm:w-3.5 sm:h-3.5" />
-          <span class="hidden sm:inline">新增任務</span>
         </button>
       </div>
-    </div>
+
+      <!-- Archive button -->
+      <button
+        @click="openArchivePanel"
+        class="flex items-center justify-center gap-1.5 bg-slate-700/50 hover:bg-slate-600 text-slate-300 p-2 sm:px-3 sm:py-1.5 rounded-lg text-xs font-medium transition-colors border border-slate-600/50"
+        title="封存卡片"
+      >
+        <Archive class="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+        <span class="hidden sm:inline">封存</span>
+      </button>
+
+      <!-- New task button -->
+      <button @click="showNewTaskModal = true" class="flex items-center justify-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-white p-2 sm:px-3 sm:py-1.5 rounded-lg text-xs font-medium transition-colors shadow-lg shadow-emerald-500/20">
+        <Plus class="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+        <span class="hidden sm:inline">新增任務</span>
+      </button>
+    </PageHeader>
 
     <!-- Mobile Stage Navigator -->
     <div v-if="isMobile && boardData.length > 0" class="shrink-0 bg-slate-900/50 border-b border-slate-800 px-2 py-2">
@@ -673,7 +594,7 @@ async function unarchiveCard(cardId: number) {
     <div
       v-if="!isMobile"
       class="flex gap-5 flex-1 items-start overflow-x-auto px-6 py-4 custom-scrollbar transition-opacity duration-300"
-      :class="{'opacity-50 grayscale pointer-events-none select-none': currentProject?.is_active === false}"
+      :class="{'opacity-50 grayscale pointer-events-none select-none': currentProject()?.is_active === false}"
     >
       <div v-for="stage in boardData" :key="stage.id" class="w-80 shrink-0 bg-slate-800/40 rounded-xl p-4 border border-slate-700/50 flex flex-col max-h-full">
         <div class="flex items-center justify-between mb-4 px-1">
@@ -815,7 +736,7 @@ async function unarchiveCard(cardId: number) {
     <div
       v-else-if="currentMobileStage"
       class="flex-1 flex flex-col overflow-hidden px-2 py-2 transition-opacity duration-300"
-      :class="{'opacity-50 grayscale pointer-events-none select-none': currentProject?.is_active === false}"
+      :class="{'opacity-50 grayscale pointer-events-none select-none': currentProject()?.is_active === false}"
       @touchstart="onTouchStart"
       @touchmove="onTouchMove"
       @touchend="onTouchEnd"
