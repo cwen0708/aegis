@@ -2,6 +2,9 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { Bot, Square } from 'lucide-vue-next'
 import type { RunningTask } from '../stores/aegis'
+import { useAuthStore } from '../stores/auth'
+
+const auth = useAuthStore()
 
 const props = defineProps<{
   task: RunningTask
@@ -63,6 +66,7 @@ const providerColor = computed(() => {
       <div class="flex items-center gap-2">
         <span class="text-xs font-mono text-emerald-400">{{ elapsed }}</span>
         <button
+          v-if="auth.isAuthenticated"
           @click.stop="emit('abort', task.task_id)"
           class="p-2 -m-1 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded transition-colors touch-visible touch-target"
           title="中止任務"

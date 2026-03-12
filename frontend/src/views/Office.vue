@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useAegisStore } from '../stores/aegis'
+import { useAuthStore } from '../stores/auth'
 import { useResponsive } from '../composables/useResponsive'
 
 const { isMobile } = useResponsive()
+const auth = useAuthStore()
 import { Settings } from 'lucide-vue-next'
 import { createOfficeGame, OfficeScene } from '../game/OfficeScene'
 import OfficeEditor from '../components/OfficeEditor.vue'
@@ -383,7 +385,7 @@ watch(
             row={{ hoverPos.row }}, col={{ hoverPos.col }}, frame={{ hoverPos.frame }}
           </span>
           <button
-            v-if="!isMobile"
+            v-if="!isMobile && auth.isAuthenticated"
             @click="enterEditMode"
             class="p-1 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors"
             title="裝修"

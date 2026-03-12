@@ -60,7 +60,7 @@ router.beforeEach((to) => {
   if (to.meta.requiresAuth) {
     const token = sessionStorage.getItem('aegis-token')
     if (!token) {
-      return { path: '/login', query: { redirect: to.fullPath } }
+      return { path: '/settings', query: { redirect: to.fullPath } }
     }
   }
 })
