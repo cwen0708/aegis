@@ -508,13 +508,7 @@ async def apply_update(version: str) -> bool:
         _state.message = "正在重啟服務..."
 
         # 重啟 systemd 服務
-        proc = await asyncio.create_subprocess_exec(
-            "sudo", "systemctl", "restart", "aegis",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        await proc.communicate()
-
+        # 注意：必須先重啟 worker 再重啟 aegis，因為重啟 aegis 會殺掉本進程
         proc = await asyncio.create_subprocess_exec(
             "sudo", "systemctl", "restart", "aegis-worker",
             stdout=asyncio.subprocess.PIPE,
@@ -523,6 +517,17 @@ async def apply_update(version: str) -> bool:
         await proc.communicate()
 
         _state.progress = 80
+        _state.message = "正在重啟 API 服務..."
+
+        # 重啟 aegis（本進程會被殺掉，之後的程式碼不會執行）
+        proc = await asyncio.create_subprocess_exec(
+            "sudo", "systemctl", "restart", "aegis",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await proc.communicate()
+
+        # 以下可能不會執行（因為 aegis 重啟會殺掉本進程）
         _state.message = "正在驗證服務..."
 
         # 等待服務啟動
@@ -621,16 +626,16 @@ async def rollback(version: str = None) -> bool:
         temp_link.symlink_to(release_dir)
         temp_link.rename(current_link)
 
-        # 重啟服務
+        # 重啟服務（先 worker 再 aegis，因為重啟 aegis 會殺掉本進程）
         proc = await asyncio.create_subprocess_exec(
-            "sudo", "systemctl", "restart", "aegis",
+            "sudo", "systemctl", "restart", "aegis-worker",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
         await proc.communicate()
 
         proc = await asyncio.create_subprocess_exec(
-            "sudo", "systemctl", "restart", "aegis-worker",
+            "sudo", "systemctl", "restart", "aegis",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
