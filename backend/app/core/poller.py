@@ -64,6 +64,15 @@ async def _process_pending_cards():
             list_name = stage_list.name if stage_list else "Unknown"
             project = session.get(Project, idx.project_id)
 
+            # DEBUG: 追蹤 pending 卡片的路由決策
+            print(f"[Poller DEBUG] Card {idx.card_id}: list_id={idx.list_id}, "
+                  f"stage_list={'found' if stage_list else 'NOT FOUND'}, "
+                  f"project_id={idx.project_id}, file_path={idx.file_path}")
+            if stage_list:
+                print(f"[Poller DEBUG] Card {idx.card_id}: stage_list.name={stage_list.name}, "
+                      f"is_ai_stage={stage_list.is_ai_stage}, stage_type={stage_list.stage_type}, "
+                      f"member_id={stage_list.member_id}")
+
             # 判斷此階段是否需要 AI 處理
             # 根據 stage_type 和 is_ai_stage 決定（通用化工作流）
             should_ai_process = (
@@ -71,6 +80,8 @@ async def _process_pending_cards():
                 and stage_list.is_ai_stage
                 and stage_list.stage_type in ["auto_process", "auto_review"]
             )
+
+            print(f"[Poller DEBUG] Card {idx.card_id}: should_ai_process={should_ai_process}")
 
             if should_ai_process:
 
@@ -125,6 +136,7 @@ async def _process_pending_cards():
                 ))
             else:
                 # 非 AI 處理階段（manual, terminal 或 is_ai_stage=False），清除 pending 狀態
+                print(f"[Poller DEBUG] Card {idx.card_id}: RESETTING TO IDLE (not AI stage)")
                 project_path = project.path if project else "."
                 _update_card_status(session, idx, "idle", project_path)
 
