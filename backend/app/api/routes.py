@@ -204,12 +204,12 @@ def _ensure_member_inboxes(session: Session, project_id: int):
     if not all_members:
         return
     bound_member_ids = set(
-        row[0] for row in session.exec(
+        mid for mid in session.exec(
             select(StageList.member_id).where(
                 StageList.project_id == project_id,
                 StageList.is_member_bound == True,
             )
-        ).all() if row[0] is not None
+        ).all() if mid is not None
     )
     missing = [m for m in all_members if m.id not in bound_member_ids]
     if not missing:
