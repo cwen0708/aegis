@@ -778,6 +778,54 @@ def trigger_card(card_id: int, session: Session = Depends(get_session)):
     return {"ok": True, "status": "pending"}
 
 
+@router.get("/debug/card/{card_id}/poller-check")
+def debug_poller_check(card_id: int, session: Session = Depends(get_session)):
+    """臨時 debug: 模擬 poller 對此卡片的決策邏輯"""
+    idx = session.get(CardIndex, card_id)
+    if not idx:
+        return {"error": "CardIndex not found"}
+
+    stage_list = session.get(StageList, idx.list_id)
+    project = session.get(Project, idx.project_id)
+
+    should_ai_process = (
+        stage_list
+        and stage_list.is_ai_stage
+        and stage_list.stage_type in ["auto_process", "auto_review"]
+    )
+
+    # 也檢查 MD 檔案的 list_id
+    md_list_id = None
+    if idx.file_path and Path(idx.file_path).exists():
+        cd = read_card_md(Path(idx.file_path))
+        md_list_id = cd.list_id
+
+    return {
+        "card_id": card_id,
+        "index": {
+            "list_id": idx.list_id,
+            "project_id": idx.project_id,
+            "status": idx.status,
+            "file_path": idx.file_path,
+        },
+        "md_file": {
+            "list_id": md_list_id,
+        },
+        "stage_list": {
+            "found": stage_list is not None,
+            "name": stage_list.name if stage_list else None,
+            "is_ai_stage": stage_list.is_ai_stage if stage_list else None,
+            "stage_type": stage_list.stage_type if stage_list else None,
+            "member_id": stage_list.member_id if stage_list else None,
+        } if True else None,
+        "should_ai_process": should_ai_process,
+        "project": {
+            "name": project.name if project else None,
+            "path": project.path if project else None,
+        },
+    }
+
+
 @router.post("/cards/{card_id}/abort")
 def abort_card(card_id: int, session: Session = Depends(get_session)):
     """中止執行中的任務"""
