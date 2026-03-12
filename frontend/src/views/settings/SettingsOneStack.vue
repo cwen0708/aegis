@@ -107,10 +107,12 @@ async function handlePair() {
   <div class="max-w-2xl space-y-6">
     <!-- 簡介 -->
     <div class="bg-gradient-to-r from-violet-500/10 to-cyan-500/10 rounded-2xl border border-violet-500/20 p-6">
-      <h2 class="text-sm font-bold text-slate-200 mb-2">OneStack — 雲端指揮中心</h2>
+      <h2 class="text-sm font-bold text-slate-200 mb-1">OneStack — 一人公司的 AI 全棧指揮中心</h2>
+      <p class="text-[11px] text-violet-400/80 font-medium mb-3">One Person. One Stack. Infinite Power.</p>
       <p class="text-xs text-slate-400 leading-relaxed">
-        連線後，你可以從 OneStack 遠端派發任務到這台 Aegis，查看執行結果、管理專案繫結。
-        Aegis 負責本地執行，OneStack 負責雲端協調。
+        OneStack 是為獨立工作者打造的雲端 SaaS，內建 AI 虛擬團隊（PM、Tech Lead、財務、行銷），
+        從需求捕捉、專案管理、報價開票到客戶經營一站搞定。
+        連線 Aegis 後，你可以從 OneStack 遠端派發任務、查看執行結果，讓雲端大腦指揮本地引擎。
       </p>
     </div>
 
