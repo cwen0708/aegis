@@ -31,7 +31,7 @@ const error = ref('')
 const loading = ref(false)
 
 onMounted(() => {
-  if (auth.isAuthenticated || sessionStorage.getItem('aegis-admin-auth') === 'true') {
+  if (auth.isAuthenticated) {
     authenticated.value = true
   }
 })

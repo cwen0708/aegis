@@ -1,15 +1,22 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Shield, ListTodo, Settings, Clock, FolderOpen, Wifi, WifiOff, Sun, Moon, Zap, Building2, PanelLeftClose, PanelLeftOpen, Rocket } from 'lucide-vue-next'
+import { Shield, ListTodo, Settings, Clock, FolderOpen, Wifi, WifiOff, Sun, Moon, Zap, Building2, PanelLeftClose, PanelLeftOpen, Rocket, LogOut } from 'lucide-vue-next'
 import { useWebSocket } from './composables/useWebSocket'
 import { useResponsive } from './composables/useResponsive'
 import { useAegisStore } from './stores/aegis'
+import { useAuthStore } from './stores/auth'
 import ToastNotification from './components/ToastNotification.vue'
 
 const router = useRouter()
 const route = useRoute()
 const store = useAegisStore()
+const authStore = useAuthStore()
+
+function handleLogout() {
+  authStore.logout()
+  router.push('/settings')
+}
 
 // 初始化 WebSocket
 useWebSocket()
@@ -144,6 +151,14 @@ function mobileNavClass(path: string) {
             <Settings class="w-5 h-5 shrink-0" />
             <span v-if="!sidebarCollapsed">系統設定</span>
           </router-link>
+          <button
+            v-if="authStore.isAuthenticated"
+            @click="handleLogout"
+            class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium text-slate-500 hover:text-red-400 hover:bg-red-500/10"
+          >
+            <LogOut class="w-5 h-5 shrink-0" />
+            <span v-if="!sidebarCollapsed">登出</span>
+          </button>
         </div>
       </nav>
 
