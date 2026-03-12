@@ -833,6 +833,29 @@ def debug_logs():
     return {"lines": list(debug_log)}
 
 
+@router.get("/debug/worker-check")
+def debug_worker_check():
+    """確認 worker.py 版本"""
+    import os
+    worker_path = Path(__file__).parent.parent.parent / "worker.py"
+    if not worker_path.exists():
+        return {"error": "worker.py not found", "path": str(worker_path)}
+    content = worker_path.read_text(encoding="utf-8")
+    has_old_whitelist = 'not in ["Planning", "Developing", "Verifying", "Scheduled", "OneStack"]' in content
+    has_new_logic = "should_ai_process" in content
+    has_generic_marker = "generic stage routing" in content
+    # 抓第 895-905 行
+    lines = content.split("\n")
+    snippet = lines[889:910] if len(lines) > 910 else lines[-20:]
+    return {
+        "has_old_whitelist": has_old_whitelist,
+        "has_new_logic": has_new_logic,
+        "has_generic_marker": has_generic_marker,
+        "snippet_lines_890_910": snippet,
+        "worker_path": str(worker_path),
+    }
+
+
 @router.post("/cards/{card_id}/abort")
 def abort_card(card_id: int, session: Session = Depends(get_session)):
     """中止執行中的任務"""
