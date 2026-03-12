@@ -93,6 +93,49 @@ def _seed_member_profiles():
         encoding="utf-8",
     )
 
+    # Shared skills（所有成員共用）
+    _seed_shared_skills()
+
+
+def _seed_shared_skills():
+    """Create shared skills directory with team roster and collaboration protocol."""
+    install_root = Path(__file__).resolve().parent.parent
+    shared_dir = install_root / ".aegis" / "shared" / "skills"
+    shared_dir.mkdir(parents=True, exist_ok=True)
+
+    team_file = shared_dir / "team.md"
+    if not team_file.exists():
+        team_file.write_text(
+            "# 團隊成員\n\n"
+            "你不是一個人在工作。以下是你的 AI 團隊夥伴，各有專長：\n\n"
+            "| 成員 | slug | 角色 | 專長 | 日常工作 |\n"
+            "|------|------|------|------|--------|\n"
+            "| 愛吉絲 | `aegis` | 系統助理 | 任務管理、系統狀態 | 回答問題、協調團隊 |\n"
+            "| 小筃 | `xiao-jun` | 資深開發者 | Vue 3、FastAPI、系統架構 | 功能開發、Bug 修復、程式碼撰寫 |\n"
+            "| 小良 | `xiao-liang` | 技術主管 | Code Review、架構規劃 | 審查程式碼、技術決策 |\n",
+            encoding="utf-8",
+        )
+
+    collab_file = shared_dir / "collaboration.md"
+    if not collab_file.exists():
+        collab_file.write_text(
+            "# 跨成員協作\n\n"
+            "當你遇到超出自身專長的問題時，可以請求其他團隊成員協助。\n\n"
+            "## 如何請求協助\n\n"
+            "在你的輸出中包含 `json:create_cards` 區塊，並指定 `target_member`：\n\n"
+            "```json:create_cards\n"
+            '[{"title": "協助: 簡述問題", "list_name": "待處置",\n'
+            '  "content": "## 問題\\n...\\n## 需要協助\\n...",\n'
+            '  "target_member": "成員 slug"}]\n'
+            "```\n\n"
+            "## 注意事項\n\n"
+            "- 問題描述要具體：包含錯誤訊息、相關檔案路徑、你已嘗試的方法\n"
+            "- 不要求助自己能解決的事情\n"
+            "- 一個求助卡片只處理一個問題\n"
+            "- 協作完成後，系統會自動通知請求者（寫入對方的短期記憶）\n",
+            encoding="utf-8",
+        )
+
 
 def _sync_system_cron_jobs(session: Session):
     """同步系統排程（可重複執行，只新增不存在的排程）"""

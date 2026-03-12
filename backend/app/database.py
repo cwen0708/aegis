@@ -34,6 +34,12 @@ def _migrate_db():
                 logger.info("[Migration] Migrated model values from member to memberaccount")
             except Exception:
                 pass  # member 表可能已經沒有 model 欄位
+        # StageList 加 is_member_bound 欄位
+        cols = [row[1] for row in cur.execute("PRAGMA table_info(stagelist)").fetchall()]
+        if "is_member_bound" not in cols:
+            cur.execute("ALTER TABLE stagelist ADD COLUMN is_member_bound INTEGER DEFAULT 0")
+            logger.info("[Migration] Added 'is_member_bound' to stagelist")
+
         conn.commit()
     except Exception as e:
         logger.warning(f"[Migration] {e}")

@@ -38,6 +38,7 @@ class StageList(SQLModel, table=True):
     system_instruction: Optional[str] = Field(default=None)  # 階段專屬系統指令
     prompt_template: Optional[str] = Field(default=None)  # 階段專屬 prompt 模板
     is_ai_stage: bool = Field(default=True)  # 是否為 AI 處理階段
+    is_member_bound: bool = Field(default=False)  # True = member_id 鎖定不可變更
 
     project: Optional[Project] = Relationship(back_populates="lists")
     cards: List["Card"] = Relationship(back_populates="stage_list")

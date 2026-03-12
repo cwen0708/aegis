@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
-import { Plus, Play, Pause, Square, Trash2, Zap, MoreVertical, ChevronLeft, ChevronRight, FolderOpen, ListTodo, UserCircle, Settings2, Bot, Hand, CheckCircle, XCircle, Archive, RotateCcw, Loader2 } from 'lucide-vue-next'
+import { Plus, Play, Pause, Square, Trash2, Zap, MoreVertical, ChevronLeft, ChevronRight, FolderOpen, ListTodo, UserCircle, Settings2, Bot, Hand, CheckCircle, XCircle, Archive, RotateCcw, Loader2, Lock, Inbox } from 'lucide-vue-next'
 import draggable from 'vuedraggable'
 import { useAegisStore } from '../stores/aegis'
 import { useAuthStore } from '../stores/auth'
@@ -266,6 +266,42 @@ async function assignMember(memberId: number | null) {
     await fetchBoard()
   } catch (e: any) {
     store.addToast(e.message || '指派失敗', 'error')
+  }
+}
+
+// 成員收件匣建立 Dialog
+const showInboxDialog = ref(false)
+useEscapeKey(showInboxDialog, () => { showInboxDialog.value = false })
+
+const availableInboxMembers = computed(() => {
+  const boundMemberIds = new Set(
+    boardData.value.filter((s: any) => s.is_member_bound).map((s: any) => s.member_id)
+  )
+  return allMembers.value.filter(m => !boundMemberIds.has(m.id))
+})
+
+function openInboxDialog() {
+  showInboxDialog.value = true
+  if (allMembers.value.length === 0) fetchMembers()
+}
+
+async function createMemberInbox(memberId: number) {
+  if (!selectedProjectId.value) return
+  try {
+    const res = await fetch(`/api/v1/projects/${selectedProjectId.value}/member-lists`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ member_id: memberId }),
+    })
+    if (!res.ok) {
+      const data = await res.json()
+      throw new Error(data.detail || `HTTP ${res.status}`)
+    }
+    showInboxDialog.value = false
+    await fetchBoard()
+    store.addToast('收件匣已建立', 'success')
+  } catch (e: any) {
+    store.addToast(e.message || '建立失敗', 'error')
   }
 }
 
@@ -570,7 +606,9 @@ async function unarchiveCard(cardId: number) {
           </h3>
           <div class="flex items-center gap-1.5">
             <!-- Member (left) -->
+            <Lock v-if="stage.is_member_bound" class="w-3 h-3 text-amber-400/60" title="成員綁定" />
             <button
+              v-if="!stage.is_member_bound"
               @click.stop="openAssignDialog(stage)"
               class="flex items-center justify-center w-6 h-6 rounded-full transition-colors"
               :class="stage.member ? 'bg-slate-700 hover:bg-slate-600' : 'text-slate-600 hover:text-slate-400 hover:bg-slate-700/50'"
@@ -579,6 +617,13 @@ async function unarchiveCard(cardId: number) {
               <span v-if="stage.member" class="text-xs">{{ stage.member.avatar || '🤖' }}</span>
               <UserCircle v-else class="w-4 h-4" />
             </button>
+            <span
+              v-else-if="stage.member"
+              class="flex items-center justify-center w-6 h-6 rounded-full bg-slate-700"
+              :title="`${stage.member.name}（綁定）`"
+            >
+              <span class="text-xs">{{ stage.member.avatar || '🤖' }}</span>
+            </span>
             <!-- Stage Config (right) -->
             <button
               @click.stop="openStageConfigDialog(stage)"
@@ -681,6 +726,20 @@ async function unarchiveCard(cardId: number) {
             </div>
           </template>
         </draggable>
+      </div>
+
+      <!-- Ghost Column: 建立成員收件匣 -->
+      <div
+        v-if="auth.isAuthenticated"
+        class="w-64 shrink-0 flex items-start"
+      >
+        <button
+          @click="openInboxDialog"
+          class="w-full flex items-center justify-center gap-2 px-4 py-3 bg-slate-800/20 hover:bg-slate-800/40 border border-dashed border-slate-700/50 hover:border-amber-500/30 rounded-xl text-slate-500 hover:text-amber-400 transition-all text-sm"
+        >
+          <Inbox class="w-4 h-4" />
+          建立成員收件匣
+        </button>
       </div>
     </div>
 
@@ -1014,6 +1073,42 @@ async function unarchiveCard(cardId: number) {
 
         <div class="flex justify-end pt-1">
           <button @click="showAssignDialog = false" class="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors">取消</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+
+  <!-- Member Inbox Dialog -->
+  <Teleport to="body">
+    <div v-if="showInboxDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" @click.self="showInboxDialog = false">
+      <div class="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-xs p-5 space-y-3">
+        <h3 class="text-sm font-bold text-slate-200 flex items-center gap-2">
+          <Inbox class="w-4 h-4 text-amber-400" />
+          建立成員收件匣
+        </h3>
+        <p class="text-[11px] text-slate-500">選擇要建立專屬收件匣的成員。收件匣建立後成員綁定不可變更。</p>
+
+        <div class="space-y-1.5 max-h-60 overflow-y-auto">
+          <button
+            v-for="m in availableInboxMembers"
+            :key="m.id"
+            @click="createMemberInbox(m.id)"
+            class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors hover:bg-amber-500/10 border border-transparent hover:border-amber-500/30"
+          >
+            <span class="text-lg w-5 text-center">{{ m.avatar || '🤖' }}</span>
+            <div>
+              <div class="text-sm text-slate-200">{{ m.name }}</div>
+              <div class="text-[10px] text-slate-500">{{ m.role || m.provider }}</div>
+            </div>
+          </button>
+        </div>
+
+        <div v-if="availableInboxMembers.length === 0" class="text-center text-xs text-slate-500 py-4">
+          所有成員皆已建立收件匣。
+        </div>
+
+        <div class="flex justify-end pt-1">
+          <button @click="showInboxDialog = false" class="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors">取消</button>
         </div>
       </div>
     </div>

@@ -1,7 +1,7 @@
 # Aegis 功能開發清單摘要
 
 > 基於 14 個 AI Agent 專案優點整合
-> 生成日期：2026-03-09
+> 初版：2026-03-09 ｜ 更新：2026-03-12
 
 ---
 
@@ -9,7 +9,7 @@
 
 | 功能 | 現狀 | 目標 | 參考專案 |
 |------|:----:|:----:|----------|
-| 多頻道通訊 | ❌ | ✓ (3+) | Nanobot, PicoClaw, ZeroClaw |
+| 多頻道通訊 | △ | ✓ (3+) | Nanobot, PicoClaw, ZeroClaw |
 | 多 LLM 支援 | △ (2) | ✓ (6+) | ZeroClaw, ClawRouter |
 | 智能路由 | △ | ✓✓ | ClawRouter, Spacebot |
 | 容器隔離 | ❌ | ✓ | IronClaw, NanoClaw |
@@ -21,27 +21,50 @@
 | 多代理協作 | △ | ✓✓ | Spacebot, TinyClaw |
 | 虛擬辦公室 | ✓✓ | ✓✓ | 獨有優勢 |
 | 成本追蹤 | ✓ | ✓✓ | ClawWork |
+| 排程系統 | ✓✓ | ✓✓ | — |
+| 成員與記憶 | ✓✓ | ✓✓ | — |
+| CI/CD 自動部署 | ✓✓ | ✓✓ | — |
+| OneStack 整合 | △ | ✓✓ | — |
 
 ---
 
-## 開發優先級總覽
+## 已完成
 
-### P0: 緊急修復（1-2 週）
-| 任務 | 說明 |
+### ~~P0: 緊急修復~~ ✅ 完成（2026-03-09 ~ 03-10）
+
+| 任務 | 說明 | 狀態 |
+|------|------|:----:|
+| B-C1 | Gemini CLI 硬編碼路徑 | ✅ |
+| B-C2 | 路徑遍歷安全漏洞 | ✅ |
+| B-C3 | Semaphore 競態條件 | ✅ |
+| F-C1 | Toast 直接修改 Pinia | ✅ |
+| F-C2 | setInterval 未清理 | ✅ |
+| F-C3 | Kanban 刪除邏輯 bug | ✅ |
+
+### 規劃外已完成（03-09 ~ 03-12）
+
+| 功能 | 說明 |
 |------|------|
-| B-C1 | Gemini CLI 硬編碼路徑 |
-| B-C2 | 路徑遍歷安全漏洞 |
-| B-C3 | Semaphore 競態條件 |
-| F-C1 | Toast 直接修改 Pinia |
-| F-C2 | setInterval 未清理 |
-| F-C3 | Kanban 刪除邏輯 bug |
+| 虛擬辦公室 | Sprite 角色系統、辦公室佈局、辦公室名稱設定 |
+| 排程系統 | CronJob CRUD、暫停/啟動、手機卡片列表、專案篩選 |
+| 全域專案選擇器 | Header 專案切換，各頁面共用 |
+| 成員系統 | 角色、頭像、Sprite、記憶體（短期/長期） |
+| GCP 部署 | CI/CD（push → tag → deploy）、熱更新 API |
+| OneStack 整合 | Phase 1 設計、連線設定頁 |
+| 頻道設定 UI | Settings 頁頻道設定區塊（P1 前置） |
+| 手機版適配 | 響應式佈局、Kanban/CronJobs 卡片版 |
+| 頁面 icon 統一 | Sidebar ↔ PageHeader icon 一致 |
 
-### P1: 多頻道通訊（2-3 週）
-| 頻道 | 技術 | 說明 |
-|------|------|------|
-| Telegram | python-telegram-bot | 建卡、查詢、中止 |
-| LINE | line-bot-sdk | 復用牧陽小通 |
-| Discord | discord.py | 團隊協作 |
+---
+
+## 待開發
+
+### P1: 多頻道通訊（2-3 週）⏳ 前置 UI 已完成
+| 頻道 | 技術 | 說明 | 狀態 |
+|------|------|------|:----:|
+| Telegram | python-telegram-bot | 建卡、查詢、中止 | 待開發 |
+| LINE | line-bot-sdk | 復用牧陽小通 | 待開發 |
+| Discord | discord.py | 團隊協作 | 待開發 |
 
 ### P2: 擴展 LLM（1-2 週）
 | LLM | 優先級 | 說明 |
@@ -122,8 +145,9 @@ aegis cron list/add/rm  # 排程管理
 
 ```
 2026 Q1 (3月)
-├── Week 1-2: P0 緊急修復
-├── Week 3-4: P1 多頻道通訊
+├── Week 1-2: P0 緊急修復 ✅
+├── Week 2-3: 虛擬辦公室 + 排程 + 部署 ✅
+├── Week 3-4: P1 多頻道通訊（後端接入）
 └── Week 5-6: P2 擴展 LLM
 
 2026 Q2 (4-6月)
@@ -143,7 +167,7 @@ aegis cron list/add/rm  # 排程管理
 
 | 建議 | 原因 |
 |------|------|
-| P1 多頻道 | 復用 HappyNAS Bot 代碼 |
+| P1 多頻道 | 復用 HappyNAS Bot 代碼，前端 UI 已完成 |
 | P2 OpenRouter | 一個 API 接入 41+ 模型 |
 | P4 安全機制 | 直接參考 IronClaw |
 
@@ -151,11 +175,12 @@ aegis cron list/add/rm  # 排程管理
 
 ## 整合建議
 
-| 現有系統 | 整合方式 |
-|---------|---------|
-| HappyNAS | 復用 LINE/Telegram Bot |
-| AutoDev | Aegis 作為 Web UI |
-| Trello | 保留整合，Aegis 執行 |
+| 現有系統 | 整合方式 | 狀態 |
+|---------|---------|:----:|
+| HappyNAS | 復用 LINE/Telegram Bot | 待開發 |
+| AutoDev | Aegis 作為 Web UI | ✅ 運作中 |
+| Trello | 保留整合，Aegis 執行 | ✅ 運作中 |
+| OneStack | 雙向同步（Phase 1-3） | △ 規劃中 |
 
 ---
 

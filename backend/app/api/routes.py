@@ -95,6 +95,7 @@ class StageListResponse(BaseModel):
     system_instruction: Optional[str] = None
     prompt_template: Optional[str] = None
     is_ai_stage: bool = True
+    is_member_bound: bool = False
 
 # ==========================================
 # Project Schemas
@@ -242,6 +243,7 @@ def read_project_board(project_id: int, session: Session = Depends(get_session))
             system_instruction=l.system_instruction,
             prompt_template=l.prompt_template,
             is_ai_stage=l.is_ai_stage,
+            is_member_bound=l.is_member_bound,
         ))
     return result
 
@@ -264,6 +266,10 @@ def update_stage_list(list_id: int, data: StageListUpdateRequest, session: Sessi
     stage_list = session.get(StageList, list_id)
     if not stage_list:
         raise HTTPException(status_code=404, detail="StageList not found")
+
+    # 成員綁定列表：禁止變更 member_id
+    if stage_list.is_member_bound and data.member_id is not None and data.member_id != stage_list.member_id:
+        raise HTTPException(status_code=403, detail="成員綁定列表無法變更成員指派")
 
     # 更新名稱
     if data.name is not None and data.name.strip():
@@ -308,6 +314,71 @@ def update_stage_list(list_id: int, data: StageListUpdateRequest, session: Sessi
         "system_instruction": stage_list.system_instruction,
         "prompt_template": stage_list.prompt_template,
         "is_ai_stage": stage_list.is_ai_stage,
+    }
+
+
+class MemberListCreateRequest(BaseModel):
+    member_id: int
+    name: Optional[str] = None  # 預設："{member.name} 收件匣"
+
+
+@router.post("/projects/{project_id}/member-lists")
+def create_member_bound_list(project_id: int, data: MemberListCreateRequest, session: Session = Depends(get_session)):
+    """建立成員綁定列表（收件匣）"""
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    member = session.get(Member, data.member_id)
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    # 檢查重複：此專案已有該成員的綁定列表
+    existing = session.exec(
+        select(StageList).where(
+            StageList.project_id == project_id,
+            StageList.member_id == data.member_id,
+            StageList.is_member_bound == True,
+        )
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail=f"{member.name} 已有綁定列表")
+
+    # 計算 position
+    max_pos = session.exec(
+        select(StageList.position).where(StageList.project_id == project_id).order_by(StageList.position.desc())
+    ).first()
+    new_position = (max_pos or 0) + 1
+
+    name = data.name.strip() if data.name and data.name.strip() else f"{member.name} 收件匣"
+
+    stage_list = StageList(
+        project_id=project_id,
+        name=name,
+        position=new_position,
+        member_id=data.member_id,
+        stage_type="auto_process",
+        is_ai_stage=True,
+        is_member_bound=True,
+    )
+    session.add(stage_list)
+    session.commit()
+    session.refresh(stage_list)
+
+    member_brief = MemberBrief(
+        id=member.id, name=member.name, avatar=member.avatar,
+        provider=_get_member_primary_provider(member.id, session),
+    )
+
+    return {
+        "ok": True,
+        "id": stage_list.id,
+        "name": stage_list.name,
+        "project_id": stage_list.project_id,
+        "position": stage_list.position,
+        "member_id": stage_list.member_id,
+        "member": member_brief,
+        "is_member_bound": True,
     }
 
 
