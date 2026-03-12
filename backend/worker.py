@@ -174,35 +174,47 @@ def get_pending_cards() -> list:
         return list(session.exec(stmt).all())
 
 
-def get_primary_provider(member_id: int) -> tuple:
-    """從成員的主帳號取得 provider、model 和認證資訊
-    回傳 (provider, model, auth_info)
-    auth_info = {
-        'auth_type': 'cli' | 'api_key',
-        'oauth_token': str,  # CLI Token
-        'api_key': str,      # API Key
-    }
+def get_member_accounts(member_id: int) -> list:
+    """取得成員所有健康帳號（按 priority 排序），用於 fallback
+    回傳 [(provider, model, auth_info, account_name), ...]
     """
     with Session(engine) as session:
         stmt = select(MemberAccount).where(
             MemberAccount.member_id == member_id
         ).order_by(MemberAccount.priority)
-        binding = session.exec(stmt).first()
-        if binding:
+        bindings = session.exec(stmt).all()
+
+        results = []
+        for binding in bindings:
             account = session.get(Account, binding.account_id)
-            if account:
+            if account and account.is_healthy:
                 auth_info = {
                     'auth_type': getattr(account, 'auth_type', 'cli'),
                     'oauth_token': getattr(account, 'oauth_token', '') or '',
                     'api_key': getattr(account, 'api_key', '') or '',
                 }
-                return account.provider, binding.model or "", auth_info
+                results.append((
+                    account.provider,
+                    binding.model or "",
+                    auth_info,
+                    account.name or f"account-{account.id}",
+                ))
+        return results
+
+
+def get_primary_provider(member_id: int) -> tuple:
+    """從成員的主帳號取得 provider、model 和認證資訊（向下相容）"""
+    accounts = get_member_accounts(member_id)
+    if accounts:
+        provider, model, auth_info, _ = accounts[0]
+        return provider, model, auth_info
     return None, "", {}
 
 
 def resolve_member(stage_list_id: int, phase: str) -> tuple:
     """解析任務應該由哪個成員執行
-    回傳 (member_id, provider, model, member_slug, auth_info)
+    回傳 (member_id, accounts_list, member_slug)
+    accounts_list = [(provider, model, auth_info, account_name), ...]
     """
     with Session(engine) as session:
         # 1. 列表級指派
@@ -210,22 +222,22 @@ def resolve_member(stage_list_id: int, phase: str) -> tuple:
         if stage_list and stage_list.member_id:
             member = session.get(Member, stage_list.member_id)
             if member:
-                provider, model, auth_info = get_primary_provider(member.id)
-                logger.info(f"[Router] List '{stage_list.name}' → {member.name} ({provider}/{model})")
-                return member.id, provider, model, member.slug, auth_info
+                accounts = get_member_accounts(member.id)
+                logger.info(f"[Router] List '{stage_list.name}' → {member.name} ({len(accounts)} accounts)")
+                return member.id, accounts, member.slug
 
-        # 2. 專案預設成員（OneStack/Scheduled 等系統列表 fallback）
+        # 2. 專案預設成員（Inbound/Scheduled 等系統列表 fallback）
         if stage_list:
             project = session.get(Project, stage_list.project_id)
             if project and project.default_member_id:
                 member = session.get(Member, project.default_member_id)
                 if member:
-                    provider, model, auth_info = get_primary_provider(member.id)
-                    logger.info(f"[Router] Project '{project.name}' default → {member.name} ({provider}/{model})")
-                    return member.id, provider, model, member.slug, auth_info
+                    accounts = get_member_accounts(member.id)
+                    logger.info(f"[Router] Project '{project.name}' default → {member.name} ({len(accounts)} accounts)")
+                    return member.id, accounts, member.slug
 
         # 3. 無指派
-        return None, None, "", None, {}
+        return None, [], None
 
 
 # ==========================================
@@ -916,7 +928,7 @@ def process_pending_cards():
             continue
 
         # 解析成員
-        member_id, forced_provider, forced_model, member_slug, auth_info = resolve_member(idx.list_id, list_name.upper())
+        member_id, accounts_list, member_slug = resolve_member(idx.list_id, list_name.upper())
 
         # 成員忙碌檢查
         if member_id and is_member_busy(member_id):
@@ -964,11 +976,12 @@ def process_pending_cards():
 
         # 準備工作區
         workspace_dir = None
+        primary_provider = accounts_list[0][0] if accounts_list else "claude"
         if member_slug:
             workspace_dir = str(prepare_workspace(
                 card_id=idx.card_id,
                 member_slug=member_slug,
-                provider=forced_provider or "claude",
+                provider=primary_provider,
                 project_path=project_path,
                 card_content=card_data.content,
             ))
@@ -977,19 +990,38 @@ def process_pending_cards():
         _dialogue_hint = "\n\n請在所有輸出的最末行，用你的角色語氣寫一句簡短的任務總結（20字以內），格式：<!-- dialogue: 你的總結 -->"
         effective_prompt = ("請閱讀你的設定檔並執行本次任務。" if workspace_dir else card_data.content) + _dialogue_hint
 
-        # 執行任務
-        result = run_task(
-            card_id=idx.card_id,
-            project_path=effective_cwd,
-            prompt=effective_prompt,
-            phase=list_name.upper(),
-            forced_provider=forced_provider,
-            forced_model=forced_model,
-            card_title=idx.title,
-            project_name=project_name,
-            member_id=member_id,
-            auth_info=auth_info,
-        )
+        # 執行任務（含 fallback 機制）
+        if not accounts_list:
+            # 無帳號綁定，用預設 claude
+            accounts_list = [("claude", "", {}, "default")]
+
+        result = None
+        for attempt_idx, (acct_provider, acct_model, acct_auth, acct_name) in enumerate(accounts_list):
+            if attempt_idx > 0:
+                logger.info(f"[Worker] Card {idx.card_id}: fallback → '{acct_name}' (priority={attempt_idx})")
+                broadcast_log(idx.card_id, f"\n⚠️ 主帳號失敗，切換至備用帳號: {acct_name}\n")
+
+            result = run_task(
+                card_id=idx.card_id,
+                project_path=effective_cwd,
+                prompt=effective_prompt,
+                phase=list_name.upper(),
+                forced_provider=acct_provider,
+                forced_model=acct_model,
+                card_title=idx.title,
+                project_name=project_name,
+                member_id=member_id,
+                auth_info=acct_auth,
+            )
+
+            if result["status"] == "success":
+                if attempt_idx > 0:
+                    logger.info(f"[Worker] Card {idx.card_id}: succeeded with fallback account '{acct_name}'")
+                break
+
+            logger.warning(f"[Worker] Card {idx.card_id}: account '{acct_name}' failed (exit={result.get('exit_code')})")
+
+        # result 一定有值（accounts_list 至少有 default）
 
         # 判斷是否為排程卡片
         cron_job_id = _parse_cron_job_id(idx.title)
