@@ -1760,6 +1760,22 @@ def get_member_history(member_id: int, limit: int = 10, session: Session = Depen
 
 
 # ==========================================
+# Member Dialogues (AVG Style)
+# ==========================================
+@router.get("/members/{member_id}/dialogues")
+def get_member_dialogues(member_id: int, limit: int = 30, session: Session = Depends(get_session)):
+    """取得成員的對話記錄（Galgame 風格）"""
+    from app.models.core import MemberDialogue
+    dialogues = session.exec(
+        select(MemberDialogue)
+        .where(MemberDialogue.member_id == member_id)
+        .order_by(MemberDialogue.created_at.desc())
+        .limit(limit)
+    ).all()
+    return [d.model_dump() for d in reversed(dialogues)]
+
+
+# ==========================================
 # Member Skills
 # ==========================================
 @router.get("/members/{member_id}/skills")

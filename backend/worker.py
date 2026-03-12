@@ -33,7 +33,7 @@ from sqlmodel import Session, select
 from app.database import engine
 from app.models.core import (
     Card, CardIndex, StageList, Project, SystemSetting,
-    Member, MemberAccount, Account, TaskLog, CronLog
+    Member, MemberAccount, Account, TaskLog, CronLog, MemberDialogue
 )
 from app.core.card_file import CardData, read_card, write_card
 from app.core.card_index import sync_card_to_index, remove_card_from_index
@@ -420,6 +420,40 @@ def _parse_cron_job_id(title: str) -> Optional[int]:
     import re
     m = re.match(r'\[cron_(\d+)\]', title)
     return int(m.group(1)) if m else None
+
+
+def _extract_dialogue(output: str) -> Optional[str]:
+    """從 AI 輸出中解析 <!-- dialogue: xxx --> 標記"""
+    import re
+    m = re.search(r'<!--\s*dialogue:\s*(.+?)\s*-->', output)
+    return m.group(1).strip() if m else None
+
+
+def _save_member_dialogue(member_id: int, card_id: int, card_title: str,
+                          project_name: str, dialogue_type: str, text: str):
+    """儲存成員對話到 DB 並透過 WebSocket 推送"""
+    try:
+        with Session(engine) as session:
+            d = MemberDialogue(
+                member_id=member_id,
+                card_id=card_id,
+                card_title=card_title,
+                project_name=project_name,
+                dialogue_type=dialogue_type,
+                text=text,
+                status="success" if dialogue_type == "task_complete" else "error",
+            )
+            session.add(d)
+            session.commit()
+        broadcast_event("member_dialogue", {
+            "member_id": member_id,
+            "text": text,
+            "dialogue_type": dialogue_type,
+            "card_title": card_title,
+        })
+        logger.info(f"[Dialogue] {dialogue_type}: {text[:40]}")
+    except Exception as e:
+        logger.warning(f"[Dialogue] Failed to save: {e}")
 
 
 # ==========================================
@@ -961,7 +995,8 @@ def process_pending_cards():
             ))
 
         effective_cwd = workspace_dir or project_path
-        effective_prompt = "請閱讀你的設定檔並執行本次任務。" if workspace_dir else card_data.content
+        _dialogue_hint = "\n\n請在所有輸出的最末行，用你的角色語氣寫一句簡短的任務總結（20字以內），格式：<!-- dialogue: 你的總結 -->"
+        effective_prompt = ("請閱讀你的設定檔並執行本次任務。" if workspace_dir else card_data.content) + _dialogue_hint
 
         # 執行任務
         result = run_task(
@@ -1025,6 +1060,16 @@ def process_pending_cards():
         # 廣播完成事件
         event = "task_completed" if new_status == "completed" else "task_failed"
         broadcast_event(event, {"card_id": idx.card_id, "status": new_status})
+
+        # 生成 AVG 對話（從 AI 輸出解析）
+        if member_id:
+            dialogue_text = _extract_dialogue(result.get("output", ""))
+            if dialogue_text:
+                _save_member_dialogue(
+                    member_id, idx.card_id, idx.title, project_name,
+                    "task_complete" if new_status == "completed" else "task_failed",
+                    dialogue_text,
+                )
 
         # OneStack 任務完成回報
         try:

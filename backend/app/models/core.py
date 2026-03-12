@@ -185,6 +185,19 @@ class TaskLog(SQLModel, table=True):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class MemberDialogue(SQLModel, table=True):
+    """成員對話記錄（AVG 風格）"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    member_id: int = Field(index=True)
+    card_id: Optional[int] = Field(default=None)
+    card_title: str = ""
+    project_name: str = ""
+    dialogue_type: str = ""  # task_complete | task_failed | task_started
+    text: str = ""
+    status: str = ""  # success | error
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class MemberAccount(SQLModel, table=True):
     """成員-帳號綁定（含優先順序與模型設定）"""
     id: Optional[int] = Field(default=None, primary_key=True)

@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { X, CheckCircle, XCircle, Clock, Loader2, ListTodo, BookOpen } from 'lucide-vue-next'
+import { useAegisStore } from '../stores/aegis'
+
+const store = useAegisStore()
 
 const props = defineProps<{
   memberId: number
@@ -14,19 +17,128 @@ const emit = defineEmits<{
   (e: 'close'): void
 }>()
 
-// 圖片比例檢測：正方形用 cover + top，長條形用 contain + bottom
+// 圖片比例檢測
 const portraitAspect = ref<'tall' | 'square'>('tall')
 function detectPortraitAspect() {
   if (!props.portrait) return
   const img = new Image()
   img.onload = () => {
-    const ratio = img.height / img.width
-    // 比例 < 1.4 視為正方形或半身像，用 cover
-    portraitAspect.value = ratio < 1.4 ? 'square' : 'tall'
+    portraitAspect.value = img.height / img.width < 1.4 ? 'square' : 'tall'
   }
-  img.src = props.portrait.startsWith('http') ? props.portrait : props.portrait
+  img.src = props.portrait
 }
 watch(() => props.portrait, detectPortraitAspect, { immediate: true })
+
+// ==========================================
+// AVG 對話系統
+// ==========================================
+interface DialogueLine {
+  id: number
+  text: string
+  dialogue_type: string
+  card_title: string
+  created_at: string
+}
+
+const dialogues = ref<DialogueLine[]>([])
+const currentIndex = ref(0)
+const displayedText = ref('')
+const isTyping = ref(false)
+let typewriterTimer: number | null = null
+const CHAR_DELAY = 35
+
+function startTypewriter(text: string) {
+  stopTypewriter()
+  displayedText.value = ''
+  isTyping.value = true
+  let i = 0
+  typewriterTimer = window.setInterval(() => {
+    if (i < text.length) {
+      displayedText.value += text[i]
+      i++
+    } else {
+      stopTypewriter()
+    }
+  }, CHAR_DELAY)
+}
+
+function stopTypewriter() {
+  if (typewriterTimer) {
+    clearInterval(typewriterTimer)
+    typewriterTimer = null
+  }
+  if (isTyping.value && currentIndex.value < dialogues.value.length) {
+    displayedText.value = dialogues.value[currentIndex.value]?.text ?? ''
+  }
+  isTyping.value = false
+}
+
+const hasNextLine = computed(() => currentIndex.value < dialogues.value.length - 1)
+
+function skipOrNext() {
+  if (isWorking.value) return
+  if (isTyping.value) {
+    stopTypewriter()
+    return
+  }
+  if (hasNextLine.value) {
+    currentIndex.value++
+    startTypewriter(dialogues.value[currentIndex.value]?.text ?? '')
+  }
+}
+
+const currentDialogue = computed(() => dialogues.value[currentIndex.value] ?? null)
+
+// 即時模式：成員正在工作
+const isWorking = computed(() => {
+  return store.runningTasks.some(t => t.member_id === props.memberId)
+})
+
+const activeCardId = computed(() => {
+  const task = store.runningTasks.find(t => t.member_id === props.memberId)
+  return task?.task_id ?? null
+})
+
+const liveLines = computed(() => {
+  if (!activeCardId.value) return []
+  return store.taskLogs.get(activeCardId.value) ?? []
+})
+
+// WebSocket 事件：即時新增對話
+function onDialogueEvent(e: Event) {
+  const detail = (e as CustomEvent).detail
+  if (detail.member_id !== props.memberId) return
+
+  dialogues.value.push({
+    id: Date.now(),
+    text: detail.text,
+    dialogue_type: detail.dialogue_type,
+    card_title: detail.card_title || '',
+    created_at: new Date().toISOString(),
+  })
+
+  // 自動跳到最新對話
+  setTimeout(() => {
+    currentIndex.value = dialogues.value.length - 1
+    startTypewriter(dialogues.value[currentIndex.value]?.text ?? '')
+  }, 800)
+}
+
+// 載入對話
+async function fetchDialogues() {
+  try {
+    const res = await fetch(`/api/v1/members/${props.memberId}/dialogues?limit=30`)
+    if (res.ok) {
+      dialogues.value = await res.json()
+      if (dialogues.value.length > 0 && !isWorking.value) {
+        currentIndex.value = dialogues.value.length - 1
+        startTypewriter(dialogues.value[currentIndex.value]?.text ?? '')
+      }
+    }
+  } catch (e) {
+    console.error('Failed to fetch dialogues:', e)
+  }
+}
 
 // Task history
 interface TaskLogItem {
@@ -56,9 +168,7 @@ async function fetchSkills() {
   loadingSkills.value = true
   try {
     const res = await fetch(`/api/v1/members/${props.memberId}/skills`)
-    if (res.ok) {
-      skills.value = await res.json()
-    }
+    if (res.ok) skills.value = await res.json()
   } catch (e) {
     console.error('Failed to fetch skills:', e)
   }
@@ -81,35 +191,40 @@ async function fetchHistory() {
   loading.value = true
   try {
     const res = await fetch(`/api/v1/members/${props.memberId}/history?limit=8`)
-    if (res.ok) {
-      history.value = await res.json()
-    }
+    if (res.ok) history.value = await res.json()
   } catch (e) {
     console.error('Failed to fetch history:', e)
   }
   loading.value = false
 }
 
-// ESC to close
 function handleKeyDown(e: KeyboardEvent) {
-  if (e.key === 'Escape') {
-    emit('close')
+  if (e.key === 'Escape') emit('close')
+  if (e.key === ' ' || e.key === 'Enter') {
+    e.preventDefault()
+    skipOrNext()
   }
 }
 
 onMounted(() => {
   window.addEventListener('keydown', handleKeyDown)
+  window.addEventListener('aegis:member-dialogue', onDialogueEvent)
   fetchHistory()
   fetchSkills()
+  fetchDialogues()
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown)
+  window.removeEventListener('aegis:member-dialogue', onDialogueEvent)
+  stopTypewriter()
 })
 
-watch(() => props.memberId, fetchHistory)
+watch(() => props.memberId, () => {
+  fetchHistory()
+  fetchDialogues()
+})
 
-// Provider color
 function providerColor(provider: string): string {
   if (provider === 'claude') return 'text-orange-400'
   if (provider === 'gemini') return 'text-blue-400'
@@ -130,8 +245,6 @@ function providerLabel(provider: string): string {
     <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="emit('close')" />
 
     <!-- Character portrait - large, left side -->
-    <!-- 智能適配：正方形/半身像用 cover+top，全身立繪用 contain+bottom -->
-    <!-- 手機版調高避開對話框遮臉 -->
     <div class="absolute left-0 sm:left-8 bottom-36 sm:bottom-0 w-[260px] sm:w-[570px] h-[45vh] sm:h-[85vh]">
       <template v-if="portrait">
         <img
@@ -193,7 +306,6 @@ function providerLabel(provider: string): string {
       <div v-if="showSkills" class="absolute right-4 sm:right-[50px] top-20 w-72 max-h-[50vh] overflow-hidden">
         <div class="bg-slate-900/40 backdrop-blur-sm rounded-lg border-2 border-purple-400/40 shadow-xl">
           <div class="p-3 max-h-[50vh] overflow-y-auto">
-            <!-- 技能列表 -->
             <template v-if="!selectedSkill">
               <div v-if="loadingSkills" class="flex items-center justify-center py-4">
                 <Loader2 class="w-5 h-5 text-purple-400 animate-spin" />
@@ -219,7 +331,6 @@ function providerLabel(provider: string): string {
               </div>
             </template>
 
-            <!-- 技能詳情 -->
             <template v-else>
               <div class="flex items-center gap-2 mb-3">
                 <button @click="selectedSkill = null" class="text-purple-400 hover:text-purple-300 text-xs">
@@ -235,10 +346,9 @@ function providerLabel(provider: string): string {
     </Transition>
 
     <!-- Dialog box - bottom, full width with frame -->
-    <!-- 手機版調高避開底部導航列 -->
     <div class="absolute bottom-24 sm:bottom-4 left-2 right-2 sm:left-[50px] sm:right-[50px]">
       <div class="bg-slate-900/40 backdrop-blur-sm rounded-lg border-2 border-slate-400/40 shadow-2xl">
-        <!-- Name tag - positioned above the box -->
+        <!-- Name tag -->
         <div class="absolute -top-4 left-6">
           <div class="bg-slate-800 rounded px-4 py-1 border border-slate-500/50">
             <span class="text-white font-bold">{{ name }}</span>
@@ -249,19 +359,44 @@ function providerLabel(provider: string): string {
         </div>
 
         <!-- Dialog content -->
-        <div class="px-6 py-6 pt-8 min-h-[150px] flex flex-col">
-          <div class="flex-1">
+        <div class="px-6 py-6 pt-8 min-h-[150px] flex flex-col cursor-pointer relative" @click="skipOrNext">
+          <!-- 即時模式：工作中 -->
+          <div v-if="isWorking" class="flex-1">
+            <div class="font-mono text-sm text-emerald-300/90 overflow-y-auto max-h-[120px] leading-relaxed">
+              <div v-for="(line, i) in liveLines.slice(-6)" :key="i" class="truncate">{{ line }}</div>
+              <span class="animate-pulse text-emerald-400">_</span>
+            </div>
+          </div>
+
+          <!-- 對話模式：AVG 打字機 -->
+          <div v-else class="flex-1">
             <p class="text-white text-lg leading-relaxed font-bold" style="text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;">
-              {{ history.length > 0
+              {{ dialogues.length > 0 ? displayedText : (history.length > 0
                 ? `已完成 ${history.filter(t => t.status === 'success').length} 個任務，隨時準備好接受新挑戰！`
-                : '準備好開始工作了！'
-              }}
+                : '準備好開始工作了！') }}
+              <span v-if="isTyping" class="animate-pulse">|</span>
+            </p>
+
+            <!-- 任務標題 + 時間戳 -->
+            <p v-if="currentDialogue && !isTyping" class="text-[11px] text-slate-500 mt-2">
+              {{ currentDialogue.card_title }} &middot; {{ new Date(currentDialogue.created_at).toLocaleString('zh-TW') }}
             </p>
           </div>
 
+          <!-- 翻頁提示 ▼ -->
+          <span
+            v-if="!isWorking && !isTyping && hasNextLine"
+            class="absolute bottom-3 right-6 animate-bounce text-white/60 text-sm"
+          >▼</span>
+
+          <!-- 頁數指示 -->
+          <span
+            v-if="dialogues.length > 1 && !isWorking"
+            class="absolute bottom-3 left-6 text-[10px] text-slate-600"
+          >{{ currentIndex + 1 }} / {{ dialogues.length }}</span>
         </div>
 
-        <!-- Action buttons - overlapping bottom border -->
+        <!-- Action buttons -->
         <div class="absolute -bottom-3 right-4 sm:right-6 flex items-center gap-1 sm:gap-2">
           <button
             @click="showTasks = !showTasks; if (showTasks) showSkills = false"

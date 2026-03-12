@@ -113,6 +113,10 @@ export function useWebSocket() {
       case 'task_log':
         store.appendTaskLog(data.card_id, data.line)
         break
+
+      case 'member_dialogue':
+        window.dispatchEvent(new CustomEvent('aegis:member-dialogue', { detail: data }))
+        break
     }
   }
 
