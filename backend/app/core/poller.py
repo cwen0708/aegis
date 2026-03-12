@@ -2,8 +2,6 @@ import asyncio
 import logging
 import re
 import json
-from collections import deque
-from datetime import datetime, timezone
 from pathlib import Path
 from sqlmodel import Session, select
 from app.database import engine
@@ -16,16 +14,6 @@ from app.core.task_workspace import prepare_workspace, cleanup_workspace
 from app.core.memory_manager import write_member_short_term_memory
 
 logger = logging.getLogger(__name__)
-
-# DEBUG ring buffer for remote log viewing
-debug_log: deque[str] = deque(maxlen=200)
-
-def dprint(msg: str):
-    """Print + store in ring buffer for API access."""
-    ts = datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
-    line = f"[{ts}] {msg}"
-    print(line)
-    debug_log.append(line)
 
 # 全域暫停旗標，供 API 控制
 is_paused = False
@@ -76,15 +64,6 @@ async def _process_pending_cards():
             list_name = stage_list.name if stage_list else "Unknown"
             project = session.get(Project, idx.project_id)
 
-            # DEBUG: 追蹤 pending 卡片的路由決策
-            dprint(f"[Poller DEBUG] Card {idx.card_id}: list_id={idx.list_id}, "
-                  f"stage_list={'found' if stage_list else 'NOT FOUND'}, "
-                  f"project_id={idx.project_id}, file_path={idx.file_path}")
-            if stage_list:
-                dprint(f"[Poller DEBUG] Card {idx.card_id}: stage_list.name={stage_list.name}, "
-                      f"is_ai_stage={stage_list.is_ai_stage}, stage_type={stage_list.stage_type}, "
-                      f"member_id={stage_list.member_id}")
-
             # 判斷此階段是否需要 AI 處理
             # 根據 stage_type 和 is_ai_stage 決定（通用化工作流）
             should_ai_process = (
@@ -93,32 +72,24 @@ async def _process_pending_cards():
                 and stage_list.stage_type in ["auto_process", "auto_review"]
             )
 
-            dprint(f"[Poller DEBUG] Card {idx.card_id}: should_ai_process={should_ai_process}")
-
             if should_ai_process:
 
                 # 防護機制：如果系統負載過高，暫停派發
                 if is_system_overloaded(cpu_threshold=90.0, mem_threshold=90.0):
-                    dprint(f"[Poller DEBUG] Card {idx.card_id}: SYSTEM OVERLOADED, skipping")
                     continue
-
-                dprint(f"[Poller DEBUG] Card {idx.card_id}: dispatching (AI stage)")
 
                 # 決定 Phase、Member 和 Provider（三層路由）
                 # phase 用於向後相容，從列表名稱推導
                 phase = list_name.upper() if list_name else "DEVELOPING"
                 member_id, forced_provider = _resolve_member(stage_list, project, phase, session)
-                dprint(f"[Poller DEBUG] Card {idx.card_id}: member_id={member_id}, provider={forced_provider}, busy_members={list(busy_members)}")
 
                 # 成員忙碌檢查：先檢查再標記，避免不必要的 pending→running→pending 狀態翻轉
                 if member_id and member_id in busy_members:
-                    dprint(f"[Poller DEBUG] Card {idx.card_id}: MEMBER BUSY, skipping")
                     continue
 
                 # 讀取 MD 檔並標記為 running 避免重複抓取
                 project_path = project.path if project else "."
                 card_data = _update_card_status(session, idx, "running", project_path)
-                dprint(f"[Poller DEBUG] Card {idx.card_id}: _update_card_status returned {'OK' if card_data else 'None'}")
                 if card_data is None:
                     continue
 
@@ -150,7 +121,6 @@ async def _process_pending_cards():
                 ))
             else:
                 # 非 AI 處理階段（manual, terminal 或 is_ai_stage=False），清除 pending 狀態
-                dprint(f"[Poller DEBUG] Card {idx.card_id}: RESETTING TO IDLE (not AI stage)")
                 project_path = project.path if project else "."
                 _update_card_status(session, idx, "idle", project_path)
 
@@ -482,9 +452,7 @@ async def _execute_and_update(
         effective_cwd = workspace_dir or project_path
         effective_prompt = "請閱讀你的設定檔並執行本次任務。" if workspace_dir else prompt
 
-        dprint(f"[Exec DEBUG] Card {card_id}: starting run_ai_task, cwd={effective_cwd}, member_id={member_id}")
         result = await run_ai_task(card_id, effective_cwd, effective_prompt, phase, forced_provider=forced_provider, card_title=card_title, project_name=project_name, member_id=member_id)
-        dprint(f"[Exec DEBUG] Card {card_id}: run_ai_task returned status={result.get('status')}")
 
         async with get_card_lock(card_id):
             file_path = Path(file_path_str) if file_path_str else card_file_path(project_path, card_id)
@@ -562,7 +530,6 @@ async def _execute_and_update(
 
     except Exception as e:
         # 錯誤回復：確保卡片不會永遠卡在 running 狀態
-        dprint(f"[Exec DEBUG] Card {card_id}: EXCEPTION in _execute_and_update: {e}")
         logger.exception(f"[Task {card_id}] _execute_and_update failed: {e}")
         try:
             async with get_card_lock(card_id):
@@ -592,16 +559,11 @@ async def _execute_and_update(
 
 async def start_poller():
     """任務監聽器的主迴圈"""
-    dprint("[Poller] Starting Aegis Task Poller...")
-    cycle = 0
+    logger.info("[Poller] Starting Aegis Task Poller...")
     while True:
         try:
-            cycle += 1
-            if cycle % 20 == 1:  # 每 60 秒記一次 heartbeat
-                dprint(f"[Poller] heartbeat cycle={cycle}")
             await _process_pending_cards()
         except Exception as e:
-            dprint(f"[Poller] ERROR: {e}")
             logger.error(f"[Poller Error] {e}")
 
         # 每 3 秒掃描一次

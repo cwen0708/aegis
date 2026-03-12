@@ -867,21 +867,6 @@ def run_task_subprocess(
 # ==========================================
 # 主處理迴圈
 # ==========================================
-def _debug_log(msg: str):
-    """寫入 debug log 檔，供 API 讀取"""
-    try:
-        log_path = Path(__file__).parent / "worker_debug.log"
-        with open(log_path, "a", encoding="utf-8") as f:
-            ts = datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
-            f.write(f"[{ts}] {msg}\n")
-        # 保持 log 不超過 200 行
-        lines = log_path.read_text(encoding="utf-8").split("\n")
-        if len(lines) > 200:
-            log_path.write_text("\n".join(lines[-100:]), encoding="utf-8")
-    except Exception:
-        pass
-
-
 def process_pending_cards():
     """處理一輪 pending 卡片"""
     max_ws = get_max_workstations()
@@ -896,8 +881,6 @@ def process_pending_cards():
         return
 
     pending = get_pending_cards()
-    if pending:
-        _debug_log(f"Found {len(pending)} pending cards: {[c.card_id for c in pending]}")
 
     for idx in pending:
         # 再次檢查工作台
@@ -915,15 +898,7 @@ def process_pending_cards():
                 and stage_list.is_ai_stage
                 and stage_list.stage_type in ["auto_process", "auto_review"]
             )
-            _debug_log(f"Card {idx.card_id}: list_id={idx.list_id}, name={list_name}, "
-                       f"stage_list={'found' if stage_list else 'NONE'}, "
-                       f"is_ai={getattr(stage_list, 'is_ai_stage', None)}, "
-                       f"type={getattr(stage_list, 'stage_type', None)}, "
-                       f"should_ai={should_ai_process}")
-
         if not should_ai_process:
-            # 不需要 AI 的列表，清除 pending 狀態
-            _debug_log(f"Card {idx.card_id}: RESET TO IDLE")
             update_card_status(idx.card_id, "idle")
             continue
 
@@ -1104,20 +1079,13 @@ def main():
     except Exception as e:
         logger.warning(f"[Worker] Failed to clear paused flag: {e}")
 
-    _debug_log(f"Worker started, DB={engine.url}")
-    cycle = 0
     while True:
         try:
-            cycle += 1
-            if cycle % 20 == 1:  # 每 60 秒
-                _debug_log(f"heartbeat cycle={cycle}, paused={is_worker_paused()}")
-            # 暫停檢查
             if is_worker_paused():
                 pass  # 靜默跳過
             else:
                 process_pending_cards()
         except Exception as e:
-            _debug_log(f"ERROR: {e}")
             logger.error(f"[Worker Error] {e}")
 
         time.sleep(POLL_INTERVAL)

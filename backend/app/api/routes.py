@@ -732,9 +732,6 @@ def list_all_cron_logs(limit: int = 50, offset: int = 0, project_id: Optional[in
 @router.post("/cards/{card_id}/trigger")
 def trigger_card(card_id: int, session: Session = Depends(get_session)):
     """手動觸發卡片執行（將 status 設為 pending）"""
-    import logging
-    _log = logging.getLogger("aegis.trigger")
-
     idx = session.get(CardIndex, card_id)
     orm_card = session.get(Card, card_id)
     if not idx and not orm_card:
@@ -745,23 +742,14 @@ def trigger_card(card_id: int, session: Session = Depends(get_session)):
         raise HTTPException(status_code=409, detail="Card is already running")
 
     now = datetime.now(timezone.utc)
-    md_written = False
 
     # Update MD file + index
     if idx and idx.file_path and Path(idx.file_path).exists():
-        _log.info(f"[Trigger] Card {card_id}: reading MD from {idx.file_path}")
         cd = read_card_md(Path(idx.file_path))
-        _log.info(f"[Trigger] Card {card_id}: MD status before={cd.status}")
         cd.status = "pending"
         cd.updated_at = now
         write_card(Path(idx.file_path), cd)
-        md_written = True
-        # Verify write
-        cd_verify = read_card_md(Path(idx.file_path))
-        _log.info(f"[Trigger] Card {card_id}: MD status after write={cd_verify.status}")
         sync_card_to_index(session, cd, project_id=idx.project_id, file_path=idx.file_path)
-    else:
-        _log.warning(f"[Trigger] Card {card_id}: no MD path (idx={idx is not None}, file_path={getattr(idx, 'file_path', None)})")
 
     # Dual-write: old Card ORM
     if orm_card:
@@ -770,137 +758,7 @@ def trigger_card(card_id: int, session: Session = Depends(get_session)):
         session.add(orm_card)
 
     session.commit()
-
-    # Post-commit verify
-    idx2 = session.get(CardIndex, card_id)
-    _log.info(f"[Trigger] Card {card_id}: post-commit index status={idx2.status if idx2 else 'N/A'}, md_written={md_written}")
-
     return {"ok": True, "status": "pending"}
-
-
-@router.get("/debug/card/{card_id}/poller-check")
-def debug_poller_check(card_id: int, session: Session = Depends(get_session)):
-    """臨時 debug: 模擬 poller 對此卡片的決策邏輯"""
-    idx = session.get(CardIndex, card_id)
-    if not idx:
-        return {"error": "CardIndex not found"}
-
-    stage_list = session.get(StageList, idx.list_id)
-    project = session.get(Project, idx.project_id)
-
-    should_ai_process = (
-        stage_list
-        and stage_list.is_ai_stage
-        and stage_list.stage_type in ["auto_process", "auto_review"]
-    )
-
-    # 也檢查 MD 檔案的 list_id
-    md_list_id = None
-    if idx.file_path and Path(idx.file_path).exists():
-        cd = read_card_md(Path(idx.file_path))
-        md_list_id = cd.list_id
-
-    return {
-        "card_id": card_id,
-        "index": {
-            "list_id": idx.list_id,
-            "project_id": idx.project_id,
-            "status": idx.status,
-            "file_path": idx.file_path,
-        },
-        "md_file": {
-            "list_id": md_list_id,
-        },
-        "stage_list": {
-            "found": stage_list is not None,
-            "name": stage_list.name if stage_list else None,
-            "is_ai_stage": stage_list.is_ai_stage if stage_list else None,
-            "stage_type": stage_list.stage_type if stage_list else None,
-            "member_id": stage_list.member_id if stage_list else None,
-        } if True else None,
-        "should_ai_process": should_ai_process,
-        "project": {
-            "name": project.name if project else None,
-            "path": project.path if project else None,
-        },
-    }
-
-
-@router.get("/debug/logs")
-def debug_logs():
-    """臨時 debug: 取得 poller debug ring buffer + worker file log"""
-    from app.core.poller import debug_log
-    poller_lines = list(debug_log)
-
-    # Worker file log
-    worker_log_path = Path(__file__).parent.parent.parent / "worker_debug.log"
-    worker_lines = []
-    if worker_log_path.exists():
-        worker_lines = worker_log_path.read_text(encoding="utf-8").strip().split("\n")[-50:]
-
-    return {"poller_lines": poller_lines, "worker_lines": worker_lines}
-
-
-@router.get("/debug/worker-check")
-def debug_worker_check():
-    """確認 worker.py 版本 + 進程狀態"""
-    import subprocess
-    worker_path = Path(__file__).parent.parent.parent / "worker.py"
-
-    result = {"worker_path": str(worker_path)}
-
-    # 檢查檔案內容
-    if worker_path.exists():
-        content = worker_path.read_text(encoding="utf-8")
-        result["has_old_whitelist"] = 'not in ["Planning", "Developing", "Verifying", "Scheduled", "OneStack"]' in content
-        result["has_new_logic"] = "should_ai_process" in content
-        lines = content.split("\n")
-        result["snippet_lines_890_910"] = lines[889:910] if len(lines) > 910 else lines[-20:]
-
-    # 檢查 systemd 服務狀態
-    try:
-        proc = subprocess.run(
-            ["systemctl", "is-active", "aegis-worker"],
-            capture_output=True, text=True, timeout=5
-        )
-        result["worker_service_status"] = proc.stdout.strip()
-    except Exception as e:
-        result["worker_service_status"] = f"error: {e}"
-
-    # 檢查 worker 進程 PID 和啟動時間
-    try:
-        proc = subprocess.run(
-            ["systemctl", "show", "aegis-worker", "--property=MainPID,ActiveEnterTimestamp,ExecMainStartTimestamp"],
-            capture_output=True, text=True, timeout=5
-        )
-        for line in proc.stdout.strip().split("\n"):
-            k, _, v = line.partition("=")
-            result[f"worker_{k}"] = v
-    except Exception as e:
-        result["worker_systemd_info"] = f"error: {e}"
-
-    # 讀取 systemd unit 配置
-    try:
-        proc = subprocess.run(
-            ["systemctl", "cat", "aegis-worker"],
-            capture_output=True, text=True, timeout=5
-        )
-        result["worker_unit_config"] = proc.stdout.strip()
-    except Exception as e:
-        result["worker_unit_config"] = f"error: {e}"
-
-    # 手動嘗試 restart 並記錄結果
-    try:
-        proc = subprocess.run(
-            ["sudo", "systemctl", "restart", "aegis-worker"],
-            capture_output=True, text=True, timeout=10
-        )
-        result["manual_restart_rc"] = proc.returncode
-        result["manual_restart_stderr"] = proc.stderr.strip()
-    except Exception as e:
-        result["manual_restart"] = f"error: {e}"
-
-    return result
 
 
 @router.post("/cards/{card_id}/abort")
