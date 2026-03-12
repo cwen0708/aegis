@@ -17,6 +17,7 @@ const pairStatus = ref<{
   device_id: string | null
   device_name: string | null
   supabase_url: string | null
+  supabase_anon_key: string | null
   connected: boolean
 } | null>(null)
 
