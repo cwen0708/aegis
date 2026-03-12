@@ -19,6 +19,7 @@ import SettingsInvitations from '../views/settings/SettingsInvitations.vue'
 import SettingsUpdate from '../views/settings/SettingsUpdate.vue'
 import SettingsOneStack from '../views/settings/SettingsOneStack.vue'
 import FileBrowser from '../views/FileBrowser.vue'
+import { useAuthStore } from '../stores/auth'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -55,11 +56,23 @@ const router = createRouter({
   ],
 })
 
-// Navigation guard: 需要認證的頁面導向登入
-router.beforeEach((to) => {
+// Navigation guard: 依系統設定決定是否強制登入才能瀏覽
+router.beforeEach(async (to) => {
+  // /settings 本身不擋（內建密碼閘門）
+  if (to.path.startsWith('/settings') || to.path === '/login' || to.path === '/onboarding') {
+    return
+  }
+
   if (to.meta.requiresAuth) {
-    const token = sessionStorage.getItem('aegis-token')
-    if (!token) {
+    const auth = useAuthStore()
+
+    // 確保已載入設定
+    if (!auth.policyLoaded) {
+      await auth.fetchAuthPolicy()
+    }
+
+    // 如果開啟路由守衛 → 強制登入
+    if (auth.requireLoginToView && !auth.isAuthenticated) {
       return { path: '/settings', query: { redirect: to.fullPath } }
     }
   }

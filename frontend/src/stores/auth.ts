@@ -7,8 +7,21 @@ const TOKEN_KEY = 'aegis-token'
 
 export const useAuthStore = defineStore('auth', () => {
   const token = ref<string | null>(sessionStorage.getItem(TOKEN_KEY))
+  const requireLoginToView = ref(false)
+  const policyLoaded = ref(false)
 
   const isAuthenticated = computed(() => !!token.value)
+
+  async function fetchAuthPolicy() {
+    try {
+      const res = await fetch(`${API}/api/v1/settings`)
+      if (res.ok) {
+        const data = await res.json()
+        requireLoginToView.value = data.require_login_to_view === 'true'
+      }
+    } catch { /* ignore */ }
+    policyLoaded.value = true
+  }
 
   function login(newToken: string) {
     token.value = newToken
@@ -53,9 +66,12 @@ export const useAuthStore = defineStore('auth', () => {
   return {
     token,
     isAuthenticated,
+    requireLoginToView,
+    policyLoaded,
     login,
     logout,
     getAuthHeaders,
     verifyPassword,
+    fetchAuthPolicy,
   }
 })

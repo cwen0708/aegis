@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Globe, Cpu, Save, Loader2, Lock, Sparkles } from 'lucide-vue-next'
+import { Globe, Cpu, Save, Loader2, Lock, Sparkles, ShieldCheck } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
+import { useAuthStore } from '../../stores/auth'
 
 import { config } from '../../config'
 import { authHeaders } from '../../utils/authFetch'
 
 const store = useAegisStore()
+const auth = useAuthStore()
 const API = config.apiUrl
 
 // Worker 暫停控制
@@ -40,8 +42,21 @@ async function toggleWorkerPaused() {
   }
 }
 
+async function toggleLoginToView() {
+  const newVal = !requireLoginToView.value
+  try {
+    await store.updateSettings({ require_login_to_view: String(newVal) })
+    requireLoginToView.value = newVal
+    auth.requireLoginToView = newVal
+  } catch {
+    store.addToast('設定失敗', 'error')
+  }
+}
+
 const loading = ref(true)
 const saving = ref(false)
+
+const requireLoginToView = ref(false)
 
 const form = ref({
   timezone: 'Asia/Taipei',
@@ -123,6 +138,7 @@ onMounted(async () => {
   form.value.max_workstations = store.settings.max_workstations || '3'
   form.value.memory_short_term_days = store.settings.memory_short_term_days || '30'
   form.value.gemini_api_key = store.settings.gemini_api_key || ''
+  requireLoginToView.value = store.settings.require_login_to_view === 'true'
   loading.value = false
 })
 
@@ -262,6 +278,39 @@ async function saveSettings() {
         <Save class="w-4 h-4" />
         {{ saving ? '儲存中...' : '儲存設定' }}
       </button>
+    </div>
+
+    <!-- 存取控制 -->
+    <div class="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
+      <div class="px-6 py-4 border-b border-slate-700/50">
+        <div class="flex items-center gap-2">
+          <ShieldCheck class="w-4 h-4 text-cyan-400" />
+          <h2 class="text-sm font-semibold text-slate-200">存取控制</h2>
+        </div>
+      </div>
+      <div class="p-6 space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <label class="block text-xs font-medium text-slate-400">強制登入才能瀏覽</label>
+            <p class="text-[11px] text-slate-500 mt-0.5">開啟後，未登入的使用者無法瀏覽任何頁面（會被導向登入畫面）</p>
+            <p class="text-[11px] text-slate-500">關閉時，未登入可瀏覽但操作按鈕（新增、刪除、拖曳等）會被隱藏</p>
+          </div>
+          <button
+            @click="toggleLoginToView"
+            :class="[
+              'relative w-11 h-6 rounded-full transition-colors shrink-0 ml-4',
+              requireLoginToView ? 'bg-cyan-500' : 'bg-slate-600'
+            ]"
+          >
+            <div
+              :class="[
+                'absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform shadow',
+                requireLoginToView ? 'left-5.5' : 'left-0.5'
+              ]"
+            ></div>
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- 管理員密碼 -->
