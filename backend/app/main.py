@@ -10,7 +10,7 @@ import asyncio
 import logging
 from pathlib import Path
 from app.database import init_db
-from app.api import routes, webhooks
+from app.api import routes, webhooks, files
 from app.core.telemetry import get_system_metrics
 # start_poller 已移到獨立的 worker.py 程序
 from app.core.cron_poller import start_cron_poller
@@ -404,6 +404,7 @@ app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 # 註冊 API 路由
 app.include_router(routes.router, prefix="/api/v1")
 app.include_router(webhooks.router, prefix="/api/v1")
+app.include_router(files.router, prefix="/api/v1")
 
 # ==========================================
 # SPA Frontend (serve from frontend/dist)

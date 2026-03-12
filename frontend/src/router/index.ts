@@ -17,6 +17,7 @@ import SettingsArchive from '../views/settings/SettingsArchive.vue'
 import SettingsInvitations from '../views/settings/SettingsInvitations.vue'
 import SettingsUpdate from '../views/settings/SettingsUpdate.vue'
 import SettingsOneStack from '../views/settings/SettingsOneStack.vue'
+import FileBrowser from '../views/FileBrowser.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -27,6 +28,8 @@ const router = createRouter({
     { path: '/cron', component: CronJobs },
     { path: '/cron/:id', component: CronJobDetail },
     { path: '/tasks', component: Tasks },
+    { path: '/files', component: FileBrowser },
+    { path: '/files/:projectId', component: FileBrowser },
     { path: '/office', component: Office },
     {
       path: '/settings',
