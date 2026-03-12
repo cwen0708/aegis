@@ -53,14 +53,20 @@ def get_current_version() -> str:
 
 
 def parse_version(version: str) -> tuple:
-    """解析版本號為可比較的 tuple"""
-    # 移除 v 前綴
+    """解析版本號為可比較的 tuple
+
+    v0.2.1       → (0, 2, 1, 1, 0)    — 正式版（dev_flag=1 排在 dev 之後）
+    v0.2.2-dev.9 → (0, 2, 2, 0, 9)    — dev 版（dev_flag=0）
+    """
     v = version.lstrip("v")
-    # 解析 major.minor.patch
-    match = re.match(r"(\d+)\.(\d+)\.(\d+)", v)
+    match = re.match(r"(\d+)\.(\d+)\.(\d+)(?:-dev\.(\d+))?", v)
     if match:
-        return tuple(map(int, match.groups()))
-    return (0, 0, 0)
+        major, minor, patch = int(match.group(1)), int(match.group(2)), int(match.group(3))
+        dev_num = match.group(4)
+        if dev_num is not None:
+            return (major, minor, patch, 0, int(dev_num))  # dev 版
+        return (major, minor, patch, 1, 0)  # 正式版排在同版 dev 之後
+    return (0, 0, 0, 0, 0)
 
 
 def is_newer_version(latest: str, current: str) -> bool:
@@ -107,8 +113,8 @@ async def check_for_updates(repo: str = "cwen0708/aegis", channel: str = "develo
             tag_pattern = re.compile(r"^v\d+\.\d+\.\d+-stable$")
             channel_name = "穩定版"
         else:
-            # 開發版（預設）：所有 v*.*.*（不含 -stable 後綴）
-            tag_pattern = re.compile(r"^v\d+\.\d+\.\d+$")
+            # 開發版（預設）：所有 v*.*.* 和 v*.*.*-dev.*
+            tag_pattern = re.compile(r"^v\d+\.\d+\.\d+(-dev\.\d+)?$")
             channel_name = "開發版"
 
         filtered_tags = [t["name"] for t in tags if tag_pattern.match(t["name"])]
