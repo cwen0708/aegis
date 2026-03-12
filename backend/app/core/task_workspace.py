@@ -70,9 +70,15 @@ def prepare_workspace(
     (ws / cfg["config_file"]).write_text(content, encoding="utf-8")
 
     # 2. Copy skills into .claude/skills/ or .gemini/skills/
+    #    先載入 shared skills，再載入成員專屬（可覆蓋共用的）
     dot_dir = ws / cfg["dot_dir"]
     target_skills = dot_dir / "skills"
     target_skills.mkdir(parents=True, exist_ok=True)
+
+    shared_skills = _INSTALL_ROOT / ".aegis" / "shared" / "skills"
+    if shared_skills.exists():
+        for md_file in shared_skills.glob("*.md"):
+            shutil.copy2(md_file, target_skills / md_file.name)
 
     src_skills = get_skills_dir(member_slug)
     if src_skills.exists():
