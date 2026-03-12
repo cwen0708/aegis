@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Globe, Cpu, Save, Loader2, Lock, Sparkles, PauseCircle } from 'lucide-vue-next'
+import { Globe, Cpu, Save, Loader2, Lock, Sparkles } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 
 import { config } from '../../config'
