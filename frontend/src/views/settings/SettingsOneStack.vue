@@ -110,7 +110,7 @@ async function handlePair() {
       <h2 class="text-sm font-bold text-slate-200 mb-1">OneStack — 一人公司的 AI 全棧指揮中心</h2>
       <p class="text-[11px] text-violet-400/80 font-medium mb-3">One Person. One Stack. Infinite Power.</p>
       <p class="text-xs text-slate-400 leading-relaxed">
-        OneStack 是為獨立工作者打造的雲端 SaaS，內建 AI 虛擬團隊（PM、Tech Lead、財務、行銷），
+        OneStack 是為獨立工作者打造的 AI 全棧營運平台，內建虛擬團隊（PM、Tech Lead、財務、行銷），
         從需求捕捉、專案管理、報價開票到客戶經營一站搞定。
         連線 Aegis 後，你可以從 OneStack 遠端派發任務、查看執行結果，讓雲端大腦指揮本地引擎。
       </p>
