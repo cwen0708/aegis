@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Globe, Cpu, Save, Loader2, Lock, Link, Sparkles } from 'lucide-vue-next'
+import { Globe, Cpu, Save, Loader2, Lock, Sparkles } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 
 import { config } from '../../config'
@@ -15,8 +15,6 @@ const form = ref({
   timezone: 'Asia/Taipei',
   max_workstations: '3',
   memory_short_term_days: '30',
-  onestack_owner_id: '',
-  onestack_endpoint: '',
   gemini_api_key: '',
 })
 
@@ -92,8 +90,6 @@ onMounted(async () => {
   form.value.timezone = store.settings.timezone || 'Asia/Taipei'
   form.value.max_workstations = store.settings.max_workstations || '3'
   form.value.memory_short_term_days = store.settings.memory_short_term_days || '30'
-  form.value.onestack_owner_id = store.settings.onestack_owner_id || ''
-  form.value.onestack_endpoint = store.settings.onestack_endpoint || ''
   form.value.gemini_api_key = store.settings.gemini_api_key || ''
   loading.value = false
 })
@@ -105,8 +101,6 @@ async function saveSettings() {
       timezone: form.value.timezone,
       max_workstations: form.value.max_workstations,
       memory_short_term_days: form.value.memory_short_term_days,
-      onestack_owner_id: form.value.onestack_owner_id,
-      onestack_endpoint: form.value.onestack_endpoint,
       gemini_api_key: form.value.gemini_api_key,
     })
   } finally {
@@ -196,38 +190,6 @@ async function saveSettings() {
             用於 AI 產生成員立繪。可在
             <a href="https://aistudio.google.com/apikey" target="_blank" class="text-purple-400 hover:underline">Google AI Studio</a> 取得
           </p>
-        </div>
-      </div>
-    </div>
-
-    <!-- OneStack 整合 -->
-    <div class="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
-      <div class="px-6 py-4 border-b border-slate-700/50">
-        <div class="flex items-center gap-2">
-          <Link class="w-4 h-4 text-violet-400" />
-          <h2 class="text-sm font-semibold text-slate-200">OneStack 整合</h2>
-        </div>
-      </div>
-      <div class="p-6 space-y-4">
-        <div>
-          <label class="block text-xs font-medium text-slate-400 mb-1.5">Endpoint</label>
-          <input
-            v-model="form.onestack_endpoint"
-            type="text"
-            placeholder="https://xxx.supabase.co/functions/v1/receive-suggestion"
-            class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-violet-500 outline-none text-sm font-mono"
-          />
-          <p class="text-[11px] text-slate-500 mt-1">OneStack Edge Function URL</p>
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-slate-400 mb-1.5">Owner ID</label>
-          <input
-            v-model="form.onestack_owner_id"
-            type="text"
-            placeholder="OneStack 個人頁面上的序號（UUID）"
-            class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-violet-500 outline-none text-sm font-mono"
-          />
-          <p class="text-[11px] text-slate-500 mt-1">Aegis 會將高價值 Email 摘要轉發到此用戶的 OneStack 指揮中心</p>
         </div>
       </div>
     </div>

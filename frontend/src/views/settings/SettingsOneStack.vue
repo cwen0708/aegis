@@ -132,9 +132,6 @@ async function handlePair() {
               </p>
             </div>
           </div>
-          <div class="text-xs text-slate-500 font-mono bg-slate-900 rounded-lg px-3 py-2 truncate">
-            {{ pairStatus.supabase_url }}
-          </div>
         </div>
 
         <!-- 未連線 -->
