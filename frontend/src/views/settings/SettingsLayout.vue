@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Settings, Globe, Terminal, MessageSquare, Users, Bot, Activity, Lock, Loader2, FolderKanban, Mail, ChevronDown, Download, Layers } from 'lucide-vue-next'
+import { Settings, Globe, Terminal, MessageSquare, Users, Bot, Activity, Lock, Loader2, FolderKanban, Mail, ChevronDown, Download, Layers, LogOut } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { useResponsive } from '../../composables/useResponsive'
 import { useAuthStore } from '../../stores/auth'
@@ -56,16 +56,30 @@ async function verifyPassword() {
     loading.value = false
   }
 }
+
+function handleLogout() {
+  auth.logout()
+  authenticated.value = false
+  password.value = ''
+}
 </script>
 
 <template>
   <div class="h-full flex flex-col">
     <!-- Header -->
-    <div class="sticky top-0 z-10 h-14 sm:h-16 shrink-0 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 px-2 sm:px-8 flex items-center">
+    <div class="sticky top-0 z-10 h-14 sm:h-16 shrink-0 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 px-2 sm:px-8 flex items-center justify-between">
       <div class="flex items-center gap-2">
         <Settings class="w-5 h-5 text-slate-400" />
         <h1 class="text-base sm:text-lg font-bold text-slate-100">系統設定</h1>
       </div>
+      <button
+        v-if="authenticated"
+        @click="handleLogout"
+        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+      >
+        <LogOut class="w-3.5 h-3.5" />
+        登出
+      </button>
     </div>
 
     <!-- 未驗證：顯示密碼輸入 -->
