@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, provide, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { Shield, ListTodo, Settings, Clock, FolderOpen, Wifi, WifiOff, Sun, Moon, Zap, Building2, PanelLeftClose, PanelLeftOpen, Rocket } from 'lucide-vue-next'
 import { useWebSocket } from './composables/useWebSocket'
@@ -17,9 +17,6 @@ useWebSocket()
 // 響應式檢測（使用共用 composable）
 const { isMobile } = useResponsive()
 
-// 側邊欄模式（provide 給子頁面控制）
-const sidebarMode = ref<'menu' | 'projects'>('menu')
-provide('sidebarMode', sidebarMode)
 
 // 側邊欄收起
 const sidebarCollapsed = ref(localStorage.getItem('aegis-sidebar') === 'collapsed')
@@ -41,39 +38,14 @@ onMounted(() => {
   if (!isDark.value) document.documentElement.classList.add('light')
 })
 
-// 專案列表（給專案模式用）
-const projects = ref<any[]>([])
-
-const fetchProjects = async () => {
-  try {
-    const res = await fetch('/api/v1/projects/')
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    projects.value = await res.json()
-  } catch (e) {
-    // silent
-  }
-}
-
-let projectInterval: ReturnType<typeof setInterval>
-
 onMounted(async () => {
-  fetchProjects()
   await store.fetchSettings()
 
   // 檢查 onboarding 狀態，未完成則導向
   if (store.settings.onboarding_completed !== 'true' && route.path !== '/onboarding') {
     router.push('/onboarding')
   }
-
-  // 定時更新專案列表
-  projectInterval = setInterval(fetchProjects, 30000)
 })
-
-onUnmounted(() => clearInterval(projectInterval))
-
-function goToProject(projectId: number) {
-  router.push({ path: '/kanban', query: { project: String(projectId) } })
-}
 
 // 系統指標格式化
 const cpuBar = computed(() => Math.min(store.systemInfo.cpu_percent, 100))
@@ -121,28 +93,8 @@ function mobileNavClass(path: string) {
         </div>
       </div>
 
-      <!-- Pill Toggle -->
-      <div v-if="!sidebarCollapsed" class="px-4 pt-4 pb-2">
-        <div class="inline-flex rounded-lg bg-slate-900 p-0.5 w-full">
-          <button
-            @click="sidebarMode = 'menu'"
-            class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors text-center"
-            :class="sidebarMode === 'menu' ? 'bg-slate-700 text-slate-100 shadow-sm' : 'text-slate-500 hover:text-slate-300'"
-          >
-            選單
-          </button>
-          <button
-            @click="sidebarMode = 'projects'"
-            class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors text-center"
-            :class="sidebarMode === 'projects' ? 'bg-slate-700 text-emerald-400 shadow-sm' : 'text-slate-500 hover:text-slate-300'"
-          >
-            專案
-          </button>
-        </div>
-      </div>
-
-      <!-- Menu Mode -->
-      <nav v-if="sidebarMode === 'menu'" class="flex-1 py-4 text-nowrap overflow-y-auto" :class="sidebarCollapsed ? 'px-1.5' : 'px-4'">
+      <!-- Menu -->
+      <nav class="flex-1 py-4 text-nowrap overflow-y-auto" :class="sidebarCollapsed ? 'px-1.5' : 'px-4'">
         <!-- 總覽 -->
         <div class="space-y-1 mb-2">
           <p v-if="!sidebarCollapsed" class="px-3 text-[10px] font-semibold text-slate-600 tracking-widest uppercase mb-1">總覽</p>
@@ -194,32 +146,6 @@ function mobileNavClass(path: string) {
           </router-link>
         </div>
       </nav>
-
-      <!-- Projects Mode -->
-      <div v-else-if="!sidebarCollapsed" class="flex-1 px-4 py-4 space-y-1 overflow-y-auto custom-scrollbar">
-        <div
-          v-for="p in projects"
-          :key="p.id"
-          @click="goToProject(p.id)"
-          class="flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer transition-colors text-sm"
-          :class="[
-            route.query.project === String(p.id) ? 'bg-emerald-500/10 text-emerald-400' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50',
-            !p.is_active ? 'opacity-50' : ''
-          ]"
-        >
-          <div class="flex items-center gap-2 min-w-0">
-            <FolderOpen class="w-4 h-4 shrink-0" />
-            <span class="truncate font-medium">{{ p.name }}</span>
-          </div>
-          <span
-            v-if="store.runningCountByProject(p.name) > 0"
-            class="bg-emerald-500/20 text-emerald-400 text-[10px] font-bold px-1.5 py-0.5 rounded-full border border-emerald-500/30 shrink-0"
-          >
-            {{ store.runningCountByProject(p.name) }}
-          </span>
-        </div>
-        <div v-if="projects.length === 0" class="text-xs text-slate-600 text-center py-4">無專案</div>
-      </div>
 
       <!-- Bottom Fixed: System Status + Collapse Toggle -->
       <div class="border-t border-slate-700" :class="sidebarCollapsed ? 'p-2 pb-2 space-y-2' : 'p-4 pb-2 space-y-3'">

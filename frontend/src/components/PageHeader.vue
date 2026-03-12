@@ -1,8 +1,9 @@
 <template>
-  <div class="flex items-center gap-2 sm:gap-4 px-4 sm:px-6 py-3 border-b border-slate-700/50 shrink-0 min-w-0">
+  <div ref="headerEl" class="h-16 flex items-center gap-2 sm:gap-4 px-4 sm:px-6 border-b border-slate-700 shrink-0 min-w-0">
     <!-- Icon + Project selector -->
-    <div class="flex items-center gap-2 min-w-0 relative">
+    <div class="flex items-center gap-2 min-w-0">
       <button
+        ref="triggerEl"
         @click="showDropdown = !showDropdown"
         class="flex items-center gap-1.5 sm:gap-2 min-w-0 group"
       >
@@ -15,46 +16,44 @@
           :class="{ 'rotate-180': showDropdown }"
         />
       </button>
-
-      <!-- Dropdown -->
-      <Teleport to="body">
-        <div
-          v-if="showDropdown"
-          class="fixed inset-0 z-40"
-          @click="showDropdown = false"
-        />
-      </Teleport>
-      <div
-        v-if="showDropdown"
-        class="absolute top-full left-0 mt-2 w-64 bg-slate-800 rounded-lg border border-slate-700 shadow-xl z-50 max-h-72 overflow-y-auto"
-      >
-        <div class="py-1">
-          <button
-            v-for="p in projects"
-            :key="p.id"
-            @click="onSelect(p.id)"
-            class="w-full flex items-center gap-2 px-3 py-2.5 text-sm transition-colors"
-            :class="selectedProjectId === p.id
-              ? 'bg-emerald-500/20 text-emerald-400'
-              : 'text-slate-300 hover:bg-slate-700'"
-          >
-            <FolderOpen class="w-4 h-4 shrink-0" :class="selectedProjectId === p.id ? 'text-emerald-400' : 'text-slate-500'" />
-            <span class="truncate">{{ p.name }}</span>
-            <span v-if="p.is_system" class="ml-auto text-[10px] text-slate-600">系統</span>
-          </button>
-        </div>
-      </div>
     </div>
 
     <!-- 右側 slot -->
     <div class="ml-auto flex items-center gap-2">
       <slot />
     </div>
+
+    <!-- Dropdown (Teleport to body) -->
+    <Teleport to="body">
+      <template v-if="showDropdown">
+        <div class="fixed inset-0 z-40" @click="showDropdown = false" />
+        <div
+          class="fixed z-50 w-64 bg-slate-800 rounded-lg border border-slate-700 shadow-xl max-h-72 overflow-y-auto"
+          :style="dropdownStyle"
+        >
+          <div class="py-1">
+            <button
+              v-for="p in projects"
+              :key="p.id"
+              @click="onSelect(p.id)"
+              class="w-full flex items-center gap-2 px-3 py-2.5 text-sm transition-colors"
+              :class="selectedProjectId === p.id
+                ? 'bg-emerald-500/20 text-emerald-400'
+                : 'text-slate-300 hover:bg-slate-700'"
+            >
+              <FolderOpen class="w-4 h-4 shrink-0" :class="selectedProjectId === p.id ? 'text-emerald-400' : 'text-slate-500'" />
+              <span class="truncate">{{ p.name }}</span>
+              <span v-if="p.is_system" class="ml-auto text-[10px] text-slate-600">系統</span>
+            </button>
+          </div>
+        </div>
+      </template>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { FolderOpen, ChevronDown } from 'lucide-vue-next'
 import { useProjectSelector } from '../composables/useProjectSelector'
 import type { Component } from 'vue'
@@ -65,6 +64,16 @@ defineProps<{
 
 const { projects, selectedProjectId, currentProject, selectProject } = useProjectSelector()
 const showDropdown = ref(false)
+const triggerEl = ref<HTMLElement | null>(null)
+
+const dropdownStyle = computed(() => {
+  if (!triggerEl.value) return {}
+  const rect = triggerEl.value.getBoundingClientRect()
+  return {
+    top: `${rect.bottom + 8}px`,
+    left: `${rect.left}px`,
+  }
+})
 
 function onSelect(id: number) {
   selectProject(id)
