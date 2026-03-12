@@ -826,6 +826,13 @@ def debug_poller_check(card_id: int, session: Session = Depends(get_session)):
     }
 
 
+@router.get("/debug/logs")
+def debug_logs():
+    """臨時 debug: 取得 poller debug ring buffer"""
+    from app.core.poller import debug_log
+    return {"lines": list(debug_log)}
+
+
 @router.post("/cards/{card_id}/abort")
 def abort_card(card_id: int, session: Session = Depends(get_session)):
     """中止執行中的任務"""
