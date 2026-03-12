@@ -892,8 +892,13 @@ def process_pending_cards():
             list_name = stage_list.name if stage_list else "Unknown"
             project = session.get(Project, idx.project_id)
 
-        # 只處理特定列表
-        if list_name not in ["Planning", "Developing", "Verifying", "Scheduled", "OneStack"]:
+        # 判斷此階段是否需要 AI 處理（通用化，不再硬編碼列表名稱）
+        should_ai_process = (
+            stage_list
+            and stage_list.is_ai_stage
+            and stage_list.stage_type in ["auto_process", "auto_review"]
+        )
+        if not should_ai_process:
             # 不需要 AI 的列表，清除 pending 狀態
             update_card_status(idx.card_id, "idle")
             continue
