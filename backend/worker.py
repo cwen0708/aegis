@@ -224,7 +224,17 @@ def resolve_member(stage_list_id: int, phase: str) -> tuple:
                 logger.info(f"[Router] List '{stage_list.name}' → {member.name} ({provider}/{model})")
                 return member.id, provider, model, member.slug, auth_info
 
-        # 2. 全域預設
+        # 2. 專案預設成員（OneStack/Scheduled 等系統列表 fallback）
+        if stage_list:
+            project = session.get(Project, stage_list.project_id)
+            if project and project.default_member_id:
+                member = session.get(Member, project.default_member_id)
+                if member:
+                    provider, model, auth_info = get_primary_provider(member.id)
+                    logger.info(f"[Router] Project '{project.name}' default → {member.name} ({provider}/{model})")
+                    return member.id, provider, model, member.slug, auth_info
+
+        # 3. 全域預設
         setting = session.get(SystemSetting, f"phase_routing.{phase}")
         if setting and setting.value:
             try:
@@ -235,7 +245,7 @@ def resolve_member(stage_list_id: int, phase: str) -> tuple:
             except (ValueError, TypeError):
                 pass
 
-        # 3. 無指派
+        # 4. 無指派
         return None, None, "", None, {}
 
 
@@ -927,7 +937,7 @@ def process_pending_cards():
             broadcast_event("task_failed", {"card_id": idx.card_id, "reason": str(e)})
             continue
 
-        # OneStack 任務：從卡片內容解析目標專案路徑
+        # OneStack 任務：自動檢傷分類（成員 + 專案路徑）
         if list_name == "OneStack" and card_data.content:
             import re as _re
             _pp_match = _re.search(r'<!-- project_path: (.+?) -->', card_data.content)
