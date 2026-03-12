@@ -104,7 +104,16 @@ async function handlePair() {
 </script>
 
 <template>
-  <div class="space-y-6">
+  <div class="max-w-2xl space-y-6">
+    <!-- 簡介 -->
+    <div class="bg-gradient-to-r from-violet-500/10 to-cyan-500/10 rounded-2xl border border-violet-500/20 p-6">
+      <h2 class="text-sm font-bold text-slate-200 mb-2">OneStack — 雲端指揮中心</h2>
+      <p class="text-xs text-slate-400 leading-relaxed">
+        連線後，你可以從 OneStack 遠端派發任務到這台 Aegis，查看執行結果、管理專案繫結。
+        Aegis 負責本地執行，OneStack 負責雲端協調。
+      </p>
+    </div>
+
     <!-- 連線狀態 -->
     <div class="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
       <div class="px-6 py-4 border-b border-slate-700/50">
