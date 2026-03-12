@@ -828,9 +828,17 @@ def debug_poller_check(card_id: int, session: Session = Depends(get_session)):
 
 @router.get("/debug/logs")
 def debug_logs():
-    """臨時 debug: 取得 poller debug ring buffer"""
+    """臨時 debug: 取得 poller debug ring buffer + worker file log"""
     from app.core.poller import debug_log
-    return {"lines": list(debug_log)}
+    poller_lines = list(debug_log)
+
+    # Worker file log
+    worker_log_path = Path(__file__).parent.parent.parent / "worker_debug.log"
+    worker_lines = []
+    if worker_log_path.exists():
+        worker_lines = worker_log_path.read_text(encoding="utf-8").strip().split("\n")[-50:]
+
+    return {"poller_lines": poller_lines, "worker_lines": worker_lines}
 
 
 @router.get("/debug/worker-check")
