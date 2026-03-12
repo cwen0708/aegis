@@ -835,25 +835,43 @@ def debug_logs():
 
 @router.get("/debug/worker-check")
 def debug_worker_check():
-    """確認 worker.py 版本"""
-    import os
+    """確認 worker.py 版本 + 進程狀態"""
+    import subprocess
     worker_path = Path(__file__).parent.parent.parent / "worker.py"
-    if not worker_path.exists():
-        return {"error": "worker.py not found", "path": str(worker_path)}
-    content = worker_path.read_text(encoding="utf-8")
-    has_old_whitelist = 'not in ["Planning", "Developing", "Verifying", "Scheduled", "OneStack"]' in content
-    has_new_logic = "should_ai_process" in content
-    has_generic_marker = "generic stage routing" in content
-    # 抓第 895-905 行
-    lines = content.split("\n")
-    snippet = lines[889:910] if len(lines) > 910 else lines[-20:]
-    return {
-        "has_old_whitelist": has_old_whitelist,
-        "has_new_logic": has_new_logic,
-        "has_generic_marker": has_generic_marker,
-        "snippet_lines_890_910": snippet,
-        "worker_path": str(worker_path),
-    }
+
+    result = {"worker_path": str(worker_path)}
+
+    # 檢查檔案內容
+    if worker_path.exists():
+        content = worker_path.read_text(encoding="utf-8")
+        result["has_old_whitelist"] = 'not in ["Planning", "Developing", "Verifying", "Scheduled", "OneStack"]' in content
+        result["has_new_logic"] = "should_ai_process" in content
+        lines = content.split("\n")
+        result["snippet_lines_890_910"] = lines[889:910] if len(lines) > 910 else lines[-20:]
+
+    # 檢查 systemd 服務狀態
+    try:
+        proc = subprocess.run(
+            ["systemctl", "is-active", "aegis-worker"],
+            capture_output=True, text=True, timeout=5
+        )
+        result["worker_service_status"] = proc.stdout.strip()
+    except Exception as e:
+        result["worker_service_status"] = f"error: {e}"
+
+    # 檢查 worker 進程 PID 和啟動時間
+    try:
+        proc = subprocess.run(
+            ["systemctl", "show", "aegis-worker", "--property=MainPID,ActiveEnterTimestamp"],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in proc.stdout.strip().split("\n"):
+            k, _, v = line.partition("=")
+            result[f"worker_{k}"] = v
+    except Exception as e:
+        result["worker_systemd_info"] = f"error: {e}"
+
+    return result
 
 
 @router.post("/cards/{card_id}/abort")
