@@ -1092,6 +1092,18 @@ def main():
     logger.info(f"Poll Interval: {POLL_INTERVAL}s")
     logger.info("=" * 50)
 
+    # 啟動時清除暫停狀態（避免 updater 設了 paused=true 但重啟後無法恢復）
+    try:
+        with Session(engine) as session:
+            paused = session.get(SystemSetting, "worker_paused")
+            if paused and paused.value == "true":
+                paused.value = "false"
+                session.add(paused)
+                session.commit()
+                logger.info("[Worker] Cleared stale worker_paused flag on startup")
+    except Exception as e:
+        logger.warning(f"[Worker] Failed to clear paused flag: {e}")
+
     _debug_log(f"Worker started, DB={engine.url}")
     cycle = 0
     while True:
