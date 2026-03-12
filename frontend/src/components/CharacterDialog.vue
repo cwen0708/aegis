@@ -87,7 +87,20 @@ function skipOrNext() {
   }
 }
 
+const hasPrevLine = computed(() => currentIndex.value > 0)
 const currentDialogue = computed(() => dialogues.value[currentIndex.value] ?? null)
+
+function goToPrev() {
+  if (!hasPrevLine.value) return
+  currentIndex.value--
+  startTypewriter(dialogues.value[currentIndex.value]?.text ?? '')
+}
+
+function goToNext() {
+  if (!hasNextLine.value) return
+  currentIndex.value++
+  startTypewriter(dialogues.value[currentIndex.value]?.text ?? '')
+}
 
 // 即時模式：成員正在工作
 const isWorking = computed(() => {
@@ -383,17 +396,26 @@ function providerLabel(provider: string): string {
             </p>
           </div>
 
-          <!-- 翻頁提示 ▼ -->
-          <span
-            v-if="!isWorking && !isTyping && hasNextLine"
-            class="absolute bottom-3 right-6 animate-bounce text-white/60 text-sm"
-          >▼</span>
-
-          <!-- 頁數指示 -->
-          <span
+          <!-- 對話導航 -->
+          <div
             v-if="dialogues.length > 1 && !isWorking"
-            class="absolute bottom-3 left-6 text-[10px] text-slate-600"
-          >{{ currentIndex + 1 }} / {{ dialogues.length }}</span>
+            class="absolute bottom-2 left-6 flex items-center gap-2"
+            @click.stop
+          >
+            <button
+              @click="goToPrev"
+              :disabled="!hasPrevLine"
+              class="px-2 py-0.5 text-xs rounded transition-colors"
+              :class="hasPrevLine ? 'text-white/70 hover:text-white hover:bg-white/10' : 'text-slate-700 cursor-default'"
+            >◀</button>
+            <span class="text-[10px] text-slate-500 tabular-nums">{{ currentIndex + 1 }} / {{ dialogues.length }}</span>
+            <button
+              @click="goToNext"
+              :disabled="!hasNextLine"
+              class="px-2 py-0.5 text-xs rounded transition-colors"
+              :class="hasNextLine ? 'text-white/70 hover:text-white hover:bg-white/10' : 'text-slate-700 cursor-default'"
+            >▶</button>
+          </div>
         </div>
 
         <!-- Action buttons -->
