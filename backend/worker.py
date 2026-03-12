@@ -927,6 +927,14 @@ def process_pending_cards():
             broadcast_event("task_failed", {"card_id": idx.card_id, "reason": str(e)})
             continue
 
+        # OneStack 任務：從卡片內容解析目標專案路徑
+        if list_name == "OneStack" and card_data.content:
+            import re as _re
+            _pp_match = _re.search(r'<!-- project_path: (.+?) -->', card_data.content)
+            if _pp_match:
+                project_path = _pp_match.group(1)
+                logger.info(f"[Worker] OneStack task using project path: {project_path}")
+
         # 準備工作區
         workspace_dir = None
         if member_slug:

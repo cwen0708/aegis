@@ -2799,23 +2799,35 @@ def create_card_from_onestack_task(
     回傳 {"ok": True, "card_id": ..., "project": ..., "stage": ...}
     失敗時回傳 {"ok": False, "error": ...}
     """
-    # 找到目標專案
-    project = None
+    # 找到 AEGIS 系統專案及其 OneStack 列表
+    aegis_project = session.exec(
+        select(Project).where(Project.is_system == True)
+    ).first()
+
+    if not aegis_project:
+        return {"ok": False, "error": "AEGIS system project not found"}
+
+    stage_list = session.exec(
+        select(StageList).where(
+            StageList.project_id == aegis_project.id,
+            StageList.name == "OneStack",
+        )
+    ).first()
+
+    if not stage_list:
+        return {"ok": False, "error": "OneStack stage list not found"}
+
+    # 找到目標專案（用於工作目錄）
+    project = aegis_project
     if project_name:
-        project = session.exec(
+        target = session.exec(
             select(Project).where(
                 Project.name == project_name,
                 Project.is_active == True
             )
         ).first()
-
-    if not project:
-        project = session.exec(
-            select(Project).where(Project.is_active == True)
-        ).first()
-
-    if not project:
-        return {"ok": False, "error": "No active project available"}
+        if target:
+            project = target
 
     # 找到目標成員
     member = None
@@ -2834,21 +2846,13 @@ def create_card_from_onestack_task(
         if first_member:
             member_id = first_member.id
 
-    # 找到「待處理」清單
-    stage_list = session.exec(
-        select(StageList).where(
-            StageList.project_id == project.id
-        ).order_by(StageList.position)
-    ).first()
-
-    if not stage_list:
-        return {"ok": False, "error": "No stage list found in project"}
-
     # 建立卡片
     card_id = next_card_id(session)
 
     body_lines = [description]
     body_lines.append(f"\n\n<!-- onestack_task_id: {task_id} -->")
+    if project_name and project != aegis_project:
+        body_lines.append(f"<!-- project_path: {project.path} -->")
     if member_slug:
         body_lines.append(f"<!-- member_slug: {member_slug} -->")
 
@@ -2861,9 +2865,9 @@ def create_card_from_onestack_task(
         status="pending",
     )
 
-    fpath = card_file_path(project.path, card_id)
+    fpath = card_file_path(aegis_project.path, card_id)
     write_card(fpath, card_data)
-    sync_card_to_index(session, card_data, project.id, str(fpath))
+    sync_card_to_index(session, card_data, aegis_project.id, str(fpath))
     session.commit()
 
     return {
