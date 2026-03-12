@@ -114,7 +114,7 @@ jobs:
 
           NEW="v${MAJOR}.${MINOR}.${NEXT_PATCH}-dev.${DEV_NUM}"
           echo "new=$NEW" >> "$GITHUB_OUTPUT"
-          echo "new_bare=${MAJOR}.${MINOR}.${PATCH}-dev.${DEV_NUM}" >> "$GITHUB_OUTPUT"
+          echo "new_bare=${MAJOR}.${MINOR}.${NEXT_PATCH}-dev.${DEV_NUM}" >> "$GITHUB_OUTPUT"
           echo "Tagging: $NEW"
 
       - name: Create dev tag
@@ -156,7 +156,7 @@ jobs:
             IS_UPDATING=$(echo "$STATUS" | grep -o '"is_updating":[a-z]*' | cut -d: -f2)
 
             # 服務重啟後版本已更新 = 成功
-            if echo "$VERSION" | grep -q "dev.${{ steps.version.outputs.new }}"; then
+            if echo "$VERSION" | grep -q "${{ steps.version.outputs.new_bare }}"; then
               echo "Deploy successful! Version: $VERSION"
               exit 0
             fi
