@@ -2,6 +2,7 @@
 import { ref, onMounted, watch } from 'vue'
 import { Archive, RotateCcw, Trash2, Loader2 } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
+import { authHeaders } from '../../utils/authFetch'
 
 const store = useAegisStore()
 
@@ -56,7 +57,7 @@ async function fetchArchivedCards() {
 async function unarchiveCard(cardId: number) {
   actionLoading.value = cardId
   try {
-    const res = await fetch(`/api/v1/cards/${cardId}/unarchive`, { method: 'POST' })
+    const res = await fetch(`/api/v1/cards/${cardId}/unarchive`, { method: 'POST', headers: authHeaders() })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     store.addToast('卡片已恢復', 'success')
     await fetchArchivedCards()
@@ -71,7 +72,7 @@ async function deleteCard(cardId: number) {
   if (!confirm('確定要永久刪除這張卡片？此操作無法復原。')) return
   actionLoading.value = cardId
   try {
-    const res = await fetch(`/api/v1/cards/${cardId}`, { method: 'DELETE' })
+    const res = await fetch(`/api/v1/cards/${cardId}`, { method: 'DELETE', headers: authHeaders() })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     store.addToast('卡片已刪除', 'success')
     await fetchArchivedCards()

@@ -3,6 +3,8 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Clock, Play, Pause, Trash2, AlertCircle, Plus, X, Pencil } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
+import { useAuthStore } from '../stores/auth'
+import { authHeaders } from '../utils/authFetch'
 import { useEscapeKey } from '../composables/useEscapeKey'
 import { useResponsive } from '../composables/useResponsive'
 import { useProjectSelector } from '../composables/useProjectSelector'
@@ -14,6 +16,7 @@ const { isMobile } = useResponsive()
 const route = useRoute()
 const router = useRouter()
 const store = useAegisStore()
+const auth = useAuthStore()
 const { projects, selectedProjectId } = useProjectSelector()
 const cronJobs = ref<any[]>([])
 const loading = ref(true)
@@ -45,7 +48,7 @@ const saveEditJob = async () => {
   try {
     const res = await fetch(`/api/v1/cron-jobs/${editJobForm.value.id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         name: editJobForm.value.name,
         description: editJobForm.value.description,
@@ -85,7 +88,7 @@ const createCronJob = async () => {
   try {
     const res = await fetch('/api/v1/cron-jobs/', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ ...newJobForm.value, project_id: pid })
     })
     if (!res.ok) throw new Error('建立排程失敗')
@@ -103,7 +106,7 @@ const toggleJob = async (job: any) => {
   try {
     const res = await fetch(`/api/v1/cron-jobs/${job.id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ is_enabled: newStatus })
     })
     if (!res.ok) throw new Error('操作失敗')
@@ -200,7 +203,7 @@ const formatTime = (iso: string) => {
     <!-- Header -->
     <PageHeader :icon="Clock">
       <!-- 排程狀態 + 暫停控制 -->
-      <div v-if="selectedProjectId" class="flex items-center bg-slate-700/50 rounded-lg border border-slate-600/50 overflow-hidden">
+      <div v-if="selectedProjectId && auth.isAuthenticated" class="flex items-center bg-slate-700/50 rounded-lg border border-slate-600/50 overflow-hidden">
         <div class="flex items-center gap-1.5 px-2.5 py-1.5">
           <span class="text-xs font-bold text-blue-400">{{ enabledCount }}</span>
           <span class="text-[10px] text-slate-500">/{{ filteredJobs.length }}</span>
@@ -218,7 +221,7 @@ const formatTime = (iso: string) => {
         </button>
       </div>
 
-      <button @click="showAddModal = true" class="flex items-center justify-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-white p-2 sm:px-3 sm:py-1.5 rounded-lg text-xs font-medium transition-all shadow-lg shadow-emerald-500/20">
+      <button v-if="auth.isAuthenticated" @click="showAddModal = true" class="flex items-center justify-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-white p-2 sm:px-3 sm:py-1.5 rounded-lg text-xs font-medium transition-all shadow-lg shadow-emerald-500/20">
         <Plus class="w-4 h-4 sm:w-3.5 sm:h-3.5" />
         <span class="hidden sm:inline">新增排程</span>
       </button>
@@ -280,7 +283,7 @@ const formatTime = (iso: string) => {
             </div>
           </div>
           <!-- 操作列 -->
-          <div class="flex border-t border-slate-700/30 divide-x divide-slate-700/30">
+          <div v-if="auth.isAuthenticated" class="flex border-t border-slate-700/30 divide-x divide-slate-700/30">
             <button @click="openEditModal(job)" class="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-slate-400 hover:text-blue-400 hover:bg-blue-400/5 transition-colors">
               <Pencil class="w-3.5 h-3.5" />
               <span class="text-[10px]">編輯</span>
@@ -349,7 +352,7 @@ const formatTime = (iso: string) => {
               <td class="px-6 py-3 text-xs text-slate-400 font-mono">
                 {{ formatTime(job.next_scheduled_at) }}
               </td>
-              <td class="px-6 py-3 text-right">
+              <td v-if="auth.isAuthenticated" class="px-6 py-3 text-right">
                 <div class="flex justify-end gap-0.5 -mr-2">
                   <button
                     @click="openEditModal(job)"

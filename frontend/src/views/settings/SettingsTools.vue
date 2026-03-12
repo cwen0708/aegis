@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { Terminal, Loader2, Download } from 'lucide-vue-next'
 
 import { config } from '../../config'
+import { authHeaders } from '../../utils/authFetch'
 
 const API = config.apiUrl
 
@@ -33,7 +34,7 @@ async function installCli(type: 'claude' | 'gemini' | 'codex') {
   cliError.value = ''
   cliSuccess.value = ''
   try {
-    const res = await fetch(`${API}/api/v1/cli/${type}/install`, { method: 'POST' })
+    const res = await fetch(`${API}/api/v1/cli/${type}/install`, { method: 'POST', headers: authHeaders() })
     const data = await res.json()
     if (!res.ok) throw new Error(data.detail || '安裝失敗')
     cliSuccess.value = data.message

@@ -5,6 +5,7 @@ import { useAegisStore } from '../../stores/aegis'
 import ConfirmDialog from '../../components/ConfirmDialog.vue'
 
 import { config } from '../../config'
+import { authHeaders } from '../../utils/authFetch'
 
 const store = useAegisStore()
 const API = config.apiUrl
@@ -205,7 +206,7 @@ async function saveInvitation() {
 
     const res = await fetch(url, {
       method,
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     })
     if (!res.ok) {
@@ -229,7 +230,7 @@ function requestDelete(invitation: Invitation) {
 async function doDelete() {
   if (!deleteTarget.value) return
   try {
-    const res = await fetch(`${API}/api/v1/invitations/${deleteTarget.value.id}`, { method: 'DELETE' })
+    const res = await fetch(`${API}/api/v1/invitations/${deleteTarget.value.id}`, { method: 'DELETE', headers: authHeaders() })
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: '刪除失敗' }))
       throw new Error(err.detail)

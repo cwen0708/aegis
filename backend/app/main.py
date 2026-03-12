@@ -20,10 +20,14 @@ from app.core.card_watcher import start_card_watcher, stop_card_watcher
 from app.core.card_index import rebuild_index
 from app.core.card_file import read_card, write_card
 from app.core.onestack_connector import start_onestack_connector, stop_onestack_connector
+from app.core.auth import verify_session_token, AEGIS_API_KEY
 from app.models.core import CardIndex, Project
 from app.channels import channel_manager
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 import os
 import time
+import secrets
 
 logger = logging.getLogger(__name__)
 
@@ -395,6 +399,62 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ==========================================
+# Auth Middleware — 保護所有寫入 API
+# ==========================================
+# 豁免路徑（不需要 token 驗證）
+_AUTH_EXEMPT_PREFIXES = (
+    "/api/v1/auth/",        # 登入流程
+    "/api/v1/internal/",    # worker 內部通訊
+    "/api/v1/webhooks/",    # 平台簽名驗證
+    "/api/v1/node/",        # API key 驗證
+)
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    # 1. GET/HEAD/OPTIONS → 放行（唯讀）
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return await call_next(request)
+
+    path = request.url.path
+
+    # 2. 非 API 路徑 → 放行（靜態檔案等）
+    if not path.startswith("/api/"):
+        return await call_next(request)
+
+    # 3. 豁免路徑 → 放行
+    for prefix in _AUTH_EXEMPT_PREFIXES:
+        if path.startswith(prefix):
+            return await call_next(request)
+
+    # 4. /health → 放行
+    if path == "/health":
+        return await call_next(request)
+
+    # 5. 來自 localhost 的請求（worker 進程）→ 放行
+    client_host = request.client.host if request.client else ""
+    if client_host in ("127.0.0.1", "::1", "localhost"):
+        return await call_next(request)
+
+    # 6. 驗證 Authorization: Bearer token
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+        if verify_session_token(token):
+            return await call_next(request)
+
+    # 7. 驗證 X-API-Key（用於外部 API 整合）
+    api_key = request.headers.get("x-api-key", "")
+    if api_key and AEGIS_API_KEY and secrets.compare_digest(api_key, AEGIS_API_KEY):
+        return await call_next(request)
+
+    # 8. 不符合以上 → 401
+    return JSONResponse(
+        status_code=401,
+        content={"detail": "Authentication required"}
+    )
+
 
 # 提供 uploads 靜態檔案（立繪等）
 uploads_dir = Path(__file__).parent.parent / "uploads"

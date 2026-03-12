@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { Link, Wifi, WifiOff, CheckCircle2, AlertCircle, Loader2 } from 'lucide-vue-next'
 import { config } from '../../config'
+import { authHeaders } from '../../utils/authFetch'
 
 const API = config.apiUrl
 
@@ -76,7 +77,7 @@ async function handlePair() {
   try {
     const resp = await fetch(`${API}/api/v1/node/pair`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         supabase_url: form.value.supabase_url.trim(),
         supabase_anon_key: form.value.supabase_anon_key.trim(),

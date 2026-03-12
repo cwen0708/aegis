@@ -1239,27 +1239,47 @@ class AuthChangePasswordRequest(BaseModel):
 
 @router.post("/auth/verify")
 def verify_admin_password(req: AuthVerifyRequest, session: Session = Depends(get_session)):
-    """驗證管理員密碼"""
+    """驗證管理員密碼，回傳 session token"""
+    from app.core.auth import check_password, hash_password, generate_session_token
+
     setting = session.get(SystemSetting, "admin_password")
-    stored_password = setting.value if setting else "aegis2026!"
-    if req.password == stored_password:
-        return {"success": True}
-    raise HTTPException(status_code=401, detail="密碼錯誤")
+    stored_password = setting.value if setting else os.getenv("AEGIS_DEFAULT_PASSWORD", "aegis2026!")
+
+    if not check_password(req.password, stored_password):
+        raise HTTPException(status_code=401, detail="密碼錯誤")
+
+    # 自動遷移：明文密碼 → scrypt 雜湊
+    if not stored_password.startswith("$scrypt$"):
+        hashed = hash_password(req.password)
+        if setting:
+            setting.value = hashed
+            session.add(setting)
+        else:
+            session.add(SystemSetting(key="admin_password", value=hashed))
+        session.commit()
+
+    token = generate_session_token(ttl_hours=8)
+    return {"success": True, "token": token, "expires_in": 28800}
 
 @router.post("/auth/change-password")
 def change_admin_password(req: AuthChangePasswordRequest, session: Session = Depends(get_session)):
     """修改管理員密碼"""
+    from app.core.auth import check_password, hash_password
+
     setting = session.get(SystemSetting, "admin_password")
-    stored_password = setting.value if setting else "aegis2026!"
-    if req.current_password != stored_password:
+    stored_password = setting.value if setting else os.getenv("AEGIS_DEFAULT_PASSWORD", "aegis2026!")
+
+    if not check_password(req.current_password, stored_password):
         raise HTTPException(status_code=401, detail="目前密碼錯誤")
     if len(req.new_password) < 6:
         raise HTTPException(status_code=400, detail="新密碼至少需要 6 個字元")
+
+    hashed = hash_password(req.new_password)
     if setting:
-        setting.value = req.new_password
+        setting.value = hashed
         session.add(setting)
     else:
-        session.add(SystemSetting(key="admin_password", value=req.new_password))
+        session.add(SystemSetting(key="admin_password", value=hashed))
     session.commit()
     return {"success": True, "message": "密碼已更新"}
 

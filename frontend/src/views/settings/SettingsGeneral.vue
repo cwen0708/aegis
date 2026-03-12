@@ -4,6 +4,7 @@ import { Globe, Cpu, Save, Loader2, Lock, Sparkles } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 
 import { config } from '../../config'
+import { authHeaders } from '../../utils/authFetch'
 
 const store = useAegisStore()
 const API = config.apiUrl
@@ -26,7 +27,7 @@ async function toggleWorkerPaused() {
   workerToggling.value = true
   try {
     const endpoint = workerPaused.value ? 'resume' : 'pause'
-    const res = await fetch(`${API}/api/v1/runner/${endpoint}`, { method: 'POST' })
+    const res = await fetch(`${API}/api/v1/runner/${endpoint}`, { method: 'POST', headers: authHeaders() })
     if (res.ok) {
       const data = await res.json()
       workerPaused.value = data.is_paused

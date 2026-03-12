@@ -3,6 +3,8 @@ import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { Plus, Play, Pause, Square, Trash2, Zap, MoreVertical, ChevronLeft, ChevronRight, FolderOpen, ListTodo, UserCircle, Settings2, Bot, Hand, CheckCircle, XCircle, Archive, RotateCcw, Loader2 } from 'lucide-vue-next'
 import draggable from 'vuedraggable'
 import { useAegisStore } from '../stores/aegis'
+import { useAuthStore } from '../stores/auth'
+import { authHeaders } from '../utils/authFetch'
 import { useEscapeKey } from '../composables/useEscapeKey'
 import { useResponsive } from '../composables/useResponsive'
 import { useProjectSelector } from '../composables/useProjectSelector'
@@ -13,6 +15,7 @@ import TerminalViewer from '../components/TerminalViewer.vue'
 const { isMobile } = useResponsive()
 
 const store = useAegisStore()
+const auth = useAuthStore()
 
 // 全域專案選擇（共用 composable）
 const { projects, selectedProjectId, currentProject } = useProjectSelector()
@@ -59,7 +62,7 @@ const createCard = async () => {
   const listId = newTaskForm.value.list_id || boardData.value[0].id
   const res = await fetch('/api/v1/cards/', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ list_id: listId, title: newTaskForm.value.title, description: newTaskForm.value.description })
   })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -86,7 +89,7 @@ const saveCardDetail = async () => {
   if (!selectedCard.value) return
   const res = await fetch(`/api/v1/cards/${selectedCard.value.id}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({
       title: selectedCard.value.title,
       description: selectedCard.value.description,
@@ -105,7 +108,7 @@ const onDragChange = async (event: any, targetListId: number) => {
     try {
       const res = await fetch(`/api/v1/cards/${cardId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ list_id: targetListId })
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -149,7 +152,7 @@ function requestDeleteCard(cardId: number) {
 async function archiveCard(cardId: number) {
   openMenuCardId.value = null
   try {
-    const res = await fetch(`/api/v1/cards/${cardId}/archive`, { method: 'POST' })
+    const res = await fetch(`/api/v1/cards/${cardId}/archive`, { method: 'POST', headers: authHeaders() })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     store.addToast('卡片已封存', 'success')
     await fetchBoard()
@@ -255,7 +258,7 @@ async function assignMember(memberId: number | null) {
   try {
     const res = await fetch(`/api/v1/lists/${assigningListId.value}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ member_id: memberId }),
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -367,7 +370,7 @@ async function saveStageConfig() {
   try {
     const res = await fetch(`/api/v1/lists/${configuringStage.value.id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(stageConfigForm.value),
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -399,7 +402,7 @@ async function moveStage(direction: 'up' | 'down') {
   try {
     const res = await fetch('/api/v1/lists/reorder', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ order }),
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -446,7 +449,7 @@ function openArchivePanel() {
 async function unarchiveCard(cardId: number) {
   unarchiveLoading.value = cardId
   try {
-    const res = await fetch(`/api/v1/cards/${cardId}/unarchive`, { method: 'POST' })
+    const res = await fetch(`/api/v1/cards/${cardId}/unarchive`, { method: 'POST', headers: authHeaders() })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     store.addToast('卡片已恢復', 'success')
     await fetchArchivedCards()
@@ -465,7 +468,7 @@ async function unarchiveCard(cardId: number) {
     <PageHeader :icon="ListTodo">
       <!-- Runner Controls (hide on mobile) -->
       <button
-        v-if="!isMobile"
+        v-if="!isMobile && auth.isAuthenticated"
         @click="toggleRunner"
         class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0"
         :class="store.systemInfo.is_paused
@@ -479,6 +482,7 @@ async function unarchiveCard(cardId: number) {
 
       <!-- Archive button -->
       <button
+        v-if="auth.isAuthenticated"
         @click="openArchivePanel"
         class="flex items-center justify-center gap-1.5 bg-slate-700/50 hover:bg-slate-600 text-slate-300 p-2 sm:px-3 sm:py-1.5 rounded-lg text-xs font-medium transition-colors border border-slate-600/50"
         title="封存卡片"
@@ -488,7 +492,7 @@ async function unarchiveCard(cardId: number) {
       </button>
 
       <!-- New task button -->
-      <button @click="showNewTaskModal = true" class="flex items-center justify-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-white p-2 sm:px-3 sm:py-1.5 rounded-lg text-xs font-medium transition-colors shadow-lg shadow-emerald-500/20">
+      <button v-if="auth.isAuthenticated" @click="showNewTaskModal = true" class="flex items-center justify-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-white p-2 sm:px-3 sm:py-1.5 rounded-lg text-xs font-medium transition-colors shadow-lg shadow-emerald-500/20">
         <Plus class="w-4 h-4 sm:w-3.5 sm:h-3.5" />
         <span class="hidden sm:inline">新增任務</span>
       </button>
@@ -594,6 +598,7 @@ async function unarchiveCard(cardId: number) {
           @change="onDragChange($event, stage.id)"
           ghost-class="opacity-50"
           :move="checkMove"
+          :disabled="!auth.isAuthenticated"
         >
           <template #item="{ element: card }">
             <div
@@ -606,7 +611,7 @@ async function unarchiveCard(cardId: number) {
               ]"
             >
               <!-- Card Menu Button -->
-              <div class="absolute top-3 right-3 touch-visible">
+              <div v-if="auth.isAuthenticated" class="absolute top-3 right-3 touch-visible">
                 <button
                   @click.stop="openMenuCardId = openMenuCardId === card.id ? null : card.id"
                   class="text-slate-500 hover:text-slate-300 p-0.5"
@@ -669,7 +674,7 @@ async function unarchiveCard(cardId: number) {
                 <span v-if="card.status === 'running' && elapsedTimers.get(card.id)" class="text-[10px] text-emerald-400 font-mono mr-1">
                   {{ elapsedTimers.get(card.id) }}
                 </span>
-                <button v-if="card.status === 'running'" @click.stop="handleAbort(card.id)" class="text-red-400 hover:text-red-300" title="中止任務">
+                <button v-if="card.status === 'running' && auth.isAuthenticated" @click.stop="handleAbort(card.id)" class="text-red-400 hover:text-red-300" title="中止任務">
                   <Square class="w-3 h-3" />
                 </button>
               </div>

@@ -8,6 +8,7 @@ import Tasks from '../views/Tasks.vue'
 import Team from '../views/Team.vue'
 import Office from '../views/Office.vue'
 import Onboarding from '../views/Onboarding.vue'
+import Login from '../views/Login.vue'
 import SettingsLayout from '../views/settings/SettingsLayout.vue'
 import SettingsGeneral from '../views/settings/SettingsGeneral.vue'
 import SettingsTools from '../views/settings/SettingsTools.vue'
@@ -23,18 +24,20 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', redirect: '/office' },
+    { path: '/login', component: Login },
     { path: '/onboarding', component: Onboarding },
-    { path: '/kanban', component: Kanban },
-    { path: '/cron', component: CronJobs },
-    { path: '/cron/:id', component: CronJobDetail },
-    { path: '/tasks', component: Tasks },
-    { path: '/files', component: FileBrowser },
-    { path: '/files/:projectId', component: FileBrowser },
     { path: '/office', component: Office },
+    { path: '/kanban', component: Kanban, meta: { requiresAuth: true } },
+    { path: '/cron', component: CronJobs, meta: { requiresAuth: true } },
+    { path: '/cron/:id', component: CronJobDetail, meta: { requiresAuth: true } },
+    { path: '/tasks', component: Tasks, meta: { requiresAuth: true } },
+    { path: '/files', component: FileBrowser, meta: { requiresAuth: true } },
+    { path: '/files/:projectId', component: FileBrowser, meta: { requiresAuth: true } },
     {
       path: '/settings',
       component: SettingsLayout,
       redirect: '/settings/general',
+      meta: { requiresAuth: true },
       children: [
         { path: 'general', component: SettingsGeneral },
         { path: 'tools', component: SettingsTools },
@@ -49,7 +52,17 @@ const router = createRouter({
         { path: 'update', component: SettingsUpdate },
       ],
     },
-  ]
+  ],
+})
+
+// Navigation guard: 需要認證的頁面導向登入
+router.beforeEach((to) => {
+  if (to.meta.requiresAuth) {
+    const token = sessionStorage.getItem('aegis-token')
+    if (!token) {
+      return { path: '/login', query: { redirect: to.fullPath } }
+    }
+  }
 })
 
 export default router

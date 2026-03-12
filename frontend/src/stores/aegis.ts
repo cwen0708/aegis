@@ -90,14 +90,31 @@ export const useAegisStore = defineStore('aegis', () => {
     taskLogs.value.delete(cardId)
   }
 
+  // Auth helpers
+  function _authHeaders(extra?: Record<string, string>): Record<string, string> {
+    const token = sessionStorage.getItem('aegis-token')
+    const headers: Record<string, string> = { ...extra }
+    if (token) headers['Authorization'] = `Bearer ${token}`
+    return headers
+  }
+
+  function _handle401(res: Response) {
+    if (res.status === 401) {
+      sessionStorage.removeItem('aegis-token')
+      sessionStorage.removeItem('aegis-admin-auth')
+      window.location.href = '/settings'
+    }
+  }
+
   // API helpers
   async function apiPost(path: string, body?: any) {
     const res = await fetch(`${API}${path}`, {
       method: 'POST',
-      headers: body ? { 'Content-Type': 'application/json' } : {},
+      headers: _authHeaders(body ? { 'Content-Type': 'application/json' } : {}),
       body: body ? JSON.stringify(body) : undefined,
     })
     if (!res.ok) {
+      _handle401(res)
       const err = await res.json().catch(() => ({ detail: res.statusText }))
       throw new Error(err.detail || res.statusText)
     }
@@ -105,8 +122,12 @@ export const useAegisStore = defineStore('aegis', () => {
   }
 
   async function apiDelete(path: string) {
-    const res = await fetch(`${API}${path}`, { method: 'DELETE' })
+    const res = await fetch(`${API}${path}`, {
+      method: 'DELETE',
+      headers: _authHeaders(),
+    })
     if (!res.ok) {
+      _handle401(res)
       const err = await res.json().catch(() => ({ detail: res.statusText }))
       throw new Error(err.detail || res.statusText)
     }
@@ -168,7 +189,7 @@ export const useAegisStore = defineStore('aegis', () => {
     try {
       const res = await fetch(`${API}/api/v1/settings`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: _authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(data),
       })
       if (res.ok) {

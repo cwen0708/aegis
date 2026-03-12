@@ -3,10 +3,12 @@ import { ref, onMounted } from 'vue'
 import { Settings, Globe, Terminal, MessageSquare, Users, Bot, Activity, Lock, Loader2, FolderKanban, Mail, ChevronDown, Download, Layers } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { useResponsive } from '../../composables/useResponsive'
+import { useAuthStore } from '../../stores/auth'
 
 const route = useRoute()
 const router = useRouter()
 const { isMobile } = useResponsive()
+const auth = useAuthStore()
 const showMobileMenu = ref(false)
 
 const menuItems = [
@@ -28,12 +30,8 @@ const password = ref('')
 const error = ref('')
 const loading = ref(false)
 
-import { config } from '../../config'
-const API = config.apiUrl
-
 onMounted(() => {
-  // 檢查 sessionStorage 是否已驗證
-  if (sessionStorage.getItem('aegis-admin-auth') === 'true') {
+  if (auth.isAuthenticated || sessionStorage.getItem('aegis-admin-auth') === 'true') {
     authenticated.value = true
   }
 })
@@ -46,17 +44,11 @@ async function verifyPassword() {
   loading.value = true
   error.value = ''
   try {
-    const res = await fetch(`${API}/api/v1/auth/verify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: password.value }),
-    })
-    if (res.ok) {
-      sessionStorage.setItem('aegis-admin-auth', 'true')
+    const ok = await auth.verifyPassword(password.value)
+    if (ok) {
       authenticated.value = true
     } else {
-      const data = await res.json()
-      error.value = data.detail || '密碼錯誤'
+      error.value = '密碼錯誤'
     }
   } catch {
     error.value = '驗證失敗，請稍後再試'

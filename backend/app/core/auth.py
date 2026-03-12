@@ -6,13 +6,114 @@ Aegis 認證模組
 """
 import os
 import secrets
+import hashlib
+import hmac
+import json
+import base64
+import time
+import logging
 from typing import Optional
 from fastapi import Depends, HTTPException, Header, status
 from sqlmodel import Session
 
+logger = logging.getLogger(__name__)
+
 # 認證模式
 AUTH_MODE = os.getenv("AEGIS_AUTH_MODE", "local")  # local | supabase
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
+
+# ==========================================
+# Session Token（HMAC 簽名）
+# ==========================================
+_signing_secret: bytes | None = None
+
+
+def _get_signing_secret() -> bytes:
+    """取得 HMAC 簽名密鑰（env > DB > 自動生成）"""
+    global _signing_secret
+    if _signing_secret:
+        return _signing_secret
+
+    # 1. 從環境變數
+    env_secret = os.getenv("AEGIS_SESSION_SECRET")
+    if env_secret:
+        _signing_secret = env_secret.encode()
+        return _signing_secret
+
+    # 2. 從 DB（或自動生成存入 DB）
+    try:
+        from app.models.core import SystemSetting
+        from app.database import engine
+        with Session(engine) as session:
+            setting = session.get(SystemSetting, "session_secret")
+            if setting and setting.value:
+                _signing_secret = setting.value.encode()
+            else:
+                new_secret = secrets.token_hex(32)
+                setting = SystemSetting(key="session_secret", value=new_secret)
+                session.add(setting)
+                session.commit()
+                _signing_secret = new_secret.encode()
+                logger.info("[Auth] Generated new session signing secret")
+    except Exception:
+        # Fallback: 產生一個不持久的隨機密鑰（每次重啟會失效）
+        _signing_secret = secrets.token_bytes(32)
+
+    return _signing_secret
+
+
+def generate_session_token(ttl_hours: int = 8) -> str:
+    """產生 HMAC 簽名的 session token"""
+    payload = json.dumps({"exp": int(time.time()) + ttl_hours * 3600})
+    payload_b64 = base64.urlsafe_b64encode(payload.encode()).decode()
+    sig = hmac.new(_get_signing_secret(), payload_b64.encode(), hashlib.sha256).hexdigest()
+    return f"{payload_b64}.{sig}"
+
+
+def verify_session_token(token: str) -> bool:
+    """驗證 session token 簽名與過期時間"""
+    try:
+        parts = token.split(".", 1)
+        if len(parts) != 2:
+            return False
+        payload_b64, sig = parts
+        expected_sig = hmac.new(_get_signing_secret(), payload_b64.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected_sig):
+            return False
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+        return payload.get("exp", 0) > time.time()
+    except Exception:
+        return False
+
+
+# ==========================================
+# 密碼雜湊（scrypt，stdlib，無新依賴）
+# ==========================================
+_HASH_PREFIX = "$scrypt$"
+
+
+def hash_password(password: str) -> str:
+    """用 scrypt 雜湊密碼"""
+    salt = secrets.token_hex(16)
+    dk = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), n=16384, r=8, p=1, dklen=32)
+    return f"{_HASH_PREFIX}{salt}${dk.hex()}"
+
+
+def check_password(password: str, stored: str) -> bool:
+    """驗證密碼（支援雜湊和明文向後相容）"""
+    if stored.startswith(_HASH_PREFIX):
+        # scrypt hash
+        try:
+            _, salt, dk_hex = stored[len(_HASH_PREFIX):].split("$", 1)[0], \
+                              stored[len(_HASH_PREFIX):].split("$")[0], \
+                              stored[len(_HASH_PREFIX):].split("$")[1]
+            dk = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), n=16384, r=8, p=1, dklen=32)
+            return hmac.compare_digest(dk.hex(), dk_hex)
+        except Exception:
+            return False
+    else:
+        # 明文（向後相容，首次登入後會自動遷移）
+        return secrets.compare_digest(password, stored)
 
 
 def get_auth_mode() -> str:

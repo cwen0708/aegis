@@ -5,6 +5,7 @@ import { useAegisStore } from '../../stores/aegis'
 import ChannelCard from '../../components/ChannelCard.vue'
 
 import { config } from '../../config'
+import { authHeaders } from '../../utils/authFetch'
 
 const store = useAegisStore()
 const API = config.apiUrl
@@ -134,7 +135,7 @@ async function updateChannelConfig(name: string, config: ChannelConfig) {
   try {
     const res = await fetch(`${API}/api/v1/channels/${name}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(config),
     })
     if (res.ok) {
@@ -153,7 +154,7 @@ async function updateChannelConfig(name: string, config: ChannelConfig) {
 async function restartChannels() {
   channelRestarting.value = true
   try {
-    const res = await fetch(`${API}/api/v1/channels/restart`, { method: 'POST' })
+    const res = await fetch(`${API}/api/v1/channels/restart`, { method: 'POST', headers: authHeaders() })
     const data = await res.json()
     if (res.ok) {
       store.addToast(data.message || '頻道已重啟', 'success')

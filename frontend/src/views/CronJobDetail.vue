@@ -3,10 +3,13 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Clock, Play, Pause, Pencil, Check, AlertCircle, CheckCircle2, XCircle, Timer, ChevronDown, ChevronRight } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
+import { useAuthStore } from '../stores/auth'
+import { authHeaders } from '../utils/authFetch'
 
 const route = useRoute()
 const router = useRouter()
 const store = useAegisStore()
+const auth = useAuthStore()
 
 const jobId = computed(() => Number(route.params.id))
 const job = ref<any>(null)
@@ -71,7 +74,7 @@ async function toggleEnabled() {
   try {
     const res = await fetch(`/api/v1/cron-jobs/${job.value.id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ is_enabled: newStatus })
     })
     if (!res.ok) throw new Error('操作失敗')
@@ -96,7 +99,7 @@ async function saveEdit() {
   try {
     const res = await fetch(`/api/v1/cron-jobs/${job.value.id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(editForm.value)
     })
     if (!res.ok) throw new Error('更新失敗')
@@ -162,7 +165,7 @@ watch(jobId, async () => {
           </div>
         </div>
       </div>
-      <div v-if="job" class="flex items-center gap-2">
+      <div v-if="job && auth.isAuthenticated" class="flex items-center gap-2">
         <button @click="toggleEnabled" :class="[
           'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
           job.is_enabled ? 'text-amber-400 hover:bg-amber-400/10' : 'text-emerald-400 hover:bg-emerald-400/10'

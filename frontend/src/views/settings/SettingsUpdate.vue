@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { Download, RefreshCw, Clock } from 'lucide-vue-next'
 
 import { config } from '../../config'
+import { authHeaders } from '../../utils/authFetch'
 
 const API = config.apiUrl
 
@@ -54,7 +55,7 @@ async function fetchUpdateStatus() {
 async function checkForUpdates() {
   checkingUpdate.value = true
   try {
-    const res = await fetch(`${API}/api/v1/update/check`, { method: 'POST' })
+    const res = await fetch(`${API}/api/v1/update/check`, { method: 'POST', headers: authHeaders() })
     const data = await res.json()
     updateStatus.value = { ...updateStatus.value, ...data }
   } catch (e) {
@@ -75,7 +76,7 @@ async function applyUpdate() {
   try {
     const res = await fetch(`${API}/api/v1/update/apply`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ wait_timeout: 300 }),
     })
     const data = await res.json()
@@ -130,7 +131,7 @@ async function saveAutoUpdateSettings() {
   try {
     await fetch(`${API}/api/v1/update/settings`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         auto_update_enabled: updateStatus.value.auto_update_enabled,
         auto_update_time: updateStatus.value.auto_update_time,

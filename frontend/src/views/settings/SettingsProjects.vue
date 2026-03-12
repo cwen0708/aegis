@@ -5,6 +5,7 @@ import { useAegisStore } from '../../stores/aegis'
 import ConfirmDialog from '../../components/ConfirmDialog.vue'
 
 import { config } from '../../config'
+import { authHeaders } from '../../utils/authFetch'
 
 const store = useAegisStore()
 const API = config.apiUrl
@@ -120,7 +121,7 @@ function requestDelete(project: ProjectInfo) {
 async function doDelete() {
   if (!deleteTarget.value) return
   try {
-    const res = await fetch(`${API}/api/v1/projects/${deleteTarget.value.id}`, { method: 'DELETE' })
+    const res = await fetch(`${API}/api/v1/projects/${deleteTarget.value.id}`, { method: 'DELETE', headers: authHeaders() })
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: '刪除失敗' }))
       throw new Error(err.detail)
@@ -139,7 +140,7 @@ async function toggleActive(project: ProjectInfo) {
   try {
     const res = await fetch(`${API}/api/v1/projects/${project.id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ is_active: !project.is_active }),
     })
     if (!res.ok) throw new Error('更新失敗')

@@ -4,6 +4,7 @@ import { Plus, UserPlus, Save, Edit3, Upload, Sparkles, Image, BookOpen, Chevron
 import { useAegisStore } from '../stores/aegis'
 import { useEscapeKey } from '../composables/useEscapeKey'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import { authHeaders } from '../utils/authFetch'
 
 import { config } from '../config'
 
@@ -172,6 +173,7 @@ async function uploadPortrait(event: Event) {
 
     const res = await fetch(`${API}/api/v1/members/${editingMember.value.id}/portrait`, {
       method: 'POST',
+      headers: authHeaders(),
       body: formData,
     })
     if (!res.ok) throw new Error('上傳失敗')
@@ -200,6 +202,7 @@ async function generatePortrait(event: Event) {
 
     const res = await fetch(`${API}/api/v1/members/${editingMember.value.id}/generate-portrait`, {
       method: 'POST',
+      headers: authHeaders(),
       body: formData,
     })
 
@@ -227,7 +230,7 @@ async function saveMember() {
     const method = editingMember.value ? 'PUT' : 'POST'
     const res = await fetch(url, {
       method,
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(memberForm.value),
     })
     if (!res.ok) throw new Error('儲存失敗')
@@ -251,7 +254,7 @@ function requestDeleteMember(id: number) {
 async function doDeleteMember() {
   if (!deleteTargetMemberId.value) return
   try {
-    const res = await fetch(`${API}/api/v1/members/${deleteTargetMemberId.value}`, { method: 'DELETE' })
+    const res = await fetch(`${API}/api/v1/members/${deleteTargetMemberId.value}`, { method: 'DELETE', headers: authHeaders() })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     store.addToast('成員已刪除', 'success')
     confirmDeleteMember.value = false
@@ -293,7 +296,7 @@ async function bindAccount() {
   try {
     const res = await fetch(`${API}/api/v1/members/${bindingMemberId.value}/accounts`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(bindForm.value),
     })
     if (!res.ok) throw new Error('綁定失敗')
@@ -317,7 +320,7 @@ async function saveEditBinding() {
   try {
     const res = await fetch(`${API}/api/v1/members/${memberId}/accounts`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         account_id: acc.account_id,
         priority: editBindForm.value.priority,
@@ -345,7 +348,7 @@ async function removeBinding() {
 
 async function unbindAccount(memberId: number, accountId: number) {
   try {
-    const res = await fetch(`${API}/api/v1/members/${memberId}/accounts/${accountId}`, { method: 'DELETE' })
+    const res = await fetch(`${API}/api/v1/members/${memberId}/accounts/${accountId}`, { method: 'DELETE', headers: authHeaders() })
     if (!res.ok) throw new Error('解綁失敗')
     await fetchAll()
   } catch {
@@ -426,7 +429,7 @@ async function saveSkill() {
   try {
     const res = await fetch(`${API}/api/v1/members/${skillsMember.value.id}/skills/${skill.name}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ content: skillEditContent.value }),
     })
     if (!res.ok) throw new Error('儲存失敗')
@@ -454,7 +457,7 @@ async function createSkill() {
   try {
     const res = await fetch(`${API}/api/v1/members/${skillsMember.value.id}/skills`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(newSkillForm.value),
     })
     if (!res.ok) {
@@ -481,6 +484,7 @@ async function deleteSkill() {
   try {
     const res = await fetch(`${API}/api/v1/members/${skillsMember.value.id}/skills/${skill.name}`, {
       method: 'DELETE',
+      headers: authHeaders(),
     })
     if (!res.ok) throw new Error('刪除失敗')
 

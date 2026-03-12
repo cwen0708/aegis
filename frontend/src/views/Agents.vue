@@ -5,6 +5,7 @@ import { useAegisStore } from '../stores/aegis'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 
 import { config } from '../config'
+import { authHeaders } from '../utils/authFetch'
 
 const store = useAegisStore()
 const API = config.apiUrl
@@ -124,7 +125,7 @@ async function startGcloudAuth() {
   gcloudError.value = ''
   gcloudSuccess.value = ''
   try {
-    const res = await fetch(`${API}/api/v1/gcloud/auth/init`, { method: 'POST' })
+    const res = await fetch(`${API}/api/v1/gcloud/auth/init`, { method: 'POST', headers: authHeaders() })
     if (!res.ok) {
       const err = await res.json()
       throw new Error(err.detail || '啟動認證失敗')
@@ -144,7 +145,7 @@ async function completeGcloudAuth() {
   try {
     const res = await fetch(`${API}/api/v1/gcloud/auth/complete`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         session_id: gcloudAuthSession.value.session_id,
         auth_code: gcloudAuthCode.value.trim(),
@@ -167,7 +168,7 @@ function cancelGcloudAuth() {
   if (gcloudAuthSession.value) {
     fetch(`${API}/api/v1/gcloud/auth/cancel`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ session_id: gcloudAuthSession.value.session_id }),
     }).catch(() => {})
   }
@@ -224,7 +225,7 @@ async function createAccount() {
     }
     const res = await fetch(`${API}/api/v1/accounts`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(payload),
     })
     if (!res.ok) {
@@ -255,7 +256,7 @@ async function saveEditAccount() {
   try {
     const res = await fetch(`${API}/api/v1/accounts/${editingAccount.value.id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(editAccountForm.value),
     })
     if (!res.ok) throw new Error('儲存失敗')
@@ -277,7 +278,7 @@ function requestDeleteAccount() {
 async function doDeleteAccount() {
   if (!editingAccount.value) return
   try {
-    const res = await fetch(`${API}/api/v1/accounts/${editingAccount.value.id}`, { method: 'DELETE' })
+    const res = await fetch(`${API}/api/v1/accounts/${editingAccount.value.id}`, { method: 'DELETE', headers: authHeaders() })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     store.addToast('帳號已刪除', 'success')
     confirmDeleteAccount.value = false
