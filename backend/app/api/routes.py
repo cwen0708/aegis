@@ -2779,6 +2779,7 @@ def get_pair_status():
         "device_id": connector.device_id,
         "device_name": connector.device_name,
         "supabase_url": connector.supabase_url or None,
+        "supabase_anon_key": connector.supabase_key or None,
         "connected": connector.enabled and connector.device_id is not None,
     }
 
