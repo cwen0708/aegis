@@ -892,14 +892,16 @@ def process_pending_cards():
             list_name = stage_list.name if stage_list else "Unknown"
             project = session.get(Project, idx.project_id)
 
-        # 判斷此階段是否需要 AI 處理（通用化，不再硬編碼列表名稱）
-        should_ai_process = (
-            stage_list
-            and stage_list.is_ai_stage
-            and stage_list.stage_type in ["auto_process", "auto_review"]
-        )
+            # 判斷此階段是否需要 AI 處理（通用化，不再硬編碼列表名稱）
+            should_ai_process = (
+                stage_list
+                and stage_list.is_ai_stage
+                and stage_list.stage_type in ["auto_process", "auto_review"]
+            )
+
         if not should_ai_process:
             # 不需要 AI 的列表，清除 pending 狀態
+            logger.info(f"[Worker] Card {idx.card_id}: list '{list_name}' not AI stage, reset to idle")
             update_card_status(idx.card_id, "idle")
             continue
 
@@ -1063,7 +1065,7 @@ def process_pending_cards():
 def main():
     """Worker 主程式"""
     logger.info("=" * 50)
-    logger.info("Aegis Worker Starting...")
+    logger.info("Aegis Worker Starting... (generic stage routing)")
     logger.info(f"API Base: {API_BASE}")
     logger.info(f"Poll Interval: {POLL_INTERVAL}s")
     logger.info("=" * 50)
