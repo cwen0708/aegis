@@ -1092,14 +1092,20 @@ def main():
     logger.info(f"Poll Interval: {POLL_INTERVAL}s")
     logger.info("=" * 50)
 
+    _debug_log(f"Worker started, DB={engine.url}")
+    cycle = 0
     while True:
         try:
+            cycle += 1
+            if cycle % 20 == 1:  # 每 60 秒
+                _debug_log(f"heartbeat cycle={cycle}, paused={is_worker_paused()}")
             # 暫停檢查
             if is_worker_paused():
                 pass  # 靜默跳過
             else:
                 process_pending_cards()
         except Exception as e:
+            _debug_log(f"ERROR: {e}")
             logger.error(f"[Worker Error] {e}")
 
         time.sleep(POLL_INTERVAL)
