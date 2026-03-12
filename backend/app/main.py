@@ -409,6 +409,7 @@ _AUTH_EXEMPT_PREFIXES = (
     "/api/v1/internal/",    # worker 內部通訊
     "/api/v1/webhooks/",    # 平台簽名驗證
     "/api/v1/node/",        # API key 驗證
+    "/api/v1/update/",      # CI/CD 部署觸發
 )
 
 @app.middleware("http")
