@@ -22,7 +22,7 @@ const boardData = ref<any[]>([])
 
 // Modal 狀態
 const showNewTaskModal = ref(false)
-const newTaskForm = ref({ title: '', description: '' })
+const newTaskForm = ref({ title: '', description: '', list_id: null as number | null })
 useEscapeKey(showNewTaskModal, () => { showNewTaskModal.value = false })
 
 // 卡片選單
@@ -56,16 +56,16 @@ const fetchBoard = async () => {
 
 const createCard = async () => {
   if (!newTaskForm.value.title || boardData.value.length === 0) return
-  const firstListId = boardData.value[0].id
+  const listId = newTaskForm.value.list_id || boardData.value[0].id
   const res = await fetch('/api/v1/cards/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ list_id: firstListId, title: newTaskForm.value.title, description: newTaskForm.value.description })
+    body: JSON.stringify({ list_id: listId, title: newTaskForm.value.title, description: newTaskForm.value.description })
   })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   await fetchBoard()
   showNewTaskModal.value = false
-  newTaskForm.value = { title: '', description: '' }
+  newTaskForm.value = { title: '', description: '', list_id: null }
 }
 
 // 卡片詳情 Modal
@@ -203,6 +203,8 @@ function onDocumentClick() {
 watch(selectedProjectId, () => { fetchBoard() })
 
 onMounted(() => {
+  // 確保初始載入：selectedProjectId 可能在 mount 前已有值（全域 singleton）
+  if (selectedProjectId.value) fetchBoard()
   elapsedInterval = setInterval(updateElapsedTimers, 1000)
   window.addEventListener('aegis:task-event', onTaskEvent)
   document.addEventListener('click', onDocumentClick)
@@ -920,12 +922,23 @@ async function unarchiveCard(cardId: number) {
     <div class="bg-slate-800 border border-slate-700 rounded-2xl p-6 w-full max-w-lg shadow-2xl">
       <h3 class="text-lg font-bold text-slate-100 mb-4">建立新任務</h3>
       <div class="space-y-4">
-        <div>
-          <label class="block text-sm font-medium text-slate-400 mb-1">目標專案</label>
-          <select disabled class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-500 cursor-not-allowed">
-            <option>{{ projects.find(p => p.id === selectedProjectId)?.name }}</option>
-          </select>
-          <p class="text-[10px] text-emerald-500 mt-1">將加入待辦清單。</p>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm font-medium text-slate-400 mb-1">目標專案</label>
+            <select disabled class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-500 cursor-not-allowed text-sm">
+              <option>{{ projects.find(p => p.id === selectedProjectId)?.name }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-400 mb-1">目標列表</label>
+            <select
+              v-model="newTaskForm.list_id"
+              class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-sm"
+            >
+              <option :value="null">{{ boardData[0]?.name || '第一個列表' }}（預設）</option>
+              <option v-for="stage in boardData" :key="stage.id" :value="stage.id">{{ stage.name }}</option>
+            </select>
+          </div>
         </div>
         <div>
           <label class="block text-sm font-medium text-slate-400 mb-1">任務標題 <span class="text-red-400">*</span></label>

@@ -1,12 +1,43 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Globe, Cpu, Save, Loader2, Lock, Sparkles } from 'lucide-vue-next'
+import { Globe, Cpu, Save, Loader2, Lock, Sparkles, PauseCircle } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 
 import { config } from '../../config'
 
 const store = useAegisStore()
 const API = config.apiUrl
+
+// Worker 暫停控制
+const workerPaused = ref(false)
+const workerToggling = ref(false)
+
+async function fetchWorkerStatus() {
+  try {
+    const res = await fetch(`${API}/api/v1/system/services`)
+    if (res.ok) {
+      const data = await res.json()
+      workerPaused.value = data.engines?.task_worker?.is_paused ?? false
+    }
+  } catch {}
+}
+
+async function toggleWorkerPaused() {
+  workerToggling.value = true
+  try {
+    const endpoint = workerPaused.value ? 'resume' : 'pause'
+    const res = await fetch(`${API}/api/v1/runner/${endpoint}`, { method: 'POST' })
+    if (res.ok) {
+      const data = await res.json()
+      workerPaused.value = data.is_paused
+      store.addToast(workerPaused.value ? 'Worker 已暫停' : 'Worker 已恢復', 'success')
+    }
+  } catch {
+    store.addToast('操作失敗', 'error')
+  } finally {
+    workerToggling.value = false
+  }
+}
 
 const loading = ref(true)
 const saving = ref(false)
@@ -86,7 +117,7 @@ const timezoneOptions = [
 ]
 
 onMounted(async () => {
-  await store.fetchSettings()
+  await Promise.all([store.fetchSettings(), fetchWorkerStatus()])
   form.value.timezone = store.settings.timezone || 'Asia/Taipei'
   form.value.max_workstations = store.settings.max_workstations || '3'
   form.value.memory_short_term_days = store.settings.memory_short_term_days || '30'
@@ -144,6 +175,32 @@ async function saveSettings() {
         </div>
       </div>
       <div class="p-6 space-y-4">
+        <!-- Worker 暫停開關 -->
+        <div class="flex items-center justify-between">
+          <div>
+            <label class="block text-xs font-medium text-slate-400">Worker 任務執行</label>
+            <p class="text-[11px] text-slate-500 mt-0.5">暫停後 Worker 不會拾取新的 pending 卡片</p>
+          </div>
+          <button
+            @click="toggleWorkerPaused"
+            :disabled="workerToggling"
+            :class="[
+              'relative w-11 h-6 rounded-full transition-colors',
+              workerPaused ? 'bg-red-500/60' : 'bg-emerald-500'
+            ]"
+          >
+            <div
+              :class="[
+                'absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform shadow',
+                workerPaused ? 'left-0.5' : 'left-5.5'
+              ]"
+            ></div>
+          </button>
+          <span :class="['text-xs font-medium ml-2 w-10', workerPaused ? 'text-red-400' : 'text-emerald-400']">
+            {{ workerPaused ? '已暫停' : '運行中' }}
+          </span>
+        </div>
+
         <div>
           <label class="block text-xs font-medium text-slate-400 mb-1.5">工作台數量</label>
           <input
