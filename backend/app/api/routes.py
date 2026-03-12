@@ -2757,6 +2757,89 @@ def create_card_from_onestack_task(
     }
 
 
+@router.get("/node/projects")
+def get_node_projects(
+    session: Session = Depends(get_session),
+    _: bool = Depends(require_api_key)
+):
+    """取得可用專案清單（供 OneStack 繫結用）"""
+    projects = session.exec(
+        select(Project).where(Project.is_active == True)
+    ).all()
+
+    return {
+        "projects": [
+            {
+                "id": p.id,
+                "name": p.name,
+                "path": p.path,
+                "stages": [
+                    {"id": s.id, "name": s.name, "position": s.position}
+                    for s in sorted(
+                        session.exec(
+                            select(StageList).where(StageList.project_id == p.id)
+                        ).all(),
+                        key=lambda s: s.position
+                    )
+                ],
+            }
+            for p in projects
+        ]
+    }
+
+
+class BindProjectPayload(BaseModel):
+    onestack_project_id: str
+    aegis_project_id: Optional[int] = None  # None = 自動建立新專案
+
+
+@router.post("/node/bind-project")
+def bind_project(
+    payload: BindProjectPayload,
+    session: Session = Depends(get_session),
+    _: bool = Depends(require_api_key)
+):
+    """
+    繫結 OneStack 專案到 Aegis 專案
+
+    若 aegis_project_id 為 None，則回傳可用專案清單讓前端選擇。
+    """
+    if payload.aegis_project_id is None:
+        # 回傳可用專案清單
+        projects = session.exec(
+            select(Project).where(Project.is_active == True)
+        ).all()
+        return {
+            "ok": False,
+            "action": "select_project",
+            "projects": [
+                {"id": p.id, "name": p.name, "path": p.path}
+                for p in projects
+            ],
+        }
+
+    # 驗證 Aegis 專案存在
+    project = session.get(Project, payload.aegis_project_id)
+    if not project or not project.is_active:
+        raise HTTPException(status_code=404, detail="Aegis project not found")
+
+    # 取得 stages
+    stages = session.exec(
+        select(StageList).where(StageList.project_id == project.id)
+        .order_by(StageList.position)
+    ).all()
+
+    return {
+        "ok": True,
+        "aegis_project_id": project.id,
+        "aegis_project_name": project.name,
+        "stages": [
+            {"id": s.id, "name": s.name, "position": s.position}
+            for s in stages
+        ],
+    }
+
+
 @router.post("/node/task")
 async def receive_node_task(
     payload: NodeTaskPayload,
