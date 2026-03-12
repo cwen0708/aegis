@@ -40,6 +40,13 @@ def _migrate_db():
             cur.execute("ALTER TABLE stagelist ADD COLUMN is_member_bound INTEGER DEFAULT 0")
             logger.info("[Migration] Added 'is_member_bound' to stagelist")
 
+        # StageList: OneStack → Inbound 改名
+        renamed = cur.execute(
+            "UPDATE stagelist SET name = 'Inbound' WHERE name = 'OneStack'"
+        ).rowcount
+        if renamed:
+            logger.info(f"[Migration] Renamed {renamed} 'OneStack' list(s) to 'Inbound'")
+
         conn.commit()
     except Exception as e:
         logger.warning(f"[Migration] {e}")

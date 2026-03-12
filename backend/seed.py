@@ -145,11 +145,11 @@ def _sync_system_cron_jobs(session: Session):
         print("  AEGIS system project not found, skipping cron sync.")
         return
 
-    # 補建缺少的系統列表（如 OneStack）
+    # 補建缺少的系統列表（如 Inbound）
     existing_lists = {sl.name for sl in session.exec(
         select(StageList).where(StageList.project_id == aegis.id)
     ).all()}
-    for pos, list_name in enumerate(["Scheduled", "OneStack"]):
+    for pos, list_name in enumerate(["Scheduled", "Inbound"]):
         if list_name not in existing_lists:
             session.add(StageList(
                 project_id=aegis.id, name=list_name, position=pos,
@@ -289,13 +289,13 @@ def _sync_system_cron_jobs(session: Session):
             is_system=True,
         ))
 
-    # Email 分類轉發（OneStack 列表）
+    # Email 分類轉發（Inbound 列表）
     if "Email 分類轉發" not in existing_crons:
         cron_expr = "*/15 * * * *"
         crons_to_add.append(CronJob(
             project_id=aegis.id,
             name="Email 分類轉發",
-            description="分類未處理 email，actionable 信件轉發到 OneStack。",
+            description="分類未處理 email，actionable 信件轉發到 Inbound。",
             prompt_template=(
                 "你是 Aegis 郵件助手。以下是 {unclassified_email_count} 封未分類的郵件：\n\n"
                 "{unclassified_emails}\n\n"
@@ -329,7 +329,7 @@ def _sync_system_cron_jobs(session: Session):
             next_scheduled_at=_calculate_next_scheduled_at(cron_expr),
             is_enabled=False,  # 需設定 Email 頻道後手動啟用
             is_system=True,
-            metadata_json='{"target_list": "OneStack"}',
+            metadata_json='{"target_list": "Inbound"}',
         ))
 
     if crons_to_add:
@@ -479,7 +479,7 @@ def seed_data():
             print("  - Added AEGIS system project")
 
             # AEGIS 系統列表
-            for pos, list_name in enumerate(["Scheduled", "OneStack"]):
+            for pos, list_name in enumerate(["Scheduled", "Inbound"]):
                 sl = StageList(
                     project_id=aegis.id,
                     name=list_name,

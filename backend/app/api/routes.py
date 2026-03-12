@@ -2917,12 +2917,12 @@ def create_card_from_onestack_task(
     stage_list = session.exec(
         select(StageList).where(
             StageList.project_id == aegis_project.id,
-            StageList.name == "OneStack",
+            StageList.name == "Inbound",
         )
     ).first()
 
     if not stage_list:
-        return {"ok": False, "error": "OneStack stage list not found"}
+        return {"ok": False, "error": "Inbound stage list not found"}
 
     # 找到目標專案（用於工作目錄）
     project = aegis_project

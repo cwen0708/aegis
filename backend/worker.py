@@ -960,7 +960,7 @@ def process_pending_cards():
         except Exception as e:
             logger.error(f"[Worker] Failed to read card {idx.card_id}: {e}")
             cron_job_id = _parse_cron_job_id(idx.title)
-            if cron_job_id is not None and list_name in ("Scheduled", "OneStack"):
+            if cron_job_id is not None and list_name in ("Scheduled", "Inbound"):
                 # 排程卡片讀取失敗：寫 CronLog + 刪除卡片
                 with Session(engine) as session:
                     from app.models.core import CronJob as CJ
@@ -975,13 +975,13 @@ def process_pending_cards():
             broadcast_event("task_failed", {"card_id": idx.card_id, "reason": str(e)})
             continue
 
-        # OneStack 任務：自動檢傷分類（成員 + 專案路徑）
-        if list_name == "OneStack" and card_data.content:
+        # Inbound 任務：自動檢傷分類（成員 + 專案路徑）
+        if list_name == "Inbound" and card_data.content:
             import re as _re
             _pp_match = _re.search(r'<!-- project_path: (.+?) -->', card_data.content)
             if _pp_match:
                 project_path = _pp_match.group(1)
-                logger.info(f"[Worker] OneStack task using project path: {project_path}")
+                logger.info(f"[Worker] Inbound task using project path: {project_path}")
 
         # 準備工作區
         workspace_dir = None
@@ -1014,7 +1014,7 @@ def process_pending_cards():
 
         # 判斷是否為排程卡片
         cron_job_id = _parse_cron_job_id(idx.title)
-        is_cron_card = cron_job_id is not None and list_name in ("Scheduled", "OneStack")
+        is_cron_card = cron_job_id is not None and list_name in ("Scheduled", "Inbound")
 
         new_status = "completed" if result["status"] == "success" else "failed"
         token_info = result.get("token_info", {})
