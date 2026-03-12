@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { X, CheckCircle, XCircle, Clock, Loader2, ListTodo, BookOpen } from 'lucide-vue-next'
+import { X, CheckCircle, XCircle, Clock, Loader2, ListTodo, BookOpen, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 
 const store = useAegisStore()
@@ -380,18 +380,48 @@ function providerLabel(provider: string): string {
     <!-- Dialog box - bottom, full width with frame -->
     <div class="absolute bottom-24 sm:bottom-4 left-2 right-2 sm:left-[50px] sm:right-[50px]">
       <div class="bg-slate-900/40 backdrop-blur-sm rounded-lg border-2 border-slate-400/40 shadow-2xl">
-        <!-- Name tag -->
+        <!-- 左上：人物/身分 -->
         <div class="absolute -top-4 left-6">
           <div class="bg-slate-800 rounded px-4 py-1 border border-slate-500/50">
             <span class="text-white font-bold">{{ name }}</span>
             <span class="text-xs text-slate-400 ml-2">{{ role || '開發者' }}</span>
-            <span class="mx-1 text-slate-600">|</span>
-            <span :class="providerColor(provider)" class="text-xs">{{ providerLabel(provider) }}</span>
+          </div>
+        </div>
+
+        <!-- 右上：上一頁/下一頁/關閉 -->
+        <div class="absolute -top-4 right-6" @click.stop>
+          <div class="bg-slate-800 rounded px-3 py-1 border border-slate-500/50 flex items-center gap-1">
+            <template v-if="dialogues.length > 1 && !isWorking">
+              <button
+                @click="goToPrev"
+                :disabled="!hasPrevLine"
+                class="p-0.5 rounded transition-colors"
+                :class="hasPrevLine ? 'text-white/70 hover:text-white hover:bg-white/10' : 'text-slate-700 cursor-default'"
+              >
+                <ChevronLeft class="w-3.5 h-3.5" />
+              </button>
+              <span class="text-[10px] text-slate-400 tabular-nums">{{ currentIndex + 1 }}/{{ dialogues.length }}</span>
+              <button
+                @click="goToNext"
+                :disabled="!hasNextLine"
+                class="p-0.5 rounded transition-colors"
+                :class="hasNextLine ? 'text-white/70 hover:text-white hover:bg-white/10' : 'text-slate-700 cursor-default'"
+              >
+                <ChevronRight class="w-3.5 h-3.5" />
+              </button>
+              <span class="mx-0.5 text-slate-600">|</span>
+            </template>
+            <button
+              @click="emit('close')"
+              class="p-0.5 rounded text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+            >
+              <X class="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
 
         <!-- Dialog content -->
-        <div class="px-6 py-6 pt-8 min-h-[150px] flex flex-col cursor-pointer relative" @click="skipOrNext">
+        <div class="px-6 py-6 pt-8 min-h-[150px] flex flex-col cursor-pointer" @click="skipOrNext">
           <!-- 即時模式：工作中 -->
           <div v-if="isWorking" class="flex-1">
             <div class="font-mono text-sm text-emerald-300/90 overflow-y-auto max-h-[120px] leading-relaxed">
@@ -410,34 +440,13 @@ function providerLabel(provider: string): string {
             </p>
 
             <!-- 任務標題 + 時間戳 -->
-            <p v-if="currentDialogue && !isTyping" class="text-[11px] text-slate-500 mt-2">
-              {{ currentDialogue.card_title }} &middot; {{ new Date(currentDialogue.created_at).toLocaleString('zh-TW') }}
+            <p v-if="currentDialogue && !isTyping" class="text-xs text-white/60 mt-2">
+              {{ currentDialogue.card_title }} · {{ new Date(currentDialogue.created_at).toLocaleString('zh-TW') }}
             </p>
-          </div>
-
-          <!-- 對話導航 -->
-          <div
-            v-if="dialogues.length > 1 && !isWorking"
-            class="absolute bottom-2 left-6 flex items-center gap-2"
-            @click.stop
-          >
-            <button
-              @click="goToPrev"
-              :disabled="!hasPrevLine"
-              class="px-2 py-0.5 text-xs rounded transition-colors"
-              :class="hasPrevLine ? 'text-white/70 hover:text-white hover:bg-white/10' : 'text-slate-700 cursor-default'"
-            >◀</button>
-            <span class="text-[10px] text-slate-500 tabular-nums">{{ currentIndex + 1 }} / {{ dialogues.length }}</span>
-            <button
-              @click="goToNext"
-              :disabled="!hasNextLine"
-              class="px-2 py-0.5 text-xs rounded transition-colors"
-              :class="hasNextLine ? 'text-white/70 hover:text-white hover:bg-white/10' : 'text-slate-700 cursor-default'"
-            >▶</button>
           </div>
         </div>
 
-        <!-- Action buttons -->
+        <!-- 右下：任務/技能/模型名稱 -->
         <div class="absolute -bottom-3 right-4 sm:right-6 flex items-center gap-1 sm:gap-2">
           <button
             @click="showTasks = !showTasks; if (showTasks) showSkills = false"
@@ -455,13 +464,9 @@ function providerLabel(provider: string): string {
             <BookOpen :size="14" class="sm:w-3 sm:h-3" />
             <span class="hidden sm:inline">技能</span>
           </button>
-          <button
-            @click="emit('close')"
-            class="flex items-center justify-center gap-1 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 px-3 py-2 sm:py-1 bg-slate-700 text-slate-300 hover:text-white hover:bg-slate-600 rounded transition-colors text-xs"
-          >
-            <X :size="14" class="sm:w-3 sm:h-3" />
-            <span>關閉</span>
-          </button>
+          <div class="px-3 py-2 sm:py-1 bg-slate-700 rounded text-xs">
+            <span :class="providerColor(provider)">{{ providerLabel(provider) }}</span>
+          </div>
         </div>
       </div>
     </div>
