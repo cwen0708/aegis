@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
-import { useRouter } from 'vue-router'
-import { Plus, Play, Pause, Square, Clock, Trash2, Zap, MoreVertical, ChevronLeft, ChevronRight, FolderOpen, Eye, UserCircle, Settings2, Bot, Hand, CheckCircle, XCircle, Archive, RotateCcw, Loader2, LayoutDashboard } from 'lucide-vue-next'
+import { Plus, Play, Pause, Square, Trash2, Zap, MoreVertical, ChevronLeft, ChevronRight, FolderOpen, ListTodo, UserCircle, Settings2, Bot, Hand, CheckCircle, XCircle, Archive, RotateCcw, Loader2 } from 'lucide-vue-next'
 import draggable from 'vuedraggable'
 import { useAegisStore } from '../stores/aegis'
 import { useEscapeKey } from '../composables/useEscapeKey'
@@ -13,41 +12,7 @@ import TerminalViewer from '../components/TerminalViewer.vue'
 
 const { isMobile } = useResponsive()
 
-const router = useRouter()
 const store = useAegisStore()
-
-// 排程狀態（per-project paused set）
-const cronPausedProjects = ref<number[]>([])
-
-const fetchCronStatus = async () => {
-  try {
-    const res = await fetch('/api/v1/system/services')
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
-    cronPausedProjects.value = data?.engines?.cron_poller?.paused_projects ?? []
-  } catch (e) {
-    console.error('Failed to fetch cron status', e)
-  }
-}
-
-const isCronPausedForCurrentProject = computed(() => {
-  if (!selectedProjectId.value) return false
-  return cronPausedProjects.value.includes(selectedProjectId.value)
-})
-
-async function toggleCron() {
-  if (!selectedProjectId.value) return
-  try {
-    if (isCronPausedForCurrentProject.value) {
-      await store.resumeCron(selectedProjectId.value)
-    } else {
-      await store.pauseCron(selectedProjectId.value)
-    }
-    await fetchCronStatus()
-  } catch (e: any) {
-    store.addToast(e.message, 'error')
-  }
-}
 
 // 全域專案選擇（共用 composable）
 const { projects, selectedProjectId, currentProject } = useProjectSelector()
@@ -238,7 +203,6 @@ function onDocumentClick() {
 watch(selectedProjectId, () => { fetchBoard() })
 
 onMounted(() => {
-  fetchCronStatus()
   elapsedInterval = setInterval(updateElapsedTimers, 1000)
   window.addEventListener('aegis:task-event', onTaskEvent)
   document.addEventListener('click', onDocumentClick)
@@ -496,7 +460,7 @@ async function unarchiveCard(cardId: number) {
 <template>
   <div class="h-full flex flex-col">
     <!-- Header -->
-    <PageHeader :icon="LayoutDashboard">
+    <PageHeader :icon="ListTodo">
       <!-- Runner Controls (hide on mobile) -->
       <button
         v-if="!isMobile"
@@ -510,25 +474,6 @@ async function unarchiveCard(cardId: number) {
         <Pause v-else class="w-3.5 h-3.5" />
         {{ store.systemInfo.is_paused ? '恢復' : '暫停' }}
       </button>
-
-      <!-- 排程狀態群組（per-project）- hide on mobile -->
-      <div v-if="!isMobile" class="flex items-center bg-slate-700/50 rounded-lg border border-slate-600/50 overflow-hidden">
-        <div class="flex items-center gap-1.5 px-3 py-1.5">
-          <Clock class="w-3.5 h-3.5" :class="isCronPausedForCurrentProject ? 'text-amber-400' : 'text-emerald-400'" />
-          <span class="text-xs font-medium text-slate-200">排程</span>
-        </div>
-        <div class="w-px h-5 bg-slate-600/50"></div>
-        <button @click="router.push('/cron')" class="flex items-center gap-1 px-2.5 py-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-600/50 transition-colors">
-          <Eye class="w-3 h-3" />
-          <span class="text-[10px] font-medium">查看</span>
-        </button>
-        <div class="w-px h-5 bg-slate-600/50"></div>
-        <button @click="toggleCron" :title="isCronPausedForCurrentProject ? '啟動此專案的排程' : '暫停此專案的排程'" class="flex items-center gap-1 px-2.5 py-1.5 transition-colors" :class="isCronPausedForCurrentProject ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-amber-400 hover:bg-amber-500/10'">
-            <Play v-if="isCronPausedForCurrentProject" class="w-3 h-3" />
-            <Pause v-else class="w-3 h-3" />
-            <span class="text-[10px] font-medium">{{ isCronPausedForCurrentProject ? '啟動' : '暫停' }}</span>
-        </button>
-      </div>
 
       <!-- Archive button -->
       <button

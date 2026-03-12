@@ -110,7 +110,7 @@ function mobileNavClass(path: string) {
           </router-link>
           <router-link to="/office" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/office')">
             <Building2 class="w-5 h-5 shrink-0" />
-            <span v-if="!sidebarCollapsed">辦公室</span>
+            <span v-if="!sidebarCollapsed">{{ store.settings.office_name || '辦公室' }}</span>
           </router-link>
         </div>
 

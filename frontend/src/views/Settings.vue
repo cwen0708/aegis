@@ -10,6 +10,7 @@ const settingsLoading = ref(true)
 const saving = ref(false)
 
 const form = ref({
+  office_name: '辦公室',
   timezone: 'Asia/Taipei',
   max_workstations: '3',
   gemini_api_key: '',
@@ -318,6 +319,7 @@ onMounted(async () => {
 
   // 設定值需要等待後填入表單
   await store.fetchSettings()
+  form.value.office_name = store.settings.office_name || '辦公室'
   form.value.timezone = store.settings.timezone || 'Asia/Taipei'
   form.value.max_workstations = store.settings.max_workstations || '3'
   form.value.gemini_api_key = store.settings.gemini_api_key || ''
@@ -329,6 +331,7 @@ async function saveSettings() {
   saving.value = true
   try {
     await store.updateSettings({
+      office_name: form.value.office_name,
       timezone: form.value.timezone,
       max_workstations: form.value.max_workstations,
       gemini_api_key: form.value.gemini_api_key,
@@ -363,7 +366,18 @@ async function saveSettings() {
           </div>
           <div class="p-6 space-y-4">
             <div v-if="settingsLoading" class="text-sm text-slate-500">讀取中...</div>
-            <div v-else>
+            <div v-else class="space-y-4">
+              <div>
+                <label class="block text-xs font-medium text-slate-400 mb-1.5">辦公室名稱</label>
+                <input
+                  v-model="form.office_name"
+                  type="text"
+                  placeholder="辦公室"
+                  class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
+                />
+                <p class="text-[11px] text-slate-500 mt-1">顯示在側邊欄的虛擬辦公室名稱</p>
+              </div>
+              <div>
               <label class="block text-xs font-medium text-slate-400 mb-1.5">時區</label>
               <select
                 v-model="form.timezone"
@@ -372,6 +386,7 @@ async function saveSettings() {
                 <option v-for="tz in timezoneOptions" :key="tz" :value="tz">{{ tz }}</option>
               </select>
               <p class="text-[11px] text-slate-500 mt-1">排程時間、日誌時間戳記所使用的時區</p>
+              </div>
             </div>
           </div>
         </div>

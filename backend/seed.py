@@ -170,26 +170,23 @@ def _sync_system_cron_jobs(session: Session):
             is_system=True,
         ))
 
-    # 記憶整理
-    if "記憶整理" not in existing_crons:
+    # 短期記憶整理（每 4 小時）
+    if "短期記憶整理" not in existing_crons:
         cron_expr = "0 */4 * * *"
         crons_to_add.append(CronJob(
             project_id=aegis.id,
-            name="記憶整理",
-            description="每 4 小時回顧系統事件，整理短期記憶並更新長期記憶。",
+            name="短期記憶整理",
+            description="每 4 小時整理近期事件為短期記憶。",
             prompt_template=(
-                "你是 Aegis 系統的記憶管理 AI。請根據以下資料整理系統記憶。\n\n"
+                "你是 Aegis 系統的記憶管理 AI。請根據以下資料整理短期記憶。\n\n"
                 "## 過去 4 小時的事件\n{recent_task_logs}\n\n"
                 "## 過去 4 小時的心跳報告摘要\n{recent_heartbeat_summaries}\n\n"
-                "## 現有短期記憶（最近 7 天）\n{short_term_memories}\n\n"
-                "## 現有長期記憶\n{long_term_memories}\n\n"
+                "## 現有短期記憶\n{short_term_memories}\n\n"
                 "請執行：\n"
-                "1. **短期記憶**：用 Markdown 整理這 4 小時發生的重要事實\n"
-                "2. **長期記憶更新**：判斷是否有反覆出現的模式或趨勢\n\n"
+                "1. 用 Markdown 整理這 4 小時發生的重要事實（任務結果、異常、部署等）\n"
+                "2. 合併或去重與既有短期記憶重複的內容\n\n"
                 "回覆格式：\n"
-                "---SHORT_TERM---\n（短期記憶內容）\n"
-                "---LONG_TERM---\n（長期記憶更新，或「無需更新」）\n"
-                "---LONG_TERM_FILE---\n（目標檔名，如 recurring-issues.md）"
+                "---SHORT_TERM---\n（短期記憶內容）"
             ),
             cron_expression=cron_expr,
             next_scheduled_at=_calculate_next_scheduled_at(cron_expr),
@@ -222,20 +219,26 @@ def _sync_system_cron_jobs(session: Session):
             is_system=True,
         ))
 
-    # 短期記憶清理
-    if "短期記憶清理" not in existing_crons:
+    # 長期記憶整理（每天，含短期清理）
+    if "長期記憶整理" not in existing_crons:
         cron_expr = "0 4 * * *"
         crons_to_add.append(CronJob(
             project_id=aegis.id,
-            name="短期記憶清理",
-            description="每天凌晨清理超過保留天數的短期記憶檔案。",
+            name="長期記憶整理",
+            description="每天凌晨將短期記憶歸納為長期記憶，並清理過期短期記憶。",
             prompt_template=(
-                "你是 Aegis 系統的記憶清理 AI。請執行以下步驟：\n\n"
-                "1. 讀取系統設定 memory_short_term_days（短期記憶保留天數）\n"
-                "2. 掃描 .aegis/memory/ 目錄下的短期記憶檔案\n"
-                "3. 刪除超過保留天數的檔案\n"
-                "4. 回報清理結果：刪除了多少檔案、釋放了多少空間\n\n"
-                "注意：長期記憶（long-term/）目錄不要清理。"
+                "你是 Aegis 系統的記憶管理 AI。請執行每日長期記憶整理。\n\n"
+                "## 現有短期記憶\n{short_term_memories}\n\n"
+                "## 現有長期記憶\n{long_term_memories}\n\n"
+                "請執行：\n"
+                "1. **歸納長期記憶**：從短期記憶中提取反覆出現的模式、趨勢、重要決策\n"
+                "2. **更新長期記憶**：合併到對應的長期記憶檔案（如 recurring-issues.md）\n"
+                "3. **清理短期記憶**：刪除超過保留天數（memory_short_term_days）的短期記憶檔案\n"
+                "4. 回報：歸納了什麼、清理了多少檔案\n\n"
+                "回覆格式：\n"
+                "---LONG_TERM---\n（長期記憶更新內容，或「無需更新」）\n"
+                "---LONG_TERM_FILE---\n（目標檔名）\n"
+                "---CLEANUP---\n（清理結果）"
             ),
             cron_expression=cron_expr,
             next_scheduled_at=_calculate_next_scheduled_at(cron_expr),

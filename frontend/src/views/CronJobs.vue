@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Clock, Play, Pause, Trash2, AlertCircle, Plus, X, FolderOpen, Pencil, ChevronDown, ChevronRight } from 'lucide-vue-next'
+import { Clock, Play, Pause, Trash2, AlertCircle, Plus, X, Pencil } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 import { useEscapeKey } from '../composables/useEscapeKey'
 import { useResponsive } from '../composables/useResponsive'
@@ -14,7 +14,7 @@ const { isMobile } = useResponsive()
 const route = useRoute()
 const router = useRouter()
 const store = useAegisStore()
-const { projects } = useProjectSelector()
+const { projects, selectedProjectId } = useProjectSelector()
 const cronJobs = ref<any[]>([])
 const loading = ref(true)
 const cronPausedProjects = ref<number[]>([])
@@ -80,12 +80,13 @@ const fetchCronJobs = async () => {
 }
 
 const createCronJob = async () => {
-  if (!newJobForm.value.name || !newJobForm.value.project_id) return
+  const pid = newJobForm.value.project_id || selectedProjectId.value
+  if (!newJobForm.value.name || !pid) return
   try {
     const res = await fetch('/api/v1/cron-jobs/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newJobForm.value)
+      body: JSON.stringify({ ...newJobForm.value, project_id: pid })
     })
     if (!res.ok) throw new Error('建立排程失敗')
     showAddModal.value = false
@@ -145,22 +146,32 @@ function projectName(projectId: number) {
   return projects.value.find((p: any) => p.id === projectId)?.name ?? `#${projectId}`
 }
 
-function isProjectCronPaused(projectId: number) {
-  return cronPausedProjects.value.includes(projectId)
-}
+const isCronPaused = computed(() => {
+  if (!selectedProjectId.value) return false
+  return cronPausedProjects.value.includes(selectedProjectId.value)
+})
 
-async function toggleProjectCron(projectId: number) {
+async function toggleCron() {
+  if (!selectedProjectId.value) return
   try {
-    if (isProjectCronPaused(projectId)) {
-      await store.resumeCron(projectId)
+    if (isCronPaused.value) {
+      await store.resumeCron(selectedProjectId.value)
     } else {
-      await store.pauseCron(projectId)
+      await store.pauseCron(selectedProjectId.value)
     }
     await fetchCronPausedProjects()
   } catch (e: any) {
     store.addToast(e.message, 'error')
   }
 }
+
+// 依選中專案篩選
+const filteredJobs = computed(() => {
+  if (!selectedProjectId.value) return cronJobs.value
+  return cronJobs.value.filter(j => j.project_id === selectedProjectId.value)
+})
+
+const enabledCount = computed(() => filteredJobs.value.filter(j => j.is_enabled).length)
 
 onMounted(async () => {
   await fetchCronJobs()
@@ -170,54 +181,17 @@ onMounted(async () => {
   }
 })
 
+// 新增排程時預設帶入當前專案
+watch(showAddModal, (v) => {
+  if (v && selectedProjectId.value) {
+    newJobForm.value.project_id = selectedProjectId.value
+  }
+})
+
 const formatTime = (iso: string) => {
   if (!iso) return '從未執行'
   const tz = store.settings.timezone || 'Asia/Taipei'
   return new Date(iso).toLocaleString('zh-TW', { timeZone: tz })
-}
-
-// 整體排程狀態（有任何專案被暫停就算 partial）
-const totalEnabledJobs = computed(() => cronJobs.value.filter((j: any) => j.is_enabled).length)
-// 按專案分組
-const jobsByProject = computed(() => {
-  const map = new Map<number, { project: any; jobs: any[] }>()
-  for (const job of cronJobs.value) {
-    if (!map.has(job.project_id)) {
-      const proj = projects.value.find((p: any) => p.id === job.project_id)
-      map.set(job.project_id, { project: proj ?? { id: job.project_id, name: `#${job.project_id}` }, jobs: [] })
-    }
-    map.get(job.project_id)!.jobs.push(job)
-  }
-  return Array.from(map.values())
-})
-
-// 折疊狀態：collapsed = 只顯示前 10 則，expanded = 全部顯示
-const COLLAPSE_THRESHOLD = 10
-const collapsedProjects = ref<Set<number>>(new Set())  // 完全收合（隱藏表格）
-const expandedProjects = ref<Set<number>>(new Set())    // 超過 10 則時，展開全部
-
-function toggleCollapse(projectId: number) {
-  if (collapsedProjects.value.has(projectId)) {
-    collapsedProjects.value.delete(projectId)
-  } else {
-    collapsedProjects.value.add(projectId)
-  }
-}
-
-function toggleExpand(projectId: number) {
-  if (expandedProjects.value.has(projectId)) {
-    expandedProjects.value.delete(projectId)
-  } else {
-    expandedProjects.value.add(projectId)
-  }
-}
-
-function visibleJobs(group: { project: any; jobs: any[] }) {
-  const pid = group.project.id
-  if (group.jobs.length <= COLLAPSE_THRESHOLD || expandedProjects.value.has(pid)) {
-    return group.jobs
-  }
-  return group.jobs.slice(0, COLLAPSE_THRESHOLD)
 }
 </script>
 
@@ -225,16 +199,23 @@ function visibleJobs(group: { project: any; jobs: any[] }) {
   <div class="h-full flex flex-col">
     <!-- Header -->
     <PageHeader :icon="Clock">
-      <!-- 排程狀態 -->
-      <div class="flex items-center bg-slate-700/50 rounded-lg border border-slate-600/50 overflow-hidden">
-        <div class="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5">
-          <span class="text-xs font-bold text-blue-400">{{ totalEnabledJobs }}</span>
-          <span class="text-[10px] text-slate-500">/{{ cronJobs.length }}</span>
+      <!-- 排程狀態 + 暫停控制 -->
+      <div v-if="selectedProjectId" class="flex items-center bg-slate-700/50 rounded-lg border border-slate-600/50 overflow-hidden">
+        <div class="flex items-center gap-1.5 px-2.5 py-1.5">
+          <span class="text-xs font-bold text-blue-400">{{ enabledCount }}</span>
+          <span class="text-[10px] text-slate-500">/{{ filteredJobs.length }}</span>
         </div>
-        <div v-if="!isMobile" class="w-px h-5 bg-slate-600/50"></div>
-        <div v-if="!isMobile" class="flex items-center px-2.5 py-1.5">
-          <span class="text-[10px] text-slate-400 font-mono">{{ store.settings.timezone || 'Asia/Taipei' }}</span>
-        </div>
+        <div class="w-px h-5 bg-slate-600/50"></div>
+        <button
+          @click="toggleCron"
+          :title="isCronPaused ? '啟動此專案的排程' : '暫停此專案的排程'"
+          class="flex items-center gap-1 px-2.5 py-1.5 transition-colors"
+          :class="isCronPaused ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-amber-400 hover:bg-amber-500/10'"
+        >
+          <Play v-if="isCronPaused" class="w-3 h-3" />
+          <Pause v-else class="w-3 h-3" />
+          <span class="text-[10px] font-medium">{{ isCronPaused ? '啟動' : '暫停' }}</span>
+        </button>
       </div>
 
       <button @click="showAddModal = true" class="flex items-center justify-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-white p-2 sm:px-3 sm:py-1.5 rounded-lg text-xs font-medium transition-all shadow-lg shadow-emerald-500/20">
@@ -243,132 +224,165 @@ function visibleJobs(group: { project: any; jobs: any[] }) {
       </button>
     </PageHeader>
 
-    <div class="flex-1 overflow-auto p-2 sm:p-8 space-y-4 sm:space-y-6">
+    <div class="flex-1 overflow-auto p-2 sm:p-8">
 
-    <!-- 無排程 -->
-    <div v-if="cronJobs.length === 0 && !loading" class="bg-slate-800/30 rounded-2xl border border-slate-700/50 p-20 text-center">
-      <AlertCircle class="w-10 h-10 mx-auto mb-4 text-slate-600 opacity-40" />
-      <p class="text-sm text-slate-500">尚無排程任務。</p>
-    </div>
-
-    <!-- 按專案分組 -->
-    <div v-for="group in jobsByProject" :key="group.project.id" class="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden shadow-xl">
-      <!-- 專案標題列（可點擊折疊） -->
-      <div class="flex items-center justify-between px-6 py-3 bg-slate-800/80 cursor-pointer select-none" :class="collapsedProjects.has(group.project.id) ? '' : 'border-b border-slate-700'" @click="toggleCollapse(group.project.id)">
-        <div class="flex items-center gap-2.5">
-          <ChevronRight v-if="collapsedProjects.has(group.project.id)" class="w-4 h-4 text-slate-500 transition-transform" />
-          <ChevronDown v-else class="w-4 h-4 text-slate-500 transition-transform" />
-          <FolderOpen class="w-4 h-4 text-emerald-400" />
-          <span class="text-sm font-semibold text-slate-100">{{ group.project.name }}</span>
-          <span class="text-[10px] text-slate-500 font-mono">{{ group.jobs.length }} 個排程</span>
-        </div>
-        <div class="flex items-center gap-2" @click.stop>
-          <span
-            v-if="isProjectCronPaused(group.project.id)"
-            class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20"
-          >排程暫停中</span>
-          <button
-            @click="toggleProjectCron(group.project.id)"
-            class="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg transition-colors"
-            :class="isProjectCronPaused(group.project.id)
-              ? 'text-emerald-400 hover:bg-emerald-500/10'
-              : 'text-amber-400 hover:bg-amber-500/10'"
-            :title="isProjectCronPaused(group.project.id) ? '啟動此專案排程' : '暫停此專案排程'"
-          >
-            <Play v-if="isProjectCronPaused(group.project.id)" class="w-3 h-3" />
-            <Pause v-else class="w-3 h-3" />
-            {{ isProjectCronPaused(group.project.id) ? '啟動' : '暫停' }}
-          </button>
+      <!-- 未選專案 -->
+      <div v-if="!selectedProjectId" class="flex items-center justify-center h-full">
+        <div class="text-center">
+          <Clock class="w-12 h-12 text-slate-700 mx-auto mb-3" />
+          <p class="text-slate-500 text-sm">選擇一個專案以查看排程</p>
         </div>
       </div>
 
-      <!-- 排程表格（折疊時隱藏） -->
-      <table v-if="!collapsedProjects.has(group.project.id)" class="w-full text-left border-collapse">
-        <thead>
-          <tr class="text-slate-500 text-[10px] uppercase tracking-widest border-b border-slate-700/50">
-            <th class="px-6 py-2.5 font-semibold">排程名稱</th>
-            <th class="px-6 py-2.5 font-semibold">排程週期</th>
-            <th class="px-6 py-2.5 font-semibold text-center">狀態</th>
-            <th class="px-6 py-2.5 font-semibold">下次執行</th>
-            <th class="px-6 py-2.5 font-semibold text-right">操作</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-slate-700/30">
-          <tr v-for="job in visibleJobs(group)" :key="job.id" class="hover:bg-slate-700/20 transition-colors group">
-            <td class="px-6 py-3 cursor-pointer" @click="router.push(`/cron/${job.id}`)">
-              <div class="font-medium text-sm text-slate-100 hover:text-emerald-400 transition-colors">{{ job.name }}</div>
-              <div v-if="job.description" class="text-xs text-slate-500 mt-0.5 truncate max-w-xs">{{ job.description }}</div>
-            </td>
-            <td class="px-6 py-3">
-              <div class="flex items-center gap-2 text-blue-400 font-mono text-sm">
-                <Clock class="w-3.5 h-3.5" />
-                {{ job.cron_expression }}
+      <!-- 無排程 -->
+      <div v-else-if="filteredJobs.length === 0 && !loading" class="flex items-center justify-center h-full">
+        <div class="text-center">
+          <AlertCircle class="w-10 h-10 mx-auto mb-4 text-slate-600 opacity-40" />
+          <p class="text-sm text-slate-500">此專案尚無排程任務</p>
+        </div>
+      </div>
+
+      <!-- 手機版：卡片列表 -->
+      <div v-else-if="isMobile" class="space-y-2">
+        <!-- 暫停中提示 -->
+        <div v-if="isCronPaused" class="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
+          <Pause class="w-3.5 h-3.5 text-amber-400" />
+          <span class="text-xs text-amber-400">此專案排程已暫停</span>
+        </div>
+
+        <div
+          v-for="job in filteredJobs"
+          :key="job.id"
+          class="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden"
+        >
+          <!-- 卡片主體（點擊進詳情） -->
+          <div class="p-3" @click="router.push(`/cron/${job.id}`)">
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0">
+                <div class="font-medium text-sm text-slate-100 truncate">{{ job.name }}</div>
+                <div v-if="job.description" class="text-xs text-slate-500 mt-0.5 line-clamp-2">{{ job.description }}</div>
               </div>
-            </td>
-            <td class="px-6 py-3 text-center">
               <span
                 :class="[
-                  'px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-tighter border',
+                  'px-1.5 py-0.5 rounded text-[10px] font-bold border shrink-0',
                   job.is_enabled ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-slate-700 text-slate-500 border-slate-600'
                 ]"
               >
                 {{ job.is_enabled ? '啟用' : '停用' }}
               </span>
-            </td>
-            <td class="px-6 py-3 text-xs text-slate-400 font-mono">
-              {{ formatTime(job.next_scheduled_at) }}
-            </td>
-            <td class="px-6 py-3 text-right">
-              <div class="flex justify-end gap-0.5 -mr-2">
-                <button
-                  @click="openEditModal(job)"
-                  class="p-2.5 text-slate-500 hover:text-blue-400 hover:bg-blue-400/10 rounded-lg transition-colors touch-target"
-                  title="編輯排程"
-                >
-                  <Pencil class="w-4 h-4" />
-                </button>
-                <button
-                  @click="toggleJob(job)"
-                  :class="[
-                    'p-2.5 rounded-lg transition-colors touch-target',
-                    job.is_enabled ? 'text-amber-400 hover:bg-amber-400/10' : 'text-emerald-400 hover:bg-emerald-400/10'
-                  ]"
-                  :title="job.is_enabled ? '停用此排程' : '啟用此排程'"
-                >
-                  <Pause v-if="job.is_enabled" class="w-4 h-4" />
-                  <Play v-else class="w-4 h-4" />
-                </button>
-                <button
-                  v-if="!job.is_system"
-                  @click="requestDelete(job.id)"
-                  class="p-2.5 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors touch-target"
-                  title="刪除排程"
-                >
-                  <Trash2 class="w-4 h-4" />
-                </button>
+            </div>
+            <div class="flex items-center gap-3 mt-2">
+              <div class="flex items-center gap-1 text-blue-400 font-mono text-xs">
+                <Clock class="w-3 h-3" />
+                {{ job.cron_expression }}
               </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <!-- 展開更多 / 收合 -->
-      <div
-        v-if="!collapsedProjects.has(group.project.id) && group.jobs.length > COLLAPSE_THRESHOLD"
-        class="px-6 py-2.5 border-t border-slate-700/30 text-center"
-      >
-        <button
-          @click="toggleExpand(group.project.id)"
-          class="text-[11px] text-slate-400 hover:text-slate-200 transition-colors"
-        >
-          <template v-if="expandedProjects.has(group.project.id)">
-            收合（顯示前 {{ COLLAPSE_THRESHOLD }} 則）
-          </template>
-          <template v-else>
-            顯示全部 {{ group.jobs.length }} 則（還有 {{ group.jobs.length - COLLAPSE_THRESHOLD }} 則）
-          </template>
-        </button>
+              <div class="text-[10px] text-slate-500 truncate">{{ formatTime(job.next_scheduled_at) }}</div>
+            </div>
+          </div>
+          <!-- 操作列 -->
+          <div class="flex border-t border-slate-700/30 divide-x divide-slate-700/30">
+            <button @click="openEditModal(job)" class="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-slate-400 hover:text-blue-400 hover:bg-blue-400/5 transition-colors">
+              <Pencil class="w-3.5 h-3.5" />
+              <span class="text-[10px]">編輯</span>
+            </button>
+            <button
+              @click="toggleJob(job)"
+              class="flex-1 flex items-center justify-center gap-1.5 py-2.5 transition-colors"
+              :class="job.is_enabled ? 'text-amber-400 hover:bg-amber-400/5' : 'text-emerald-400 hover:bg-emerald-400/5'"
+            >
+              <Pause v-if="job.is_enabled" class="w-3.5 h-3.5" />
+              <Play v-else class="w-3.5 h-3.5" />
+              <span class="text-[10px]">{{ job.is_enabled ? '停用' : '啟用' }}</span>
+            </button>
+            <button
+              v-if="!job.is_system"
+              @click="requestDelete(job.id)"
+              class="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-slate-400 hover:text-red-400 hover:bg-red-400/5 transition-colors"
+            >
+              <Trash2 class="w-3.5 h-3.5" />
+              <span class="text-[10px]">刪除</span>
+            </button>
+          </div>
+        </div>
       </div>
-    </div>
+
+      <!-- 桌面版：表格 -->
+      <div v-else class="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden shadow-xl">
+        <!-- 暫停中提示 -->
+        <div v-if="isCronPaused" class="flex items-center gap-2 px-6 py-2.5 bg-amber-500/5 border-b border-amber-500/20">
+          <Pause class="w-3.5 h-3.5 text-amber-400" />
+          <span class="text-xs text-amber-400">此專案排程已暫停，排程不會自動執行</span>
+        </div>
+
+        <table class="w-full text-left border-collapse">
+          <thead>
+            <tr class="text-slate-500 text-[10px] uppercase tracking-widest border-b border-slate-700/50">
+              <th class="px-6 py-2.5 font-semibold">排程名稱</th>
+              <th class="px-6 py-2.5 font-semibold">排程週期</th>
+              <th class="px-6 py-2.5 font-semibold text-center">狀態</th>
+              <th class="px-6 py-2.5 font-semibold">下次執行</th>
+              <th class="px-6 py-2.5 font-semibold text-right">操作</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-700/30">
+            <tr v-for="job in filteredJobs" :key="job.id" class="hover:bg-slate-700/20 transition-colors">
+              <td class="px-6 py-3 cursor-pointer" @click="router.push(`/cron/${job.id}`)">
+                <div class="font-medium text-sm text-slate-100 hover:text-emerald-400 transition-colors">{{ job.name }}</div>
+                <div v-if="job.description" class="text-xs text-slate-500 mt-0.5 truncate max-w-xs">{{ job.description }}</div>
+              </td>
+              <td class="px-6 py-3">
+                <div class="flex items-center gap-2 text-blue-400 font-mono text-sm">
+                  <Clock class="w-3.5 h-3.5" />
+                  {{ job.cron_expression }}
+                </div>
+              </td>
+              <td class="px-6 py-3 text-center">
+                <span
+                  :class="[
+                    'px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-tighter border',
+                    job.is_enabled ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-slate-700 text-slate-500 border-slate-600'
+                  ]"
+                >
+                  {{ job.is_enabled ? '啟用' : '停用' }}
+                </span>
+              </td>
+              <td class="px-6 py-3 text-xs text-slate-400 font-mono">
+                {{ formatTime(job.next_scheduled_at) }}
+              </td>
+              <td class="px-6 py-3 text-right">
+                <div class="flex justify-end gap-0.5 -mr-2">
+                  <button
+                    @click="openEditModal(job)"
+                    class="p-2.5 text-slate-500 hover:text-blue-400 hover:bg-blue-400/10 rounded-lg transition-colors"
+                    title="編輯排程"
+                  >
+                    <Pencil class="w-4 h-4" />
+                  </button>
+                  <button
+                    @click="toggleJob(job)"
+                    :class="[
+                      'p-2.5 rounded-lg transition-colors',
+                      job.is_enabled ? 'text-amber-400 hover:bg-amber-400/10' : 'text-emerald-400 hover:bg-emerald-400/10'
+                    ]"
+                    :title="job.is_enabled ? '停用此排程' : '啟用此排程'"
+                  >
+                    <Pause v-if="job.is_enabled" class="w-4 h-4" />
+                    <Play v-else class="w-4 h-4" />
+                  </button>
+                  <button
+                    v-if="!job.is_system"
+                    @click="requestDelete(job.id)"
+                    class="p-2.5 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
+                    title="刪除排程"
+                  >
+                    <Trash2 class="w-4 h-4" />
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
     </div>
 
@@ -381,7 +395,7 @@ function visibleJobs(group: { project: any; jobs: any[] }) {
         </div>
 
         <div class="p-6 overflow-y-auto custom-scrollbar space-y-4">
-          <div class="grid grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label class="block text-xs font-medium text-slate-400 mb-1">目標專案</label>
               <select v-model="newJobForm.project_id" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none">
@@ -409,17 +423,15 @@ function visibleJobs(group: { project: any; jobs: any[] }) {
             <textarea v-model="newJobForm.description" rows="2" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none resize-none"></textarea>
           </div>
 
-          <div class="space-y-4">
-            <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1">提示詞模板</label>
-              <textarea v-model="newJobForm.prompt_template" rows="5" placeholder="定義 AI 的任務..." class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 font-mono text-sm focus:ring-2 focus:ring-emerald-500 outline-none"></textarea>
-            </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">提示詞模板</label>
+            <textarea v-model="newJobForm.prompt_template" rows="5" placeholder="定義 AI 的任務..." class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 font-mono text-sm focus:ring-2 focus:ring-emerald-500 outline-none"></textarea>
           </div>
         </div>
 
         <div class="p-4 border-t border-slate-700 bg-slate-800/50 flex justify-end gap-3">
           <button @click="showAddModal = false" class="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">取消</button>
-          <button @click="createCronJob" :disabled="!newJobForm.name || !newJobForm.project_id" class="px-6 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold transition-all shadow-lg shadow-emerald-500/20">
+          <button @click="createCronJob" :disabled="!newJobForm.name || !(newJobForm.project_id || selectedProjectId)" class="px-6 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold transition-all shadow-lg shadow-emerald-500/20">
             建立排程
           </button>
         </div>
@@ -435,7 +447,7 @@ function visibleJobs(group: { project: any; jobs: any[] }) {
         </div>
 
         <div class="p-6 overflow-y-auto custom-scrollbar space-y-4">
-          <div class="grid grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label class="block text-xs font-medium text-slate-400 mb-1">所屬專案</label>
               <div class="w-full bg-slate-900/50 border border-slate-700 rounded-lg p-2.5 text-slate-500 text-sm">{{ projectName(editJobForm.project_id) }}</div>
@@ -460,11 +472,9 @@ function visibleJobs(group: { project: any; jobs: any[] }) {
             <textarea v-model="editJobForm.description" rows="2" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none resize-none"></textarea>
           </div>
 
-          <div class="space-y-4">
-            <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1">提示詞模板</label>
-              <textarea v-model="editJobForm.prompt_template" rows="5" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 font-mono text-sm focus:ring-2 focus:ring-emerald-500 outline-none"></textarea>
-            </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">提示詞模板</label>
+            <textarea v-model="editJobForm.prompt_template" rows="5" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 font-mono text-sm focus:ring-2 focus:ring-emerald-500 outline-none"></textarea>
           </div>
         </div>
 
