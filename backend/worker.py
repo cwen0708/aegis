@@ -987,7 +987,7 @@ def process_pending_cards():
             ))
 
         effective_cwd = workspace_dir or project_path
-        _dialogue_hint = "\n\n請在所有輸出的最末行，用你的角色語氣寫一句簡短的任務總結（20字以內），格式：<!-- dialogue: 你的總結 -->"
+        _dialogue_hint = "\n\n請在所有輸出的最末行，用你的角色語氣寫一句簡短的任務總結（70字以內），格式：<!-- dialogue: 你的總結 -->"
         effective_prompt = ("請閱讀你的設定檔並執行本次任務。" if workspace_dir else card_data.content) + _dialogue_hint
 
         # 執行任務（含 fallback 機制）
