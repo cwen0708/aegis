@@ -168,17 +168,28 @@ async function uploadPortrait(event: Event) {
   const input = event.target as HTMLInputElement
   if (!input.files?.length || !editingMember.value) return
 
+  const file = input.files[0]!
+  const maxSize = 10 * 1024 * 1024 // 10MB
+  if (file.size > maxSize) {
+    store.addToast(`檔案過大（${(file.size / 1024 / 1024).toFixed(1)}MB），上限 10MB`, 'error')
+    return
+  }
+
   uploadingPortrait.value = true
   try {
     const formData = new FormData()
-    formData.append('file', input.files[0]!)
+    formData.append('file', file)
 
     const res = await fetch(`${API}/api/v1/members/${editingMember.value.id}/portrait`, {
       method: 'POST',
       headers: authHeaders(),
       body: formData,
     })
-    if (!res.ok) throw new Error('上傳失敗')
+    if (res.status === 413) throw new Error('檔案過大，請壓縮後再試（上限 10MB）')
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: '上傳失敗' }))
+      throw new Error(err.detail || '上傳失敗')
+    }
 
     const data = await res.json()
     memberForm.value.portrait = data.portrait
@@ -197,10 +208,17 @@ async function generatePortrait(event: Event) {
   const input = event.target as HTMLInputElement
   if (!input.files?.length || !editingMember.value) return
 
+  const file = input.files[0]!
+  const maxSize = 10 * 1024 * 1024 // 10MB
+  if (file.size > maxSize) {
+    store.addToast(`檔案過大（${(file.size / 1024 / 1024).toFixed(1)}MB），上限 10MB`, 'error')
+    return
+  }
+
   generatingPortrait.value = true
   try {
     const formData = new FormData()
-    formData.append('file', input.files[0]!)
+    formData.append('file', file)
 
     const res = await fetch(`${API}/api/v1/members/${editingMember.value.id}/generate-portrait`, {
       method: 'POST',
@@ -208,6 +226,7 @@ async function generatePortrait(event: Event) {
       body: formData,
     })
 
+    if (res.status === 413) throw new Error('檔案過大，請壓縮後再試（上限 10MB）')
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: '生成失敗' }))
       throw new Error(err.detail || '生成失敗')
