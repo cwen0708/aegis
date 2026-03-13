@@ -117,6 +117,10 @@ export function useWebSocket() {
       case 'member_dialogue':
         window.dispatchEvent(new CustomEvent('aegis:member-dialogue', { detail: data }))
         break
+
+      case 'clone_progress':
+        window.dispatchEvent(new CustomEvent('aegis:clone-progress', { detail: data }))
+        break
     }
   }
 
