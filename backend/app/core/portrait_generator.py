@@ -77,7 +77,7 @@ CRITICAL:
 - Style similar to: Clannad, Steins;Gate, or modern visual novels"""
 
     response = client.models.generate_content(
-        model="gemini-2.0-flash-exp-image-generation",
+        model="gemini-3.1-flash-image-preview",
         contents=[
             prompt,
             types.Part.from_bytes(data=photo_bytes, mime_type="image/jpeg")
