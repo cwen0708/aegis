@@ -16,6 +16,22 @@ const showPassword = ref(false)
 const passwordSaving = ref(false)
 const passwordSaved = ref(false)
 const passwordError = ref('')
+const isDefaultPassword = ref(true)
+
+async function checkPasswordStatus() {
+  try {
+    const API = import.meta.env.VITE_API_BASE || ''
+    const res = await fetch(`${API}/api/v1/auth/password-status`)
+    if (res.ok) {
+      const data = await res.json()
+      isDefaultPassword.value = data.is_default
+      if (!data.is_default) passwordSaved.value = true
+    }
+  } catch { /* ignore */ }
+}
+
+// 頁面載入時檢查密碼狀態
+checkPasswordStatus()
 
 async function savePassword() {
   if (newPassword.value.length < 6) {
@@ -30,13 +46,14 @@ async function savePassword() {
   passwordError.value = ''
   try {
     const API = import.meta.env.VITE_API_BASE || ''
-    const res = await fetch(`${API}/api/v1/auth/change-password`, {
+    const res = await fetch(`${API}/api/v1/auth/set-initial-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ current_password: 'aegis2026!', new_password: newPassword.value }),
+      body: JSON.stringify({ new_password: newPassword.value }),
     })
     if (res.ok) {
       passwordSaved.value = true
+      isDefaultPassword.value = false
     } else {
       const data = await res.json().catch(() => ({}))
       passwordError.value = data.detail || '密碼設定失敗'
@@ -76,9 +93,9 @@ const steps: Step[] = [
     description: '設定管理員密碼，保護你的 Aegis 系統設定。',
     icon: Lock,
     details: [
-      '預設密碼為 aegis2026!',
-      '建議立即更改為你自己的密碼',
+      '設定管理員密碼以保護系統',
       '密碼用於存取系統設定頁面',
+      '完成引導前必須設定密碼',
       '之後可在設定頁面中修改密碼',
     ],
   },
@@ -341,14 +358,18 @@ function skipOnboarding() {
               <button
                 v-else
                 @click="completeOnboarding"
-                :disabled="completing"
+                :disabled="completing || isDefaultPassword"
                 class="flex items-center gap-2 px-5 sm:px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 disabled:opacity-50 text-white rounded-lg font-bold text-sm transition-all shadow-lg shadow-emerald-500/20"
+                :title="isDefaultPassword ? '請先設定管理員密碼' : ''"
               >
                 <Sparkles class="w-4 h-4" />
                 {{ completing ? '處理中...' : '完成設定' }}
               </button>
             </div>
           </div>
+          <p v-if="currentStep === steps.length - 1 && isDefaultPassword" class="text-xs text-amber-400 mt-3 text-center">
+            請先回到「設定密碼」步驟完成密碼設定
+          </p>
         </div>
       </div>
     </div>

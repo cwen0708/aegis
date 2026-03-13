@@ -341,16 +341,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to clear update status: {e}")
 
-    # 同步系統排程（更新檢查、記憶清理等）
+    # 執行 seed（首次啟動時建立預設成員、專案、排程等）
     try:
-        from seed import _sync_system_cron_jobs
-        from app.database import engine as _engine
-        from sqlmodel import Session as _Session
-
-        with _Session(_engine) as session:
-            _sync_system_cron_jobs(session)
+        from seed import seed_data
+        seed_data()
     except Exception as e:
-        logger.warning(f"Failed to sync system cron jobs: {e}")
+        logger.warning(f"Failed to run seed: {e}")
 
     # 注意：AI Task Poller 已移到獨立的 worker.py 程序
     # 透過 dev.bat 啟動，避免阻塞 FastAPI event loop

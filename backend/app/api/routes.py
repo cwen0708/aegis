@@ -1467,6 +1467,9 @@ class AuthChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str
 
+class AuthSetInitialPasswordRequest(BaseModel):
+    new_password: str
+
 @router.post("/auth/verify")
 def verify_admin_password(req: AuthVerifyRequest, session: Session = Depends(get_session)):
     """驗證管理員密碼，回傳 session token"""
@@ -1512,6 +1515,41 @@ def change_admin_password(req: AuthChangePasswordRequest, session: Session = Dep
         session.add(SystemSetting(key="admin_password", value=hashed))
     session.commit()
     return {"success": True, "message": "密碼已更新"}
+
+@router.get("/auth/password-status")
+def get_password_status(session: Session = Depends(get_session)):
+    """檢查密碼是否仍為預設值"""
+    from app.core.auth import check_password
+
+    default_password = os.getenv("AEGIS_DEFAULT_PASSWORD", "aegis2026!")
+    setting = session.get(SystemSetting, "admin_password")
+    stored_password = setting.value if setting else default_password
+
+    is_default = check_password(default_password, stored_password)
+    return {"is_default": is_default}
+
+@router.post("/auth/set-initial-password")
+def set_initial_password(req: AuthSetInitialPasswordRequest, session: Session = Depends(get_session)):
+    """首次設定密碼（僅在密碼仍為預設值時可用）"""
+    from app.core.auth import check_password, hash_password
+
+    default_password = os.getenv("AEGIS_DEFAULT_PASSWORD", "aegis2026!")
+    setting = session.get(SystemSetting, "admin_password")
+    stored_password = setting.value if setting else default_password
+
+    if not check_password(default_password, stored_password):
+        raise HTTPException(status_code=403, detail="密碼已被修改，請使用一般修改密碼功能")
+    if len(req.new_password) < 6:
+        raise HTTPException(status_code=400, detail="新密碼至少需要 6 個字元")
+
+    hashed = hash_password(req.new_password)
+    if setting:
+        setting.value = hashed
+        session.add(setting)
+    else:
+        session.add(SystemSetting(key="admin_password", value=hashed))
+    session.commit()
+    return {"success": True, "message": "密碼已設定"}
 
 
 # ==========================================
