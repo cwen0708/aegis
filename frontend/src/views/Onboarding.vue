@@ -3,11 +3,9 @@ import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Rocket, CheckCircle2, ChevronRight, Terminal, Users, Kanban, Clock, Sparkles } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
-import { useResponsive } from '../composables/useResponsive'
 
 const router = useRouter()
 const store = useAegisStore()
-const { isMobile } = useResponsive()
 const currentStep = ref(0)
 const completing = ref(false)
 
