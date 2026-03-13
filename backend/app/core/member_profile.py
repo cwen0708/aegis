@@ -1,4 +1,5 @@
-"""Member profile management — soul, skills, memory directories."""
+"""Member profile management — soul, skills, memory, MCP directories."""
+import json
 import logging
 import re
 from pathlib import Path
@@ -49,6 +50,28 @@ def get_member_memory_dir(slug: str) -> Path:
     (d / "short-term").mkdir(parents=True, exist_ok=True)
     (d / "long-term").mkdir(parents=True, exist_ok=True)
     return d
+
+
+def get_mcp_config_path(slug: str) -> Path:
+    """回傳成員的 mcp.json 路徑"""
+    return get_member_dir(slug) / "mcp.json"
+
+
+def get_mcp_config(slug: str) -> dict:
+    """讀取成員 MCP 設定"""
+    path = get_mcp_config_path(slug)
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            logger.warning(f"Invalid MCP config for {slug}, returning empty")
+    return {"mcpServers": {}}
+
+
+def save_mcp_config(slug: str, config: dict) -> None:
+    """寫入成員 MCP 設定"""
+    path = get_mcp_config_path(slug)
+    path.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def list_skills(slug: str) -> list[dict]:

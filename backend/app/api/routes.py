@@ -2015,6 +2015,34 @@ def delete_member_skill(member_id: int, skill_name: str, session: Session = Depe
 
 
 # ==========================================
+# Member MCP Config
+# ==========================================
+@router.get("/members/{member_id}/mcp")
+def get_member_mcp(member_id: int, session: Session = Depends(get_session)):
+    """讀取成員 MCP 設定"""
+    member = session.get(Member, member_id)
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+    from app.core.member_profile import get_mcp_config
+    return get_mcp_config(member.slug)
+
+
+@router.put("/members/{member_id}/mcp")
+def update_member_mcp(member_id: int, data: dict, session: Session = Depends(get_session)):
+    """更新成員 MCP 設定"""
+    member = session.get(Member, member_id)
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    if not isinstance(data, dict) or "mcpServers" not in data:
+        raise HTTPException(status_code=400, detail="Must contain 'mcpServers' key")
+
+    from app.core.member_profile import save_mcp_config
+    save_mcp_config(member.slug, data)
+    return data
+
+
+# ==========================================
 # Member Portrait Upload
 # ==========================================
 @router.post("/members/{member_id}/portrait")

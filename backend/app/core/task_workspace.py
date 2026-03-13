@@ -3,7 +3,7 @@ import logging
 import shutil
 from pathlib import Path
 
-from app.core.member_profile import get_member_dir, get_soul_content, get_skills_dir, get_member_memory_dir
+from app.core.member_profile import get_member_dir, get_soul_content, get_skills_dir, get_member_memory_dir, get_mcp_config_path
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +89,11 @@ def prepare_workspace(
     if src_skills.exists():
         for md_file in src_skills.glob("*.md"):
             shutil.copy2(md_file, target_skills / md_file.name)
+
+    # 3. Copy MCP config to workspace root (.mcp.json)
+    mcp_src = get_mcp_config_path(member_slug)
+    if mcp_src.exists():
+        shutil.copy2(mcp_src, ws / ".mcp.json")
 
     logger.info(f"[Workspace] Created task-{card_id} for {member_slug} ({provider})")
     return ws

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
-import { Plus, UserPlus, Save, Edit3, Upload, Sparkles, Image, BookOpen, ChevronLeft, Trash2 } from 'lucide-vue-next'
+import { Plus, UserPlus, Save, Edit3, Upload, Sparkles, Image, BookOpen, ChevronLeft, Trash2, Plug } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 import { useEscapeKey } from '../composables/useEscapeKey'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -98,10 +98,20 @@ const savingSkill = ref(false)
 const showNewSkillDialog = ref(false)
 const newSkillForm = ref({ name: '', content: '' })
 
+// MCP
+const showMcpDialog = ref(false)
+const mcpMember = ref<MemberInfo | null>(null)
+const mcpContent = ref('')
+const mcpEditing = ref(false)
+const savingMcp = ref(false)
+const loadingMcp = ref(false)
+const mcpJsonError = ref('')
+
 // ESC key handling for skill dialogs
 useEscapeKey(showSkillsDialog, () => { showSkillsDialog.value = false })
 useEscapeKey(showSkillDetailDialog, () => { showSkillDetailDialog.value = false; showSkillsDialog.value = true })
 useEscapeKey(showNewSkillDialog, () => { showNewSkillDialog.value = false })
+useEscapeKey(showMcpDialog, () => { showMcpDialog.value = false })
 
 // 綁定時根據選的帳號 provider 提供 model 選項
 const bindAccountProvider = computed(() => {
@@ -478,6 +488,59 @@ async function deleteSkill() {
     store.addToast('刪除失敗', 'error')
   }
 }
+
+// MCP functions
+async function openMcpDialog(member: MemberInfo) {
+  mcpMember.value = member
+  mcpContent.value = ''
+  mcpEditing.value = false
+  mcpJsonError.value = ''
+  loadingMcp.value = true
+  showMcpDialog.value = true
+  try {
+    const res = await fetch(`${API}/api/v1/members/${member.id}/mcp`, { headers: authHeaders() })
+    if (res.ok) {
+      const data = await res.json()
+      mcpContent.value = JSON.stringify(data, null, 2)
+    }
+  } catch {
+    store.addToast('MCP 設定載入失敗', 'error')
+  }
+  loadingMcp.value = false
+}
+
+function validateMcpJson(): boolean {
+  try {
+    const parsed = JSON.parse(mcpContent.value)
+    if (!parsed || typeof parsed !== 'object' || !('mcpServers' in parsed)) {
+      mcpJsonError.value = '必須包含 mcpServers 鍵'
+      return false
+    }
+    mcpJsonError.value = ''
+    return true
+  } catch (e: any) {
+    mcpJsonError.value = `JSON 格式錯誤: ${e.message}`
+    return false
+  }
+}
+
+async function saveMcp() {
+  if (!mcpMember.value || !validateMcpJson()) return
+  savingMcp.value = true
+  try {
+    const res = await fetch(`${API}/api/v1/members/${mcpMember.value.id}/mcp`, {
+      method: 'PUT',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: mcpContent.value,
+    })
+    if (!res.ok) throw new Error('儲存失敗')
+    store.addToast('MCP 設定已儲存', 'success')
+    mcpEditing.value = false
+  } catch {
+    store.addToast('MCP 設定儲存失敗', 'error')
+  }
+  savingMcp.value = false
+}
 </script>
 
 <template>
@@ -550,6 +613,10 @@ async function deleteSkill() {
                   <button @click="openSkillsDialog(member)" class="flex items-center gap-1.5 px-3 py-2 text-xs text-slate-500 hover:text-purple-400 hover:bg-purple-400/10 rounded-lg transition-colors">
                     <BookOpen class="w-4 h-4" />
                     <span class="hidden sm:inline">技能</span>
+                  </button>
+                  <button @click="openMcpDialog(member)" class="flex items-center gap-1.5 px-3 py-2 text-xs text-slate-500 hover:text-cyan-400 hover:bg-cyan-400/10 rounded-lg transition-colors">
+                    <Plug class="w-4 h-4" />
+                    <span class="hidden sm:inline">MCP</span>
                   </button>
                 </div>
               </div>
@@ -891,6 +958,53 @@ async function deleteSkill() {
           <div class="flex justify-end gap-2 pt-2">
             <button @click="showNewSkillDialog = false" class="px-4 py-2 text-xs text-slate-400 hover:text-slate-200 transition-colors">取消</button>
             <button @click="createSkill" :disabled="!newSkillForm.name" class="px-4 py-2 bg-purple-500 hover:bg-purple-600 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-all">建立</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- MCP Config Dialog -->
+    <Teleport to="body">
+      <div v-if="showMcpDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" @click.self="showMcpDialog = false">
+        <div class="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-2xl max-h-[80vh] flex flex-col">
+          <div class="px-6 py-4 border-b border-slate-700/50 flex items-center gap-3">
+            <Plug class="w-4 h-4 text-cyan-400" />
+            <div>
+              <h3 class="text-sm font-bold text-slate-200">{{ mcpMember?.name }} 的 MCP 設定</h3>
+              <p class="text-xs text-slate-500">Model Context Protocol servers</p>
+            </div>
+          </div>
+
+          <div class="flex-1 overflow-y-auto p-6">
+            <div v-if="loadingMcp" class="text-center text-sm text-slate-500 py-8">載入中...</div>
+            <div v-else>
+              <textarea
+                v-model="mcpContent"
+                :readonly="!mcpEditing"
+                @input="mcpJsonError = ''"
+                class="w-full h-[50vh] bg-slate-900/50 rounded-xl p-4 text-sm text-slate-300 font-mono resize-none outline-none border"
+                :class="mcpEditing ? 'border-cyan-500/50 focus:ring-2 focus:ring-cyan-500' : 'border-slate-700/50'"
+                placeholder='{"mcpServers": {}}'
+              ></textarea>
+              <p v-if="mcpJsonError" class="text-xs text-red-400 mt-2">{{ mcpJsonError }}</p>
+            </div>
+          </div>
+
+          <div class="px-6 py-4 border-t border-slate-700/50 flex justify-end gap-2">
+            <template v-if="!mcpEditing">
+              <button @click="mcpEditing = true" class="px-4 py-2 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 rounded-lg text-xs font-medium transition-colors flex items-center gap-1">
+                <Edit3 class="w-3.5 h-3.5" />
+                編輯
+              </button>
+            </template>
+            <template v-else>
+              <button @click="mcpEditing = false; mcpJsonError = ''" class="px-4 py-2 text-xs text-slate-400 hover:text-slate-200 transition-colors">取消</button>
+              <button @click="saveMcp" :disabled="savingMcp" class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1">
+                <Save class="w-3.5 h-3.5" />
+                {{ savingMcp ? '儲存中...' : '儲存' }}
+              </button>
+            </template>
+            <button @click="showMcpDialog = false" class="px-4 py-2 text-xs text-slate-400 hover:text-slate-200 transition-colors">關閉</button>
           </div>
         </div>
       </div>
