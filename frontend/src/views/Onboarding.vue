@@ -1,13 +1,52 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { Rocket, CheckCircle2, ChevronRight, Terminal, Users, Kanban, Clock, Sparkles } from 'lucide-vue-next'
+import { Rocket, CheckCircle2, ChevronRight, Terminal, Users, Kanban, Clock, Sparkles, Lock, Eye, EyeOff } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 
 const router = useRouter()
 const store = useAegisStore()
 const currentStep = ref(0)
 const completing = ref(false)
+
+// 密碼設定
+const newPassword = ref('')
+const confirmPassword = ref('')
+const showPassword = ref(false)
+const passwordSaving = ref(false)
+const passwordSaved = ref(false)
+const passwordError = ref('')
+
+async function savePassword() {
+  if (newPassword.value.length < 6) {
+    passwordError.value = '密碼至少需要 6 個字元'
+    return
+  }
+  if (newPassword.value !== confirmPassword.value) {
+    passwordError.value = '兩次輸入的密碼不一致'
+    return
+  }
+  passwordSaving.value = true
+  passwordError.value = ''
+  try {
+    const API = import.meta.env.VITE_API_BASE || ''
+    const res = await fetch(`${API}/api/v1/auth/change-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current_password: 'aegis2026!', new_password: newPassword.value }),
+    })
+    if (res.ok) {
+      passwordSaved.value = true
+    } else {
+      const data = await res.json().catch(() => ({}))
+      passwordError.value = data.detail || '密碼設定失敗'
+    }
+  } catch {
+    passwordError.value = '連線失敗'
+  } finally {
+    passwordSaving.value = false
+  }
+}
 
 interface Step {
   id: string
@@ -32,8 +71,20 @@ const steps: Step[] = [
     ],
   },
   {
+    id: 'password',
+    title: '設定密碼',
+    description: '設定管理員密碼，保護你的 Aegis 系統設定。',
+    icon: Lock,
+    details: [
+      '預設密碼為 aegis2026!',
+      '建議立即更改為你自己的密碼',
+      '密碼用於存取系統設定頁面',
+      '之後可在設定頁面中修改密碼',
+    ],
+  },
+  {
     id: 'cli',
-    title: '安裝 CLI 工具',
+    title: '安裝 CLI',
     description: '確保伺服器已安裝必要的 CLI 工具，這是執行 AI 任務的基礎。',
     icon: Terminal,
     details: [
@@ -209,6 +260,50 @@ function skipOnboarding() {
                 <CheckCircle2 class="w-3 h-3 text-emerald-400" />
               </div>
               <span class="text-sm text-slate-300">{{ detail }}</span>
+            </div>
+          </div>
+
+          <!-- Password setup (only for password step) -->
+          <div v-if="currentStepData.id === 'password'" class="mb-6 sm:mb-8">
+            <div v-if="passwordSaved" class="flex items-center gap-3 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+              <CheckCircle2 class="w-5 h-5 text-emerald-400 shrink-0" />
+              <span class="text-sm text-emerald-300">密碼已更新！</span>
+            </div>
+            <div v-else class="space-y-3">
+              <div class="relative">
+                <input
+                  v-model="newPassword"
+                  :type="showPassword ? 'text' : 'password'"
+                  placeholder="輸入新密碼（至少 6 個字元）"
+                  class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 pr-10 text-slate-200 focus:ring-2 focus:ring-cyan-500 outline-none text-sm"
+                />
+                <button
+                  type="button"
+                  @click="showPassword = !showPassword"
+                  class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                >
+                  <EyeOff v-if="showPassword" class="w-4 h-4" />
+                  <Eye v-else class="w-4 h-4" />
+                </button>
+              </div>
+              <input
+                v-model="confirmPassword"
+                :type="showPassword ? 'text' : 'password'"
+                placeholder="再次輸入新密碼"
+                class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-slate-200 focus:ring-2 focus:ring-cyan-500 outline-none text-sm"
+                @keyup.enter="savePassword"
+              />
+              <div v-if="passwordError" class="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+                {{ passwordError }}
+              </div>
+              <button
+                @click="savePassword"
+                :disabled="passwordSaving || !newPassword"
+                class="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors"
+              >
+                {{ passwordSaving ? '儲存中...' : '設定密碼' }}
+              </button>
+              <p class="text-xs text-slate-500">也可以跳過此步驟，之後在設定頁面修改。</p>
             </div>
           </div>
 
