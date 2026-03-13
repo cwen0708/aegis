@@ -122,11 +122,9 @@ async def _process_pending_cards():
             project = session.get(Project, idx.project_id)
 
             # 判斷此階段是否需要 AI 處理
-            # 根據 stage_type 和 is_ai_stage 決定（通用化工作流）
             should_ai_process = (
                 stage_list
                 and stage_list.is_ai_stage
-                and stage_list.stage_type in ["auto_process", "auto_review"]
             )
 
             if should_ai_process:
@@ -177,7 +175,7 @@ async def _process_pending_cards():
                     workspace_dir=workspace_dir, member_slug=member_slug,
                 ))
             else:
-                # 非 AI 處理階段（manual, terminal 或 is_ai_stage=False），清除 pending 狀態
+                # 非 AI 處理階段，清除 pending 狀態
                 project_path = project.path if project else "."
                 _update_card_status(session, idx, "idle", project_path)
 
@@ -307,12 +305,12 @@ def _parse_and_create_cards(
                     if member_list:
                         target_list_id = member_list.id
                     else:
-                        # fallback: 第一個 auto_process list
+                        # fallback: 第一個 AI 處理階段
                         fallback_list = session.exec(
                             select(StageList).where(
                                 StageList.project_id == effective_project_id,
-                                StageList.stage_type == "auto_process",
-                            )
+                                StageList.is_ai_stage == True,
+                            ).order_by(StageList.position)
                         ).first()
                         if fallback_list:
                             target_list_id = fallback_list.id

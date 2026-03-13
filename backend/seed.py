@@ -175,7 +175,7 @@ def _sync_system_cron_jobs(session: Session):
         if list_name not in existing_lists:
             session.add(StageList(
                 project_id=aegis.id, name=list_name, position=pos,
-                stage_type="auto_process", is_ai_stage=True,
+                is_ai_stage=True,
             ))
             print(f"  - Added missing system list: {list_name}")
     session.commit()
@@ -506,7 +506,6 @@ def seed_data():
                     project_id=aegis.id,
                     name=list_name,
                     position=pos,
-                    stage_type="auto_process",
                     is_ai_stage=True,
                 )
                 session.add(sl)
@@ -529,22 +528,21 @@ def seed_data():
             print("  - Added Aegis Demo project")
 
             # ── 6. StageLists ──
-            # 階段配置：(name, stage_type, is_ai_stage)
+            # (name, is_ai_stage)
             stages_config = [
-                ("Backlog", "manual", False),
-                ("Planning", "auto_process", True),
-                ("Developing", "auto_process", True),
-                ("Verifying", "auto_review", True),
-                ("Done", "terminal", False),
-                ("Aborted", "terminal", False),
+                ("Backlog", False),
+                ("Planning", True),
+                ("Developing", True),
+                ("Verifying", True),
+                ("Done", False),
+                ("Aborted", False),
             ]
             stage_objs = {}
-            for idx, (name, stage_type, is_ai) in enumerate(stages_config):
+            for idx, (name, is_ai) in enumerate(stages_config):
                 sl = StageList(
                     project_id=p1.id,
                     name=name,
                     position=idx,
-                    stage_type=stage_type,
                     is_ai_stage=is_ai,
                 )
                 session.add(sl)

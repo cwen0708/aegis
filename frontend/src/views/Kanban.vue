@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
-import { Plus, Play, Pause, Square, Trash2, Zap, MoreVertical, ChevronLeft, ChevronRight, FolderOpen, ListTodo, UserCircle, Settings2, Bot, Hand, CheckCircle, XCircle, Archive, RotateCcw, Loader2, Lock } from 'lucide-vue-next'
+import { Plus, Play, Pause, Square, Trash2, Zap, MoreVertical, ChevronLeft, ChevronRight, FolderOpen, ListTodo, UserCircle, Settings2, Bot, Hand, Archive, RotateCcw, Loader2, Lock } from 'lucide-vue-next'
 import draggable from 'vuedraggable'
 import { useAegisStore } from '../stores/aegis'
 import { useAuthStore } from '../stores/auth'
@@ -344,7 +344,6 @@ const configuringStage = ref<any>(null)
 const stageConfigForm = ref({
   name: '',
   description: '',
-  stage_type: 'auto_process',
   is_ai_stage: true,
   on_success_action: 'none',
   on_fail_action: 'none',
@@ -352,19 +351,11 @@ const stageConfigForm = ref({
 
 useEscapeKey(showStageConfigDialog, () => { showStageConfigDialog.value = false })
 
-const stageTypeOptions = [
-  { value: 'manual', label: '手動', icon: Hand, desc: '不自動執行，需手動觸發' },
-  { value: 'auto_process', label: '自動執行', icon: Bot, desc: '卡片進入後自動執行 AI 任務' },
-  { value: 'auto_review', label: '自動審核', icon: CheckCircle, desc: '自動執行 AI 審核/驗證' },
-  { value: 'terminal', label: '終止階段', icon: XCircle, desc: '流程結束，不執行任何操作' },
-]
-
 function openStageConfigDialog(stage: any) {
   configuringStage.value = stage
   stageConfigForm.value = {
     name: stage.name || '',
     description: stage.description || '',
-    stage_type: stage.stage_type || 'auto_process',
     is_ai_stage: stage.is_ai_stage ?? true,
     on_success_action: stage.on_success_action || 'none',
     on_fail_action: stage.on_fail_action || 'none',
@@ -402,10 +393,6 @@ async function saveStageConfig() {
   } catch (e: any) {
     store.addToast(e.message || '儲存失敗', 'error')
   }
-}
-
-function getStageTypeIcon(stageType: string) {
-  return stageTypeOptions.find(o => o.value === stageType)?.icon || Bot
 }
 
 // 階段排序
@@ -572,17 +559,12 @@ async function unarchiveCard(cardId: number) {
       <div v-for="stage in boardData" :key="stage.id" class="w-80 shrink-0 bg-slate-800/40 rounded-xl p-4 border border-slate-700/50 flex flex-col max-h-full">
         <div class="flex items-center justify-between mb-4 px-1">
           <h3 class="font-medium text-slate-200 flex items-center gap-2">
-            <!-- Stage Type Icon -->
+            <!-- AI Stage Icon -->
             <component
-              :is="getStageTypeIcon(stage.stage_type)"
+              :is="stage.is_ai_stage ? Bot : Hand"
               class="w-4 h-4"
-              :class="{
-                'text-slate-500': stage.stage_type === 'manual',
-                'text-emerald-400': stage.stage_type === 'auto_process',
-                'text-blue-400': stage.stage_type === 'auto_review',
-                'text-slate-600': stage.stage_type === 'terminal',
-              }"
-              :title="stageTypeOptions.find(o => o.value === stage.stage_type)?.label || '自動執行'"
+              :class="stage.is_ai_stage ? 'text-emerald-400' : 'text-slate-500'"
+              :title="stage.is_ai_stage ? 'AI 自動處理' : '手動處理'"
             />
             {{ stage.name }}
             <span v-if="stage.cards.some((c: any) => c.status === 'running')" class="relative flex h-2 w-2 ml-1">
@@ -732,14 +714,9 @@ async function unarchiveCard(cardId: number) {
       <div class="flex items-center justify-between mb-3 px-1">
         <h3 class="font-medium text-slate-200 flex items-center gap-2">
           <component
-            :is="getStageTypeIcon(currentMobileStage.stage_type)"
+            :is="currentMobileStage.is_ai_stage ? Bot : Hand"
             class="w-4 h-4"
-            :class="{
-              'text-slate-500': currentMobileStage.stage_type === 'manual',
-              'text-emerald-400': currentMobileStage.stage_type === 'auto_process',
-              'text-blue-400': currentMobileStage.stage_type === 'auto_review',
-              'text-slate-600': currentMobileStage.stage_type === 'terminal',
-            }"
+            :class="currentMobileStage.is_ai_stage ? 'text-emerald-400' : 'text-slate-500'"
           />
           {{ currentMobileStage.name }}
           <span class="text-xs text-slate-500">({{ currentMobileStage.cards.length }})</span>
@@ -1107,29 +1084,7 @@ async function unarchiveCard(cardId: number) {
           />
         </div>
 
-        <!-- Stage Type -->
-        <div class="space-y-2">
-          <label class="block text-xs font-medium text-slate-400">階段類型</label>
-          <div class="space-y-1.5">
-            <button
-              v-for="opt in stageTypeOptions"
-              :key="opt.value"
-              @click="stageConfigForm.stage_type = opt.value"
-              class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors border"
-              :class="stageConfigForm.stage_type === opt.value
-                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                : 'border-transparent hover:bg-slate-700/50 hover:border-slate-600 text-slate-300'"
-            >
-              <component :is="opt.icon" class="w-4 h-4" />
-              <div class="flex-1">
-                <div class="text-sm font-medium">{{ opt.label }}</div>
-                <div class="text-[10px] text-slate-500">{{ opt.desc }}</div>
-              </div>
-            </button>
-          </div>
-        </div>
-
-        <!-- Is AI Stage -->
+        <!-- AI 處理開關 -->
         <div class="flex items-center justify-between py-2 px-1">
           <div>
             <div class="text-sm text-slate-200">AI 處理階段</div>

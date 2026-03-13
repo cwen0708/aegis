@@ -95,7 +95,6 @@ class StageListResponse(BaseModel):
     member: Optional[MemberBrief] = None
     cards: List[CardResponse] = []
     # 階段配置
-    stage_type: str = "auto_process"
     system_instruction: Optional[str] = None
     prompt_template: Optional[str] = None
     is_ai_stage: bool = True
@@ -157,23 +156,26 @@ def create_project(data: ProjectCreate, session: Session = Depends(get_session))
     session.commit()
     session.refresh(project)
 
-    # 4. 建立預設 StageList（含階段配置）
-    # (name, stage_type, is_ai, on_success_action, on_fail_action)
+    # 4. 建立預設 StageList
+    # (name, is_ai, on_success, on_fail, description)
     stages_config = [
-        ("Backlog", "manual", False, "none", "none"),
-        ("Scheduled", "auto_process", True, "delete", "none"),
-        ("Planning", "auto_process", True, "none", "none"),
-        ("Developing", "auto_process", True, "none", "none"),
-        ("Verifying", "auto_review", True, "none", "none"),
-        ("Done", "terminal", False, "none", "none"),
-        ("Aborted", "terminal", False, "none", "none"),
+        ("Backlog", False, "none", "none", "待處理任務佇列。手動或由排程系統加入卡片，不會自動執行。"),
+        ("Scheduled", True, "delete", "none", "排程觸發的臨時任務。由 CronJob 自動建立卡片，執行完成後依動作設定處理（預設刪除）。"),
+        ("Planning", True, "none", "none",
+         "任務規劃階段。AI 分析需求，拆解為具體步驟，確認技術方案與影響範圍，產出執行計畫後將卡片移至下一階段。"),
+        ("Developing", True, "none", "none",
+         "開發執行階段。AI 依據規劃方案編寫程式碼、建立或更新測試、提交 commit，完成後將卡片移至驗證階段。"),
+        ("Verifying", True, "none", "none",
+         "驗證審查階段。AI 執行測試、檢查程式碼品質與安全性、確認功能符合需求，通過後移至 Done，未通過則退回 Developing。"),
+        ("Done", False, "none", "none", "已完成。任務已通過驗證，等待人工確認或合併。"),
+        ("Aborted", False, "none", "none", "已中止。任務因故取消或多次失敗後放棄。"),
     ]
-    for idx, (name, stage_type, is_ai, on_success, on_fail) in enumerate(stages_config):
+    for idx, (name, is_ai, on_success, on_fail, desc) in enumerate(stages_config):
         sl = StageList(
             project_id=project.id,
             name=name,
+            description=desc,
             position=idx,
-            stage_type=stage_type,
             is_ai_stage=is_ai,
             on_success_action=on_success,
             on_fail_action=on_fail,
@@ -235,7 +237,6 @@ def _ensure_member_inboxes(session: Session, project_id: int):
             name=f"{m.name} 收件匣",
             position=pos,
             member_id=m.id,
-            stage_type="auto_process",
             is_ai_stage=True,
             is_member_bound=True,
         ))
@@ -289,7 +290,6 @@ def read_project_board(project_id: int, session: Session = Depends(get_session))
                 description=ci.description, status=ci.status, created_at=ci.created_at
             ) for ci in list_cards],
             # 階段配置
-            stage_type=l.stage_type,
             system_instruction=l.system_instruction,
             prompt_template=l.prompt_template,
             is_ai_stage=l.is_ai_stage,
@@ -308,7 +308,6 @@ class StageListUpdateRequest(BaseModel):
     position: Optional[int] = None
     member_id: Optional[int] = None  # null = 使用預設路由
     # 階段行為配置
-    stage_type: Optional[str] = None  # manual, auto_process, auto_review, terminal
     system_instruction: Optional[str] = None
     prompt_template: Optional[str] = None
     is_ai_stage: Optional[bool] = None
@@ -344,8 +343,6 @@ def update_stage_list(list_id: int, data: StageListUpdateRequest, session: Sessi
         stage_list.member_id = data.member_id if data.member_id != 0 else None
 
     # 更新階段配置
-    if data.stage_type is not None:
-        stage_list.stage_type = data.stage_type
     if data.system_instruction is not None:
         stage_list.system_instruction = data.system_instruction if data.system_instruction else None
     if data.prompt_template is not None:
@@ -376,7 +373,6 @@ def update_stage_list(list_id: int, data: StageListUpdateRequest, session: Sessi
         "name": stage_list.name,
         "member_id": stage_list.member_id,
         "member": member_brief,
-        "stage_type": stage_list.stage_type,
         "system_instruction": stage_list.system_instruction,
         "prompt_template": stage_list.prompt_template,
         "is_ai_stage": stage_list.is_ai_stage,
@@ -426,7 +422,6 @@ def create_member_bound_list(project_id: int, data: MemberListCreateRequest, ses
         name=name,
         position=new_position,
         member_id=data.member_id,
-        stage_type="auto_process",
         is_ai_stage=True,
         is_member_bound=True,
     )
@@ -1665,20 +1660,19 @@ async def _do_clone(task_id: str, clone_url: str, destination: str, project_name
             session.refresh(project)
 
             stages_config = [
-                ("Backlog", "manual", False, "none", "none"),
-                ("Scheduled", "auto_process", True, "delete", "none"),
-                ("Planning", "auto_process", True, "none", "none"),
-                ("Developing", "auto_process", True, "none", "none"),
-                ("Verifying", "auto_review", True, "none", "none"),
-                ("Done", "terminal", False, "none", "none"),
-                ("Aborted", "terminal", False, "none", "none"),
+                ("Backlog", False, "none", "none"),
+                ("Scheduled", True, "delete", "none"),
+                ("Planning", True, "none", "none"),
+                ("Developing", True, "none", "none"),
+                ("Verifying", True, "none", "none"),
+                ("Done", False, "none", "none"),
+                ("Aborted", False, "none", "none"),
             ]
-            for idx, (name, stage_type, is_ai, on_success, on_fail) in enumerate(stages_config):
+            for idx, (name, is_ai, on_success, on_fail) in enumerate(stages_config):
                 sl = StageList(
                     project_id=project.id,
                     name=name,
                     position=idx,
-                    stage_type=stage_type,
                     is_ai_stage=is_ai,
                     on_success_action=on_success,
                     on_fail_action=on_fail,
