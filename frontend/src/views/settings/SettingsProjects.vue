@@ -67,6 +67,7 @@ const cloneStatus = ref('')
 const showRelocate = ref(false)
 const relocatePath = ref('')
 const relocateSaving = ref(false)
+const confirmRelocate = ref(false)
 
 // Delete confirm
 const confirmDelete = ref(false)
@@ -575,7 +576,7 @@ const canSaveGithub = computed(() => {
                   取消
                 </button>
                 <button
-                  @click="doRelocate"
+                  @click="confirmRelocate = true"
                   :disabled="relocateSaving || !relocatePath.trim() || relocatePath.trim() === form.path"
                   class="flex items-center gap-1 px-3 py-1.5 text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition"
                 >
@@ -784,6 +785,15 @@ const canSaveGithub = computed(() => {
       :message="`確定要刪除「${deleteTarget?.name}」？此操作會刪除所有相關的卡片和資料。`"
       confirm-text="刪除"
       @confirm="doDelete"
+    />
+
+    <!-- Confirm Relocate -->
+    <ConfirmDialog
+      v-model:show="confirmRelocate"
+      title="搬移專案目錄"
+      :message="`確定要將「${editingProject?.name}」搬移至\n${relocatePath}？`"
+      confirm-text="搬移"
+      @confirm="doRelocate"
     />
   </div>
 </template>
