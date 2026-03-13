@@ -109,7 +109,7 @@ const steps: Step[] = [
       'Gemini CLI：用於執行 Gemini 任務',
       '可在「設定」頁面一鍵安裝',
     ],
-    action: { label: '前往設定', route: '/settings' },
+    action: { label: '前往終端管理', route: '/settings/tools' },
   },
   {
     id: 'team',
@@ -122,7 +122,7 @@ const steps: Step[] = [
       '綁定 AI 帳號到成員',
       '成員會在辦公室場景中以角色呈現',
     ],
-    action: { label: '前往團隊', route: '/team' },
+    action: { label: '前往團隊', route: '/settings/team' },
   },
   {
     id: 'projects',
