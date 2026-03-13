@@ -1678,7 +1678,10 @@ def relocate_project(project_id: int, data: ProjectRelocateRequest, session: Ses
     if new_path.exists():
         raise HTTPException(status_code=400, detail="目標路徑已存在")
     if not new_path.parent.exists():
-        raise HTTPException(status_code=400, detail="目標路徑的父目錄不存在")
+        try:
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"無法建立父目錄: {e}")
 
     # 檢查是否有執行中的任務
     running = session.exec(
