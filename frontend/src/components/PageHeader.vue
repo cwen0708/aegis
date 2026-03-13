@@ -3,6 +3,14 @@
     <!-- Icon + Project selector -->
     <div class="flex items-center gap-2 min-w-0">
       <button
+        @click="selectAdjacentProject(-1)"
+        :disabled="!canGoPrev"
+        class="p-1 rounded transition-colors"
+        :class="canGoPrev ? 'text-slate-400 hover:text-emerald-400 hover:bg-slate-700' : 'text-slate-700 cursor-default'"
+      >
+        <ChevronLeft class="w-3.5 sm:w-4 h-3.5 sm:h-4" />
+      </button>
+      <button
         ref="triggerEl"
         @click="showDropdown = !showDropdown"
         class="flex items-center gap-1.5 sm:gap-2 min-w-0 group"
@@ -15,6 +23,14 @@
           class="w-3 sm:w-4 h-3 sm:h-4 text-slate-500 shrink-0 transition-transform"
           :class="{ 'rotate-180': showDropdown }"
         />
+      </button>
+      <button
+        @click="selectAdjacentProject(1)"
+        :disabled="!canGoNext"
+        class="p-1 rounded transition-colors"
+        :class="canGoNext ? 'text-slate-400 hover:text-emerald-400 hover:bg-slate-700' : 'text-slate-700 cursor-default'"
+      >
+        <ChevronRight class="w-3.5 sm:w-4 h-3.5 sm:h-4" />
       </button>
     </div>
 
@@ -54,7 +70,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { FolderOpen, ChevronDown } from 'lucide-vue-next'
+import { FolderOpen, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { useProjectSelector } from '../composables/useProjectSelector'
 import type { Component } from 'vue'
 
@@ -62,7 +78,16 @@ defineProps<{
   icon: Component
 }>()
 
-const { projects, selectedProjectId, currentProject, selectProject } = useProjectSelector()
+const { projects, selectedProjectId, currentProject, selectProject, selectAdjacentProject } = useProjectSelector()
+
+const canGoPrev = computed(() => {
+  const idx = projects.value.findIndex(p => p.id === selectedProjectId.value)
+  return idx > 0
+})
+const canGoNext = computed(() => {
+  const idx = projects.value.findIndex(p => p.id === selectedProjectId.value)
+  return idx >= 0 && idx < projects.value.length - 1
+})
 const showDropdown = ref(false)
 const triggerEl = ref<HTMLElement | null>(null)
 
