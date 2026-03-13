@@ -124,13 +124,33 @@ const liveLines = computed(() => {
           if (block.type === 'text' && block.text) {
             parsed.push(block.text)
           } else if (block.type === 'tool_use') {
-            parsed.push(`[${block.name}]`)
+            // 顯示工具名稱 + 輸入摘要
+            const input = block.input || {}
+            let detail = ''
+            if (block.name === 'Read' && input.file_path) {
+              detail = input.file_path
+            } else if (block.name === 'Write' && input.file_path) {
+              detail = input.file_path
+            } else if (block.name === 'Edit' && input.file_path) {
+              detail = input.file_path
+            } else if (block.name === 'Bash' && input.command) {
+              detail = input.command.length > 80 ? input.command.slice(0, 80) + '…' : input.command
+            } else if (block.name === 'Glob' && input.pattern) {
+              detail = input.pattern
+            } else if (block.name === 'Grep' && input.pattern) {
+              detail = input.pattern
+            } else {
+              const keys = Object.keys(input)
+              if (keys.length > 0) detail = keys.join(', ')
+            }
+            parsed.push(detail ? `[${block.name}] ${detail}` : `[${block.name}]`)
           }
         }
       }
     } catch {
-      // 非 JSON 行直接顯示
-      if (line.trim()) parsed.push(line)
+      // 過濾掉 worker 的處理中提示，只保留有意義的非 JSON 行
+      const trimmed = line.trim()
+      if (trimmed && !trimmed.startsWith('⏳')) parsed.push(trimmed)
     }
   }
   return parsed
@@ -441,7 +461,7 @@ function providerLabel(provider: string): string {
 
             <!-- 任務標題 + 時間戳 -->
             <p v-if="currentDialogue && !isTyping" class="text-xs text-white/80 mt-2 font-bold" style="text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;">
-              {{ currentDialogue.card_title }} · {{ new Date(currentDialogue.created_at).toLocaleString('zh-TW') }}
+              {{ currentDialogue.card_title }} · {{ new Date(currentDialogue.created_at.endsWith('Z') ? currentDialogue.created_at : currentDialogue.created_at + 'Z').toLocaleString('zh-TW') }}
             </p>
           </div>
         </div>
