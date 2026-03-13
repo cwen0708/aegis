@@ -25,6 +25,12 @@
       載入中...
     </div>
 
+    <!-- Image preview -->
+    <div v-else-if="isImage" class="flex-1 flex items-center justify-center p-6 overflow-auto bg-[#0c0e14]">
+      <img :src="imageUrl" :alt="path" class="max-w-full max-h-full object-contain rounded-lg" />
+    </div>
+
+    <!-- Binary (non-image) -->
     <div v-else-if="fileData?.binary" class="flex-1 flex items-center justify-center text-slate-600 text-sm">
       二進位檔案，無法預覽
     </div>
@@ -37,14 +43,14 @@
       <!-- Markdown preview -->
       <div v-if="isMarkdown && showPreview" class="p-6 prose prose-invert prose-sm max-w-none" v-html="renderedMarkdown"></div>
 
-      <!-- Source code -->
+      <!-- Source code with syntax highlighting -->
       <div v-else class="flex text-[13px] font-mono leading-5">
         <!-- 行號 -->
         <div class="select-none text-right pr-3 pl-4 py-3 text-slate-600 border-r border-slate-700/50 bg-slate-850 shrink-0">
           <div v-for="n in lineCount" :key="n">{{ n }}</div>
         </div>
         <!-- 內容 -->
-        <pre class="flex-1 py-3 px-4 text-slate-300 overflow-x-auto"><code>{{ fileData.content }}</code></pre>
+        <pre class="flex-1 py-3 px-4 overflow-x-auto m-0"><code class="hljs" v-html="highlightedCode"></code></pre>
       </div>
     </div>
 
@@ -59,6 +65,7 @@
 import { ref, computed, watch } from 'vue'
 import { File as FileIcon, Eye, Code } from 'lucide-vue-next'
 import { marked } from 'marked'
+import hljs from 'highlight.js/lib/common'
 import { config } from '../../config'
 
 const props = defineProps<{
@@ -67,6 +74,8 @@ const props = defineProps<{
 }>()
 
 const API = config.apiUrl
+
+const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico', '.bmp'])
 
 interface FileData {
   path: string
@@ -85,6 +94,16 @@ const isMarkdown = computed(() => {
   return props.path?.toLowerCase().endsWith('.md')
 })
 
+const isImage = computed(() => {
+  if (!props.path) return false
+  const ext = '.' + props.path.split('.').pop()?.toLowerCase()
+  return IMAGE_EXTS.has(ext)
+})
+
+const imageUrl = computed(() => {
+  return `${API}/api/v1/projects/${props.projectId}/files/raw?path=${encodeURIComponent(props.path)}`
+})
+
 const renderedMarkdown = computed(() => {
   if (!fileData.value?.content) return ''
   return marked.parse(fileData.value.content) as string
@@ -93,6 +112,21 @@ const renderedMarkdown = computed(() => {
 const lineCount = computed(() => {
   if (!fileData.value?.content) return 0
   return fileData.value.content.split('\n').length
+})
+
+// highlight.js 不支援的語言做映射
+const LANG_ALIAS: Record<string, string> = { vue: 'xml', svelte: 'xml', jsx: 'javascript' }
+
+const highlightedCode = computed(() => {
+  if (!fileData.value?.content) return ''
+  let lang = fileData.value.language || 'text'
+  lang = LANG_ALIAS[lang] || lang
+  try {
+    if (lang !== 'text' && hljs.getLanguage(lang)) {
+      return hljs.highlight(fileData.value.content, { language: lang }).value
+    }
+  } catch { /* fallback */ }
+  return hljs.highlightAuto(fileData.value.content).value
 })
 
 function formatSize(bytes: number): string {
@@ -104,6 +138,12 @@ function formatSize(bytes: number): string {
 async function loadFile() {
   if (!props.path) {
     fileData.value = null
+    return
+  }
+  // Image files don't need content API
+  if (isImage.value) {
+    fileData.value = null
+    loading.value = false
     return
   }
   loading.value = true
@@ -142,4 +182,36 @@ watch(() => props.projectId, () => { fileData.value = null })
 .prose :deep(th) { background: #1e293b; font-weight: 600; }
 .prose :deep(hr) { border: none; border-top: 1px solid #334155; margin: 1.5em 0; }
 .prose :deep(img) { max-width: 100%; border-radius: 8px; }
+
+/* highlight.js dark theme (GitHub Dark style) */
+.hljs { color: #c9d1d9; background: transparent; }
+.hljs :deep(.hljs-keyword) { color: #ff7b72; }
+.hljs :deep(.hljs-built_in) { color: #ffa657; }
+.hljs :deep(.hljs-type) { color: #ffa657; }
+.hljs :deep(.hljs-literal) { color: #79c0ff; }
+.hljs :deep(.hljs-number) { color: #79c0ff; }
+.hljs :deep(.hljs-string) { color: #a5d6ff; }
+.hljs :deep(.hljs-comment) { color: #8b949e; font-style: italic; }
+.hljs :deep(.hljs-function) { color: #d2a8ff; }
+.hljs :deep(.hljs-title) { color: #d2a8ff; }
+.hljs :deep(.hljs-params) { color: #c9d1d9; }
+.hljs :deep(.hljs-attr) { color: #79c0ff; }
+.hljs :deep(.hljs-attribute) { color: #79c0ff; }
+.hljs :deep(.hljs-selector-tag) { color: #7ee787; }
+.hljs :deep(.hljs-selector-class) { color: #d2a8ff; }
+.hljs :deep(.hljs-selector-id) { color: #ffa657; }
+.hljs :deep(.hljs-variable) { color: #ffa657; }
+.hljs :deep(.hljs-template-variable) { color: #ffa657; }
+.hljs :deep(.hljs-tag) { color: #7ee787; }
+.hljs :deep(.hljs-name) { color: #7ee787; }
+.hljs :deep(.hljs-meta) { color: #79c0ff; }
+.hljs :deep(.hljs-symbol) { color: #79c0ff; }
+.hljs :deep(.hljs-regexp) { color: #a5d6ff; }
+.hljs :deep(.hljs-deletion) { color: #ffa198; background: #490202; }
+.hljs :deep(.hljs-addition) { color: #aff5b4; background: #04260f; }
+.hljs :deep(.hljs-section) { color: #d2a8ff; font-weight: bold; }
+.hljs :deep(.hljs-bullet) { color: #ffa657; }
+.hljs :deep(.hljs-subst) { color: #c9d1d9; }
+.hljs :deep(.hljs-property) { color: #79c0ff; }
+.hljs :deep(.hljs-doctag) { color: #ff7b72; }
 </style>

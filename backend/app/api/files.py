@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlmodel import Session
 
@@ -26,6 +27,9 @@ EXCLUDED_NAMES = {
 }
 
 MAX_FILE_SIZE = 1 * 1024 * 1024  # 1MB
+
+# 支援預覽的圖片副檔名
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".bmp"}
 
 
 # ==========================================
@@ -207,6 +211,26 @@ def read_file_content(
         "truncated": truncated,
         "language": _guess_language(target),
     }
+
+
+@router.get("/projects/{project_id}/files/raw")
+def raw_file(
+    project_id: int,
+    path: str = Query(..., description="檔案相對路徑"),
+    session: Session = Depends(get_session),
+):
+    """提供原始檔案（圖片預覽用）"""
+    project = _get_project(project_id, session)
+    target = _resolve_safe_path(project.path, path)
+
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    if target.suffix.lower() not in IMAGE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Only image files supported")
+
+    mime, _ = mimetypes.guess_type(str(target))
+    return FileResponse(target, media_type=mime or "application/octet-stream")
 
 
 def _guess_language(file_path: Path) -> str:

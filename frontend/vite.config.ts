@@ -8,6 +8,15 @@ export default defineConfig({
     vue(),
     tailwindcss(),
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'highlight': ['highlight.js'],
+        },
+      },
+    },
+  },
   server: {
     port: 8888,
     strictPort: true,
