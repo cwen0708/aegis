@@ -86,15 +86,28 @@ echo -e "${NC}"
 # ============================================
 print_step "Checking prerequisites..."
 
-# Check Node.js
+# Check Node.js (require >= 18)
+NODE_OK=false
 if command -v node &> /dev/null; then
-    NODE_VERSION=$(node --version)
-    print_success "Node.js: $NODE_VERSION"
-else
-    print_error "Node.js not found. Please install Node.js 18+"
-    echo "  Ubuntu/Debian: curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs"
-    echo "  Or use nvm: curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash"
-    exit 1
+    NODE_VERSION=$(node --version | sed 's/v//')
+    NODE_MAJOR=$(echo "$NODE_VERSION" | cut -d. -f1)
+    if [ "$NODE_MAJOR" -ge 18 ] 2>/dev/null; then
+        print_success "Node.js: v$NODE_VERSION"
+        NODE_OK=true
+    else
+        print_warn "Node.js v$NODE_VERSION is too old (require >= 18)"
+    fi
+fi
+
+if [ "$NODE_OK" = false ]; then
+    print_step "Installing Node.js 20..."
+    if curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs; then
+        print_success "Node.js: $(node --version)"
+    else
+        print_error "Failed to install Node.js. Please install Node.js 18+ manually."
+        echo "  https://nodejs.org/en/download/"
+        exit 1
+    fi
 fi
 
 # Check npm
@@ -128,6 +141,18 @@ if [ -z "$PYTHON_CMD" ]; then
     exit 1
 fi
 
+# Check python3-venv
+if ! $PYTHON_CMD -m venv --help &> /dev/null; then
+    print_warn "python3-venv not found, installing..."
+    PY_MINOR=$($PYTHON_CMD --version 2>&1 | grep -oP '3\.\d+')
+    if sudo apt-get install -y "python${PY_MINOR}-venv" 2>/dev/null; then
+        print_success "python${PY_MINOR}-venv installed"
+    else
+        print_error "Failed to install python3-venv. Please run: sudo apt install python3-venv"
+        exit 1
+    fi
+fi
+
 # Check Git (only for dev mode)
 if [ "$DEV_MODE" = true ]; then
     if command -v git &> /dev/null; then
@@ -157,8 +182,8 @@ if [ -d "$INSTALL_DIR" ]; then
     else
         print_warn "Overwriting (--yes mode)"
     fi
-    # Clean existing contents for fresh install
-    rm -rf "$INSTALL_DIR"/*
+    # Clean existing directory completely for fresh install
+    rm -rf "$INSTALL_DIR"
 fi
 
 mkdir -p "$INSTALL_DIR"
