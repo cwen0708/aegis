@@ -40,6 +40,12 @@ def _migrate_db():
             cur.execute("ALTER TABLE stagelist ADD COLUMN is_member_bound INTEGER DEFAULT 0")
             logger.info("[Migration] Added 'is_member_bound' to stagelist")
 
+        # TaskLog 加 output 欄位
+        cols = [row[1] for row in cur.execute("PRAGMA table_info(tasklog)").fetchall()]
+        if "output" not in cols:
+            cur.execute("ALTER TABLE tasklog ADD COLUMN output TEXT DEFAULT ''")
+            logger.info("[Migration] Added 'output' column to tasklog")
+
         # StageList: OneStack → Inbound 改名
         renamed = cur.execute(
             "UPDATE stagelist SET name = 'Inbound' WHERE name = 'OneStack'"

@@ -795,6 +795,36 @@ def get_cron_job(job_id: int, session: Session = Depends(get_session)):
 
 
 # ==========================================
+# TaskLog（任務執行記錄）
+# ==========================================
+@router.get("/task-logs/")
+def list_task_logs(
+    member_id: Optional[int] = None,
+    limit: int = 50,
+    offset: int = 0,
+    session: Session = Depends(get_session),
+):
+    """取得任務執行記錄（可按成員篩選）"""
+    query = select(TaskLog)
+    count_query = select(sa_func.count()).select_from(TaskLog)
+    if member_id is not None:
+        query = query.where(TaskLog.member_id == member_id)
+        count_query = count_query.where(TaskLog.member_id == member_id)
+    logs = session.exec(query.order_by(TaskLog.created_at.desc()).offset(offset).limit(limit)).all()
+    total = session.exec(count_query).one()
+    return {"items": logs, "total": total}
+
+
+@router.get("/task-logs/{log_id}")
+def get_task_log(log_id: int, session: Session = Depends(get_session)):
+    """取得單筆任務執行記錄詳情"""
+    log = session.get(TaskLog, log_id)
+    if not log:
+        raise HTTPException(status_code=404, detail="TaskLog not found")
+    return log
+
+
+# ==========================================
 # CronLog（排程執行記錄）
 # ==========================================
 @router.get("/cron-jobs/{job_id}/logs")

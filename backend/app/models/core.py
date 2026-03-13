@@ -177,6 +177,7 @@ class TaskLog(SQLModel, table=True):
     model: str = ""  # opus, sonnet, gemini-2.5-flash...
     member_id: Optional[int] = Field(default=None)
     status: str = ""  # success / error / timeout
+    output: str = Field(default="")  # AI 完整輸出
     duration_ms: int = Field(default=0)
     input_tokens: int = Field(default=0)
     output_tokens: int = Field(default=0)

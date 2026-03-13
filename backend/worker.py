@@ -325,7 +325,7 @@ def parse_claude_json(output: str) -> Dict[str, Any]:
 
 
 def save_task_log(card_id: int, card_title: str, project_name: str, provider: str,
-                  member_id: Optional[int], status: str, token_info: Dict[str, Any]):
+                  member_id: Optional[int], status: str, output: str, token_info: Dict[str, Any]):
     """儲存任務執行記錄"""
     try:
         with Session(engine) as session:
@@ -337,6 +337,7 @@ def save_task_log(card_id: int, card_title: str, project_name: str, provider: st
                 model=token_info.get("model", ""),
                 member_id=member_id,
                 status=status,
+                output=output,
                 duration_ms=token_info.get("duration_ms", 0),
                 input_tokens=token_info.get("input_tokens", 0),
                 output_tokens=token_info.get("output_tokens", 0),
@@ -798,7 +799,7 @@ def run_task_pty_windows(
         if token_info.get("result_text"):
             actual_output = token_info["result_text"]
 
-    save_task_log(card_id, card_title, project_name, provider_name, member_id, status, token_info)
+    save_task_log(card_id, card_title, project_name, provider_name, member_id, status, actual_output, token_info)
 
     return {
         "status": status,
@@ -870,7 +871,7 @@ def run_task_subprocess(
             if token_info.get("result_text"):
                 actual_output = token_info["result_text"]
 
-        save_task_log(card_id, card_title, project_name, provider_name, member_id, status, token_info)
+        save_task_log(card_id, card_title, project_name, provider_name, member_id, status, actual_output, token_info)
 
         return {
             "status": status,
@@ -882,7 +883,7 @@ def run_task_subprocess(
 
     except Exception as e:
         logger.exception(f"[Task {card_id}] Subprocess execution failed: {e}")
-        save_task_log(card_id, card_title, project_name, provider_name, member_id, "error", {})
+        save_task_log(card_id, card_title, project_name, provider_name, member_id, "error", str(e), {})
         return {"status": "error", "output": str(e), "provider": provider_name}
 
     finally:
