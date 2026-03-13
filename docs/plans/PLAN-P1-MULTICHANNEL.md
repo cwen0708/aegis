@@ -3,7 +3,7 @@
 > 狀態：正式版
 > 建立日期：2026-03-09
 > 參考來源：Nanobot, ZeroClaw, PicoClaw 最佳實踐
-> 現有資源：牧陽小通 (LINE), @liang_82_bot (Telegram)
+> 現有資源：LINE Bot, Telegram Bot
 
 ---
 
@@ -12,7 +12,7 @@
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    外部平台                                  │
-│   Telegram (@liang_82_bot)  LINE (牧陽小通)  Discord (未來) │
+│   Telegram Bot    LINE Bot    Discord (未來)                 │
 └──────────────┬─────────────────────┬───────────────────────┘
                │                     │
 ┌──────────────▼─────────────────────▼───────────────────────┐
@@ -662,7 +662,7 @@ async def _on_task_complete(task_id: str, card_id: int, result: str):
 
 | 面向 | HappyNAS 現狀 | Aegis 新架構 |
 |------|---------------|--------------|
-| Bot Token | 牧陽小通、@liang_82_bot | **共用**（環境變數） |
+| Bot Token | 現有 LINE/Telegram Bot | **共用**（環境變數） |
 | Webhook | Flask on GCP | **可共用或獨立** |
 | 核心邏輯 | Happy Server → Claude CLI | Aegis Runner → Claude/Gemini |
 | 訊息格式 | 各自處理 | **統一 Inbound/Outbound** |

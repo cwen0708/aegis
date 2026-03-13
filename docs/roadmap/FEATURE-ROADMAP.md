@@ -59,7 +59,7 @@
 | # | 任務 | 參考專案 | 預估 |
 |---|------|---------|------|
 | 1 | Telegram Bot 整合 | Nanobot、zclaw | 3d |
-| 2 | LINE Bot 整合（牧陽小通復用） | HappyNAS | 2d |
+| 2 | LINE Bot 整合 | HappyNAS | 2d |
 | 3 | Discord Bot 整合 | Spacebot、PicoClaw | 2d |
 | 4 | 統一頻道管理器 | Nanobot ChannelManager | 2d |
 | 5 | 遠端建卡 API | - | 1d |

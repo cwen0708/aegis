@@ -449,7 +449,7 @@ Poller → 自動派遣 Planning（Gemini）→ Developing（Claude）
 Git commit + PR 自動生成
 ```
 
-**場景 B：Greenshepherd 平台維運**
+**場景 B：IoT 平台維運**
 ```
 邊緣計算設備告警
   ↓ (HTTP POST)

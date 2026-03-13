@@ -69,7 +69,7 @@
 | 頻道 | 技術 | 說明 | 狀態 |
 |------|------|------|:----:|
 | Telegram | python-telegram-bot | 建卡、查詢、中止 | 待開發 |
-| LINE | line-bot-sdk | 復用牧陽小通 | 待開發 |
+| LINE | line-bot-sdk | LINE Bot 整合 | 待開發 |
 | Discord | discord.py | 團隊協作 | 待開發 |
 
 ### P2: 擴展 LLM（1-2 週）
