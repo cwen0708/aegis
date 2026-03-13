@@ -181,7 +181,7 @@ function skipOnboarding() {
               <span v-else>{{ index + 1 }}</span>
             </div>
             <span :class="[
-              'text-[10px] sm:text-xs font-medium whitespace-nowrap',
+              'hidden sm:block text-xs font-medium whitespace-nowrap',
               index === currentStep ? 'text-cyan-400' : index < currentStep ? 'text-emerald-400' : 'text-slate-500'
             ]">{{ step.title }}</span>
           </button>
