@@ -56,6 +56,9 @@ def main():
     try:
         update_status("downloading", 0, "正在拉取最新代碼...")
 
+        # Reset VERSION file to avoid conflict (it gets overwritten by this script each update)
+        run_command(["git", "checkout", "--", "backend/VERSION"], cwd=str(PROJECT_ROOT))
+
         # Git pull
         ret, out, err = run_command(["git", "pull", "--ff-only"], cwd=str(PROJECT_ROOT))
         if ret != 0:

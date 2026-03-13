@@ -260,9 +260,6 @@ async function saveSettings() {
               ]"
             ></div>
           </button>
-          <span :class="['text-xs font-medium ml-2 w-10', workerPaused ? 'text-red-400' : 'text-emerald-400']">
-            {{ workerPaused ? '已暫停' : '運行中' }}
-          </span>
         </div>
 
         <div>
@@ -272,7 +269,7 @@ async function saveSettings() {
             type="number"
             min="1"
             max="10"
-            class="w-32 bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-mono"
+            class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-mono"
           />
           <p class="text-[11px] text-slate-500 mt-1">同時間可使用的工作台數量</p>
         </div>
@@ -283,7 +280,7 @@ async function saveSettings() {
             type="number"
             min="1"
             max="365"
-            class="w-32 bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-mono"
+            class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-mono"
           />
           <p class="text-[11px] text-slate-500 mt-1">AEGIS 系統短期記憶的保留天數，超過自動清理</p>
         </div>
@@ -367,18 +364,6 @@ async function saveSettings() {
       </div>
     </div>
 
-    <!-- 儲存按鈕 -->
-    <div class="flex justify-end">
-      <button
-        @click="saveSettings"
-        :disabled="saving || loading"
-        class="flex items-center gap-2 px-6 py-2.5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white rounded-lg font-bold text-sm transition-all shadow-lg shadow-emerald-500/20"
-      >
-        <Save class="w-4 h-4" />
-        {{ saving ? '儲存中...' : '儲存設定' }}
-      </button>
-    </div>
-
     <!-- 存取控制 -->
     <div class="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
       <div class="px-6 py-4 border-b border-slate-700/50">
@@ -410,6 +395,18 @@ async function saveSettings() {
           </button>
         </div>
       </div>
+    </div>
+
+    <!-- 儲存按鈕 -->
+    <div class="flex justify-end">
+      <button
+        @click="saveSettings"
+        :disabled="saving || loading"
+        class="flex items-center gap-2 px-6 py-2.5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white rounded-lg font-bold text-sm transition-all shadow-lg shadow-emerald-500/20"
+      >
+        <Save class="w-4 h-4" />
+        {{ saving ? '儲存中...' : '儲存設定' }}
+      </button>
     </div>
 
     <!-- 管理員密碼 -->
