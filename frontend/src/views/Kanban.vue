@@ -350,12 +350,6 @@ const stageConfigForm = ref({
   on_fail_action: 'none',
 })
 
-const stageActionOptions = [
-  { value: 'none', label: '不動作' },
-  { value: 'archive', label: '封存' },
-  { value: 'delete', label: '刪除' },
-  // move_to:<id> 動態產生
-]
 useEscapeKey(showStageConfigDialog, () => { showStageConfigDialog.value = false })
 
 const stageTypeOptions = [
