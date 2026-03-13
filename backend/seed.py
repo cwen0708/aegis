@@ -12,13 +12,19 @@ from app.core.default_office_layout import get_default_office_layout_json
 from app.core.member_profile import get_member_dir
 from app.core.card_index import sync_card_to_index
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from croniter import croniter
 
 
-def _calculate_next_scheduled_at(cron_expression: str) -> datetime:
-    """計算下一次執行時間"""
-    cron = croniter(cron_expression, datetime.now(timezone.utc))
-    return cron.get_next(datetime).replace(tzinfo=timezone.utc)
+def _calculate_next_scheduled_at(cron_expression: str, tz_name: str = "Asia/Taipei") -> datetime:
+    """計算下一次執行時間。Cron 表達式以使用者時區解析，返回 UTC。"""
+    local_tz = ZoneInfo(tz_name)
+    now_local = datetime.now(local_tz)
+    cron = croniter(cron_expression, now_local)
+    next_local = cron.get_next(datetime)
+    if next_local.tzinfo is None:
+        next_local = next_local.replace(tzinfo=local_tz)
+    return next_local.astimezone(timezone.utc)
 
 # 範例立繪路徑
 EXAMPLE_PORTRAITS_DIR = Path(__file__).parent / "uploads" / "portraits"

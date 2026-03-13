@@ -343,9 +343,19 @@ const showStageConfigDialog = ref(false)
 const configuringStage = ref<any>(null)
 const stageConfigForm = ref({
   name: '',
+  description: '',
   stage_type: 'auto_process',
   is_ai_stage: true,
+  on_success_action: 'none',
+  on_fail_action: 'none',
 })
+
+const stageActionOptions = [
+  { value: 'none', label: '不動作' },
+  { value: 'archive', label: '封存' },
+  { value: 'delete', label: '刪除' },
+  // move_to:<id> 動態產生
+]
 useEscapeKey(showStageConfigDialog, () => { showStageConfigDialog.value = false })
 
 const stageTypeOptions = [
@@ -359,10 +369,28 @@ function openStageConfigDialog(stage: any) {
   configuringStage.value = stage
   stageConfigForm.value = {
     name: stage.name || '',
+    description: stage.description || '',
     stage_type: stage.stage_type || 'auto_process',
     is_ai_stage: stage.is_ai_stage ?? true,
+    on_success_action: stage.on_success_action || 'none',
+    on_fail_action: stage.on_fail_action || 'none',
   }
   showStageConfigDialog.value = true
+}
+
+// 取得可用的動作選項（含「移到某列表」）
+function getActionOptions(excludeListId?: number) {
+  const opts = [
+    { value: 'none', label: '不動作' },
+    { value: 'archive', label: '封存' },
+    { value: 'delete', label: '刪除' },
+  ]
+  for (const stage of boardData.value) {
+    if (stage.id !== excludeListId) {
+      opts.push({ value: `move_to:${stage.id}`, label: `移到「${stage.name}」` })
+    }
+  }
+  return opts
 }
 
 async function saveStageConfig() {
@@ -598,6 +626,9 @@ async function unarchiveCard(cardId: number) {
             </button>
           </div>
         </div>
+        <div v-if="stage.description" class="text-[10px] text-slate-500 px-1 -mt-2 mb-3 truncate" :title="stage.description">
+          {{ stage.description }}
+        </div>
 
         <draggable
           v-model="stage.cards"
@@ -739,6 +770,9 @@ async function unarchiveCard(cardId: number) {
             <Settings2 class="w-4 h-4" />
           </button>
         </div>
+      </div>
+      <div v-if="currentMobileStage.description" class="text-[10px] text-slate-500 px-4 -mt-1 mb-2 truncate">
+        {{ currentMobileStage.description }}
       </div>
 
       <!-- Cards List -->
@@ -1068,6 +1102,17 @@ async function unarchiveCard(cardId: number) {
           />
         </div>
 
+        <!-- Description -->
+        <div class="space-y-1.5">
+          <label class="block text-xs font-medium text-slate-400">階段說明</label>
+          <input
+            v-model="stageConfigForm.description"
+            type="text"
+            class="w-full px-3 py-2 bg-slate-900 text-slate-200 border border-slate-600 rounded-lg focus:outline-none focus:border-emerald-500 text-sm"
+            placeholder="例：AI 自動審查程式碼品質"
+          />
+        </div>
+
         <!-- Stage Type -->
         <div class="space-y-2">
           <label class="block text-xs font-medium text-slate-400">階段類型</label>
@@ -1106,6 +1151,28 @@ async function unarchiveCard(cardId: number) {
               :class="stageConfigForm.is_ai_stage ? 'left-5' : 'left-0.5'"
             />
           </button>
+        </div>
+
+        <!-- On Success Action -->
+        <div class="space-y-1.5">
+          <label class="block text-xs font-medium text-slate-400">成功後動作</label>
+          <select
+            v-model="stageConfigForm.on_success_action"
+            class="w-full px-3 py-2 bg-slate-900 text-slate-200 border border-slate-600 rounded-lg focus:outline-none focus:border-emerald-500 text-sm"
+          >
+            <option v-for="opt in getActionOptions(configuringStage?.id)" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+          </select>
+        </div>
+
+        <!-- On Fail Action -->
+        <div class="space-y-1.5">
+          <label class="block text-xs font-medium text-slate-400">失敗後動作</label>
+          <select
+            v-model="stageConfigForm.on_fail_action"
+            class="w-full px-3 py-2 bg-slate-900 text-slate-200 border border-slate-600 rounded-lg focus:outline-none focus:border-emerald-500 text-sm"
+          >
+            <option v-for="opt in getActionOptions(configuringStage?.id)" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+          </select>
         </div>
 
         <!-- Actions -->

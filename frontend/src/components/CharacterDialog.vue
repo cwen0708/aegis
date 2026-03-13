@@ -461,7 +461,7 @@ function providerLabel(provider: string): string {
 
             <!-- 任務標題 + 時間戳 -->
             <p v-if="currentDialogue && !isTyping" class="text-xs text-white/80 mt-2 font-bold" style="text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;">
-              {{ currentDialogue.card_title }} · {{ new Date(currentDialogue.created_at.endsWith('Z') ? currentDialogue.created_at : currentDialogue.created_at + 'Z').toLocaleString('zh-TW') }}
+              {{ currentDialogue.card_title }} · {{ new Date(currentDialogue.created_at.endsWith('Z') ? currentDialogue.created_at : currentDialogue.created_at + 'Z').toLocaleString('zh-TW', { timeZone: store.settings.timezone || 'Asia/Taipei' }) }}
             </p>
           </div>
         </div>

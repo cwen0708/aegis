@@ -5,6 +5,7 @@ from sqlalchemy import func as sa_func
 from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from app.database import get_session
 from app.models.core import Project, Card, StageList, CronJob, CronLog, SystemSetting, Account, Member, MemberAccount, TaskLog, CardIndex, InviteCode, BotUser, BotUserProject, EmailMessage
 from typing import Any
@@ -88,6 +89,7 @@ class StageListResponse(BaseModel):
     id: int
     project_id: int
     name: str
+    description: Optional[str] = None
     position: int
     member_id: Optional[int] = None
     member: Optional[MemberBrief] = None
@@ -98,6 +100,9 @@ class StageListResponse(BaseModel):
     prompt_template: Optional[str] = None
     is_ai_stage: bool = True
     is_member_bound: bool = False
+    # 完成/失敗動作
+    on_success_action: str = "none"
+    on_fail_action: str = "none"
 
 # ==========================================
 # Project Schemas
@@ -153,21 +158,25 @@ def create_project(data: ProjectCreate, session: Session = Depends(get_session))
     session.refresh(project)
 
     # 4. 建立預設 StageList（含階段配置）
+    # (name, stage_type, is_ai, on_success_action, on_fail_action)
     stages_config = [
-        ("Backlog", "manual", False),
-        ("Planning", "auto_process", True),
-        ("Developing", "auto_process", True),
-        ("Verifying", "auto_review", True),
-        ("Done", "terminal", False),
-        ("Aborted", "terminal", False),
+        ("Backlog", "manual", False, "none", "none"),
+        ("Scheduled", "auto_process", True, "delete", "none"),
+        ("Planning", "auto_process", True, "none", "none"),
+        ("Developing", "auto_process", True, "none", "none"),
+        ("Verifying", "auto_review", True, "none", "none"),
+        ("Done", "terminal", False, "none", "none"),
+        ("Aborted", "terminal", False, "none", "none"),
     ]
-    for idx, (name, stage_type, is_ai) in enumerate(stages_config):
+    for idx, (name, stage_type, is_ai, on_success, on_fail) in enumerate(stages_config):
         sl = StageList(
             project_id=project.id,
             name=name,
             position=idx,
             stage_type=stage_type,
             is_ai_stage=is_ai,
+            on_success_action=on_success,
+            on_fail_action=on_fail,
         )
         session.add(sl)
     session.commit()
@@ -271,6 +280,7 @@ def read_project_board(project_id: int, session: Session = Depends(get_session))
             id=l.id,
             project_id=l.project_id,
             name=l.name,
+            description=l.description,
             position=l.position,
             member_id=l.member_id,
             member=member_brief,
@@ -284,6 +294,8 @@ def read_project_board(project_id: int, session: Session = Depends(get_session))
             prompt_template=l.prompt_template,
             is_ai_stage=l.is_ai_stage,
             is_member_bound=l.is_member_bound,
+            on_success_action=l.on_success_action,
+            on_fail_action=l.on_fail_action,
         ))
     return result
 
@@ -292,6 +304,7 @@ def read_project_board(project_id: int, session: Session = Depends(get_session))
 # ==========================================
 class StageListUpdateRequest(BaseModel):
     name: Optional[str] = None
+    description: Optional[str] = None  # 階段說明
     position: Optional[int] = None
     member_id: Optional[int] = None  # null = 使用預設路由
     # 階段行為配置
@@ -299,6 +312,9 @@ class StageListUpdateRequest(BaseModel):
     system_instruction: Optional[str] = None
     prompt_template: Optional[str] = None
     is_ai_stage: Optional[bool] = None
+    # 完成/失敗後動作
+    on_success_action: Optional[str] = None  # none | move_to:<list_id> | archive | delete
+    on_fail_action: Optional[str] = None
 
 
 @router.patch("/lists/{list_id}")
@@ -314,6 +330,10 @@ def update_stage_list(list_id: int, data: StageListUpdateRequest, session: Sessi
     # 更新名稱
     if data.name is not None and data.name.strip():
         stage_list.name = data.name.strip()
+
+    # 更新說明
+    if data.description is not None:
+        stage_list.description = data.description if data.description.strip() else None
 
     # 更新位置
     if data.position is not None:
@@ -332,6 +352,12 @@ def update_stage_list(list_id: int, data: StageListUpdateRequest, session: Sessi
         stage_list.prompt_template = data.prompt_template if data.prompt_template else None
     if data.is_ai_stage is not None:
         stage_list.is_ai_stage = data.is_ai_stage
+
+    # 更新完成/失敗動作
+    if data.on_success_action is not None:
+        stage_list.on_success_action = data.on_success_action
+    if data.on_fail_action is not None:
+        stage_list.on_fail_action = data.on_fail_action
 
     session.add(stage_list)
     session.commit()
@@ -354,6 +380,9 @@ def update_stage_list(list_id: int, data: StageListUpdateRequest, session: Sessi
         "system_instruction": stage_list.system_instruction,
         "prompt_template": stage_list.prompt_template,
         "is_ai_stage": stage_list.is_ai_stage,
+        "description": stage_list.description,
+        "on_success_action": stage_list.on_success_action,
+        "on_fail_action": stage_list.on_fail_action,
     }
 
 
@@ -604,10 +633,20 @@ def update_cron_job(job_id: int, update_data: CronJobUpdate, session: Session = 
     job = session.get(CronJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="CronJob not found")
+    cron_changed = False
     for field in ["name", "description", "cron_expression", "system_instruction", "prompt_template", "is_enabled"]:
         val = getattr(update_data, field)
         if val is not None:
+            if field == "cron_expression" and val != job.cron_expression:
+                cron_changed = True
             setattr(job, field, val)
+    # cron 表達式或啟用狀態改變時，重算下次執行時間
+    if cron_changed or (update_data.is_enabled is not None):
+        from app.core.cron_poller import _calculate_next_time, _get_system_timezone
+        tz_name = _get_system_timezone(session)
+        next_time = _calculate_next_time(job.cron_expression, tz_name)
+        if next_time:
+            job.next_scheduled_at = next_time
     session.add(job)
     session.commit()
     session.refresh(job)
@@ -630,11 +669,18 @@ def create_cron_job(data: CronJobCreateRequest, session: Session = Depends(get_s
     project = session.get(Project, data.project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    # 計算下次執行時間
+    # 計算下次執行時間（用系統時區解析 cron 表達式）
     next_time = None
     try:
-        cron = croniter(data.cron_expression, datetime.now(timezone.utc))
-        next_time = cron.get_next(datetime)
+        tz_setting = session.get(SystemSetting, "timezone")
+        tz_name = tz_setting.value if tz_setting and tz_setting.value else "Asia/Taipei"
+        local_tz = ZoneInfo(tz_name)
+        now_local = datetime.now(local_tz)
+        cron = croniter(data.cron_expression, now_local)
+        next_local = cron.get_next(datetime)
+        if next_local.tzinfo is None:
+            next_local = next_local.replace(tzinfo=local_tz)
+        next_time = next_local.astimezone(timezone.utc)
     except Exception:
         pass
     job = CronJob(
@@ -654,18 +700,18 @@ def create_cron_job(data: CronJobCreateRequest, session: Session = Depends(get_s
 
 @router.post("/cron-jobs/fix-schedules")
 def fix_cron_schedules(session: Session = Depends(get_session)):
-    """修復所有排程的 next_scheduled_at（重新計算下次執行時間）"""
+    """修復所有排程的 next_scheduled_at（以系統時區重新計算下次執行時間）"""
+    from app.core.cron_poller import _calculate_next_time, _get_system_timezone
+    tz_name = _get_system_timezone(session)
     jobs = session.exec(select(CronJob).where(CronJob.is_enabled == True)).all()
     fixed_count = 0
     for job in jobs:
         try:
-            cron = croniter(job.cron_expression, datetime.now(timezone.utc))
-            next_time = cron.get_next(datetime)
-            if next_time.tzinfo is None:
-                next_time = next_time.replace(tzinfo=timezone.utc)
-            job.next_scheduled_at = next_time
-            session.add(job)
-            fixed_count += 1
+            next_time = _calculate_next_time(job.cron_expression, tz_name)
+            if next_time:
+                job.next_scheduled_at = next_time
+                session.add(job)
+                fixed_count += 1
         except Exception as e:
             pass
     session.commit()
@@ -1619,20 +1665,23 @@ async def _do_clone(task_id: str, clone_url: str, destination: str, project_name
             session.refresh(project)
 
             stages_config = [
-                ("Backlog", "manual", False),
-                ("Planning", "auto_process", True),
-                ("Developing", "auto_process", True),
-                ("Verifying", "auto_review", True),
-                ("Done", "terminal", False),
-                ("Aborted", "terminal", False),
+                ("Backlog", "manual", False, "none", "none"),
+                ("Scheduled", "auto_process", True, "delete", "none"),
+                ("Planning", "auto_process", True, "none", "none"),
+                ("Developing", "auto_process", True, "none", "none"),
+                ("Verifying", "auto_review", True, "none", "none"),
+                ("Done", "terminal", False, "none", "none"),
+                ("Aborted", "terminal", False, "none", "none"),
             ]
-            for idx, (name, stage_type, is_ai) in enumerate(stages_config):
+            for idx, (name, stage_type, is_ai, on_success, on_fail) in enumerate(stages_config):
                 sl = StageList(
                     project_id=project.id,
                     name=name,
                     position=idx,
                     stage_type=stage_type,
                     is_ai_stage=is_ai,
+                    on_success_action=on_success,
+                    on_fail_action=on_fail,
                 )
                 session.add(sl)
             session.commit()
@@ -3781,10 +3830,12 @@ async def update_settings(payload: UpdateSettingsPayload, session: Session = Dep
             if payload.auto_update_time is not None:
                 hour, minute = map(int, payload.auto_update_time.split(":"))
                 update_job.cron_expression = f"{minute} {hour} * * *"
-                # 重新計算下次執行時間
-                from datetime import datetime, timezone
-                cron = croniter(update_job.cron_expression, datetime.now(timezone.utc))
-                update_job.next_scheduled_at = cron.get_next(datetime)
+                # 重新計算下次執行時間（用系統時區）
+                from app.core.cron_poller import _calculate_next_time, _get_system_timezone
+                tz_name = _get_system_timezone(session)
+                next_time = _calculate_next_time(update_job.cron_expression, tz_name)
+                if next_time:
+                    update_job.next_scheduled_at = next_time
 
             session.add(update_job)
 

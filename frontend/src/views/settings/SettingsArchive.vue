@@ -148,7 +148,7 @@ onMounted(() => {
           </div>
           <div class="text-sm text-slate-200 truncate">{{ card.title }}</div>
           <div class="text-[10px] text-slate-500 mt-1">
-            封存於 {{ new Date(card.updated_at).toLocaleString('zh-TW') }}
+            封存於 {{ new Date(card.updated_at).toLocaleString('zh-TW', { timeZone: store.settings.timezone || 'Asia/Taipei' }) }}
           </div>
         </div>
         <div class="flex items-center gap-2 ml-4">

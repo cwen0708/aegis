@@ -49,6 +49,63 @@ def _update_card_status(session: Session, idx: CardIndex, new_status: str, proje
     return card_data
 
 
+def _apply_stage_action(session: Session, card_id: int, card_data, orm_card, new_status: str, project_id: int, project_path: str, file_path):
+    """任務完成/失敗後，依據 StageList 上的 on_success_action / on_fail_action 執行動作。
+    動作格式: none | move_to:<list_id> | archive | delete
+    """
+    list_id = card_data.list_id if card_data else (orm_card.list_id if orm_card else None)
+    if not list_id:
+        return
+
+    stage_list = session.get(StageList, list_id)
+    if not stage_list:
+        return
+
+    action = stage_list.on_success_action if new_status == "completed" else stage_list.on_fail_action
+    if not action or action == "none":
+        return
+
+    logger.info(f"[Task {card_id}] Applying stage action: {action} (status={new_status})")
+
+    if action.startswith("move_to:"):
+        target_list_id = int(action.split(":")[1])
+        target_list = session.get(StageList, target_list_id)
+        if not target_list:
+            logger.warning(f"[Task {card_id}] Target list {target_list_id} not found, skipping action")
+            return
+        # 移動卡片到目標列表（不改 status，保留 completed/failed）
+        if card_data:
+            card_data.list_id = target_list_id
+            write_card(Path(file_path), card_data)
+            sync_card_to_index(session, card_data, project_id, str(file_path))
+        if orm_card:
+            orm_card.list_id = target_list_id
+            session.add(orm_card)
+        session.commit()
+
+    elif action == "archive":
+        if card_data:
+            card_data.is_archived = True
+            write_card(Path(file_path), card_data)
+            sync_card_to_index(session, card_data, project_id, str(file_path))
+        if orm_card:
+            orm_card.is_archived = True
+            session.add(orm_card)
+        session.commit()
+
+    elif action == "delete":
+        # 刪除 MD 檔案與資料庫記錄
+        fp = Path(file_path)
+        if fp.exists():
+            fp.unlink()
+        idx = session.get(CardIndex, card_id)
+        if idx:
+            session.delete(idx)
+        if orm_card:
+            session.delete(orm_card)
+        session.commit()
+
+
 async def _process_pending_cards():
     """定期掃描 CardIndex 中 status='pending' 的卡片並派發給 AI"""
     if is_paused:
@@ -477,6 +534,9 @@ async def _execute_and_update(
 
                 session.commit()
                 logger.info(f"[Task {card_id}] State updated to {new_status}")
+
+                # 執行階段配置的完成/失敗動作
+                _apply_stage_action(session, card_id, card_data, orm_card, new_status, project_id, project_path, file_path)
 
                 # 解析 AI 輸出中的 create_cards 區塊，自動建立新卡片
                 # completed 和 failed 都解析（失敗時 AI 可能發出協作求助）

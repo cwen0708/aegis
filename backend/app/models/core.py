@@ -30,6 +30,7 @@ class StageList(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     project_id: int = Field(foreign_key="project.id")
     name: str
+    description: Optional[str] = Field(default=None)  # 階段說明（如「審查階段」）
     position: int = Field(default=0) # 用於排序
     member_id: Optional[int] = Field(default=None, foreign_key="member.id")  # 指派成員（覆寫預設路由）
 
@@ -39,6 +40,10 @@ class StageList(SQLModel, table=True):
     prompt_template: Optional[str] = Field(default=None)  # 階段專屬 prompt 模板
     is_ai_stage: bool = Field(default=True)  # 是否為 AI 處理階段
     is_member_bound: bool = Field(default=False)  # True = member_id 鎖定不可變更
+
+    # 完成/失敗後動作: none | move_to:<list_id> | archive | delete
+    on_success_action: str = Field(default="none")
+    on_fail_action: str = Field(default="none")
 
     project: Optional[Project] = Relationship(back_populates="lists")
     cards: List["Card"] = Relationship(back_populates="stage_list")

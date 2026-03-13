@@ -3,6 +3,7 @@ import os
 import json
 import logging
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from sqlmodel import Session, select
 from app.database import engine
 from app.models.core import Card, StageList, Project, Tag, CardTagLink, CronJob, CardIndex, SystemSetting, TaskLog, EmailMessage
@@ -103,17 +104,29 @@ def _render_template(template: str, variables: dict) -> str:
     return result
 
 
-def _calculate_next_time(cron_expression: str) -> datetime:
-    """計算下一次執行時間（返回 aware datetime）"""
+def _get_system_timezone(session: Session = None) -> str:
+    """從系統設定取得時區，預設 Asia/Taipei"""
+    if session:
+        tz_setting = session.get(SystemSetting, "timezone")
+        if tz_setting and tz_setting.value:
+            return tz_setting.value
+    return "Asia/Taipei"
+
+
+def _calculate_next_time(cron_expression: str, tz_name: str = "Asia/Taipei") -> datetime:
+    """計算下一次執行時間。Cron 表達式以使用者時區解析，返回 UTC aware datetime。"""
     if not cron_expression:
         return None
     try:
-        cron = croniter(cron_expression, datetime.now(timezone.utc))
-        next_dt = cron.get_next(datetime)
-        # 確保返回 aware datetime
-        if next_dt.tzinfo is None:
-            next_dt = next_dt.replace(tzinfo=timezone.utc)
-        return next_dt
+        local_tz = ZoneInfo(tz_name)
+        now_local = datetime.now(local_tz)
+        cron = croniter(cron_expression, now_local)
+        next_local = cron.get_next(datetime)
+        # croniter 可能返回 naive datetime，補上本地時區
+        if next_local.tzinfo is None:
+            next_local = next_local.replace(tzinfo=local_tz)
+        # 轉為 UTC 存儲
+        return next_local.astimezone(timezone.utc)
     except Exception as e:
         logger.error(f"Invalid cron expression: {cron_expression}, error: {e}")
         return None
@@ -138,6 +151,7 @@ def create_card_for_cron_job(session: Session, job: CronJob, ops_tag: Tag = None
     回傳 (card_id, error_message)。card_id=None 表示跳過或失敗。
     """
     cron_tag = f"cron_{job.id}"
+    tz_name = _get_system_timezone(session)
 
     # 去重：檢查是否已存在待處理卡片
     existing = session.exec(
@@ -147,7 +161,7 @@ def create_card_for_cron_job(session: Session, job: CronJob, ops_tag: Tag = None
     ).first()
     if existing:
         if update_next_time:
-            next_time = _calculate_next_time(job.cron_expression)
+            next_time = _calculate_next_time(job.cron_expression, tz_name)
             if next_time:
                 job.next_scheduled_at = next_time
                 session.add(job)
@@ -217,7 +231,7 @@ def create_card_for_cron_job(session: Session, job: CronJob, ops_tag: Tag = None
 
     # 更新下次執行時間
     if update_next_time:
-        next_time = _calculate_next_time(job.cron_expression)
+        next_time = _calculate_next_time(job.cron_expression, tz_name)
         if next_time:
             job.next_scheduled_at = next_time
         else:
