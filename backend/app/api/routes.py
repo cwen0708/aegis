@@ -622,6 +622,7 @@ class CronJobUpdate(BaseModel):
     system_instruction: Optional[str] = None
     prompt_template: Optional[str] = None
     is_enabled: Optional[bool] = None
+    target_list_id: Optional[int] = None  # 0 = 清除（回到預設 Scheduled）
 
 @router.patch("/cron-jobs/{job_id}", response_model=CronJob)
 def update_cron_job(job_id: int, update_data: CronJobUpdate, session: Session = Depends(get_session)):
@@ -635,6 +636,9 @@ def update_cron_job(job_id: int, update_data: CronJobUpdate, session: Session = 
             if field == "cron_expression" and val != job.cron_expression:
                 cron_changed = True
             setattr(job, field, val)
+    # 目標列表：0 = 清除，正數 = 設定
+    if update_data.target_list_id is not None:
+        job.target_list_id = update_data.target_list_id if update_data.target_list_id != 0 else None
     # cron 表達式或啟用狀態改變時，重算下次執行時間
     if cron_changed or (update_data.is_enabled is not None):
         from app.core.cron_poller import _calculate_next_time, _get_system_timezone
@@ -658,6 +662,7 @@ class CronJobCreateRequest(BaseModel):
     cron_expression: str = "0 0 * * *"
     system_instruction: Optional[str] = None
     prompt_template: str = ""
+    target_list_id: Optional[int] = None  # 目標列表，None=Scheduled
 
 @router.post("/cron-jobs/", response_model=CronJob)
 def create_cron_job(data: CronJobCreateRequest, session: Session = Depends(get_session)):
@@ -685,6 +690,7 @@ def create_cron_job(data: CronJobCreateRequest, session: Session = Depends(get_s
         cron_expression=data.cron_expression,
         system_instruction=data.system_instruction,
         prompt_template=data.prompt_template,
+        target_list_id=data.target_list_id,
         next_scheduled_at=next_time,
     )
     session.add(job)

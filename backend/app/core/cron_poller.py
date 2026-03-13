@@ -179,14 +179,20 @@ def create_card_for_cron_job(session: Session, job: CronJob, ops_tag: Tag = None
 
     # 組合 prompt
     metadata = json.loads(job.metadata_json) if job.metadata_json else {}
-    target_list_name = metadata.get("target_list", "Scheduled")
-    sched_list = session.exec(
-        select(StageList)
-        .where(StageList.project_id == job.project_id)
-        .where(StageList.name == target_list_name)
-    ).first()
+
+    # 決定目標列表：target_list_id > metadata.target_list > "Scheduled"
+    sched_list = None
+    if job.target_list_id:
+        sched_list = session.get(StageList, job.target_list_id)
     if not sched_list:
-        return None, f"找不到列表 '{target_list_name}'（project {job.project_id}）"
+        target_list_name = metadata.get("target_list", "Scheduled")
+        sched_list = session.exec(
+            select(StageList)
+            .where(StageList.project_id == job.project_id)
+            .where(StageList.name == target_list_name)
+        ).first()
+    if not sched_list:
+        return None, f"找不到目標列表（project {job.project_id}）"
 
     template_vars = _get_template_variables(session)
     rendered_prompt = _render_template(job.prompt_template, template_vars)

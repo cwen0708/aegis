@@ -30,8 +30,18 @@ const newJobForm = ref({
   name: '',
   description: '',
   cron_expression: '0 0 * * *',
-  prompt_template: ''
+  prompt_template: '',
+  target_list_id: null as number | null,
 })
+
+// 取得指定專案的列表（供目標列表選擇器用）
+const projectStageLists = ref<any[]>([])
+const fetchStageLists = async (projectId: number) => {
+  try {
+    const res = await fetch(`/api/v1/projects/${projectId}/board`)
+    if (res.ok) projectStageLists.value = await res.json()
+  } catch { projectStageLists.value = [] }
+}
 
 // 編輯 Modal
 const showEditModal = ref(false)
@@ -41,6 +51,7 @@ useEscapeKey(showEditModal, () => { showEditModal.value = false })
 function openEditModal(job: any) {
   editJobForm.value = { ...job }
   showEditModal.value = true
+  if (job.project_id) fetchStageLists(job.project_id)
 }
 
 const saveEditJob = async () => {
@@ -54,6 +65,7 @@ const saveEditJob = async () => {
         description: editJobForm.value.description,
         cron_expression: editJobForm.value.cron_expression,
         prompt_template: editJobForm.value.prompt_template,
+        target_list_id: editJobForm.value.target_list_id || 0,
       })
     })
     if (!res.ok) throw new Error('更新排程失敗')
@@ -95,7 +107,7 @@ const createCronJob = async () => {
     showAddModal.value = false
     store.addToast('排程已建立', 'success')
     await fetchCronJobs()
-    newJobForm.value = { project_id: null, name: '', description: '', cron_expression: '0 0 * * *', prompt_template: '' }
+    newJobForm.value = { project_id: null, name: '', description: '', cron_expression: '0 0 * * *', prompt_template: '', target_list_id: null }
   } catch (e) {
     store.addToast('建立排程失敗', 'error')
   }
@@ -201,10 +213,11 @@ onMounted(async () => {
   }
 })
 
-// 新增排程時預設帶入當前專案
+// 新增排程時預設帶入當前專案並載入列表
 watch(showAddModal, (v) => {
   if (v && selectedProjectId.value) {
     newJobForm.value.project_id = selectedProjectId.value
+    fetchStageLists(selectedProjectId.value)
   }
 })
 
@@ -429,7 +442,7 @@ const formatTime = (iso: string) => {
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label class="block text-xs font-medium text-slate-400 mb-1">目標專案</label>
-              <select v-model="newJobForm.project_id" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none">
+              <select v-model="newJobForm.project_id" @change="newJobForm.project_id && fetchStageLists(newJobForm.project_id)" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none">
                 <option :value="null">選擇專案...</option>
                 <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option>
               </select>
@@ -452,6 +465,18 @@ const formatTime = (iso: string) => {
           <div>
             <label class="block text-xs font-medium text-slate-400 mb-1">描述（選填）</label>
             <textarea v-model="newJobForm.description" rows="2" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none resize-none"></textarea>
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">目標列表</label>
+            <select
+              v-model="newJobForm.target_list_id"
+              class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
+            >
+              <option :value="null">預設（Scheduled）</option>
+              <option v-for="sl in projectStageLists" :key="sl.id" :value="sl.id">{{ sl.name }}</option>
+            </select>
+            <p class="text-[10px] text-slate-500 mt-1">指定卡片建立後要放入的列表，會依該列表的行為設定執行</p>
           </div>
 
           <div>
@@ -501,6 +526,18 @@ const formatTime = (iso: string) => {
           <div>
             <label class="block text-xs font-medium text-slate-400 mb-1">描述</label>
             <textarea v-model="editJobForm.description" rows="2" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none resize-none"></textarea>
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">目標列表</label>
+            <select
+              v-model="editJobForm.target_list_id"
+              class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
+            >
+              <option :value="null">預設（Scheduled）</option>
+              <option v-for="sl in projectStageLists" :key="sl.id" :value="sl.id">{{ sl.name }}</option>
+            </select>
+            <p class="text-[10px] text-slate-500 mt-1">指定卡片建立後要放入的列表，會依該列表的行為設定執行</p>
           </div>
 
           <div>

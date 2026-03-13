@@ -98,6 +98,7 @@ class CronJob(SQLModel, table=True):
     cron_expression: str
     is_enabled: bool = Field(default=True)
     is_system: bool = Field(default=False)  # 系統排程，前端禁止刪除
+    target_list_id: Optional[int] = Field(default=None, foreign_key="stagelist.id")  # 目標列表，None=Scheduled
     next_scheduled_at: Optional[datetime] = None
     
     # 存放原本 Supabase 裡的 metadata (field_id, event_type 等)，用 JSON 字串存
