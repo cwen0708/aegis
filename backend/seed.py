@@ -59,6 +59,10 @@ def _seed_member_profiles():
         encoding="utf-8",
     )
     (liang_dir / "skills" / "code-review.md").write_text(
+        "---\n"
+        "name: code-review\n"
+        'description: "程式碼審查規範。檢查安全性、效能、測試覆蓋率與風格一致性。"\n'
+        "---\n\n"
         "# Code Review 規範\n\n"
         "- 檢查安全性（OWASP Top 10）\n"
         "- 檢查效能瓶頸\n"
@@ -85,6 +89,10 @@ def _seed_member_profiles():
         encoding="utf-8",
     )
     (jun_dir / "skills" / "fullstack-dev.md").write_text(
+        "---\n"
+        "name: fullstack-dev\n"
+        'description: "全端開發規範。Vue 3 Composition API 前端、FastAPI + SQLModel 後端開發指引。"\n'
+        "---\n\n"
         "# 全端開發規範\n\n"
         "- 前端使用 Vue 3 Composition API + <script setup>\n"
         "- 後端使用 FastAPI + SQLModel\n"
@@ -106,6 +114,10 @@ def _seed_shared_skills():
     team_file = shared_dir / "team.md"
     if not team_file.exists():
         team_file.write_text(
+            "---\n"
+            "name: team\n"
+            'description: "AI 團隊成員名冊。了解團隊組成與各成員專長，用於跨成員協作。"\n'
+            "---\n\n"
             "# 團隊成員\n\n"
             "你不是一個人在工作。以下是你的 AI 團隊夥伴，各有專長：\n\n"
             "| 成員 | slug | 角色 | 專長 | 日常工作 |\n"
@@ -119,6 +131,10 @@ def _seed_shared_skills():
     collab_file = shared_dir / "collaboration.md"
     if not collab_file.exists():
         collab_file.write_text(
+            "---\n"
+            "name: collaboration\n"
+            'description: "跨成員協作協議。當遇到超出自身專長的問題時，如何請求其他成員協助。"\n'
+            "---\n\n"
             "# 跨成員協作\n\n"
             "當你遇到超出自身專長的問題時，可以請求其他團隊成員協助。\n\n"
             "## 如何請求協助\n\n"
