@@ -64,7 +64,6 @@ const cloning = ref(false)
 const cloneStatus = ref('')
 
 // Relocate
-const relocating = ref(false)
 const showRelocate = ref(false)
 const relocatePath = ref('')
 const relocateSaving = ref(false)
