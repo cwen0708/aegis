@@ -143,7 +143,7 @@ async function saveProject() {
     const method = editingProject.value ? 'PATCH' : 'POST'
     const res = await fetch(url, {
       method,
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(form.value),
     })
     if (!res.ok) {
@@ -167,7 +167,7 @@ async function parseGithubUrl() {
   try {
     const res = await fetch(`${API}/api/v1/github/parse-url`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ url }),
     })
     if (!res.ok) {
@@ -255,7 +255,7 @@ async function startClone() {
   try {
     const res = await fetch(`${API}/api/v1/github/clone`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         repo_url: githubSelectedRepo.value.clone_url,
         destination: form.value.path,
@@ -314,7 +314,7 @@ async function doRelocate() {
   try {
     const res = await fetch(`${API}/api/v1/projects/${editingProject.value.id}/relocate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ new_path: relocatePath.value.trim() }),
     })
     if (!res.ok) {
