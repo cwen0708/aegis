@@ -376,6 +376,129 @@ def git_diff(
     }
 
 
+@router.post("/projects/{project_id}/git/fetch")
+def git_fetch(
+    project_id: int,
+    session: Session = Depends(get_session),
+):
+    """執行 git fetch 更新遠端追蹤分支"""
+    project = _get_project(project_id, session)
+
+    if not _is_git_repo(project.path):
+        raise HTTPException(status_code=400, detail="Not a git repository")
+
+    ok, output = _run_git(project.path, ["fetch", "--prune"], timeout=30)
+    if not ok:
+        return {"ok": False, "error": output}
+
+    # 重新取得 ahead/behind
+    ahead, behind = 0, 0
+    ok2, tracking = _run_git(project.path, ["rev-parse", "--abbrev-ref", "@{upstream}"])
+    if ok2:
+        ok3, counts = _run_git(project.path, ["rev-list", "--left-right", "--count", f"HEAD...{tracking}"])
+        if ok3 and "\t" in counts:
+            parts = counts.split("\t")
+            ahead, behind = int(parts[0]), int(parts[1])
+
+    return {"ok": True, "ahead": ahead, "behind": behind}
+
+
+@router.post("/projects/{project_id}/git/pull-task")
+def git_pull_task(
+    project_id: int,
+    session: Session = Depends(get_session),
+):
+    """建立 AI 卡片執行 git pull，自動處理衝突"""
+    from app.models.core import StageList, Card, Project
+    from app.core.card_file import CardData, card_file_path, write_card, next_card_id
+    from app.core.card_sync import sync_card_to_index
+    from sqlmodel import select
+    from sqlalchemy import func as sa_func
+
+    project = _get_project(project_id, session)
+
+    if not _is_git_repo(project.path):
+        raise HTTPException(status_code=400, detail="Not a git repository")
+
+    # 找到第一個 AI 處理階段（Scheduled 或 Processing）
+    stages = session.exec(
+        select(StageList)
+        .where(StageList.project_id == project_id)
+        .where(StageList.is_ai_stage == True)
+        .order_by(StageList.position)
+    ).all()
+
+    if not stages:
+        raise HTTPException(status_code=400, detail="No AI stage found for this project")
+
+    target_stage = stages[0]
+
+    # 建立卡片
+    new_id = next_card_id(session)
+    old_max_id = session.exec(select(sa_func.max(Card.id))).one()
+    if old_max_id is not None:
+        new_id = max(new_id, old_max_id + 1)
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+
+    card_data = CardData(
+        id=new_id,
+        list_id=target_stage.id,
+        title="Git Pull — 拉取遠端更新",
+        description="自動拉取遠端變更並處理衝突",
+        content=(
+            "請執行以下操作：\n\n"
+            "1. 執行 `git pull` 拉取遠端最新程式碼\n"
+            "2. 如果有合併衝突，請逐一解決衝突：\n"
+            "   - 查看衝突檔案\n"
+            "   - 根據程式碼邏輯選擇合理的合併方式\n"
+            "   - 保留雙方有意義的變更\n"
+            "3. 確認合併完成後，執行 `git status` 確認工作目錄乾淨\n"
+            "4. 回報拉取結果（更新了哪些檔案、是否有衝突及如何解決）"
+        ),
+        status="idle",
+        tags=[],
+        created_at=now,
+        updated_at=now,
+    )
+
+    fpath = card_file_path(project.path, new_id)
+    fpath.parent.mkdir(parents=True, exist_ok=True)
+    write_card(fpath, card_data)
+    sync_card_to_index(session, card_data, project_id=project.id, file_path=str(fpath))
+
+    # Dual-write
+    orm_card = Card(
+        id=new_id, list_id=target_stage.id,
+        title=card_data.title, description=card_data.description,
+        status="idle", created_at=now, updated_at=now,
+    )
+    session.add(orm_card)
+    session.commit()
+
+    # 觸發
+    orm_card.status = "pending"
+    orm_card.updated_at = now
+    session.add(orm_card)
+
+    from app.core.card_file import read_card_md
+    cd = read_card_md(fpath)
+    cd.status = "pending"
+    cd.updated_at = now
+    write_card(fpath, cd)
+    sync_card_to_index(session, cd, project_id=project.id, file_path=str(fpath))
+
+    session.commit()
+
+    return {
+        "ok": True,
+        "card_id": new_id,
+        "stage": target_stage.name,
+        "message": f"已建立拉取任務 #{new_id}，AI 將自動執行 git pull",
+    }
+
+
 @router.get("/projects/{project_id}/git/branches")
 def git_branches(
     project_id: int,

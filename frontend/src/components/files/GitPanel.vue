@@ -29,9 +29,37 @@
         <div class="flex items-center gap-2 text-sm">
           <GitBranch class="w-4 h-4 text-purple-400" />
           <span class="text-slate-300 font-mono">{{ status.branch }}</span>
-          <span v-if="status.ahead > 0" class="text-xs text-emerald-400">+{{ status.ahead }}</span>
-          <span v-if="status.behind > 0" class="text-xs text-amber-400">-{{ status.behind }}</span>
-          <span v-if="status.is_clean" class="ml-auto text-xs text-emerald-500">Clean</span>
+          <span v-if="status.ahead > 0" class="text-xs text-emerald-400">↑{{ status.ahead }}</span>
+          <span v-if="status.behind > 0" class="text-xs text-amber-400">↓{{ status.behind }}</span>
+          <span v-if="status.is_clean && !status.behind" class="ml-auto text-xs text-emerald-500">Clean</span>
+          <!-- Fetch 按鈕 -->
+          <button
+            class="ml-auto text-xs px-2 py-0.5 rounded border transition-colors"
+            :class="fetching
+              ? 'text-slate-600 border-slate-700 cursor-wait'
+              : 'text-slate-400 border-slate-600 hover:text-slate-200 hover:border-slate-500'"
+            :disabled="fetching"
+            @click="doFetch"
+          >
+            {{ fetching ? '檢查中...' : '⟳ Fetch' }}
+          </button>
+        </div>
+
+        <!-- Pull 按鈕 -->
+        <div v-if="status.behind > 0" class="flex items-center gap-2 px-3 py-2 rounded bg-amber-500/10 border border-amber-500/20">
+          <span class="text-xs text-amber-400 flex-1">
+            遠端有 {{ status.behind }} 筆新 commit 可拉取
+          </span>
+          <button
+            class="text-xs px-3 py-1 rounded font-medium transition-colors"
+            :class="pulling
+              ? 'bg-slate-700 text-slate-500 cursor-wait'
+              : 'bg-amber-500 text-slate-900 hover:bg-amber-400'"
+            :disabled="pulling"
+            @click="doPullTask"
+          >
+            {{ pulling ? '建立中...' : '↓ AI Pull' }}
+          </button>
         </div>
 
         <!-- Modified -->
@@ -105,6 +133,10 @@ const props = defineProps<{
   projectId: number
 }>()
 
+const emit = defineEmits<{
+  (e: 'pull-triggered', cardId: number): void
+}>()
+
 const API = config.apiUrl
 
 const tabs = computed(() => [
@@ -118,6 +150,8 @@ const status = ref<any>(null)
 const commits = ref<any[]>([])
 const diffContent = ref('')
 const diffLoading = ref(false)
+const fetching = ref(false)
+const pulling = ref(false)
 
 const changedCount = computed(() => {
   if (!status.value?.is_git) return 0
@@ -146,6 +180,38 @@ function formatDate(iso: string): string {
 async function loadStatus() {
   const res = await fetch(`${API}/api/v1/projects/${props.projectId}/git/status`)
   if (res.ok) status.value = await res.json()
+}
+
+async function doFetch() {
+  fetching.value = true
+  try {
+    const res = await fetch(`${API}/api/v1/projects/${props.projectId}/git/fetch`, { method: 'POST' })
+    if (res.ok) {
+      const data = await res.json()
+      if (data.ok && status.value) {
+        status.value.ahead = data.ahead
+        status.value.behind = data.behind
+      }
+    }
+  } finally {
+    fetching.value = false
+  }
+}
+
+async function doPullTask() {
+  pulling.value = true
+  try {
+    const res = await fetch(`${API}/api/v1/projects/${props.projectId}/git/pull-task`, { method: 'POST' })
+    if (res.ok) {
+      const data = await res.json()
+      if (data.ok) {
+        emit('pull-triggered', data.card_id)
+        alert(`已建立拉取任務 #${data.card_id}\nAI 將自動執行 git pull`)
+      }
+    }
+  } finally {
+    pulling.value = false
+  }
 }
 
 async function loadLog() {
@@ -178,8 +244,10 @@ watch(() => props.projectId, () => {
   loadLog()
 })
 
-onMounted(() => {
-  loadStatus()
+onMounted(async () => {
+  await loadStatus()
   loadLog()
+  // 自動 fetch 遠端狀態
+  doFetch()
 })
 </script>
