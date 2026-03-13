@@ -88,9 +88,9 @@ export function useProjectSelector() {
   function selectAdjacentProject(direction: -1 | 1) {
     if (!projects.value.length) return
     const idx = projects.value.findIndex(p => p.id === selectedProjectId.value)
-    const next = idx + direction
-    if (next >= 0 && next < projects.value.length) {
-      selectProject(projects.value[next].id)
+    const target = projects.value[idx + direction]
+    if (target) {
+      selectProject(target.id)
     }
   }
 
