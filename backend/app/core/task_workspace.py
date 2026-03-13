@@ -95,6 +95,22 @@ def prepare_workspace(
     if mcp_src.exists():
         shutil.copy2(mcp_src, ws / ".mcp.json")
 
+    # 4. Inject GitHub PAT as git credential (if configured)
+    try:
+        from sqlmodel import Session as SqlSession
+        from app.database import engine
+        from app.models.core import SystemSetting
+        with SqlSession(engine) as db_session:
+            pat_setting = db_session.get(SystemSetting, "github_pat")
+            if pat_setting and pat_setting.value:
+                gitconfig = (
+                    '[credential "https://github.com"]\n'
+                    f"    helper = !echo username=x-access-token && echo password={pat_setting.value}\n"
+                )
+                (ws / ".gitconfig").write_text(gitconfig, encoding="utf-8")
+    except Exception as e:
+        logger.warning(f"[Workspace] Failed to inject git credential: {e}")
+
     logger.info(f"[Workspace] Created task-{card_id} for {member_slug} ({provider})")
     return ws
 

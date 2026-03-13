@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Globe, Cpu, Save, Loader2, Lock, Sparkles, ShieldCheck } from 'lucide-vue-next'
+import { Globe, Cpu, Save, Loader2, Lock, Sparkles, ShieldCheck, Github, CheckCircle2, Unplug } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 import { useAuthStore } from '../../stores/auth'
 
@@ -118,6 +118,53 @@ async function changePassword() {
   }
 }
 
+// GitHub 連線
+const githubStatus = ref<{ connected: boolean; login?: string; name?: string; error?: string }>({ connected: false })
+const githubToken = ref('')
+const githubVerifying = ref(false)
+const githubLoading = ref(true)
+
+async function fetchGithubStatus() {
+  githubLoading.value = true
+  try {
+    const res = await fetch(`${API}/api/v1/github/status`)
+    if (res.ok) githubStatus.value = await res.json()
+  } catch {}
+  githubLoading.value = false
+}
+
+async function connectGithub() {
+  if (!githubToken.value.trim()) return
+  githubVerifying.value = true
+  try {
+    const res = await fetch(`${API}/api/v1/github/verify`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ token: githubToken.value.trim() }),
+    })
+    if (!res.ok) {
+      const data = await res.json()
+      store.addToast(data.detail || 'Token 無效', 'error')
+      return
+    }
+    // 驗證成功，儲存 token
+    await store.updateSettings({ github_pat: githubToken.value.trim() })
+    githubToken.value = ''
+    await fetchGithubStatus()
+    store.addToast('GitHub 已連線', 'success')
+  } catch {
+    store.addToast('連線失敗', 'error')
+  } finally {
+    githubVerifying.value = false
+  }
+}
+
+async function disconnectGithub() {
+  await store.updateSettings({ github_pat: '' })
+  githubStatus.value = { connected: false }
+  store.addToast('GitHub 已斷開', 'info')
+}
+
 const timezoneOptions = [
   'Asia/Taipei',
   'Asia/Tokyo',
@@ -133,7 +180,7 @@ const timezoneOptions = [
 ]
 
 onMounted(async () => {
-  await Promise.all([store.fetchSettings(), fetchWorkerStatus()])
+  await Promise.all([store.fetchSettings(), fetchWorkerStatus(), fetchGithubStatus()])
   form.value.timezone = store.settings.timezone || 'Asia/Taipei'
   form.value.max_workstations = store.settings.max_workstations || '3'
   form.value.memory_short_term_days = store.settings.memory_short_term_days || '30'
@@ -239,6 +286,58 @@ async function saveSettings() {
             class="w-32 bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-mono"
           />
           <p class="text-[11px] text-slate-500 mt-1">AEGIS 系統短期記憶的保留天數，超過自動清理</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- GitHub 連線 -->
+    <div class="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
+      <div class="px-6 py-4 border-b border-slate-700/50">
+        <div class="flex items-center gap-2">
+          <Github class="w-4 h-4 text-slate-300" />
+          <h2 class="text-sm font-semibold text-slate-200">GitHub 連線</h2>
+          <Loader2 v-if="githubLoading" class="w-3.5 h-3.5 text-slate-500 animate-spin ml-auto" />
+        </div>
+      </div>
+      <div class="p-6 space-y-4">
+        <!-- 已連線 -->
+        <div v-if="githubStatus.connected" class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <CheckCircle2 class="w-5 h-5 text-emerald-400" />
+            <div>
+              <div class="text-sm text-slate-200 font-medium">{{ githubStatus.login }}</div>
+              <div v-if="githubStatus.name" class="text-[11px] text-slate-500">{{ githubStatus.name }}</div>
+            </div>
+          </div>
+          <button @click="disconnectGithub" class="flex items-center gap-1.5 px-3 py-1.5 text-xs text-red-400 hover:bg-red-400/10 rounded-lg transition-colors">
+            <Unplug class="w-3.5 h-3.5" />
+            斷開連線
+          </button>
+        </div>
+        <!-- 未連線 -->
+        <div v-else>
+          <label class="block text-xs font-medium text-slate-400 mb-1.5">Personal Access Token</label>
+          <div class="flex gap-2">
+            <input
+              v-model="githubToken"
+              type="password"
+              placeholder="ghp_xxxx 或 github_pat_xxxx"
+              class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-slate-500 outline-none text-sm font-mono"
+              @keyup.enter="connectGithub"
+            />
+            <button
+              @click="connectGithub"
+              :disabled="githubVerifying || !githubToken.trim()"
+              class="flex items-center gap-1.5 px-4 py-2 bg-slate-600 hover:bg-slate-500 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-all"
+            >
+              <Loader2 v-if="githubVerifying" class="w-3.5 h-3.5 animate-spin" />
+              {{ githubVerifying ? '驗證中...' : '連線' }}
+            </button>
+          </div>
+          <p class="text-[11px] text-slate-500 mt-1.5">
+            AI 成員執行任務時將使用此 Token 存取私有 Git 倉庫。可在
+            <a href="https://github.com/settings/tokens" target="_blank" class="text-slate-400 hover:underline">GitHub Settings → Tokens</a> 建立
+          </p>
         </div>
       </div>
     </div>

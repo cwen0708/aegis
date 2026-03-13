@@ -523,6 +523,11 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
         env.pop(key, None)
     env["CLAUDE_CODE_ENTRY_POINT"] = "worker"
 
+    # 注入 GitHub git credential（如果 workspace 有 .gitconfig）
+    ws_gitconfig = os.path.join(project_path, ".gitconfig")
+    if os.path.exists(ws_gitconfig):
+        env["GIT_CONFIG_GLOBAL"] = ws_gitconfig
+
     # 根據帳號認證資訊設定環境變數
     auth_type = auth_info.get('auth_type', 'cli')
     if provider_name == "claude":
@@ -552,6 +557,11 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
         "project": project_name,
         "provider": provider_name
     })
+
+    # 如果 workspace 有 .gitconfig（GitHub PAT），注入環境變數
+    _ws_gitconfig = Path(project_path) / ".gitconfig"
+    if _ws_gitconfig.exists():
+        env["GIT_CONFIG_GLOBAL"] = str(_ws_gitconfig)
 
     start_time = time.time()
 

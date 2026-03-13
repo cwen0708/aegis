@@ -1,7 +1,7 @@
 # Aegis 功能開發清單
 
 > 基於 14 個 AI Agent 專案的優點整合
-> 生成日期：2026-03-09
+> 生成日期：2026-03-09 ｜ 更新：2026-03-13
 
 ---
 
@@ -10,18 +10,20 @@
 ### Aegis 已有的優勢
 - ✅ 虛擬辦公室（獨有）
 - ✅ MD 檔案驅動 + Git 原生
-- ✅ 多 AI 路由（Claude/Gemini）
+- ✅ 多 AI 路由（Claude/Gemini）+ 帳號 Fallback
 - ✅ Cron 排程
 - ✅ 成本追蹤（Claude Token）
 - ✅ WebSocket 即時監控
 - ✅ Member 人設/技能/記憶
+- ✅ 成員收件匣（跨 Agent 通訊基礎）
+- ✅ CI/CD 自動部署 + 熱更新 API
 
 ### Aegis 缺少的常見功能
 | 功能 | 其他專案表現 | Aegis 現狀 |
 |------|-------------|-----------|
 | 多頻道通訊 | Nanobot(9)、ZeroClaw(15+)、PicoClaw(12+) | ❌ 無 |
 | 更多 LLM | ZeroClaw(20+)、ClawRouter(41+) | △ 僅 2 個 |
-| 智能路由 | ClawRouter(81%省)、Spacebot(四層) | △ 基本標籤 |
+| 智能路由 | ClawRouter(81%省)、Spacebot(四層) | △ 帳號 fallback 已完成 |
 | 容器隔離 | IronClaw(WASM+Docker)、NanoClaw | ❌ 無 |
 | 安全機制 | IronClaw(注入防禦)、Spacebot | ❌ 有漏洞 |
 | 向量搜索 | IronClaw(pgvector)、Spacebot(LanceDB) | ❌ 無 |
@@ -33,18 +35,18 @@
 
 ## 開發優先級
 
-### P0: 緊急修復（1-2 週）
+### ~~P0: 緊急修復~~ ✅ 完成（2026-03-09 ~ 03-10）
 
 > 來自 ANALYSIS.md 的 6 個 Critical Bug
 
-| # | 任務 | 來源 | 預估 |
-|---|------|------|------|
-| 1 | 修復 Gemini CLI 硬編碼路徑 | B-C1 | 2h |
-| 2 | 修復路徑遍歷安全漏洞 | B-C2 | 2h |
-| 3 | 修復 Semaphore 競態條件 | B-C3 | 4h |
-| 4 | 修復 Toast 直接修改 Pinia | F-C1 | 1h |
-| 5 | 修復 App.vue setInterval 未清理 | F-C2 | 1h |
-| 6 | 修復 Kanban 刪除邏輯 bug | F-C3 | 1h |
+| # | 任務 | 來源 | 狀態 |
+|---|------|------|:----:|
+| 1 | 修復 Gemini CLI 硬編碼路徑 | B-C1 | ✅ |
+| 2 | 修復路徑遍歷安全漏洞 | B-C2 | ✅ |
+| 3 | 修復 Semaphore 競態條件 | B-C3 | ✅ |
+| 4 | 修復 Toast 直接修改 Pinia | F-C1 | ✅ |
+| 5 | 修復 App.vue setInterval 未清理 | F-C2 | ✅ |
+| 6 | 修復 Kanban 刪除邏輯 bug | F-C3 | ✅ |
 
 ---
 
@@ -111,7 +113,7 @@
 |---|------|---------|------|
 | 1 | 任務複雜度評估器 | ClawRouter | 2d |
 | 2 | 成本/性能路由表 | ClawRouter | 1d |
-| 3 | 備援鏈（失敗自動切換） | Spacebot | 2d |
+| 3 | 備援鏈（失敗自動切換） | Spacebot | ✅ 帳號 fallback |
 | 4 | 路由統計與優化建議 | ClawRouter | 2d |
 
 **路由策略**：
@@ -252,7 +254,7 @@ AI 任務 → memory_search → 混合搜索 (RRF) → 相關上下文
 
 | # | 任務 | 參考專案 | 預估 |
 |---|------|---------|------|
-| 1 | Agent 間訊息傳遞 | TinyClaw [@agent: msg] | 2d |
+| 1 | Agent 間訊息傳遞 | TinyClaw [@agent: msg] | ✅ 成員收件匣 |
 | 2 | 任務分解與分派 | Spacebot Branch/Worker | 3d |
 | 3 | 結果聚合機制 | Spacebot Compactor | 2d |
 | 4 | 協作可視化 | Aegis Virtual Office | 2d |
@@ -264,7 +266,8 @@ AI 任務 → memory_search → 混合搜索 (RRF) → 相關上下文
 
 ```
 2026 Q1 (3月)
-├── Week 1-2: P0 緊急修復 (6 Critical bugs)
+├── Week 1-2: P0 緊急修復 ✅ + 虛擬辦公室/排程/部署 ✅
+├── Week 2-3: 成員收件匣 + AI 帳號 Fallback + 對話框優化 ✅
 ├── Week 3-4: P1 多頻道通訊 (Telegram/LINE)
 └── Week 5-6: P2 擴展 LLM (OpenAI/DeepSeek/Ollama)
 
@@ -289,7 +292,7 @@ AI 任務 → memory_search → 混合搜索 (RRF) → 相關上下文
 |------|:----------:|:------------:|:--------:|:--------:|:-------:|
 | 多 LLM | △ (2) | ✓ (6+) | ✓ (6+) | ✓ | ✓ (23+) |
 | 多頻道 | ❌ | ✓ (3+) | ✓ (5+) | ✓ (5) | ✓ (9) |
-| 智能路由 | △ | ✓✓ | ✓ | ✓✓ | - |
+| 智能路由 | △ (fallback) | ✓✓ | ✓ | ✓✓ | - |
 | 容器隔離 | ❌ | ✓ | ✓✓ | ✓ | - |
 | 安全機制 | ❌ | ✓✓ | ✓✓✓ | ✓✓ | △ |
 | 向量搜索 | ❌ | ✓✓ | ✓✓ | ✓✓ | - |
@@ -297,7 +300,7 @@ AI 任務 → memory_search → 混合搜索 (RRF) → 相關上下文
 | 技能系統 | △ | ✓✓ | ✓✓ | ✓ | ✓ |
 | 虛擬辦公室 | ✓✓ | ✓✓ | - | - | - |
 | 成本追蹤 | ✓ | ✓✓ | - | - | - |
-| 多代理協作 | △ | ✓✓ | △ | ✓✓ | - |
+| 多代理協作 | △ (收件匣) | ✓✓ | △ | ✓✓ | - |
 
 ---
 
@@ -316,13 +319,14 @@ AI 任務 → memory_search → 混合搜索 (RRF) → 相關上下文
 
 ### 整合建議
 
-| 現有系統 | 整合方式 |
-|---------|---------|
-| HappyNAS | 復用 LINE/Telegram Bot 代碼 |
-| AutoDev | Aegis 作為 AutoDev 的 Web UI |
-| Trello | 保留現有 Trello 整合，Aegis 作為執行層 |
+| 現有系統 | 整合方式 | 狀態 |
+|---------|---------|:----:|
+| HappyNAS | 復用 LINE/Telegram Bot 代碼 | 待開發 |
+| AutoDev | Aegis 作為 AutoDev 的 Web UI | ✅ 運作中 |
+| Trello | 保留現有 Trello 整合，Aegis 作為執行層 | ✅ 運作中 |
+| OneStack | 雙向同步（Phase 1-3） | △ 規劃中 |
 
 ---
 
 *本清單基於 14 個 AI Agent 專案分析，結合 Aegis 現狀生成。*
-*生成日期：2026-03-09*
+*生成日期：2026-03-09 ｜ 更新：2026-03-13*

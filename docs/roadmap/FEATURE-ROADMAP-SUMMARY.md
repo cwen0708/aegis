@@ -1,7 +1,7 @@
 # Aegis 功能開發清單摘要
 
 > 基於 14 個 AI Agent 專案優點整合
-> 初版：2026-03-09 ｜ 更新：2026-03-12
+> 初版：2026-03-09 ｜ 更新：2026-03-13
 
 ---
 
@@ -11,14 +11,14 @@
 |------|:----:|:----:|----------|
 | 多頻道通訊 | △ | ✓ (3+) | Nanobot, PicoClaw, ZeroClaw |
 | 多 LLM 支援 | △ (2) | ✓ (6+) | ZeroClaw, ClawRouter |
-| 智能路由 | △ | ✓✓ | ClawRouter, Spacebot |
+| 智能路由 | △ (fallback) | ✓✓ | ClawRouter, Spacebot |
 | 容器隔離 | ❌ | ✓ | IronClaw, NanoClaw |
 | 安全機制 | ❌ | ✓✓ | IronClaw, Spacebot |
 | 向量搜索 | ❌ | ✓✓ | IronClaw, Spacebot |
 | CLI 工具 | ❌ | ✓ | Nanobot, ZeroClaw |
 | 技能系統 | △ | ✓✓ | ClawHub, IronClaw |
 | 瀏覽器自動化 | ❌ | ✓ | CoPaw, Spacebot |
-| 多代理協作 | △ | ✓✓ | Spacebot, TinyClaw |
+| 多代理協作 | △ (收件匣) | ✓✓ | Spacebot, TinyClaw |
 | 虛擬辦公室 | ✓✓ | ✓✓ | 獨有優勢 |
 | 成本追蹤 | ✓ | ✓✓ | ClawWork |
 | 排程系統 | ✓✓ | ✓✓ | — |
@@ -41,7 +41,7 @@
 | F-C2 | setInterval 未清理 | ✅ |
 | F-C3 | Kanban 刪除邏輯 bug | ✅ |
 
-### 規劃外已完成（03-09 ~ 03-12）
+### 規劃外已完成（03-09 ~ 03-13）
 
 | 功能 | 說明 |
 |------|------|
@@ -54,6 +54,12 @@
 | 頻道設定 UI | Settings 頁頻道設定區塊（P1 前置） |
 | 手機版適配 | 響應式佈局、Kanban/CronJobs 卡片版 |
 | 頁面 icon 統一 | Sidebar ↔ PageHeader icon 一致 |
+| 成員收件匣 | 自動建立 AI 成員專屬列表（is_member_bound），支援跨成員丟卡片通訊 |
+| Inbound 列表 | OneStack → Inbound 更名，語意更通用 |
+| AI 帳號 Fallback | 主帳號失敗時自動切換備用帳號（按 priority 順序） |
+| 預設路由移除 | 移除 phase_routing 遺留系統，簡化成員路由邏輯 |
+| 對話框優化 | Claude JSON 解析、工具詳情顯示、UTC 時區修正、摘要 70 字 |
+| Auth 中介層 | CI/CD deploy 路徑豁免認證 |
 
 ---
 

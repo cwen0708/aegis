@@ -670,6 +670,22 @@ def fix_cron_schedules(session: Session = Depends(get_session)):
     return {"ok": True, "fixed_count": fixed_count}
 
 
+@router.post("/cron-jobs/{job_id}/trigger")
+def trigger_cron_job(job_id: int, session: Session = Depends(get_session)):
+    """手動觸發 CronJob，建立待執行卡片"""
+    job = session.get(CronJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="CronJob not found")
+
+    from app.core.cron_poller import create_card_for_cron_job
+    card_id, error = create_card_for_cron_job(session, job, update_next_time=False)
+
+    if error:
+        raise HTTPException(status_code=409, detail=error)
+
+    return {"ok": True, "card_id": card_id, "message": f"已手動觸發「{job.name}」"}
+
+
 # ==========================================
 # Delete Endpoints
 # ==========================================
@@ -1351,6 +1367,11 @@ def get_settings(session: Session = Depends(get_session)):
     if "max_workstations" not in db_keys and "max_concurrent_agents" in db_keys:
         result["max_workstations"] = result["max_concurrent_agents"]
     result.pop("max_concurrent_agents", None)
+    # Mask 敏感 token（只顯示後 4 位）
+    for secret_key in ("github_pat",):
+        if secret_key in result and result[secret_key]:
+            val = result[secret_key]
+            result[secret_key] = f"***{val[-4:]}" if len(val) > 4 else "***"
     return result
 
 
@@ -1376,6 +1397,64 @@ def update_settings(data: dict, session: Session = Depends(get_session)):
         except (ValueError, TypeError):
             raise HTTPException(status_code=400, detail="max_workstations 必須為正整數")
     return get_settings(session=session)
+
+
+# ==========================================
+# GitHub Integration
+# ==========================================
+class GitHubTokenRequest(BaseModel):
+    token: str
+
+
+@router.post("/github/verify")
+def verify_github_token(data: GitHubTokenRequest):
+    """驗證 GitHub PAT 有效性"""
+    import urllib.request
+    req = urllib.request.Request(
+        "https://api.github.com/user",
+        headers={
+            "Authorization": f"Bearer {data.token}",
+            "Accept": "application/vnd.github+json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            import json as _json
+            user = _json.loads(resp.read().decode("utf-8"))
+            return {
+                "ok": True,
+                "login": user["login"],
+                "name": user.get("name", ""),
+                "avatar_url": user.get("avatar_url", ""),
+            }
+    except urllib.error.HTTPError:
+        raise HTTPException(status_code=401, detail="GitHub Token 無效")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"無法連線 GitHub API: {e}")
+
+
+@router.get("/github/status")
+def get_github_status(session: Session = Depends(get_session)):
+    """取得 GitHub 連線狀態"""
+    setting = session.get(SystemSetting, "github_pat")
+    if not setting or not setting.value:
+        return {"connected": False}
+
+    import urllib.request
+    req = urllib.request.Request(
+        "https://api.github.com/user",
+        headers={
+            "Authorization": f"Bearer {setting.value}",
+            "Accept": "application/vnd.github+json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            import json as _json
+            user = _json.loads(resp.read().decode("utf-8"))
+            return {"connected": True, "login": user["login"], "name": user.get("name", "")}
+    except Exception:
+        return {"connected": False, "error": "Token 已失效"}
 
 
 # ==========================================

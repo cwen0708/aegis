@@ -387,7 +387,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Aegis API",
     description="AI Engineering Grid & Intelligence System",
-    version="0.2.0",
+    version="0.2.3",
     lifespan=lifespan
 )
 

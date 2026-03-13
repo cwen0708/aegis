@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Clock, Play, Pause, Pencil, Check, AlertCircle, CheckCircle2, XCircle, Timer, ChevronDown, ChevronRight } from 'lucide-vue-next'
+import { ArrowLeft, Clock, Play, Pause, Pencil, Check, AlertCircle, CheckCircle2, XCircle, Timer, ChevronDown, ChevronRight, Zap } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 import { useAuthStore } from '../stores/auth'
 import { authHeaders } from '../utils/authFetch'
@@ -65,6 +65,24 @@ async function fetchLogs() {
     console.error('Failed to fetch cron logs', e)
   } finally {
     logsLoading.value = false
+  }
+}
+
+async function triggerJob() {
+  if (!job.value) return
+  try {
+    const res = await fetch(`/api/v1/cron-jobs/${job.value.id}/trigger`, {
+      method: 'POST',
+      headers: authHeaders(),
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      store.addToast(data.detail || '觸發失敗', 'error')
+      return
+    }
+    store.addToast(`已手動觸發「${job.value.name}」`, 'success')
+  } catch (e) {
+    store.addToast('觸發失敗', 'error')
   }
 }
 
@@ -166,6 +184,10 @@ watch(jobId, async () => {
         </div>
       </div>
       <div v-if="job && auth.isAuthenticated" class="flex items-center gap-2">
+        <button @click="triggerJob" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-cyan-400 hover:bg-cyan-400/10 transition-all">
+          <Zap class="w-3.5 h-3.5" />
+          手動執行
+        </button>
         <button @click="toggleEnabled" :class="[
           'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
           job.is_enabled ? 'text-amber-400 hover:bg-amber-400/10' : 'text-emerald-400 hover:bg-emerald-400/10'

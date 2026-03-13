@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Clock, Play, Pause, Trash2, AlertCircle, Plus, X, Pencil } from 'lucide-vue-next'
+import { Clock, Play, Pause, Trash2, AlertCircle, Plus, X, Pencil, Zap } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 import { useAuthStore } from '../stores/auth'
 import { authHeaders } from '../utils/authFetch'
@@ -114,6 +114,23 @@ const toggleJob = async (job: any) => {
     store.addToast(newStatus ? '排程已啟用' : '排程已停用', 'info')
   } catch (e) {
     store.addToast('操作失敗', 'error')
+  }
+}
+
+const triggerJob = async (job: any) => {
+  try {
+    const res = await fetch(`/api/v1/cron-jobs/${job.id}/trigger`, {
+      method: 'POST',
+      headers: authHeaders(),
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      store.addToast(data.detail || '觸發失敗', 'error')
+      return
+    }
+    store.addToast(`已手動觸發「${job.name}」`, 'success')
+  } catch (e) {
+    store.addToast('觸發失敗', 'error')
   }
 }
 
@@ -284,6 +301,10 @@ const formatTime = (iso: string) => {
           </div>
           <!-- 操作列 -->
           <div v-if="auth.isAuthenticated" class="flex border-t border-slate-700/30 divide-x divide-slate-700/30">
+            <button @click="triggerJob(job)" class="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-cyan-400 hover:bg-cyan-400/5 transition-colors">
+              <Zap class="w-3.5 h-3.5" />
+              <span class="text-[10px]">執行</span>
+            </button>
             <button @click="openEditModal(job)" class="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-slate-400 hover:text-blue-400 hover:bg-blue-400/5 transition-colors">
               <Pencil class="w-3.5 h-3.5" />
               <span class="text-[10px]">編輯</span>
@@ -354,6 +375,13 @@ const formatTime = (iso: string) => {
               </td>
               <td v-if="auth.isAuthenticated" class="px-6 py-3 text-right">
                 <div class="flex justify-end gap-0.5 -mr-2">
+                  <button
+                    @click="triggerJob(job)"
+                    class="p-2.5 text-cyan-400 hover:bg-cyan-400/10 rounded-lg transition-colors"
+                    title="手動執行"
+                  >
+                    <Zap class="w-4 h-4" />
+                  </button>
                   <button
                     @click="openEditModal(job)"
                     class="p-2.5 text-slate-500 hover:text-blue-400 hover:bg-blue-400/10 rounded-lg transition-colors"
