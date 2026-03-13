@@ -37,12 +37,15 @@ onMounted(() => {
   if (!isDark.value) document.documentElement.classList.add('light')
 })
 
+const settingsReady = ref(false)
+
 onMounted(async () => {
   await store.fetchSettings()
+  settingsReady.value = true
 
   // 檢查 onboarding 狀態，未完成則導向
   if (store.settings.onboarding_completed !== 'true' && route.path !== '/onboarding') {
-    router.push('/onboarding')
+    router.replace('/onboarding')
   }
 })
 
@@ -97,14 +100,11 @@ function mobileNavClass(path: string) {
         <!-- 總覽 -->
         <div class="space-y-1 mb-2">
           <p v-if="!sidebarCollapsed" class="px-3 text-[10px] font-semibold text-slate-600 tracking-widest uppercase mb-1">總覽</p>
-          <router-link to="/onboarding" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/onboarding')">
+          <router-link v-if="store.settings.onboarding_completed !== 'true'" to="/onboarding" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/onboarding')">
             <Rocket class="w-5 h-5 shrink-0" />
             <span v-if="!sidebarCollapsed" class="flex items-center gap-2">
               設定引導
-              <span
-                v-if="store.settings.onboarding_completed !== 'true'"
-                class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"
-              ></span>
+              <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
             </span>
           </router-link>
           <router-link to="/office" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/office')">
@@ -224,7 +224,7 @@ function mobileNavClass(path: string) {
       <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-emerald-900/20 via-slate-900 to-slate-900 pointer-events-none"></div>
 
       <div class="flex-1 overflow-hidden relative z-0" :class="{ 'pb-14': isMobile }">
-        <router-view></router-view>
+        <router-view v-if="settingsReady"></router-view>
       </div>
     </main>
 

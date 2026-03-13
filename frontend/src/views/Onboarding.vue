@@ -3,9 +3,11 @@ import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Rocket, CheckCircle2, ChevronRight, Terminal, Users, Kanban, Clock, Sparkles } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
+import { useResponsive } from '../composables/useResponsive'
 
 const router = useRouter()
 const store = useAegisStore()
+const { isMobile } = useResponsive()
 const currentStep = ref(0)
 const completing = ref(false)
 
@@ -160,111 +162,98 @@ function skipOnboarding() {
 
     <!-- Content -->
     <div class="flex-1 overflow-auto">
-      <div class="max-w-4xl mx-auto p-8">
-        <div class="flex gap-8">
-          <!-- Step navigation -->
-          <div class="w-64 shrink-0">
-            <div class="space-y-2">
-              <button
-                v-for="(step, index) in steps"
-                :key="step.id"
-                @click="goToStep(index)"
-                :class="[
-                  'w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all',
-                  index === currentStep
-                    ? 'bg-slate-700/50 border border-slate-600'
-                    : index < currentStep
-                    ? 'text-slate-400 hover:bg-slate-800/50'
-                    : 'text-slate-500 hover:bg-slate-800/50'
-                ]"
-              >
-                <div :class="[
-                  'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold',
-                  index < currentStep
-                    ? 'bg-emerald-500 text-white'
-                    : index === currentStep
-                    ? 'bg-cyan-500 text-white'
-                    : 'bg-slate-700 text-slate-400'
-                ]">
-                  <CheckCircle2 v-if="index < currentStep" class="w-4 h-4" />
-                  <span v-else>{{ index + 1 }}</span>
-                </div>
-                <span :class="[
-                  'text-sm font-medium',
-                  index === currentStep ? 'text-slate-100' : ''
-                ]">{{ step.title }}</span>
-              </button>
+      <div class="max-w-4xl mx-auto p-4 sm:p-8">
+        <!-- Step indicators (horizontal numbers) -->
+        <div class="flex items-center justify-center gap-2 sm:gap-4 mb-6">
+          <button
+            v-for="(step, index) in steps"
+            :key="step.id"
+            @click="goToStep(index)"
+            class="flex flex-col items-center gap-1 transition-all"
+          >
+            <div :class="[
+              'w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-xs sm:text-sm font-bold transition-all',
+              index < currentStep
+                ? 'bg-emerald-500 text-white'
+                : index === currentStep
+                ? 'bg-cyan-500 text-white ring-2 ring-cyan-400/30 ring-offset-2 ring-offset-slate-900'
+                : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+            ]">
+              <CheckCircle2 v-if="index < currentStep" class="w-4 h-4" />
+              <span v-else>{{ index + 1 }}</span>
+            </div>
+            <span :class="[
+              'text-[10px] sm:text-xs font-medium whitespace-nowrap',
+              index === currentStep ? 'text-cyan-400' : index < currentStep ? 'text-emerald-400' : 'text-slate-500'
+            ]">{{ step.title }}</span>
+          </button>
+        </div>
+
+        <!-- Step content -->
+        <div class="bg-slate-800/50 rounded-2xl border border-slate-700 p-5 sm:p-8">
+          <div class="flex items-start gap-3 sm:gap-4 mb-6">
+            <div class="w-12 h-12 sm:w-14 sm:h-14 shrink-0 rounded-2xl bg-gradient-to-br from-emerald-400/20 to-cyan-500/20 flex items-center justify-center">
+              <component :is="currentStepData.icon" class="w-6 h-6 sm:w-7 sm:h-7 text-cyan-400" />
+            </div>
+            <div class="min-w-0">
+              <h2 class="text-xl sm:text-2xl font-bold text-slate-100 mb-1 sm:mb-2">{{ currentStepData.title }}</h2>
+              <p class="text-sm sm:text-base text-slate-400">{{ currentStepData.description }}</p>
             </div>
           </div>
 
-          <!-- Step content -->
-          <div class="flex-1">
-            <div class="bg-slate-800/50 rounded-2xl border border-slate-700 p-8">
-              <div class="flex items-start gap-4 mb-6">
-                <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-400/20 to-cyan-500/20 flex items-center justify-center">
-                  <component :is="currentStepData.icon" class="w-7 h-7 text-cyan-400" />
-                </div>
-                <div>
-                  <h2 class="text-2xl font-bold text-slate-100 mb-2">{{ currentStepData.title }}</h2>
-                  <p class="text-slate-400">{{ currentStepData.description }}</p>
-                </div>
+          <div class="space-y-2 sm:space-y-3 mb-6 sm:mb-8">
+            <div
+              v-for="(detail, i) in currentStepData.details"
+              :key="i"
+              class="flex items-start gap-3 p-3 bg-slate-900/50 rounded-lg"
+            >
+              <div class="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center mt-0.5 shrink-0">
+                <CheckCircle2 class="w-3 h-3 text-emerald-400" />
               </div>
+              <span class="text-sm text-slate-300">{{ detail }}</span>
+            </div>
+          </div>
 
-              <div class="space-y-3 mb-8">
-                <div
-                  v-for="(detail, i) in currentStepData.details"
-                  :key="i"
-                  class="flex items-start gap-3 p-3 bg-slate-900/50 rounded-lg"
-                >
-                  <div class="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center mt-0.5">
-                    <CheckCircle2 class="w-3 h-3 text-emerald-400" />
-                  </div>
-                  <span class="text-sm text-slate-300">{{ detail }}</span>
-                </div>
-              </div>
+          <!-- Action button for step -->
+          <div v-if="currentStepData.action" class="mb-6 sm:mb-8">
+            <router-link
+              :to="currentStepData.action!.route"
+              class="inline-flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm font-medium transition-colors"
+            >
+              {{ currentStepData.action!.label }}
+              <ChevronRight class="w-4 h-4" />
+            </router-link>
+          </div>
 
-              <!-- Action button for step -->
-              <div v-if="currentStepData.action" class="mb-8">
-                <router-link
-                  :to="currentStepData.action!.route"
-                  class="inline-flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm font-medium transition-colors"
-                >
-                  {{ currentStepData.action!.label }}
-                  <ChevronRight class="w-4 h-4" />
-                </router-link>
-              </div>
+          <!-- Navigation -->
+          <div class="flex items-center justify-between pt-4 sm:pt-6 border-t border-slate-700">
+            <button
+              v-if="currentStep > 0"
+              @click="prevStep"
+              class="px-4 py-2 text-slate-400 hover:text-slate-200 text-sm font-medium transition-colors"
+            >
+              上一步
+            </button>
+            <div v-else></div>
 
-              <!-- Navigation -->
-              <div class="flex items-center justify-between pt-6 border-t border-slate-700">
-                <button
-                  v-if="currentStep > 0"
-                  @click="prevStep"
-                  class="px-4 py-2 text-slate-400 hover:text-slate-200 text-sm font-medium transition-colors"
-                >
-                  上一步
-                </button>
-                <div v-else></div>
-
-                <div class="flex gap-3">
-                  <button
-                    v-if="currentStep < steps.length - 1"
-                    @click="nextStep"
-                    class="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 text-white rounded-lg font-bold text-sm transition-all shadow-lg shadow-emerald-500/20"
-                  >
-                    下一步
-                    <ChevronRight class="w-4 h-4" />
-                  </button>
-                  <button
-                    v-else
-                    @click="completeOnboarding"
-                    :disabled="completing"
-                    class="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 disabled:opacity-50 text-white rounded-lg font-bold text-sm transition-all shadow-lg shadow-emerald-500/20"
-                  >
-                    <Sparkles class="w-4 h-4" />
-                    {{ completing ? '處理中...' : '完成設定' }}
-                  </button>
-                </div>
-              </div>
+            <div class="flex gap-3">
+              <button
+                v-if="currentStep < steps.length - 1"
+                @click="nextStep"
+                class="flex items-center gap-2 px-5 sm:px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 text-white rounded-lg font-bold text-sm transition-all shadow-lg shadow-emerald-500/20"
+              >
+                下一步
+                <ChevronRight class="w-4 h-4" />
+              </button>
+              <button
+                v-else
+                @click="completeOnboarding"
+                :disabled="completing"
+                class="flex items-center gap-2 px-5 sm:px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 disabled:opacity-50 text-white rounded-lg font-bold text-sm transition-all shadow-lg shadow-emerald-500/20"
+              >
+                <Sparkles class="w-4 h-4" />
+                {{ completing ? '處理中...' : '完成設定' }}
+              </button>
             </div>
           </div>
         </div>

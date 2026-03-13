@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Settings, Globe, Terminal, MessageSquare, Users, Bot, Activity, Lock, Loader2, FolderKanban, Mail, ChevronDown, Download, Layers, LogOut } from 'lucide-vue-next'
+import { Settings, Globe, Terminal, MessageSquare, Users, Bot, Activity, Lock, Loader2, FolderKanban, Mail, ChevronDown, Download, Layers, LogOut, Rocket } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { useResponsive } from '../../composables/useResponsive'
 import { useAuthStore } from '../../stores/auth'
@@ -22,6 +22,7 @@ const menuItems = [
   { path: '/settings/tools', label: '終端管理', icon: Terminal },
   { path: '/settings/status', label: '服務狀態', icon: Activity },
   { path: '/settings/update', label: '系統更新', icon: Download },
+  { path: '/onboarding', label: '設定引導', icon: Rocket },
 ]
 
 // 驗證狀態
