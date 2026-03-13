@@ -179,8 +179,8 @@ def update_project(project_id: int, update_data: ProjectUpdate, session: Session
     project = session.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    # 系統專案禁止改名
-    if project.is_system and update_data.name is not None:
+    # 系統專案禁止改名（名稱未變更時放行）
+    if project.is_system and update_data.name is not None and update_data.name != project.name:
         raise HTTPException(status_code=403, detail="無法修改系統專案名稱")
     if update_data.name is not None:
         project.name = update_data.name
