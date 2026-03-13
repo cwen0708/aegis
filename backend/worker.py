@@ -23,7 +23,7 @@ import logging
 import subprocess
 import platform
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any
 
 # 加入 app 路徑
@@ -87,7 +87,7 @@ PROVIDERS = {
 # HTTP 工具
 # ==========================================
 def broadcast_log(card_id: int, line: str):
-    """透過 HTTP 發送 log 給 FastAPI 廣播"""
+    """透過 HTTP 發送 log 給 FastAPI 廣播，同時寫入 BroadcastLog"""
     try:
         # 過濾掉 ANSI escape codes 和控制字符
         import re
@@ -96,6 +96,15 @@ def broadcast_log(card_id: int, line: str):
 
         if not clean_line.strip():
             return  # 跳過空行
+
+        # 寫入 BroadcastLog（臨時表）
+        try:
+            with Session(engine) as session:
+                from app.models.core import BroadcastLog
+                session.add(BroadcastLog(card_id=card_id, line=clean_line))
+                session.commit()
+        except Exception:
+            pass  # 不影響廣播
 
         logger.info(f"[Broadcast] card={card_id} len={len(clean_line)}")
         data = json.dumps({"card_id": card_id, "line": clean_line}).encode("utf-8")
@@ -109,6 +118,24 @@ def broadcast_log(card_id: int, line: str):
     except Exception as e:
         logger.warning(f"[Broadcast] Failed: {e}")
         pass
+
+
+def cleanup_broadcast_logs():
+    """清理超過 24 小時的廣播記錄"""
+    try:
+        from app.models.core import BroadcastLog
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        with Session(engine) as session:
+            old_logs = session.exec(
+                select(BroadcastLog).where(BroadcastLog.created_at < cutoff)
+            ).all()
+            if old_logs:
+                for log in old_logs:
+                    session.delete(log)
+                session.commit()
+                logger.info(f"[Cleanup] Deleted {len(old_logs)} broadcast logs older than 24h")
+    except Exception as e:
+        logger.warning(f"[Cleanup] Failed: {e}")
 
 
 def broadcast_event(event_type: str, payload: dict):
@@ -1136,12 +1163,18 @@ def main():
     except Exception as e:
         logger.warning(f"[Worker] Failed to clear paused flag: {e}")
 
+    last_cleanup = time.time()
     while True:
         try:
             if is_worker_paused():
                 pass  # 靜默跳過
             else:
                 process_pending_cards()
+
+            # 每小時清理過期廣播記錄
+            if time.time() - last_cleanup > 3600:
+                cleanup_broadcast_logs()
+                last_cleanup = time.time()
         except Exception as e:
             logger.error(f"[Worker Error] {e}")
 

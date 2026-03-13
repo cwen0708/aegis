@@ -187,6 +187,14 @@ class TaskLog(SQLModel, table=True):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class BroadcastLog(SQLModel, table=True):
+    """任務廣播記錄（臨時，24 小時自動清理）"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    card_id: int = Field(index=True)
+    line: str = ""
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class MemberDialogue(SQLModel, table=True):
     """成員對話記錄（AVG 風格）"""
     id: Optional[int] = Field(default=None, primary_key=True)

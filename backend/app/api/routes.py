@@ -824,6 +824,18 @@ def get_task_log(log_id: int, session: Session = Depends(get_session)):
     return log
 
 
+@router.get("/cards/{card_id}/broadcast-logs")
+def get_card_broadcast_logs(card_id: int, session: Session = Depends(get_session)):
+    """取得卡片的廣播記錄（24 小時內）"""
+    from app.models.core import BroadcastLog
+    logs = session.exec(
+        select(BroadcastLog)
+        .where(BroadcastLog.card_id == card_id)
+        .order_by(BroadcastLog.created_at)
+    ).all()
+    return [{"line": l.line, "created_at": l.created_at} for l in logs]
+
+
 # ==========================================
 # CronLog（排程執行記錄）
 # ==========================================
