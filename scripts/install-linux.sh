@@ -141,16 +141,21 @@ if [ -z "$PYTHON_CMD" ]; then
     exit 1
 fi
 
-# Check python3-venv
-if ! $PYTHON_CMD -m venv --help &> /dev/null; then
-    print_warn "python3-venv not found, installing..."
-    PY_MINOR=$($PYTHON_CMD --version 2>&1 | grep -oP '3\.\d+')
-    if sudo apt-get install -y "python${PY_MINOR}-venv" 2>/dev/null; then
+# Check python3-venv (test by creating a temp venv)
+VENV_TEST_DIR=$(mktemp -d)
+if ! $PYTHON_CMD -m venv "$VENV_TEST_DIR/test_venv" 2>/dev/null; then
+    rm -rf "$VENV_TEST_DIR"
+    print_warn "python3-venv not available, installing..."
+    PY_MINOR=$($PYTHON_CMD --version 2>&1 | sed -n 's/.*Python \(3\.[0-9]*\).*/\1/p')
+    if sudo apt-get install -y "python${PY_MINOR}-venv"; then
         print_success "python${PY_MINOR}-venv installed"
     else
         print_error "Failed to install python3-venv. Please run: sudo apt install python3-venv"
         exit 1
     fi
+else
+    rm -rf "$VENV_TEST_DIR"
+    print_success "python3-venv: OK"
 fi
 
 # Check Git (only for dev mode)
