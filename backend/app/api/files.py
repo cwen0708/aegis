@@ -143,7 +143,7 @@ def list_files(
         for item in sorted(target.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
             if item.name in EXCLUDED_NAMES:
                 continue
-            if item.name.startswith(".") and item.name not in (".gitignore", ".env.example", ".aegis"):
+            if item.name.startswith(".") and item.name not in (".gitignore", ".env.example"):
                 continue
 
             try:

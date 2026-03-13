@@ -317,7 +317,8 @@ async function saveSettings() {
           <div class="flex gap-2">
             <input
               v-model="githubToken"
-              type="password"
+              type="text"
+              autocomplete="off"
               placeholder="ghp_xxxx 或 github_pat_xxxx"
               class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-slate-500 outline-none text-sm font-mono"
               @keyup.enter="connectGithub"
