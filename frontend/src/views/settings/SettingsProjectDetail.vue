@@ -266,6 +266,7 @@ function toggleReveal(varId: number) {
 
 // ── Remote Control ──
 const rcStatus = ref<'stopped' | 'running' | 'starting'>('stopped')
+const rcError = ref('')
 const rcBridgeUrl = ref('')
 const rcPid = ref<number | null>(null)
 const rcUptime = ref(0)
@@ -287,6 +288,7 @@ async function fetchRcStatus() {
 
 async function startRc() {
   rcStatus.value = 'starting'
+  rcError.value = ''
   try {
     const res = await fetch(`${API}/api/v1/projects/${projectId}/remote-control`, {
       method: 'POST',
@@ -301,11 +303,10 @@ async function startRc() {
     rcBridgeUrl.value = data.bridge_url || ''
     rcPid.value = data.pid || null
     store.addToast('Remote Control 已啟動', 'success')
-    // 開始輪詢狀態
     startRcPolling()
   } catch (e: any) {
     rcStatus.value = 'stopped'
-    store.addToast(e.message || '啟動失敗', 'error')
+    rcError.value = e.message || '啟動失敗'
   }
 }
 
@@ -612,6 +613,11 @@ onUnmounted(() => {
         <p class="text-xs text-slate-500">
           啟動 Claude Code Remote Control，可從手機 App 或 claude.ai/code 遠端操控此專案。
         </p>
+
+        <!-- Error -->
+        <div v-if="rcError" class="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-sm text-red-300">
+          {{ rcError }}
+        </div>
 
         <!-- Stopped -->
         <div v-if="rcStatus === 'stopped'">

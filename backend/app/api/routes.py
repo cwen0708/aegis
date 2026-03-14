@@ -1285,8 +1285,16 @@ async def start_remote_control(project_id: int, session: Session = Depends(get_s
             break
 
     if proc.poll() is not None:
-        # 程序已結束，啟動失敗
-        raise HTTPException(status_code=500, detail="Claude RC failed to start")
+        # 程序已結束，檢查失敗原因
+        full_output = " ".join(str(l) for l in output_lines)
+        if "not trusted" in full_output.lower() or "workspace trust" in full_output.lower():
+            raise HTTPException(
+                status_code=400,
+                detail="此專案目錄尚未被 Claude CLI 信任。請先在伺服器上手動執行一次 `claude`，接受 workspace trust 對話框。"
+            )
+        if "not found" in full_output.lower() or "ENOENT" in full_output:
+            raise HTTPException(status_code=500, detail="Claude CLI 未安裝或找不到")
+        raise HTTPException(status_code=500, detail=f"Claude RC 啟動失敗：{full_output[:200]}")
 
     _rc_sessions[project_id] = {
         "process": proc,
