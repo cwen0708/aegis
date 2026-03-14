@@ -2,8 +2,8 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  ArrowLeft, Save, Loader2, Trash2, Upload, Sparkles, Image,
-  Plus, Edit3, BookOpen, ChevronDown, ChevronUp, Plug, AlertTriangle, X,
+  ArrowLeft, Save, Loader2, Trash2, Upload, Sparkles,
+  Plus, Edit3, BookOpen, ChevronDown, ChevronUp, Plug, AlertTriangle,
 } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 import ConfirmDialog from '../../components/ConfirmDialog.vue'
