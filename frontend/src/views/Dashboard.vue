@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { Server, Cpu, HardDrive, Activity, Clock, Radio, Terminal, Sparkles, Eye } from 'lucide-vue-next'
+import { Server, Cpu, HardDrive, Activity, Clock, Radio, Terminal, Sparkles, Eye, Cog, PlayCircle, PauseCircle } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 
 const store = useAegisStore()
@@ -41,17 +41,28 @@ async function toggleRunner() {
   }
 }
 
-function serviceStatusColor(status: string, isPaused?: boolean) {
-  if (isPaused) return 'text-amber-400'
-  if (status === 'running') return 'text-emerald-400'
-  if (status === 'paused') return 'text-amber-400'
-  return 'text-red-400'
+function statusDot(status: string) {
+  if (status === 'running') return 'bg-emerald-400'
+  if (status === 'paused') return 'bg-amber-400'
+  if (status === 'stopped') return 'bg-red-400'
+  return 'bg-slate-500'
+}
+
+function statusLabel(status: string) {
+  if (status === 'running') return '運行中'
+  if (status === 'paused') return '已暫停'
+  if (status === 'stopped') return '未啟動'
+  if (status === 'unknown') return '未知'
+  return status
 }
 
 onMounted(() => {
   fetchMetrics()
   fetchServices()
-  intervalId = window.setInterval(fetchMetrics, 5000)
+  intervalId = window.setInterval(() => {
+    fetchMetrics()
+    fetchServices()
+  }, 5000)
 })
 
 onUnmounted(() => {
@@ -62,10 +73,9 @@ onUnmounted(() => {
 <template>
   <div class="space-y-6">
 
-    <!-- Hardware Metrics Grid -->
+    <!-- Hardware Metrics -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6" v-if="metrics">
-
-      <!-- CPU Card -->
+      <!-- CPU -->
       <div class="bg-gradient-to-br from-slate-800 to-slate-800/80 p-6 rounded-2xl border border-slate-700 shadow-xl relative overflow-hidden group">
         <div class="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
         <div class="flex justify-between items-start mb-4">
@@ -83,7 +93,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- RAM Card -->
+      <!-- RAM -->
       <div class="bg-gradient-to-br from-slate-800 to-slate-800/80 p-6 rounded-2xl border border-slate-700 shadow-xl relative overflow-hidden group">
         <div class="absolute inset-0 bg-gradient-to-br from-purple-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
         <div class="flex justify-between items-start mb-4">
@@ -101,7 +111,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Disk Card -->
+      <!-- Disk -->
       <div class="bg-gradient-to-br from-slate-800 to-slate-800/80 p-6 rounded-2xl border border-slate-700 shadow-xl relative overflow-hidden group">
         <div class="absolute inset-0 bg-gradient-to-br from-emerald-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
         <div class="flex justify-between items-start mb-4">
@@ -120,97 +130,159 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 服務狀態 -->
-    <div v-if="services?.engines" class="bg-slate-800/50 p-5 rounded-2xl border border-slate-700">
-      <div class="flex items-center justify-between mb-4">
-        <h3 class="text-sm font-semibold text-slate-300 tracking-wider">服務狀態</h3>
-        <span v-if="services.pid" class="text-[10px] text-slate-500 font-mono">PID {{ services.pid }}</span>
-      </div>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-0">
-        <!-- 左列：內部引擎 -->
-        <div class="space-y-0.5">
-          <!-- Task Poller -->
-          <div class="flex items-center justify-between py-2 border-b border-slate-700/30">
-            <div class="flex items-center gap-2">
-              <Activity class="w-3.5 h-3.5" :class="serviceStatusColor(services.engines.task_poller?.status, services.engines.task_poller?.is_paused)" />
-              <span class="text-xs text-slate-300 font-medium">任務輪詢</span>
-              <span class="text-[10px] text-slate-500 font-mono">{{ services.engines.task_poller?.interval_sec }}s</span>
-            </div>
-            <button
-              @click="toggleRunner"
-              class="text-[10px] px-2 py-0.5 rounded bg-slate-700/80 hover:bg-slate-600 text-slate-400 hover:text-slate-200 transition-colors"
-            >
-              {{ services.engines.task_poller?.is_paused ? '啟動' : '暫停' }}
-            </button>
-          </div>
+    <!-- Services (中型卡片) -->
+    <div v-if="services" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 
-          <!-- Cron Poller -->
-          <div class="flex items-center justify-between py-2 border-b border-slate-700/30">
-            <div class="flex items-center gap-2">
-              <Clock class="w-3.5 h-3.5 text-emerald-400" />
-              <span class="text-xs text-slate-300 font-medium">排程</span>
-              <span class="text-[10px] text-slate-500 font-mono">{{ services.engines.cron_poller?.interval_sec }}s</span>
-            </div>
-            <div class="flex items-center gap-1.5">
-              <span v-if="services.engines.cron_poller?.paused_projects?.length" class="text-[10px] text-amber-400 font-mono">
-                {{ services.engines.cron_poller.paused_projects.length }} 專案暫停中
-              </span>
-              <router-link
-                to="/cron"
-                class="text-[10px] px-2 py-0.5 rounded bg-slate-700/80 hover:bg-slate-600 text-slate-400 hover:text-slate-200 transition-colors flex items-center gap-1"
-              >
-                <Eye class="w-3 h-3" />
-                查看
-              </router-link>
-            </div>
+      <!-- 主服務 (FastAPI) -->
+      <div class="bg-slate-800/60 rounded-xl border border-slate-700/50 p-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <Cog class="w-4 h-4 text-cyan-400" />
+            <span class="text-sm font-semibold text-slate-200">主服務</span>
           </div>
-
-          <!-- WebSocket -->
-          <div class="flex items-center justify-between py-2">
-            <div class="flex items-center gap-2">
-              <Radio class="w-3.5 h-3.5" :class="serviceStatusColor(services.engines.websocket?.status)" />
-              <span class="text-xs text-slate-300 font-medium">WebSocket</span>
-            </div>
-            <span class="text-[10px] text-slate-500 font-mono">{{ services.engines.websocket?.clients ?? 0 }} 連線</span>
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span class="text-[10px] text-emerald-400">運行中</span>
           </div>
         </div>
-
-        <!-- 右列：AI 工具 -->
-        <div v-if="services.cli_tools" class="space-y-0.5">
-          <!-- Claude CLI -->
-          <div class="flex items-center justify-between py-2 border-b border-slate-700/30">
-            <div class="flex items-center gap-2">
-              <Terminal class="w-3.5 h-3.5" :class="services.cli_tools.claude?.installed ? 'text-emerald-400' : 'text-red-400'" />
-              <span class="text-xs text-slate-300 font-medium">Claude CLI</span>
-              <span v-if="services.cli_tools.claude?.version" class="text-[10px] text-slate-500 font-mono">{{ services.cli_tools.claude.version }}</span>
-            </div>
-            <div class="flex items-center gap-1.5">
-              <span
-                v-if="services.cli_tools.claude?.subscription"
-                class="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-400 border border-orange-500/20"
-              >{{ services.cli_tools.claude.subscription }}</span>
-              <span class="text-[10px] font-bold" :class="services.cli_tools.claude?.authenticated ? 'text-emerald-400' : 'text-red-400'">
-                {{ services.cli_tools.claude?.authenticated ? '✓' : '✗' }}
-              </span>
-            </div>
+        <div class="space-y-1.5 text-xs text-slate-400">
+          <div class="flex justify-between">
+            <span>PID</span>
+            <span class="font-mono text-slate-300">{{ services.pid }}</span>
           </div>
-
-          <!-- Gemini CLI -->
-          <div class="flex items-center justify-between py-2 border-b border-slate-700/30">
-            <div class="flex items-center gap-2">
-              <Sparkles class="w-3.5 h-3.5" :class="services.cli_tools.gemini?.installed ? 'text-emerald-400' : 'text-red-400'" />
-              <span class="text-xs text-slate-300 font-medium">Gemini CLI</span>
-              <span v-if="services.cli_tools.gemini?.version" class="text-[10px] text-slate-500 font-mono">{{ services.cli_tools.gemini.version }}</span>
-            </div>
-            <div class="flex items-center gap-1.5">
-              <span v-if="services.cli_tools.gemini?.account" class="text-[10px] text-slate-500 font-mono truncate max-w-[140px]">{{ services.cli_tools.gemini.account }}</span>
-              <span class="text-[10px] font-bold" :class="services.cli_tools.gemini?.authenticated ? 'text-emerald-400' : 'text-red-400'">
-                {{ services.cli_tools.gemini?.authenticated ? '✓' : '✗' }}
-              </span>
-            </div>
+          <div class="flex justify-between">
+            <span>WebSocket</span>
+            <span class="font-mono text-slate-300">{{ services.engines?.websocket?.clients ?? 0 }} 連線</span>
           </div>
         </div>
       </div>
+
+      <!-- Task Worker -->
+      <div class="bg-slate-800/60 rounded-xl border border-slate-700/50 p-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <Activity class="w-4 h-4 text-orange-400" />
+            <span class="text-sm font-semibold text-slate-200">Task Worker</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full" :class="[statusDot(services.engines?.task_worker?.status), services.engines?.task_worker?.status === 'running' ? 'animate-pulse' : '']"></span>
+            <span class="text-[10px]" :class="services.engines?.task_worker?.status === 'running' ? 'text-emerald-400' : services.engines?.task_worker?.status === 'paused' ? 'text-amber-400' : 'text-red-400'">
+              {{ statusLabel(services.engines?.task_worker?.status) }}
+            </span>
+          </div>
+        </div>
+        <div class="space-y-1.5 text-xs text-slate-400">
+          <div class="flex justify-between">
+            <span>PID</span>
+            <span class="font-mono" :class="services.engines?.task_worker?.pid ? 'text-slate-300' : 'text-red-400'">
+              {{ services.engines?.task_worker?.pid ?? '---' }}
+            </span>
+          </div>
+          <div class="flex justify-between">
+            <span>輪詢間隔</span>
+            <span class="font-mono text-slate-300">{{ services.engines?.task_worker?.interval_sec }}s</span>
+          </div>
+        </div>
+        <div class="mt-3 pt-3 border-t border-slate-700/30">
+          <button
+            @click="toggleRunner"
+            class="flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-lg transition-colors w-full justify-center"
+            :class="services.engines?.task_worker?.is_paused
+              ? 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/20'
+              : 'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 border border-amber-500/20'"
+          >
+            <PlayCircle v-if="services.engines?.task_worker?.is_paused" class="w-3.5 h-3.5" />
+            <PauseCircle v-else class="w-3.5 h-3.5" />
+            {{ services.engines?.task_worker?.is_paused ? '啟動 Worker' : '暫停 Worker' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Cron Poller -->
+      <div class="bg-slate-800/60 rounded-xl border border-slate-700/50 p-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <Clock class="w-4 h-4 text-emerald-400" />
+            <span class="text-sm font-semibold text-slate-200">排程引擎</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span class="text-[10px] text-emerald-400">運行中</span>
+          </div>
+        </div>
+        <div class="space-y-1.5 text-xs text-slate-400">
+          <div class="flex justify-between">
+            <span>檢查間隔</span>
+            <span class="font-mono text-slate-300">{{ services.engines?.cron_poller?.interval_sec }}s</span>
+          </div>
+          <div v-if="services.engines?.cron_poller?.paused_projects?.length" class="flex justify-between">
+            <span>暫停專案</span>
+            <span class="font-mono text-amber-400">{{ services.engines.cron_poller.paused_projects.length }} 個</span>
+          </div>
+        </div>
+        <div class="mt-3 pt-3 border-t border-slate-700/30">
+          <router-link
+            to="/cron"
+            class="flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-400 hover:bg-slate-600/50 hover:text-slate-200 transition-colors w-full justify-center border border-slate-700/30"
+          >
+            <Eye class="w-3.5 h-3.5" />
+            查看排程
+          </router-link>
+        </div>
+      </div>
+
+      <!-- Claude CLI -->
+      <div class="bg-slate-800/60 rounded-xl border border-slate-700/50 p-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <Terminal class="w-4 h-4" :class="services.cli_tools?.claude?.installed ? 'text-violet-400' : 'text-red-400'" />
+            <span class="text-sm font-semibold text-slate-200">Claude CLI</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full" :class="services.cli_tools?.claude?.authenticated ? 'bg-emerald-400' : 'bg-red-400'"></span>
+            <span class="text-[10px]" :class="services.cli_tools?.claude?.authenticated ? 'text-emerald-400' : 'text-red-400'">
+              {{ services.cli_tools?.claude?.authenticated ? '已認證' : '未認證' }}
+            </span>
+          </div>
+        </div>
+        <div class="space-y-1.5 text-xs text-slate-400">
+          <div class="flex justify-between">
+            <span>版本</span>
+            <span class="font-mono text-slate-300">{{ services.cli_tools?.claude?.version || '---' }}</span>
+          </div>
+          <div v-if="services.cli_tools?.claude?.subscription" class="flex justify-between">
+            <span>方案</span>
+            <span class="font-mono text-orange-400">{{ services.cli_tools.claude.subscription }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Gemini CLI -->
+      <div class="bg-slate-800/60 rounded-xl border border-slate-700/50 p-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <Sparkles class="w-4 h-4" :class="services.cli_tools?.gemini?.installed ? 'text-blue-400' : 'text-red-400'" />
+            <span class="text-sm font-semibold text-slate-200">Gemini CLI</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full" :class="services.cli_tools?.gemini?.authenticated ? 'bg-emerald-400' : 'bg-red-400'"></span>
+            <span class="text-[10px]" :class="services.cli_tools?.gemini?.authenticated ? 'text-emerald-400' : 'text-red-400'">
+              {{ services.cli_tools?.gemini?.authenticated ? '已認證' : '未認證' }}
+            </span>
+          </div>
+        </div>
+        <div class="space-y-1.5 text-xs text-slate-400">
+          <div class="flex justify-between">
+            <span>版本</span>
+            <span class="font-mono text-slate-300">{{ services.cli_tools?.gemini?.version || '---' }}</span>
+          </div>
+          <div v-if="services.cli_tools?.gemini?.account" class="flex justify-between">
+            <span>帳號</span>
+            <span class="font-mono text-slate-300 truncate max-w-[120px]">{{ services.cli_tools.gemini.account }}</span>
+          </div>
+        </div>
+      </div>
+
     </div>
 
   </div>

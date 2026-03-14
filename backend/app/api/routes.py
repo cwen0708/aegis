@@ -1448,11 +1448,34 @@ def get_services(session: Session = Depends(get_session)):
     paused_setting = session.get(SystemSetting, "worker_paused")
     worker_paused = paused_setting and paused_setting.value == "true"
 
+    # 偵測 Worker 獨立程序的 PID
+    worker_pid = None
+    worker_status = "stopped"
+    try:
+        import psutil
+        for proc in psutil.process_iter(['pid', 'cmdline']):
+            try:
+                cmdline = proc.info.get('cmdline') or []
+                cmd_str = ' '.join(cmdline)
+                if 'worker.py' in cmd_str and 'python' in cmd_str.lower():
+                    worker_pid = proc.info['pid']
+                    worker_status = "paused" if worker_paused else "running"
+                    break
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    except ImportError:
+        # psutil 不可用時 fallback：假設 systemd 管理，無法偵測 PID
+        worker_status = "paused" if worker_paused else "unknown"
+
+    if not worker_pid and not worker_paused:
+        worker_status = "stopped"
+
     result = {
         "pid": os.getpid(),
         "engines": {
             "task_worker": {
-                "status": "paused" if worker_paused else "running",
+                "status": worker_status,
+                "pid": worker_pid,
                 "interval_sec": 3,
                 "is_paused": worker_paused,
             },
