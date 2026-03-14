@@ -1214,6 +1214,142 @@ def delete_env_var(project_id: int, var_id: int, session: Session = Depends(get_
 
 
 # ==========================================
+# Project Remote Control (Claude Code RC)
+# ==========================================
+# 追蹤運行中的 remote control sessions
+# key: project_id, value: { process, bridge_url, name, started_at, pid }
+_rc_sessions: Dict[int, Dict[str, Any]] = {}
+
+
+@router.post("/projects/{project_id}/remote-control")
+async def start_remote_control(project_id: int, session: Session = Depends(get_session)):
+    """啟動 Claude Code Remote Control session"""
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # 已有 session 運行中
+    existing = _rc_sessions.get(project_id)
+    if existing and existing.get("process") and existing["process"].poll() is None:
+        return {
+            "ok": True,
+            "status": "running",
+            "bridge_url": existing.get("bridge_url", ""),
+            "pid": existing["process"].pid,
+            "name": existing.get("name", ""),
+        }
+
+    # 啟動 claude rc
+    import re as _re
+    cmd = ["claude", "rc", "--name", project.name]
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=project.path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="Claude CLI not found")
+
+    # 讀取前幾秒的輸出，解析 bridge URL
+    bridge_url = ""
+    import threading
+    output_lines = []
+
+    def _read_initial():
+        for _ in range(50):  # 最多讀 50 行
+            line = proc.stdout.readline()
+            if not line:
+                break
+            decoded = line.decode("utf-8", errors="replace")
+            output_lines.append(decoded)
+            # 找 bridge URL
+            m = _re.search(r'(https://claude\.ai/code\?bridge=[a-zA-Z0-9_]+)', decoded)
+            if m:
+                output_lines.append(f"FOUND: {m.group(1)}")
+                return m.group(1)
+        return ""
+
+    reader = threading.Thread(target=lambda: output_lines.append(_read_initial()))
+    reader.start()
+    reader.join(timeout=10)
+
+    # 從 output 中找 bridge URL
+    for line in output_lines:
+        m = _re.search(r'(https://claude\.ai/code\?bridge=[a-zA-Z0-9_]+)', str(line))
+        if m:
+            bridge_url = m.group(1)
+            break
+
+    if proc.poll() is not None:
+        # 程序已結束，啟動失敗
+        raise HTTPException(status_code=500, detail="Claude RC failed to start")
+
+    _rc_sessions[project_id] = {
+        "process": proc,
+        "bridge_url": bridge_url,
+        "name": project.name,
+        "started_at": time_module.time(),
+        "pid": proc.pid,
+    }
+
+    return {
+        "ok": True,
+        "status": "running",
+        "bridge_url": bridge_url,
+        "pid": proc.pid,
+        "name": project.name,
+    }
+
+
+@router.get("/projects/{project_id}/remote-control")
+def get_remote_control(project_id: int, session: Session = Depends(get_session)):
+    """查詢 Remote Control session 狀態"""
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    existing = _rc_sessions.get(project_id)
+    if not existing or not existing.get("process"):
+        return {"status": "stopped", "bridge_url": "", "pid": None}
+
+    proc = existing["process"]
+    if proc.poll() is not None:
+        # 已結束
+        _rc_sessions.pop(project_id, None)
+        return {"status": "stopped", "bridge_url": "", "pid": None}
+
+    return {
+        "status": "running",
+        "bridge_url": existing.get("bridge_url", ""),
+        "pid": proc.pid,
+        "name": existing.get("name", ""),
+        "uptime_sec": int(time_module.time() - existing.get("started_at", 0)),
+    }
+
+
+@router.delete("/projects/{project_id}/remote-control")
+def stop_remote_control(project_id: int, session: Session = Depends(get_session)):
+    """停止 Remote Control session"""
+    existing = _rc_sessions.pop(project_id, None)
+    if not existing or not existing.get("process"):
+        return {"ok": True, "status": "already_stopped"}
+
+    proc = existing["process"]
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+    return {"ok": True, "status": "stopped"}
+
+
+# ==========================================
 # Project Reindex
 # ==========================================
 @router.post("/projects/{project_id}/reindex")

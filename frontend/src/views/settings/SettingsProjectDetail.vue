@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, FolderOpen, Loader2, Trash2, FolderInput, Plus, Edit3, Eye, EyeOff, KeyRound, Save } from 'lucide-vue-next'
+import { ArrowLeft, FolderOpen, Loader2, Trash2, FolderInput, Plus, Edit3, Eye, EyeOff, KeyRound, Save, Smartphone, Square, ExternalLink, Copy, Check } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 import ConfirmDialog from '../../components/ConfirmDialog.vue'
 import { config } from '../../config'
@@ -264,9 +264,108 @@ function toggleReveal(varId: number) {
   }
 }
 
+// ── Remote Control ──
+const rcStatus = ref<'stopped' | 'running' | 'starting'>('stopped')
+const rcBridgeUrl = ref('')
+const rcPid = ref<number | null>(null)
+const rcUptime = ref(0)
+const rcCopied = ref(false)
+let rcPollTimer: ReturnType<typeof setInterval> | null = null
+
+async function fetchRcStatus() {
+  try {
+    const res = await fetch(`${API}/api/v1/projects/${projectId}/remote-control`)
+    if (res.ok) {
+      const data = await res.json()
+      rcStatus.value = data.status === 'running' ? 'running' : 'stopped'
+      rcBridgeUrl.value = data.bridge_url || ''
+      rcPid.value = data.pid || null
+      rcUptime.value = data.uptime_sec || 0
+    }
+  } catch {}
+}
+
+async function startRc() {
+  rcStatus.value = 'starting'
+  try {
+    const res = await fetch(`${API}/api/v1/projects/${projectId}/remote-control`, {
+      method: 'POST',
+      headers: authHeaders(),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || 'Failed to start')
+    }
+    const data = await res.json()
+    rcStatus.value = 'running'
+    rcBridgeUrl.value = data.bridge_url || ''
+    rcPid.value = data.pid || null
+    store.addToast('Remote Control 已啟動', 'success')
+    // 開始輪詢狀態
+    startRcPolling()
+  } catch (e: any) {
+    rcStatus.value = 'stopped'
+    store.addToast(e.message || '啟動失敗', 'error')
+  }
+}
+
+async function stopRc() {
+  try {
+    await fetch(`${API}/api/v1/projects/${projectId}/remote-control`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    })
+    rcStatus.value = 'stopped'
+    rcBridgeUrl.value = ''
+    rcPid.value = null
+    stopRcPolling()
+    store.addToast('Remote Control 已停止', 'success')
+  } catch {
+    store.addToast('停止失敗', 'error')
+  }
+}
+
+function copyBridgeUrl() {
+  if (rcBridgeUrl.value) {
+    navigator.clipboard.writeText(rcBridgeUrl.value)
+    rcCopied.value = true
+    setTimeout(() => { rcCopied.value = false }, 2000)
+  }
+}
+
+function openBridgeUrl() {
+  if (rcBridgeUrl.value) {
+    window.open(rcBridgeUrl.value, '_blank')
+  }
+}
+
+function startRcPolling() {
+  stopRcPolling()
+  rcPollTimer = setInterval(fetchRcStatus, 5000)
+}
+
+function stopRcPolling() {
+  if (rcPollTimer) {
+    clearInterval(rcPollTimer)
+    rcPollTimer = null
+  }
+}
+
+function formatUptime(sec: number): string {
+  if (sec < 60) return `${sec}s`
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}s`
+  return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`
+}
+
 onMounted(async () => {
-  await Promise.all([fetchProject(), fetchMembers(), fetchEnvVars()])
+  await Promise.all([fetchProject(), fetchMembers(), fetchEnvVars(), fetchRcStatus()])
   loading.value = false
+  // 如果 RC 正在運行，開始輪詢
+  if (rcStatus.value === 'running') startRcPolling()
+})
+
+onUnmounted(() => {
+  stopRcPolling()
 })
 </script>
 
@@ -493,6 +592,80 @@ onMounted(async () => {
           >
             <Plus class="w-4 h-4" />
             新增
+          </button>
+        </div>
+      </div>
+
+      <!-- ═══ Section 3: Remote Control ═══ -->
+      <div class="bg-slate-800/50 rounded-2xl border border-slate-700 p-6 space-y-4">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <Smartphone class="w-4 h-4 text-violet-400" />
+            <h3 class="text-sm font-bold text-slate-300 uppercase tracking-wider">Remote Control</h3>
+          </div>
+          <div v-if="rcStatus === 'running'" class="flex items-center gap-2 text-xs text-slate-500">
+            <span class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
+            PID {{ rcPid }} · {{ formatUptime(rcUptime) }}
+          </div>
+        </div>
+
+        <p class="text-xs text-slate-500">
+          啟動 Claude Code Remote Control，可從手機 App 或 claude.ai/code 遠端操控此專案。
+        </p>
+
+        <!-- Stopped -->
+        <div v-if="rcStatus === 'stopped'">
+          <button
+            @click="startRc"
+            class="flex items-center gap-2 px-4 py-2.5 bg-violet-600 hover:bg-violet-500 rounded-lg transition text-sm"
+          >
+            <Smartphone class="w-4 h-4" />
+            啟動 Remote Control
+          </button>
+        </div>
+
+        <!-- Starting -->
+        <div v-else-if="rcStatus === 'starting'" class="flex items-center gap-3 py-2">
+          <Loader2 class="w-5 h-5 animate-spin text-violet-400" />
+          <span class="text-sm text-slate-400">正在啟動...</span>
+        </div>
+
+        <!-- Running -->
+        <div v-else class="space-y-3">
+          <!-- Bridge URL -->
+          <div v-if="rcBridgeUrl" class="bg-slate-900/80 rounded-lg border border-violet-500/30 p-4 space-y-3">
+            <div class="text-xs text-slate-400">在手機或其他裝置上開啟此連結：</div>
+            <div class="flex items-center gap-2">
+              <code class="flex-1 text-sm text-violet-300 font-mono truncate select-all">{{ rcBridgeUrl }}</code>
+              <button
+                @click="copyBridgeUrl"
+                class="p-1.5 text-slate-400 hover:text-violet-300 transition"
+                title="複製連結"
+              >
+                <Check v-if="rcCopied" class="w-4 h-4 text-green-400" />
+                <Copy v-else class="w-4 h-4" />
+              </button>
+              <button
+                @click="openBridgeUrl"
+                class="p-1.5 text-slate-400 hover:text-violet-300 transition"
+                title="在新視窗開啟"
+              >
+                <ExternalLink class="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          <div v-else class="text-sm text-slate-500">
+            Session 已啟動，但尚未取得 Bridge URL。
+          </div>
+
+          <!-- Stop -->
+          <button
+            @click="stopRc"
+            class="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-red-600/80 text-slate-300 hover:text-white rounded-lg transition text-sm"
+          >
+            <Square class="w-4 h-4" />
+            停止 Remote Control
           </button>
         </div>
       </div>
