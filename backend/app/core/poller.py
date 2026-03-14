@@ -9,7 +9,8 @@ from app.database import engine
 from app.models.core import Card, CardIndex, StageList, Project, SystemSetting, Member, MemberDialogue
 from app.core.card_file import CardData, read_card, write_card, card_file_path
 from app.core.card_index import sync_card_to_index, query_pending_cards, next_card_id
-from app.core.runner import run_ai_task, busy_members
+from app.core.runner import run_ai_task, busy_members, running_tasks
+import app.core.runner as runner_module
 from app.core.telemetry import is_system_overloaded
 from app.core.task_workspace import prepare_workspace, cleanup_workspace
 from app.core.memory_manager import write_member_short_term_memory
@@ -52,6 +53,9 @@ async def _save_member_dialogue(member_id: int, card_id: int, card_title: str,
         logger.info(f"[Dialogue] {dialogue_type}: {text[:40]}")
     except Exception as e:
         logger.warning(f"[Dialogue] Failed to save: {e}")
+
+# 已派發的任務數（含排隊等 semaphore 的）
+_dispatched_count = 0
 
 # Card-level locks for safe concurrent MD file writes
 _card_locks: dict[int, asyncio.Lock] = {}
@@ -143,6 +147,7 @@ def _apply_stage_action(session: Session, card_id: int, card_data, orm_card, new
 
 async def _process_pending_cards():
     """定期掃描 CardIndex 中 status='pending' 的卡片並派發給 AI"""
+    global _dispatched_count
     if is_paused:
         return
 
@@ -151,6 +156,11 @@ async def _process_pending_cards():
         pending_entries = query_pending_cards(session)
 
         for idx in pending_entries:
+            # 工作台已滿時停止派發（避免大量任務排隊佔用 running 狀態）
+            if _dispatched_count >= runner_module.MAX_WORKSTATIONS:
+                logger.debug("[Poller] All workstations busy, skipping remaining pending cards")
+                break
+
             # Look up StageList and Project from the index's list_id
             stage_list = session.get(StageList, idx.list_id)
             list_name = stage_list.name if stage_list else "Unknown"
@@ -206,6 +216,7 @@ async def _process_pending_cards():
                         ))
 
                 # 使用 asyncio.create_task 在背景跑，這樣 poller 可以繼續掃描下一張卡片
+                _dispatched_count += 1
                 asyncio.create_task(_execute_and_update(
                     idx.card_id, project_path, card_data.content, phase,
                     card_title, project_name, forced_provider, member_id,
@@ -526,6 +537,7 @@ async def _execute_and_update(
     workspace_dir: str | None = None, member_slug: str | None = None,
 ):
     """包裝 run_ai_task，並在完成後更新 MD 檔案與資料庫卡片狀態"""
+    global _dispatched_count
     from app.core.ws_manager import broadcast_event
 
     try:
@@ -647,6 +659,10 @@ async def _execute_and_update(
             logger.error(f"[Task {card_id}] Failed to recover card state: {inner_e}")
 
     finally:
+        # 釋放派發計數
+        global _dispatched_count
+        _dispatched_count = max(0, _dispatched_count - 1)
+
         # 確保臨時工作區一定被清理
         if workspace_dir:
             cleanup_workspace(card_id)
