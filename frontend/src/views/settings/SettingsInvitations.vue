@@ -320,12 +320,12 @@ function getLevelText(level: number) {
         <p class="font-medium text-slate-400">情境範例：</p>
         <ul class="space-y-2 ml-3">
           <li>
-            <span class="text-slate-300">案場業主（王先生）</span>
-            — L1 唯讀、限定「OM AI」專案、使用 1 次。身份描述填：<span class="text-slate-400 italic">「王先生是良輝畜牧場業主，可查看發電數據和設備狀態，不可查看財務報表和合約條款」</span>
+            <span class="text-slate-300">外部客戶</span>
+            — L1 唯讀、限定特定專案、使用 1 次。身份描述填：<span class="text-slate-400 italic">「王先生是 A 專案客戶，可查看進度報告和數據摘要，不可查看財務資料和內部文件」</span>
           </li>
           <li>
-            <span class="text-slate-300">內部工程師</span>
-            — L2 進階、可建卡片和執行任務、綁定「小牧」成員。身份描述填：<span class="text-slate-400 italic">「張工程師是維運部同事，負責台南區案場巡檢，可存取所有設備數據和派工單」</span>
+            <span class="text-slate-300">內部同事</span>
+            — L2 進階、可建卡片和執行任務、綁定特定 AI 成員。身份描述填：<span class="text-slate-400 italic">「張工程師是維運部同事，負責現場巡檢，可存取所有設備數據和工單」</span>
           </li>
           <li>
             <span class="text-slate-300">產品展示</span>
@@ -333,7 +333,7 @@ function getLevelText(level: number) {
           </li>
           <li>
             <span class="text-slate-300">合作廠商</span>
-            — L1 唯讀、限定特定專案、使用 3 次（團隊共用）。身份描述填：<span class="text-slate-400 italic">「六和機械維修團隊，可查看設備告警和維修記錄，不可操作排程」</span>
+            — L1 唯讀、限定特定專案、使用 3 次（團隊共用）。身份描述填：<span class="text-slate-400 italic">「B 公司維修團隊，可查看設備告警和維修記錄，不可操作排程」</span>
           </li>
           <li>
             <span class="text-slate-300">臨時訪客</span>
