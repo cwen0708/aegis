@@ -3505,6 +3505,85 @@ def delete_invitation(invitation_id: int, session: Session = Depends(get_session
 
 
 # ==========================================
+# Bot User 管理
+# ==========================================
+
+class BotUserUpdate(BaseModel):
+    level: Optional[int] = None
+    is_active: Optional[bool] = None
+    access_expires_at: Optional[str] = None  # ISO format or null
+    default_member_id: Optional[int] = None
+
+@router.get("/bot-users")
+def list_bot_users(session: Session = Depends(get_session)):
+    """列出所有 Bot User"""
+    users = session.exec(select(BotUser).order_by(BotUser.created_at.desc())).all()
+    result = []
+    for u in users:
+        # 查關聯的專案
+        projects = session.exec(
+            select(BotUserProject).where(BotUserProject.bot_user_id == u.id)
+        ).all()
+        member = session.get(Member, u.default_member_id) if u.default_member_id else None
+        result.append({
+            "id": u.id,
+            "platform": u.platform,
+            "platform_user_id": u.platform_user_id,
+            "username": u.username,
+            "level": u.level,
+            "is_active": u.is_active,
+            "default_member_id": u.default_member_id,
+            "default_member_name": member.name if member else None,
+            "access_expires_at": u.access_expires_at.isoformat() if u.access_expires_at else None,
+            "created_at": u.created_at.isoformat(),
+            "last_active_at": u.last_active_at.isoformat() if u.last_active_at else None,
+            "projects": [{"id": p.id, "project_id": p.project_id, "display_name": p.display_name, "can_view": p.can_view, "can_create_card": p.can_create_card, "can_run_task": p.can_run_task} for p in projects],
+        })
+    return result
+
+@router.patch("/bot-users/{user_id}")
+def update_bot_user(user_id: int, data: BotUserUpdate, session: Session = Depends(get_session)):
+    """更新 Bot User"""
+    user = session.get(BotUser, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if data.level is not None:
+        user.level = data.level
+    if data.is_active is not None:
+        user.is_active = data.is_active
+    if data.default_member_id is not None:
+        user.default_member_id = data.default_member_id
+    if data.access_expires_at is not None:
+        if data.access_expires_at == "" or data.access_expires_at == "null":
+            user.access_expires_at = None
+        else:
+            user.access_expires_at = datetime.fromisoformat(data.access_expires_at.replace("Z", "+00:00"))
+    session.add(user)
+    session.commit()
+    return {"ok": True}
+
+@router.delete("/bot-users/{user_id}")
+def delete_bot_user(user_id: int, session: Session = Depends(get_session)):
+    """刪除 Bot User 及其關聯資料"""
+    user = session.get(BotUser, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    # 刪除關聯
+    from app.models.core import BotUserProject as BUP, BotUserMember as BUM, ChatSession as CS, ChatMessage as CM
+    for bup in session.exec(select(BUP).where(BUP.bot_user_id == user_id)).all():
+        session.delete(bup)
+    for bum in session.exec(select(BUM).where(BUM.bot_user_id == user_id)).all():
+        session.delete(bum)
+    for cs in session.exec(select(CS).where(CS.bot_user_id == user_id)).all():
+        for cm in session.exec(select(CM).where(CM.session_id == cs.id)).all():
+            session.delete(cm)
+        session.delete(cs)
+    session.delete(user)
+    session.commit()
+    return {"ok": True}
+
+
+# ==========================================
 # OneStack Node API（供 OneStack 查詢/派發任務）
 # ==========================================
 
