@@ -100,7 +100,7 @@ function userLevelColor(level: number): string {
     2: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30',
     3: 'text-amber-400 bg-amber-500/10 border-amber-500/30',
   }
-  return colors[level] || colors[0]
+  return colors[level] ?? colors[0] ?? ''
 }
 
 function isUserExpired(u: BotUserInfo): boolean {
@@ -113,7 +113,7 @@ function openEditUser(u: BotUserInfo) {
   editUserForm.value = {
     level: u.level,
     is_active: u.is_active,
-    access_expires_at: u.access_expires_at ? u.access_expires_at.split('T')[0] : '',
+    access_expires_at: u.access_expires_at ? u.access_expires_at.split('T')[0] ?? '' : '',
   }
   showEditUser.value = true
 }
