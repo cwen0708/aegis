@@ -442,9 +442,10 @@ async def wait_for_tasks_completion(timeout: int = 300) -> bool:
     _state.stage = UPDATE_STAGE_WAITING
     _state.message = "等待執行中的任務完成..."
 
-    # 先暫停 Worker
+    # 記住更新前 Worker 是否已被使用者手動暫停
     with Session(engine) as session:
         paused = session.get(SystemSetting, "worker_paused")
+        _was_paused_before_update = paused and paused.value == "true"
         if paused:
             paused.value = "true"
         else:
@@ -574,19 +575,22 @@ async def apply_update(version: str) -> bool:
         return False
 
     finally:
-        # 無論成功或失敗，都恢復 Worker
+        # 只在更新前 Worker 沒有被手動暫停的情況下恢復
         try:
             from app.database import engine
             from app.models.core import SystemSetting
             from sqlmodel import Session
 
-            with Session(engine) as session:
-                paused = session.get(SystemSetting, "worker_paused")
-                if paused and paused.value == "true":
-                    paused.value = "false"
-                    session.add(paused)
-                    session.commit()
-                    logger.info("Worker 已自動恢復")
+            if _was_paused_before_update:
+                logger.info("Worker 更新前已被手動暫停，保持暫停狀態")
+            else:
+                with Session(engine) as session:
+                    paused = session.get(SystemSetting, "worker_paused")
+                    if paused and paused.value == "true":
+                        paused.value = "false"
+                        session.add(paused)
+                        session.commit()
+                        logger.info("Worker 已自動恢復")
         except Exception as resume_err:
             logger.error(f"恢復 Worker 失敗: {resume_err}")
 
@@ -638,14 +642,23 @@ async def rollback(version: str = None) -> bool:
         temp_link.symlink_to(release_dir)
         temp_link.rename(current_link)
 
-        # 重啟服務（先 worker 再 aegis，因為重啟 aegis 會殺掉本進程）
-        proc = await asyncio.create_subprocess_exec(
-            "sudo", "systemctl", "restart", "aegis-worker",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        await proc.communicate()
+        # 重啟服務：先檢查 Worker 是否被手動暫停
+        from sqlmodel import Session as _RbSession
+        with _RbSession(engine) as _rbs:
+            _rb_paused = _rbs.get(SystemSetting, "worker_paused")
+            _rb_was_paused = _rb_paused and _rb_paused.value == "true"
 
+        if _rb_was_paused:
+            logger.info("[Rollback] Worker 已被手動暫停，跳過重啟")
+        else:
+            proc = await asyncio.create_subprocess_exec(
+                "sudo", "systemctl", "restart", "aegis-worker",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            await proc.communicate()
+
+        # 重啟 aegis（會殺掉本進程）
         proc = await asyncio.create_subprocess_exec(
             "sudo", "systemctl", "restart", "aegis",
             stdout=asyncio.subprocess.PIPE,
@@ -832,18 +845,21 @@ async def full_update(version: str = None, wait_timeout: int = 300) -> bool:
 
     finally:
         _state.is_updating = False
-        # 無論成功或失敗，確保 Worker 恢復運作
+        # 只在更新前 Worker 沒有被手動暫停的情況下恢復
         try:
             from app.database import engine as _engine
             from app.models.core import SystemSetting
             from sqlmodel import Session as _Session
 
-            with _Session(_engine) as _s:
-                paused = _s.get(SystemSetting, "worker_paused")
-                if paused and paused.value == "true":
-                    paused.value = "false"
-                    _s.add(paused)
-                    _s.commit()
-                    logger.info("[full_update] Worker 已自動恢復")
+            if _was_paused_before_update:
+                logger.info("[full_update] Worker 更新前已被手動暫停，保持暫停狀態")
+            else:
+                with _Session(_engine) as _s:
+                    paused = _s.get(SystemSetting, "worker_paused")
+                    if paused and paused.value == "true":
+                        paused.value = "false"
+                        _s.add(paused)
+                        _s.commit()
+                        logger.info("[full_update] Worker 已自動恢復")
         except Exception as e:
             logger.error(f"[full_update] 恢復 Worker 失敗: {e}")
