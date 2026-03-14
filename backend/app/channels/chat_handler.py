@@ -109,6 +109,15 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser) -> Optional[str]:
     account, model = _get_primary_account(member.id)
     provider = account.provider if account else "claude"
 
+    # 取得帳號認證資訊
+    auth_info = {}
+    if account:
+        auth_info = {
+            'auth_type': getattr(account, 'auth_type', 'cli'),
+            'oauth_token': getattr(account, 'oauth_token', '') or '',
+            'api_key': getattr(account, 'api_key', '') or '',
+        }
+
     # Bot 聊天預設用快速模型（成員有設定則覆蓋）
     if not model:
         if provider == "gemini":
@@ -128,6 +137,7 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser) -> Optional[str]:
             project_name="Aegis Bot",
             member_id=member.id,
             model_override=model,
+            auth_info=auth_info,
         )
     except Exception as e:
         logger.error(f"[Chat] AI task failed: {e}")

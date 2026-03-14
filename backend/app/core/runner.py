@@ -70,7 +70,8 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
                       forced_provider: Optional[str] = None, card_title: str = "",
                       project_name: str = "", member_id: Optional[int] = None,
                       model_override: Optional[str] = None,
-                      project_id: Optional[int] = None) -> Dict[str, Any]:
+                      project_id: Optional[int] = None,
+                      auth_info: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """
     執行單一 AI 呼叫（用於 chat / email 等即時場景）。
 
@@ -101,6 +102,18 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
     from app.core.sandbox import build_sanitized_env, get_popen_kwargs
     env = build_sanitized_env(project_id=project_id)
     env.update(config.get("env", {}))
+
+    # 注入 Account 認證資訊
+    auth_info = auth_info or {}
+    auth_type = auth_info.get('auth_type', 'cli')
+    if provider_name == "claude":
+        if auth_type == 'api_key' and auth_info.get('api_key'):
+            env["ANTHROPIC_API_KEY"] = auth_info['api_key']
+        elif auth_info.get('oauth_token'):
+            env["CLAUDE_CODE_OAUTH_TOKEN"] = auth_info['oauth_token']
+    elif provider_name == "gemini":
+        if auth_info.get('api_key'):
+            env["GEMINI_API_KEY"] = auth_info['api_key']
 
     logger.info(f"[Runner] Executing {provider_name} (task_id={task_id}, phase={phase})")
 
