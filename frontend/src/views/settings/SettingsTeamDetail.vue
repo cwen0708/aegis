@@ -610,15 +610,24 @@ onMounted(async () => {
           <!-- Right: Form fields -->
           <div class="flex-1 space-y-4 min-w-0">
             <!-- Avatar + Name -->
-            <div class="grid grid-cols-[4rem_1fr] gap-3">
+            <div class="space-y-3">
               <div>
                 <label class="block text-sm text-slate-400 mb-1">頭像</label>
-                <select
-                  v-model="form.avatar"
-                  class="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-center text-lg outline-none focus:border-emerald-500"
-                >
-                  <option v-for="e in avatarOptions" :key="e" :value="e">{{ e }}</option>
-                </select>
+                <div class="flex flex-wrap gap-1.5">
+                  <button
+                    v-for="e in avatarOptions"
+                    :key="e"
+                    @click="form.avatar = e"
+                    :class="[
+                      'w-9 h-9 rounded-lg text-lg flex items-center justify-center transition-all',
+                      form.avatar === e
+                        ? 'bg-emerald-500/20 border-2 border-emerald-500 scale-110'
+                        : 'bg-slate-800 border border-slate-700 hover:border-slate-500'
+                    ]"
+                  >
+                    {{ e }}
+                  </button>
+                </div>
               </div>
               <div>
                 <label class="block text-sm text-slate-400 mb-1">名稱 <span class="text-red-400">*</span></label>
