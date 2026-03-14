@@ -1151,6 +1151,16 @@ def process_pending_cards():
         new_status = "completed" if result["status"] == "success" else "failed"
         token_info = result.get("token_info", {})
 
+        # 自動重試：失敗且尚未重試過 → 重設為 pending，下一輪 poll 會再撿起
+        if new_status == "failed" and "### Error" not in card_data.content:
+            logger.info(f"[Worker] Card {idx.card_id}: first failure, scheduling retry")
+            error_note = f"\n\n### Error (retry scheduled)\n{result.get('output', '')[:200]}"
+            update_card_status(idx.card_id, "pending", error_note)
+            broadcast_event("task_failed", {"card_id": idx.card_id, "status": "retrying"})
+            if workspace_dir:
+                cleanup_workspace(idx.card_id)
+            continue
+
         if is_cron_card:
             # === 排程卡片：寫入 CronLog + 刪除卡片 ===
             output_text = result.get("output", "")
