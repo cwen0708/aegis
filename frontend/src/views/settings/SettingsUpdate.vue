@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
-import { Download, RefreshCw, Clock, Loader2 } from 'lucide-vue-next'
+import { Download, RefreshCw, Clock, Loader2, ArrowDownToLine } from 'lucide-vue-next'
+import { useAegisStore } from '../../stores/aegis'
 
 import { config } from '../../config'
 import { authHeaders } from '../../utils/authFetch'
 
+const store = useAegisStore()
 const API = config.apiUrl
 
 // 更新狀態
@@ -31,7 +33,7 @@ const stableInfo = ref({ latest: '', has_update: false, checking: false })
 
 const applyingUpdate = ref(false)
 
-// 版本歷史（從 API 取得，含 commit 訊息和時間）
+// 版本歷史
 interface VersionEntry {
   tag: string
   channel: 'dev' | 'stable'
@@ -41,6 +43,7 @@ interface VersionEntry {
 }
 const versionHistory = ref<VersionEntry[]>([])
 const versionHistoryLoading = ref(false)
+const switchingVersion = ref<string | null>(null)
 
 const updateStageText = computed(() => {
   const stages: Record<string, string> = {
@@ -50,6 +53,7 @@ const updateStageText = computed(() => {
     building: '建構中...',
     waiting: '等待任務完成...',
     applying: '套用中...',
+    restarting: '服務重啟中...',
     done: '完成',
     failed: '失敗',
   }
@@ -161,6 +165,30 @@ async function applyUpdate(channel: 'development' | 'stable') {
   }
 }
 
+async function switchToVersion(tag: string) {
+  if (!confirm(`確定要切換到 ${tag}？`)) return
+
+  switchingVersion.value = tag
+  try {
+    const res = await fetch(`${API}/api/v1/update/apply`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ version: tag.replace(/^v/, ''), wait_timeout: 300 }),
+    })
+    const data = await res.json()
+    if (data.ok) {
+      applyingUpdate.value = true
+      startPolling()
+    } else {
+      store.addToast(`切換失敗：${data.error || data.detail}`, 'error')
+    }
+  } catch {
+    store.addToast('切換失敗，請檢查伺服器狀態', 'error')
+  } finally {
+    switchingVersion.value = null
+  }
+}
+
 function startPolling() {
   if (pollInterval) return
 
@@ -174,18 +202,38 @@ function startPolling() {
         if (data.update_stage === 'done') {
           stopPolling()
           applyingUpdate.value = false
-          alert('更新成功！頁面即將重新載入。')
-          setTimeout(() => window.location.reload(), 2000)
+          // 等待後端完全啟動後再 reload
+          updateStatus.value.message = '更新完成，等待服務啟動...'
+          waitForHealthThenReload()
         } else if (data.update_stage === 'failed') {
           stopPolling()
           applyingUpdate.value = false
-          alert(`更新失敗：${data.error}`)
+          store.addToast(`更新失敗：${data.error}`, 'error')
         }
       }
     } catch {
+      // 服務重啟中，繼續等
       updateStatus.value.message = '服務重啟中，等待恢復...'
+      updateStatus.value.update_stage = 'restarting'
     }
   }, 2000)
+}
+
+async function waitForHealthThenReload(maxRetries = 30) {
+  for (let i = 0; i < maxRetries; i++) {
+    await new Promise(r => setTimeout(r, 2000))
+    try {
+      const res = await fetch(`${API}/api/v1/update/status`, { signal: AbortSignal.timeout(3000) })
+      if (res.ok) {
+        store.addToast('更新成功！頁面重新載入中...', 'success')
+        setTimeout(() => window.location.reload(), 500)
+        return
+      }
+    } catch {
+      updateStatus.value.message = `等待服務啟動...（${i + 1}/${maxRetries}）`
+    }
+  }
+  store.addToast('服務似乎未正常啟動，請手動重新整理頁面', 'error')
 }
 
 function stopPolling() {
@@ -362,7 +410,7 @@ onUnmounted(() => {
         </div>
 
         <!-- 進度條 -->
-        <div v-if="updateStatus.is_updating" class="space-y-2">
+        <div v-if="updateStatus.is_updating || updateStatus.update_stage === 'restarting'" class="space-y-2">
           <div class="flex items-center justify-between text-xs text-slate-400">
             <span>{{ updateStageText }}</span>
             <span>{{ updateStatus.progress }}%</span>
@@ -382,33 +430,21 @@ onUnmounted(() => {
 
         <!-- 自動更新設定（僅部署環境 + 有開啟自動更新時顯示） -->
         <div v-if="updateStatus.is_deployed && updateStatus.auto_update_enabled" class="pt-4 border-t border-slate-700/50">
-          <div class="flex items-center justify-between">
-            <div>
-              <label class="text-xs font-medium text-slate-400">自動更新</label>
-              <p class="text-[11px] text-slate-500 mt-0.5">每天定時檢查並套用{{ autoUpdateChannel === 'stable' ? '穩定版' : '開發版' }}更新</p>
+          <div class="flex items-center justify-between gap-4">
+            <div class="flex-1 min-w-0">
+              <label class="text-xs font-medium text-slate-300">自動更新</label>
+              <p class="text-[11px] text-slate-500 mt-0.5">
+                每天定時檢查{{ autoUpdateChannel === 'stable' ? '穩定版' : '開發版' }}通道，有新版本時自動套用。更新前會等待執行中的任務完成。
+              </p>
             </div>
-            <div class="flex items-center gap-4">
-              <div class="flex items-center gap-2">
-                <Clock class="w-3.5 h-3.5 text-slate-500" />
-                <input
-                  v-model="updateStatus.auto_update_time"
-                  type="time"
-                  @change="saveAutoUpdateSettings"
-                  class="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-mono focus:ring-2 focus:ring-cyan-500 outline-none"
-                />
-              </div>
-              <div class="flex items-center gap-1.5">
-                <span class="text-[10px] text-slate-500">保留</span>
-                <input
-                  v-model.number="updateStatus.update_keep_versions"
-                  type="number"
-                  min="1"
-                  max="10"
-                  @change="saveAutoUpdateSettings"
-                  class="w-14 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-slate-200 text-xs font-mono text-center focus:ring-2 focus:ring-cyan-500 outline-none"
-                />
-                <span class="text-[10px] text-slate-500">版</span>
-              </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <Clock class="w-3.5 h-3.5 text-slate-500" />
+              <input
+                v-model="updateStatus.auto_update_time"
+                type="time"
+                @change="saveAutoUpdateSettings"
+                class="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-mono focus:ring-2 focus:ring-cyan-500 outline-none"
+              />
             </div>
           </div>
         </div>
@@ -457,6 +493,18 @@ onUnmounted(() => {
               目前
             </span>
             <span class="text-[10px] text-slate-500 ml-auto shrink-0">{{ formatDate(v.date) }}</span>
+            <!-- 切換版本按鈕 -->
+            <button
+              v-if="!v.is_current && updateStatus.is_deployed"
+              @click="switchToVersion(v.tag)"
+              :disabled="applyingUpdate || updateStatus.is_updating || switchingVersion === v.tag"
+              class="flex items-center gap-1 px-2 py-1 text-[10px] text-slate-400 hover:text-slate-200 hover:bg-slate-700 disabled:opacity-50 rounded transition shrink-0"
+              title="切換至此版本"
+            >
+              <Loader2 v-if="switchingVersion === v.tag" class="w-3 h-3 animate-spin" />
+              <ArrowDownToLine v-else class="w-3 h-3" />
+              切換
+            </button>
           </div>
           <div v-if="v.message" class="text-xs text-slate-500 mt-1 truncate">{{ v.message }}</div>
         </div>
