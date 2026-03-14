@@ -46,6 +46,13 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser) -> Optional[str]:
     if bot_user.level < 1:
         return "🔒 請先使用 /verify <邀請碼> 驗證身份後，才能與 AI 對話"
 
+    # 0.5 存取期限檢查
+    if bot_user.access_expires_at:
+        from datetime import timezone
+        if bot_user.access_expires_at <= datetime.now(timezone.utc):
+            expire_date = bot_user.access_expires_at.strftime("%Y-%m-%d")
+            return f"🔒 您的存取權限已於 {expire_date} 過期，請聯繫管理員延期"
+
     # 1. 檢查訊息長度
     if len(msg.text) > MAX_MESSAGE_LENGTH:
         return f"⚠️ 訊息過長（最多 {MAX_MESSAGE_LENGTH} 字）"

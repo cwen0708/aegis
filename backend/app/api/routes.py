@@ -3311,7 +3311,8 @@ class InvitationCreate(BaseModel):
     default_can_run_task: bool = False
     default_can_access_sensitive: bool = False
     max_uses: int = 1
-    expires_days: Optional[int] = None   # 幾天後過期，None 表示永不過期
+    expires_days: Optional[int] = None   # 邀請碼幾天後過期，None 表示永不過期
+    access_valid_days: Optional[int] = None  # 驗證後存取有效天數，None 表示永久
     note: str = ""
 
 
@@ -3325,6 +3326,7 @@ class InvitationUpdate(BaseModel):
     default_can_access_sensitive: Optional[bool] = None
     max_uses: Optional[int] = None
     expires_days: Optional[int] = None
+    access_valid_days: Optional[int] = None
     note: Optional[str] = None
 
 
@@ -3438,6 +3440,7 @@ def create_invitation(data: InvitationCreate, session: Session = Depends(get_ses
         default_can_access_sensitive=data.default_can_access_sensitive,
         max_uses=data.max_uses,
         expires_at=expires_at,
+        access_valid_days=data.access_valid_days,
         note=data.note,
     )
     session.add(invitation)
@@ -3480,6 +3483,8 @@ def update_invitation(invitation_id: int, data: InvitationUpdate, session: Sessi
         invitation.max_uses = data.max_uses
     if data.expires_days is not None:
         invitation.expires_at = datetime.now(timezone.utc) + timedelta(days=data.expires_days)
+    if data.access_valid_days is not None:
+        invitation.access_valid_days = data.access_valid_days
     if data.note is not None:
         invitation.note = data.note
 

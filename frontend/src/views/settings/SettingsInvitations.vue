@@ -63,6 +63,7 @@ const form = ref({
   default_can_access_sensitive: false,
   max_uses: 1,
   expires_days: null as number | null,
+  access_valid_days: null as number | null,
   note: '',
 })
 
@@ -145,6 +146,7 @@ function openDialog(invitation?: Invitation) {
       default_can_access_sensitive: invitation.default_can_access_sensitive,
       max_uses: invitation.max_uses,
       expires_days: null,
+      access_valid_days: null,
       note: invitation.note,
     }
   } else {
@@ -162,6 +164,7 @@ function openDialog(invitation?: Invitation) {
       default_can_access_sensitive: false,
       max_uses: 1,
       expires_days: 30,
+      access_valid_days: null,
       note: '',
     }
   }
@@ -595,7 +598,20 @@ function getLevelText(level: number) {
                 class="w-full px-3 py-2 bg-slate-900 text-slate-200 border border-slate-600 rounded-lg focus:outline-none focus:border-sky-500 placeholder-slate-500"
                 placeholder="留空則永不過期"
               />
-              <p class="text-[11px] text-slate-600 mt-1">過期後此邀請碼無法再被新用戶驗證。已驗證的用戶不受影響，可永久使用。</p>
+              <p class="text-[11px] text-slate-600 mt-1">過期後此邀請碼無法再被新用戶驗證。已驗證的用戶不受影響。</p>
+            </div>
+
+            <!-- Access Valid Days -->
+            <div>
+              <label class="block text-sm text-slate-400 mb-1">對話有效天數</label>
+              <input
+                v-model.number="form.access_valid_days"
+                type="number"
+                min="1"
+                class="w-full px-3 py-2 bg-slate-900 text-slate-200 border border-slate-600 rounded-lg focus:outline-none focus:border-sky-500 placeholder-slate-500"
+                placeholder="留空則永久有效"
+              />
+              <p class="text-[11px] text-slate-600 mt-1">用戶驗證後可與 AI 對話的天數。過期後無法對話，但資料保留，管理員可延期。</p>
             </div>
 
             <!-- Note -->

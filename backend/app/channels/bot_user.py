@@ -219,6 +219,11 @@ def verify_invite_code(bot_user: BotUser, code: str) -> tuple[bool, str]:
             db_user.failed_verify_count = 0
             db_user.locked_until = None
 
+            # 設定存取期限
+            if invite.access_valid_days:
+                from datetime import timedelta
+                db_user.access_expires_at = datetime.now(timezone.utc) + timedelta(days=invite.access_valid_days)
+
             # 設定預設 Member
             if invite.target_member_id:
                 db_user.default_member_id = invite.target_member_id

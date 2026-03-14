@@ -72,6 +72,21 @@ class MessageRouter:
         # P2: 取得或建立 BotUser
         bot_user = get_or_create_bot_user(msg.platform, msg.user_id, msg.user_name)
 
+        # 存取期限檢查（排除驗證相關命令）
+        if bot_user.access_expires_at and bot_user.level >= 1:
+            from datetime import datetime, timezone
+            if bot_user.access_expires_at <= datetime.now(timezone.utc):
+                _cmd = parse_command(msg.text)
+                # 允許 help/verify 等 L0 命令，擋住其他操作
+                if not _cmd or _cmd.get("name") not in ("help", "start", "verify", "me"):
+                    expire_date = bot_user.access_expires_at.strftime("%Y-%m-%d")
+                    await message_bus.publish_outbound(OutboundMessage(
+                        chat_id=msg.chat_id, platform=msg.platform,
+                        text=f"\U0001F512 您的存取權限已於 {expire_date} 過期，請聯繫管理員延期",
+                        reply_to_id=msg.id,
+                    ))
+                    return
+
         # 解析命令
         cmd = parse_command(msg.text)
 

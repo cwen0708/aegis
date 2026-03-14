@@ -273,6 +273,9 @@ class BotUser(SQLModel, table=True):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     last_active_at: Optional[datetime] = None
 
+    # 存取期限
+    access_expires_at: Optional[datetime] = None     # 存取過期時間（None = 永不過期）
+
     # 安全性
     failed_verify_count: int = Field(default=0)      # 驗證失敗次數
     last_failed_at: Optional[datetime] = None        # 最後失敗時間
@@ -362,6 +365,9 @@ class InviteCode(SQLModel, table=True):
     max_uses: int = Field(default=1)
     used_count: int = Field(default=0)
     expires_at: Optional[datetime] = None
+
+    # 存取期限（驗證後的有效天數）
+    access_valid_days: Optional[int] = Field(default=None)  # None = 永久
 
     # 元資料
     created_by: Optional[int] = Field(default=None, foreign_key="botuser.id")
