@@ -587,7 +587,7 @@ function getLevelText(level: number) {
 
             <!-- Expires Days -->
             <div>
-              <label class="block text-sm text-slate-400 mb-1">有效天數</label>
+              <label class="block text-sm text-slate-400 mb-1">邀請碼有效天數</label>
               <input
                 v-model.number="form.expires_days"
                 type="number"
@@ -595,6 +595,7 @@ function getLevelText(level: number) {
                 class="w-full px-3 py-2 bg-slate-900 text-slate-200 border border-slate-600 rounded-lg focus:outline-none focus:border-sky-500 placeholder-slate-500"
                 placeholder="留空則永不過期"
               />
+              <p class="text-[11px] text-slate-600 mt-1">過期後此邀請碼無法再被新用戶驗證。已驗證的用戶不受影響，可永久使用。</p>
             </div>
 
             <!-- Note -->
