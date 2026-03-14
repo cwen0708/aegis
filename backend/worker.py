@@ -1083,6 +1083,9 @@ def process_pending_cards():
                 provider=primary_provider,
                 project_path=project_path,
                 card_content=card_data.content,
+                stage_name=stage_list.name if stage_list else "",
+                stage_description=stage_list.description or "" if stage_list else "",
+                stage_instruction=stage_list.system_instruction or "" if stage_list else "",
             ))
 
         effective_cwd = workspace_dir or project_path

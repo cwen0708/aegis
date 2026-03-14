@@ -27,9 +27,23 @@ def _build_config_content(
     member_slug: str,
     project_path: str,
     card_content: str,
+    stage_name: str = "",
+    stage_description: str = "",
+    stage_instruction: str = "",
 ) -> str:
     """Assemble the CLAUDE.md / .gemini.md content."""
     memory_path = get_member_memory_dir(member_slug)
+
+    # 階段說明區塊
+    stage_section = ""
+    if stage_name or stage_description or stage_instruction:
+        parts = [f"# 當前階段：{stage_name}" if stage_name else "# 當前階段"]
+        if stage_description:
+            parts.append(stage_description)
+        if stage_instruction:
+            parts.append(f"\n## 階段指令\n{stage_instruction}")
+        stage_section = "\n".join(parts) + "\n"
+
     return f"""# 工作目錄
 你的專案在 {project_path}
 所有程式碼修改都在那個目錄進行。
@@ -44,6 +58,7 @@ def _build_config_content(
 - long-term/ 長期記憶（累積的經驗與模式）
 需要回憶時可以去讀取。
 
+{stage_section}
 # 本次任務
 {card_content}
 
@@ -60,6 +75,9 @@ def prepare_workspace(
     provider: str,
     project_path: str,
     card_content: str,
+    stage_name: str = "",
+    stage_description: str = "",
+    stage_instruction: str = "",
 ) -> Path:
     """
     Create a temp workspace directory for the AI task.
@@ -71,7 +89,12 @@ def prepare_workspace(
 
     # 1. Build and write config file (CLAUDE.md or .gemini.md)
     soul = get_soul_content(member_slug)
-    content = _build_config_content(soul, member_slug, project_path, card_content)
+    content = _build_config_content(
+        soul, member_slug, project_path, card_content,
+        stage_name=stage_name,
+        stage_description=stage_description,
+        stage_instruction=stage_instruction,
+    )
     (ws / cfg["config_file"]).write_text(content, encoding="utf-8")
 
     # 2. Copy skills into .claude/skills/ or .gemini/skills/

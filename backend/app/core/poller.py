@@ -165,6 +165,9 @@ async def _process_pending_cards():
                             provider=forced_provider or "claude",
                             project_path=project_path,
                             card_content=card_data.content,
+                            stage_name=stage_list.name if stage_list else "",
+                            stage_description=stage_list.description or "" if stage_list else "",
+                            stage_instruction=stage_list.system_instruction or "" if stage_list else "",
                         ))
 
                 # 使用 asyncio.create_task 在背景跑，這樣 poller 可以繼續掃描下一張卡片
