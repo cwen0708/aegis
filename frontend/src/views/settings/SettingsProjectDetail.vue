@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, FolderOpen, Loader2, Trash2, FolderInput, Plus, Edit3, Eye, EyeOff, KeyRound, Save, Smartphone, Square, ExternalLink, Copy, Check } from 'lucide-vue-next'
+import { ArrowLeft, FolderOpen, Loader2, Trash2, FolderInput, Plus, Edit3, Eye, EyeOff, KeyRound, Save, Smartphone, Square, ExternalLink, Copy, Check, TerminalSquare } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 import ConfirmDialog from '../../components/ConfirmDialog.vue'
 import { config } from '../../config'
@@ -373,14 +373,36 @@ onUnmounted(() => {
 <template>
   <div class="space-y-6">
     <!-- Header -->
-    <div class="flex items-center gap-3">
-      <button
-        @click="router.push('/settings/projects')"
-        class="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50 rounded-lg transition-colors"
-      >
-        <ArrowLeft class="w-5 h-5" />
-      </button>
-      <h2 class="text-xl font-semibold text-slate-200">{{ form.name || '專案設定' }}</h2>
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <button
+          @click="router.push('/settings/projects')"
+          class="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50 rounded-lg transition-colors"
+        >
+          <ArrowLeft class="w-5 h-5" />
+        </button>
+        <h2 class="text-xl font-semibold text-slate-200">{{ form.name || '專案設定' }}</h2>
+      </div>
+      <div class="flex items-center gap-2">
+        <button
+          @click="router.push(`/settings/terminal?cwd=${encodeURIComponent(form.path)}`)"
+          class="flex items-center gap-2 px-3 py-1.5 text-sm bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition"
+          title="在此專案目錄開啟終端"
+        >
+          <TerminalSquare class="w-4 h-4" />
+          終端
+        </button>
+        <button
+          @click="startRc"
+          :disabled="rcStatus === 'starting'"
+          class="flex items-center gap-2 px-3 py-1.5 text-sm bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white rounded-lg transition"
+          title="啟動 Remote Control"
+        >
+          <Loader2 v-if="rcStatus === 'starting'" class="w-4 h-4 animate-spin" />
+          <Smartphone v-else class="w-4 h-4" />
+          遠端
+        </button>
+      </div>
     </div>
 
     <!-- Loading -->

@@ -1,11 +1,16 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { useRoute } from 'vue-router'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { TerminalSquare, Circle, Loader2 } from 'lucide-vue-next'
 import { config } from '../../config'
+
+const route = useRoute()
+// 從 query param 取得初始工作目錄
+const initialCwd = (route.query.cwd as string) || ''
 
 const termRef = ref<HTMLDivElement>()
 const status = ref<'connecting' | 'connected' | 'disconnected'>('disconnected')
@@ -29,6 +34,10 @@ function connect() {
   ws.onopen = () => {
     status.value = 'connected'
     term?.focus()
+    // 自動 cd 到指定目錄
+    if (initialCwd) {
+      setTimeout(() => sendInput(`cd ${initialCwd}\n`), 300)
+    }
   }
 
   ws.onmessage = (event) => {
