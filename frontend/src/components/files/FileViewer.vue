@@ -67,6 +67,7 @@ import { File as FileIcon, Eye, Code } from 'lucide-vue-next'
 import { marked } from 'marked'
 import hljs from 'highlight.js/lib/common'
 import { config } from '../../config'
+import { authHeaders } from '../../utils/authFetch'
 
 const props = defineProps<{
   projectId: number
@@ -148,7 +149,7 @@ async function loadFile() {
   }
   loading.value = true
   try {
-    const res = await fetch(`${API}/api/v1/projects/${props.projectId}/files/content?path=${encodeURIComponent(props.path)}`)
+    const res = await fetch(`${API}/api/v1/projects/${props.projectId}/files/content?path=${encodeURIComponent(props.path)}`, { headers: authHeaders() })
     if (res.ok) {
       fileData.value = await res.json()
     }

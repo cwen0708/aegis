@@ -20,6 +20,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted } from 'vue'
 import { config } from '../../config'
+import { authHeaders } from '../../utils/authFetch'
 import FileTreeNode from './FileTreeNode.vue'
 
 export interface FileEntry {
@@ -46,7 +47,7 @@ const loading = ref(false)
 async function loadDir(path: string = '') {
   loading.value = true
   try {
-    const res = await fetch(`${API}/api/v1/projects/${props.projectId}/files?path=${encodeURIComponent(path)}`)
+    const res = await fetch(`${API}/api/v1/projects/${props.projectId}/files?path=${encodeURIComponent(path)}`, { headers: authHeaders() })
     if (res.ok) {
       const data = await res.json()
       entries.value = data.entries

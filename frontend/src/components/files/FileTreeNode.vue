@@ -49,6 +49,7 @@
 import { ref } from 'vue'
 import { ChevronRight, Folder, FolderOpen, File as FileIcon } from 'lucide-vue-next'
 import { config } from '../../config'
+import { authHeaders } from '../../utils/authFetch'
 import type { FileEntry } from './FileTree.vue'
 
 const props = defineProps<{
@@ -73,7 +74,7 @@ async function handleClick() {
     if (!loaded.value) {
       loadingChildren.value = true
       try {
-        const res = await fetch(`${API}/api/v1/projects/${props.projectId}/files?path=${encodeURIComponent(props.entry.path)}`)
+        const res = await fetch(`${API}/api/v1/projects/${props.projectId}/files?path=${encodeURIComponent(props.entry.path)}`, { headers: authHeaders() })
         if (res.ok) {
           const data = await res.json()
           children.value = data.entries

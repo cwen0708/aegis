@@ -9,13 +9,14 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlmodel import Session
 
 from app.database import get_session
 from app.models.core import Project
+from app.core.auth import verify_session_token
 
 router = APIRouter(tags=["files"])
 
@@ -125,13 +126,27 @@ class FileEntry(BaseModel):
     modified: Optional[str] = None
 
 
+def _is_authenticated(authorization: str | None) -> bool:
+    """從 Authorization header 檢查是否已登入"""
+    if not authorization:
+        return False
+    if authorization.startswith("Bearer "):
+        return verify_session_token(authorization[7:])
+    return False
+
+
 @router.get("/projects/{project_id}/files")
 def list_files(
     project_id: int,
     path: str = Query("", description="相對路徑，空字串表示根目錄"),
     session: Session = Depends(get_session),
+    authorization: str | None = Header(None),
 ):
-    """列出目錄內容（單層，lazy load）"""
+    """列出目錄內容（單層，lazy load）
+
+    未登入：隱藏所有 dot 開頭的檔案/目錄
+    已登入：只隱藏 EXCLUDED_NAMES（.git, node_modules 等）
+    """
     project = _get_project(project_id, session)
     target = _resolve_safe_path(project.path, path)
 
@@ -140,6 +155,7 @@ def list_files(
     if not target.is_dir():
         raise HTTPException(status_code=400, detail="Not a directory")
 
+    authenticated = _is_authenticated(authorization)
     base = Path(project.path).resolve()
     entries: list[dict] = []
 
@@ -147,8 +163,11 @@ def list_files(
         for item in sorted(target.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
             if item.name in EXCLUDED_NAMES:
                 continue
-            if item.name.startswith(".") and item.name not in (".gitignore", ".env.example"):
-                continue
+            # 未登入：隱藏所有 dot 檔案/目錄
+            # 已登入：放行 dot 檔案（但仍排除 EXCLUDED_NAMES）
+            if item.name.startswith("."):
+                if not authenticated:
+                    continue
 
             try:
                 stat = item.stat()
@@ -173,6 +192,7 @@ def read_file_content(
     project_id: int,
     path: str = Query(..., description="檔案相對路徑"),
     session: Session = Depends(get_session),
+    authorization: str | None = Header(None),
 ):
     """讀取檔案內容"""
     project = _get_project(project_id, session)
@@ -182,6 +202,12 @@ def read_file_content(
         raise HTTPException(status_code=404, detail="File not found")
     if not target.is_file():
         raise HTTPException(status_code=400, detail="Not a file")
+
+    # 未登入時禁止讀取 dot 檔案/路徑中包含 dot 目錄的檔案
+    if not _is_authenticated(authorization):
+        parts = Path(path).parts
+        if any(p.startswith(".") for p in parts):
+            raise HTTPException(status_code=403, detail="Authentication required to access hidden files")
 
     size = target.stat().st_size
 
