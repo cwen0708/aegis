@@ -55,6 +55,22 @@ def build_sanitized_env(project_id: Optional[int] = None) -> dict:
     # 避免子程序偵測到巢狀 Claude session 而拒絕啟動
     env.pop("CLAUDECODE", None)
 
+    # 從 SystemSetting 注入全域 API Keys（如 gemini_api_key）
+    try:
+        from sqlmodel import Session
+        from app.database import engine
+        from app.models.core import SystemSetting
+        with Session(engine) as session:
+            for setting_key, env_key in [
+                ("gemini_api_key", "GEMINI_API_KEY"),
+                ("google_api_key", "GOOGLE_API_KEY"),
+            ]:
+                setting = session.get(SystemSetting, setting_key)
+                if setting and setting.value:
+                    env[env_key] = setting.value
+    except Exception as e:
+        logger.warning(f"[Sandbox] Failed to load SystemSetting keys: {e}")
+
     # 從 DB 讀取專案環境變數並注入
     if project_id:
         try:
