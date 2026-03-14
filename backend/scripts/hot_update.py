@@ -158,11 +158,12 @@ def main():
         # 先標記完成（因為重啟後這個進程也會被殺掉）
         update_status("done", 100, "更新完成，服務重啟中...")
 
-        # 重啟服務（用 systemctl，這會殺掉 aegis 但這個腳本是獨立的）
+        # 重啟服務：先 worker 再 aegis（因為 aegis 重啟會殺掉本進程的父進程）
         time.sleep(1)  # 給 DB 寫入一點時間
 
-        subprocess.run(["sudo", "systemctl", "restart", "aegis"], check=False)
         subprocess.run(["sudo", "systemctl", "restart", "aegis-worker"], check=False)
+        time.sleep(1)
+        subprocess.run(["sudo", "systemctl", "restart", "aegis"], check=False)
 
         return 0
 

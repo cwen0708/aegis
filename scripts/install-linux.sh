@@ -331,6 +331,28 @@ EOF
 
 print_success "Created aegis.service (systemd unit file)"
 
+# Create worker systemd service file
+cat > aegis-worker.service << EOF
+[Unit]
+Description=Aegis AI Task Worker
+After=aegis.service
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$INSTALL_DIR/backend
+Environment=PATH=$INSTALL_DIR/backend/venv/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=$HOME
+ExecStart=$INSTALL_DIR/backend/venv/bin/python worker.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+print_success "Created aegis-worker.service (systemd unit file)"
+
 # ============================================
 # Done!
 # ============================================
@@ -347,9 +369,10 @@ To start Aegis:
 
 For systemd service (optional):
   sudo cp $INSTALL_DIR/aegis.service /etc/systemd/system/
+  sudo cp $INSTALL_DIR/aegis-worker.service /etc/systemd/system/
   sudo systemctl daemon-reload
-  sudo systemctl enable aegis
-  sudo systemctl start aegis
+  sudo systemctl enable aegis aegis-worker
+  sudo systemctl start aegis aegis-worker
 
 Configuration:
   - Install directory: $INSTALL_DIR
