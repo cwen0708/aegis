@@ -200,20 +200,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to update app_version: {e}")
 
-    # 從 DB 讀取工作台數量設定
-    try:
-        from app.database import engine
-        from app.models.core import SystemSetting
-        from sqlmodel import Session as DBSession
-        from app.core.runner import update_max_workstations
-        with DBSession(engine) as session:
-            setting = session.get(SystemSetting, "max_workstations")
-            if not setting:
-                setting = session.get(SystemSetting, "max_concurrent_agents")
-            if setting:
-                update_max_workstations(int(setting.value))
-    except Exception as e:
-        logger.warning(f"Failed to load max_workstations from DB: {e}")
+    # 工作台數量由 Worker 獨立程序從 DB 讀取，主服務不需管理
 
     # 自動偵測本機已登入的 CLI 帳號，同步到 Account 表
     try:
@@ -291,28 +278,25 @@ async def lifespan(app: FastAPI):
                     logger.info(f"Rebuilt index for {project.name}: {count} cards")
             session.commit()
 
-        # Detect orphaned 'running' cards (no matching process)
+        # Detect orphaned 'running' cards — 主服務重啟時 Worker 也會重啟，
+        # 所有 running 卡片都是 orphan（Worker 的進程已不存在）
         with _Session(_engine) as session:
-            from app.core.runner import running_tasks
             orphans = session.exec(
                 _select(CardIndex).where(CardIndex.status == "running")
             ).all()
             for idx in orphans:
-                if idx.card_id not in running_tasks:
-                    # Reset to failed — no process is running for this card
-                    idx.status = "failed"
-                    session.add(idx)
-                    # Also update the MD file
-                    try:
-                        fpath = Path(idx.file_path)
-                        if fpath.exists():
-                            card = read_card(fpath)
-                            card.status = "failed"
-                            card.content += "\n\n### System Reset\nOrphaned running status detected on startup. Reset to failed."
-                            write_card(fpath, card)
-                    except Exception as e:
-                        logger.warning(f"Failed to update orphaned card {idx.card_id} MD file: {e}")
-                    logger.warning(f"Reset orphaned running card {idx.card_id}: {idx.title}")
+                idx.status = "failed"
+                session.add(idx)
+                try:
+                    fpath = Path(idx.file_path)
+                    if fpath.exists():
+                        card = read_card(fpath)
+                        card.status = "failed"
+                        card.content += "\n\n### System Reset\nOrphaned running status detected on startup. Reset to failed."
+                        write_card(fpath, card)
+                except Exception as e:
+                    logger.warning(f"Failed to update orphaned card {idx.card_id} MD file: {e}")
+                logger.warning(f"Reset orphaned running card {idx.card_id}: {idx.title}")
             session.commit()
     except Exception as e:
         logger.warning(f"Failed to rebuild card index on startup: {e}")
@@ -497,22 +481,33 @@ async def websocket_endpoint(websocket: WebSocket):
     websocket_clients.add(websocket)
     logger.info(f"[WS] Client connected. Total: {len(websocket_clients)}")
 
-    # 發送初始狀態
+    # 發送初始狀態（從 DB 讀取，Worker 在獨立程序中）
     try:
-        import app.core.runner as _runner
-        from app.core.poller import is_paused
+        from sqlmodel import Session as _WsSession, select as _ws_select
+        from app.database import engine as _ws_engine
+        from app.models.core import CardIndex as _WsCI, SystemSetting as _WsSS, Project as _WsProj
 
         tasks_data = []
-        for tid, info in list(_runner.running_tasks.items()):
-            tasks_data.append({
-                "task_id": info["task_id"],
-                "project": info.get("project", ""),
-                "card_title": info.get("card_title", ""),
-                "started_at": info.get("started_at", 0),
-                "pid": info.get("pid"),
-                "provider": info.get("provider", ""),
-                "member_id": info.get("member_id"),
-            })
+        with _WsSession(_ws_engine) as _ws_sess:
+            running = _ws_sess.exec(
+                _ws_select(_WsCI).where(_WsCI.status == "running")
+            ).all()
+            for idx in running:
+                proj = _ws_sess.get(_WsProj, idx.project_id)
+                tasks_data.append({
+                    "task_id": idx.card_id,
+                    "project": proj.name if proj else "",
+                    "card_title": idx.title,
+                    "started_at": idx.updated_at.timestamp() if idx.updated_at else 0,
+                    "pid": None,
+                    "provider": "",
+                    "member_id": idx.member_id,
+                })
+
+            max_ws_s = _ws_sess.get(_WsSS, "max_workstations")
+            max_ws = int(max_ws_s.value) if max_ws_s else 3
+            paused_s = _ws_sess.get(_WsSS, "worker_paused")
+            is_paused = paused_s and paused_s.value == "true"
 
         await broadcast_message({
             "type": "running_tasks_update",
@@ -528,8 +523,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 "mem_percent": metrics["memory_percent"],
                 "mem_available_gb": metrics["memory_available_gb"],
                 "is_paused": is_paused,
-                "workstations_used": len(_runner.running_tasks),
-                "workstations_total": _runner.MAX_WORKSTATIONS,
+                "workstations_used": len(tasks_data),
+                "workstations_total": max_ws,
             },
             "timestamp": time.time()
         })

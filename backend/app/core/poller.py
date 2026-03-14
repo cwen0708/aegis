@@ -9,8 +9,7 @@ from app.database import engine
 from app.models.core import Card, CardIndex, StageList, Project, SystemSetting, Member, MemberDialogue
 from app.core.card_file import CardData, read_card, write_card, card_file_path
 from app.core.card_index import sync_card_to_index, query_pending_cards, next_card_id
-from app.core.runner import run_ai_task, busy_members, running_tasks
-import app.core.runner as runner_module
+# 注意：卡片任務由 worker.py 獨立程序處理，此模組僅保留輔助函數
 from app.core.telemetry import is_system_overloaded
 from app.core.task_workspace import prepare_workspace, cleanup_workspace
 from app.core.memory_manager import write_member_short_term_memory

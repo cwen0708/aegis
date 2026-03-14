@@ -9,8 +9,7 @@ from zoneinfo import ZoneInfo
 from app.database import get_session
 from app.models.core import Project, Card, StageList, CronJob, CronLog, SystemSetting, Account, Member, MemberAccount, TaskLog, CardIndex, InviteCode, BotUser, BotUserProject, EmailMessage
 from typing import Any
-from app.core.runner import running_tasks, abort_task
-import app.core.runner as runner_module
+# Worker 負責卡片任務執行，runner.py 只用於 chat/email 即時互動
 from app.core.usage_poller import get_cached_claude_usage, get_cached_gemini_usage, get_last_updated
 # Worker 程序獨立執行，暫停狀態改用 DB SystemSetting "worker_paused"
 import app.core.cron_poller as cron_module
@@ -985,28 +984,10 @@ def abort_card(card_id: int, session: Session = Depends(get_session)):
     if not idx and not orm_card:
         raise HTTPException(status_code=404, detail="Card not found")
 
-    killed = abort_task(card_id)
     now = datetime.now(timezone.utc)
 
-    if killed:
-        # Update MD file + index
-        if idx and idx.file_path and Path(idx.file_path).exists():
-            cd = read_card_md(Path(idx.file_path))
-            cd.status = "failed"
-            cd.content = (cd.content or "") + "\n\n### Aborted\n任務已被手動中止。"
-            cd.updated_at = now
-            write_card(Path(idx.file_path), cd)
-            sync_card_to_index(session, cd, project_id=idx.project_id, file_path=idx.file_path)
-        # Dual-write: old Card ORM
-        if orm_card:
-            orm_card.status = "failed"
-            orm_card.content = (orm_card.content or "") + "\n\n### Aborted\n任務已被手動中止。"
-            orm_card.updated_at = now
-            session.add(orm_card)
-        session.commit()
-        return {"ok": True, "status": "aborted"}
-
-    # 即使 process 不在 running_tasks，也重設狀態
+    # Worker 在獨立程序中，此處無法直接 kill 進程
+    # 重設卡片狀態為 failed，Worker 下次 poll 不會再撿起
     status = idx.status if idx else (orm_card.status if orm_card else "idle")
     if status == "running":
         if idx and idx.file_path and Path(idx.file_path).exists():
@@ -1560,14 +1541,12 @@ def update_settings(data: dict, session: Session = Depends(get_session)):
         else:
             session.add(SystemSetting(key=key, value=str(value)))
     session.commit()
-    # 即時更新工作台數量（驗證為正整數且在合理範圍內）
+    # 工作台數量已寫入 DB，Worker 下次 poll 時會自動讀取
     if "max_workstations" in data:
-        from app.core.runner import update_max_workstations
         try:
             val = int(data["max_workstations"])
             if val < 1 or val > 100:
                 raise HTTPException(status_code=400, detail="max_workstations 必須介於 1~100")
-            update_max_workstations(val)
         except (ValueError, TypeError):
             raise HTTPException(status_code=400, detail="max_workstations 必須為正整數")
     return get_settings(session=session)
