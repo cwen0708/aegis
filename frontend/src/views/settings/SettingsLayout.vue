@@ -184,7 +184,7 @@ const mobileDropdownStyle = computed(() => {
     <!-- 已驗證：顯示設定內容 -->
     <div v-else class="flex-1 flex flex-col sm:flex-row overflow-hidden">
       <!-- Desktop: Left Menu -->
-      <div v-else class="w-48 shrink-0 border-r border-slate-800 bg-slate-900/30 p-4">
+      <div v-if="!isMobile" class="w-48 shrink-0 border-r border-slate-800 bg-slate-900/30 p-4">
         <nav class="space-y-1">
           <router-link
             v-for="item in menuItems"
