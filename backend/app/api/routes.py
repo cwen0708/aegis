@@ -978,7 +978,7 @@ def trigger_card(card_id: int, session: Session = Depends(get_session)):
 
 @router.post("/cards/{card_id}/abort")
 def abort_card(card_id: int, session: Session = Depends(get_session)):
-    """中止執行中的任務"""
+    """中止執行中的任務（透過檔案信號通知 Worker kill 子程序）"""
     idx = session.get(CardIndex, card_id)
     orm_card = session.get(Card, card_id)
     if not idx and not orm_card:
@@ -986,10 +986,13 @@ def abort_card(card_id: int, session: Session = Depends(get_session)):
 
     now = datetime.now(timezone.utc)
 
-    # Worker 在獨立程序中，此處無法直接 kill 進程
-    # 重設卡片狀態為 failed，Worker 下次 poll 不會再撿起
     status = idx.status if idx else (orm_card.status if orm_card else "idle")
     if status == "running":
+        # 寫入 abort 檔案信號，Worker 讀取迴圈會檢查並 kill 子程序
+        abort_dir = Path(__file__).resolve().parent.parent.parent / ".aegis" / "abort"
+        abort_dir.mkdir(parents=True, exist_ok=True)
+        (abort_dir / str(card_id)).touch()
+
         if idx and idx.file_path and Path(idx.file_path).exists():
             cd = read_card_md(Path(idx.file_path))
             cd.status = "failed"
@@ -1001,7 +1004,7 @@ def abort_card(card_id: int, session: Session = Depends(get_session)):
             orm_card.updated_at = now
             session.add(orm_card)
         session.commit()
-    return {"ok": True, "status": "reset"}
+    return {"ok": True, "status": "aborted"}
 
 
 @router.post("/cards/{card_id}/archive")

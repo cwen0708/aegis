@@ -46,6 +46,23 @@ from app.models.core import (
 )
 from app.core.card_file import CardData, read_card, write_card
 from app.core.card_index import sync_card_to_index, remove_card_from_index
+
+# Abort 信號目錄
+_INSTALL_ROOT = Path(__file__).resolve().parent
+ABORT_DIR = _INSTALL_ROOT.parent / ".aegis" / "abort"
+ABORT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def is_abort_requested(card_id: int) -> bool:
+    """檢查是否有 abort 請求（檔案信號）"""
+    return (ABORT_DIR / str(card_id)).exists()
+
+
+def clear_abort_signal(card_id: int):
+    """清除 abort 信號"""
+    f = ABORT_DIR / str(card_id)
+    if f.exists():
+        f.unlink(missing_ok=True)
 from app.core.telemetry import is_system_overloaded
 from app.core.task_workspace import prepare_workspace, cleanup_workspace
 from app.core.memory_manager import write_member_short_term_memory
@@ -831,6 +848,18 @@ def run_task_pty_windows(
         buffer = ""
         while pty_process.isalive():
             try:
+                # 檢查 abort 信號
+                if is_abort_requested(card_id):
+                    logger.info(f"[Task {card_id}] Abort signal received, killing PTY process")
+                    try:
+                        import signal as _sig
+                        os.kill(pty_process.pid, _sig.SIGKILL)
+                    except Exception:
+                        pass
+                    clear_abort_signal(card_id)
+                    broadcast_log(card_id, "\n🛑 任務已被中止\n")
+                    break
+
                 chunk = pty_process.read(512)
                 if chunk:
                     output_lines.append(chunk)
@@ -973,6 +1002,13 @@ def run_task_subprocess(
             line = raw_line.decode("utf-8", errors="replace")
             output_lines.append(line)
             broadcast_log(card_id, line)
+            # 檢查 abort 信號
+            if is_abort_requested(card_id):
+                logger.info(f"[Task {card_id}] Abort signal received, killing process")
+                proc.kill()
+                clear_abort_signal(card_id)
+                broadcast_log(card_id, "\n🛑 任務已被中止\n")
+                break
 
         proc.wait()
 
