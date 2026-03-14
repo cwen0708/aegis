@@ -475,6 +475,24 @@ def read_system_metrics():
 # ==========================================
 # WebSocket Endpoint
 # ==========================================
+@app.websocket("/ws/terminal")
+async def terminal_websocket(websocket: WebSocket):
+    """Web Terminal — browser-based PTY shell access."""
+    await websocket.accept()
+    logger.info("[Terminal] Client connected")
+    try:
+        from app.core.web_terminal import terminal_handler
+        await terminal_handler(websocket)
+    except Exception as e:
+        logger.warning(f"[Terminal] Error: {e}")
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+        logger.info("[Terminal] Client disconnected")
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()

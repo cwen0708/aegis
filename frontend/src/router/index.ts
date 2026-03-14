@@ -19,6 +19,7 @@ import SettingsInvitations from '../views/settings/SettingsInvitations.vue'
 import SettingsUpdate from '../views/settings/SettingsUpdate.vue'
 import SettingsOneStack from '../views/settings/SettingsOneStack.vue'
 import SettingsProjectDetail from '../views/settings/SettingsProjectDetail.vue'
+import SettingsTerminal from '../views/settings/SettingsTerminal.vue'
 import FileBrowser from '../views/FileBrowser.vue'
 import { useAuthStore } from '../stores/auth'
 
@@ -53,6 +54,7 @@ const router = createRouter({
         { path: 'status', component: Dashboard },
         { path: 'onestack', component: SettingsOneStack },
         { path: 'update', component: SettingsUpdate },
+        { path: 'terminal', component: SettingsTerminal },
       ],
     },
   ],
