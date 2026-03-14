@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { Settings, Globe, Terminal, TerminalSquare, MessageSquare, Users, Bot, Activity, Lock, Loader2, FolderKanban, Mail, ChevronDown, Download, Layers, LogOut, Rocket } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { useResponsive } from '../../composables/useResponsive'
@@ -64,15 +64,45 @@ function handleLogout() {
   authenticated.value = false
   password.value = ''
 }
+
+const currentMenuItem = computed(() => menuItems.find(m => route.path === m.path || route.path.startsWith(m.path + '/')))
+const triggerEl = ref<HTMLElement | null>(null)
+const mobileDropdownStyle = computed(() => {
+  if (!triggerEl.value) return {}
+  const rect = triggerEl.value.getBoundingClientRect()
+  return {
+    top: `${rect.bottom + 8}px`,
+    left: `${rect.left}px`,
+  }
+})
 </script>
 
 <template>
   <div class="h-full flex flex-col">
     <!-- Header -->
-    <div class="sticky top-0 z-10 h-14 sm:h-16 shrink-0 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 px-2 sm:px-8 flex items-center justify-between">
+    <div ref="headerEl" class="sticky top-0 z-10 h-14 sm:h-16 shrink-0 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 px-2 sm:px-8 flex items-center justify-between">
       <div class="flex items-center gap-2">
-        <Settings class="w-5 h-5 text-slate-400" />
-        <h1 class="text-base sm:text-lg font-bold text-slate-100">系統設定</h1>
+        <!-- Mobile: 下拉選單觸發器（跟 PageHeader 同樣式） -->
+        <button
+          v-if="isMobile && authenticated"
+          ref="triggerEl"
+          @click="showMobileMenu = !showMobileMenu"
+          class="flex items-center gap-1.5 min-w-0 group"
+        >
+          <component :is="currentMenuItem?.icon || Settings" class="w-4 h-4 text-emerald-400 shrink-0" />
+          <span class="text-sm font-bold text-slate-100 truncate group-hover:text-emerald-400 transition-colors max-w-[160px]">
+            {{ currentMenuItem?.label || '系統設定' }}
+          </span>
+          <ChevronDown
+            class="w-3 h-3 text-slate-500 shrink-0 transition-transform"
+            :class="{ 'rotate-180': showMobileMenu }"
+          />
+        </button>
+        <!-- Desktop: 固定標題 -->
+        <template v-else>
+          <Settings class="w-5 h-5 text-slate-400" />
+          <h1 class="text-base sm:text-lg font-bold text-slate-100">系統設定</h1>
+        </template>
       </div>
       <button
         v-if="authenticated"
@@ -83,6 +113,32 @@ function handleLogout() {
         登出
       </button>
     </div>
+
+    <!-- Mobile: Dropdown (Teleport to body，跟 PageHeader 同樣式) -->
+    <Teleport to="body">
+      <template v-if="showMobileMenu && isMobile && authenticated">
+        <div class="fixed inset-0 z-40" @click="showMobileMenu = false" />
+        <div
+          class="fixed z-50 w-64 bg-slate-800 rounded-lg border border-slate-700 shadow-xl max-h-72 overflow-y-auto"
+          :style="mobileDropdownStyle"
+        >
+          <div class="py-1">
+            <button
+              v-for="item in menuItems"
+              :key="item.path"
+              @click="router.push(item.path); showMobileMenu = false"
+              class="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm transition-colors"
+              :class="route.path === item.path
+                ? 'bg-emerald-500/20 text-emerald-400'
+                : 'text-slate-300 hover:bg-slate-700'"
+            >
+              <component :is="item.icon" class="w-4 h-4 shrink-0" :class="route.path === item.path ? 'text-emerald-400' : 'text-slate-500'" />
+              {{ item.label }}
+            </button>
+          </div>
+        </div>
+      </template>
+    </Teleport>
 
     <!-- 未驗證：顯示密碼輸入 -->
     <div v-if="!authenticated" class="flex-1 flex items-center justify-center">
@@ -127,34 +183,6 @@ function handleLogout() {
 
     <!-- 已驗證：顯示設定內容 -->
     <div v-else class="flex-1 flex flex-col sm:flex-row overflow-hidden">
-      <!-- Mobile: Dropdown Menu -->
-      <div v-if="isMobile" class="shrink-0 border-b border-slate-800 bg-slate-900/30 px-2 py-2">
-        <button
-          @click="showMobileMenu = !showMobileMenu"
-          class="w-full flex items-center justify-between gap-2 px-3 py-2 bg-slate-800 rounded-lg text-sm text-slate-200"
-        >
-          <div class="flex items-center gap-2">
-            <component :is="menuItems.find(m => m.path === route.path)?.icon || Globe" class="w-4 h-4 text-emerald-400" />
-            {{ menuItems.find(m => m.path === route.path)?.label || '選擇' }}
-          </div>
-          <ChevronDown class="w-4 h-4 text-slate-400" :class="{ 'rotate-180': showMobileMenu }" />
-        </button>
-        <div v-if="showMobileMenu" class="mt-2 bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
-          <button
-            v-for="item in menuItems"
-            :key="item.path"
-            @click="router.push(item.path); showMobileMenu = false"
-            class="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm transition-colors"
-            :class="route.path === item.path
-              ? 'bg-emerald-500/20 text-emerald-400'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700'"
-          >
-            <component :is="item.icon" class="w-4 h-4" />
-            {{ item.label }}
-          </button>
-        </div>
-      </div>
-
       <!-- Desktop: Left Menu -->
       <div v-else class="w-48 shrink-0 border-r border-slate-800 bg-slate-900/30 p-4">
         <nav class="space-y-1">
