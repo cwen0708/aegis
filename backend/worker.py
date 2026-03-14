@@ -1,10 +1,19 @@
 """
-Aegis Worker - 獨立任務執行程序
-獨立於 FastAPI 運行，負責：
-1. 掃描 pending 卡片
-2. 執行 AI CLI 任務
-3. 即時輸出透過 HTTP 傳給 FastAPI 廣播
-4. 更新卡片狀態
+Aegis Worker — 卡片任務的主要執行引擎（獨立程序）
+
+⚠️ 此程序是卡片任務的唯一執行路徑。
+   runner.py 只負責 chat/email 等即時互動，不處理卡片。
+
+作為獨立於 FastAPI 的程序運行（aegis-worker.service），負責：
+1. 每 3 秒掃描 CardIndex 中 status='pending' 的卡片
+2. 三層路由（列表指派 → 專案預設 → 無指派）解析成員與帳號
+3. 帳號 Fallback — 主帳號失敗自動切備用帳號
+4. PTY 即時串流 — 每行 stdout 透過 HTTP 傳給 FastAPI 廣播到 WebSocket
+5. stream-json 解析 — 解析 Claude 工具呼叫（📖 Read、💻 Bash 等）
+6. 心跳機制 — 每 5 秒廣播進度，前端可見
+7. CronLog — 排程卡片完成後寫入 CronLog + 依 stage action 處理
+8. AVG 對話 — 解析 <!-- dialogue: xxx --> 並儲存 MemberDialogue
+9. 環境隔離 — sandbox 白名單環境變數 + process group 隔離
 """
 import os
 import sys
