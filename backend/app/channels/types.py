@@ -15,6 +15,10 @@ class MessageType(str, Enum):
     COMMAND = "command"
     CALLBACK = "callback"  # 按鈕回調
     FILE = "file"
+    PHOTO = "photo"
+    VOICE = "voice"
+    AUDIO = "audio"
+    DOCUMENT = "document"
 
 
 class ParseMode(str, Enum):
@@ -49,6 +53,20 @@ class InboundMessage:
     user_name: Optional[str] = None  # 顯示名稱
     raw_data: dict = field(default_factory=dict)  # 原始資料備查
 
+    # 多模態支援
+    media_type: Optional[str] = None   # "photo" | "voice" | "audio" | "document"
+    media_path: Optional[str] = None   # 下載到本地的暫存路徑
+    media_mime: Optional[str] = None   # MIME type（如 image/jpeg）
+    caption: Optional[str] = None      # 圖片/檔案附帶的說明文字
+
+
+@dataclass
+class Attachment:
+    """發送附件（圖片/檔案）"""
+    type: str          # "photo" | "document" | "audio" | "voice"
+    path: str          # 本地檔案路徑
+    caption: str = ""  # 附帶說明
+
 
 @dataclass
 class OutboundMessage:
@@ -70,6 +88,9 @@ class OutboundMessage:
 
     # 用於編輯訊息（先回再更新）
     edit_message_id: Optional[str] = None
+
+    # 多模態附件
+    attachments: list[Attachment] = field(default_factory=list)
 
 
 @dataclass

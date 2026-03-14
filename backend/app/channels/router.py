@@ -3,11 +3,11 @@
 """
 import asyncio
 from .bus import message_bus
-from .types import InboundMessage, OutboundMessage, MessageType, ParseMode
+from .types import InboundMessage, OutboundMessage, Attachment, MessageType, ParseMode
 from .commands.parser import parse_command
 from .commands.handlers import handle_command
 from .bot_user import get_or_create_bot_user
-from .chat_handler import handle_chat
+from .chat_handler import handle_chat, extract_attachments
 import logging
 
 logger = logging.getLogger(__name__)
@@ -122,12 +122,20 @@ class MessageRouter:
         if not response_text:
             response_text = "（無回應）"
 
-        # 3. 編輯訊息為實際回應
+        # 2.5 偵測 AI 回應中的附件標記
+        cleaned_text, attachments_data = extract_attachments(response_text)
+        attachments = [
+            Attachment(type=a["type"], path=a["path"], caption=a.get("caption", ""))
+            for a in attachments_data
+        ]
+
+        # 3. 編輯訊息為實際回應（附帶附件）
         edit_msg = OutboundMessage(
             chat_id=msg.chat_id,
             platform=msg.platform,
-            text=response_text,
+            text=cleaned_text or response_text,
             edit_message_id=str(message_id),
+            attachments=attachments,
         )
         await channel.send(edit_msg)
 

@@ -91,13 +91,21 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser) -> Optional[str]:
     if default_project:
         user_context = get_user_context(bot_user.id, default_project.id)
 
+    # 7.5 多模態：如果有附帶媒體，在訊息中加入檔案路徑
+    user_message = msg.text or ""
+    if msg.media_type and msg.media_path:
+        media_hint = f"\n\n[用戶傳送了{_media_type_label(msg.media_type)}，檔案路徑: {msg.media_path}]"
+        if msg.caption:
+            media_hint += f"\n[附帶說明: {msg.caption}]"
+        user_message = (user_message + media_hint).strip()
+
     # 8. 建構 prompt（含用戶身份和專案範圍）
     prompt = _build_chat_prompt(
         soul=soul,
         skills=skills_content,
         member=member,
         history=history,
-        user_message=msg.text,
+        user_message=user_message,
         user_context=user_context,
         accessible_projects=accessible_projects,
         user_level=bot_user.level,
@@ -433,3 +441,42 @@ def _create_task_card(
     except Exception as e:
         logger.error(f"[CreateTask] Failed: {e}")
         return None
+
+
+def _media_type_label(media_type: str) -> str:
+    """媒體類型的中文標籤"""
+    labels = {
+        "photo": "一張圖片",
+        "voice": "一段語音",
+        "audio": "一個音檔",
+        "document": "一個檔案",
+    }
+    return labels.get(media_type, "一個媒體檔案")
+
+
+def extract_attachments(output: str) -> tuple[str, list[dict]]:
+    """從 AI 回應中偵測 <!-- send_image: /path --> 等標記
+
+    Returns:
+        (cleaned_output, attachments_list)
+        attachments_list: [{"type": "photo", "path": "/tmp/xxx.png", "caption": "..."}, ...]
+    """
+    import os
+
+    attachments = []
+
+    # 偵測 <!-- send_image: /path/to/file.png --> 或 <!-- send_document: /path/to/file.pdf -->
+    pattern = r'<!--\s*send_(image|document|photo|file)\s*:\s*(.+?)\s*-->'
+    matches = re.findall(pattern, output, re.IGNORECASE)
+
+    for send_type, path in matches:
+        path = path.strip()
+        if os.path.exists(path):
+            att_type = "photo" if send_type in ("image", "photo") else "document"
+            attachments.append({"type": att_type, "path": path, "caption": ""})
+            logger.info(f"[Chat] Detected attachment: {att_type} → {path}")
+
+    # 清除標記
+    cleaned = re.sub(pattern, '', output).strip()
+
+    return cleaned, attachments

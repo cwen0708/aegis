@@ -16,14 +16,17 @@ from ..bus import message_bus
 from ..types import (
     InboundMessage,
     OutboundMessage,
+    Attachment,
     ChannelStatus,
     MessageType,
     ParseMode,
 )
 from datetime import datetime, timezone
 from typing import AsyncIterator
+from pathlib import Path
 import asyncio
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +57,10 @@ class TelegramChannel(ChannelBase):
         # 建立 Application
         self._app = Application.builder().token(self.token).build()
 
-        # 註冊 handler - 處理所有文字訊息和命令
+        # 註冊 handler - 處理文字、命令和媒體訊息
         self._app.add_handler(MessageHandler(
-            filters.TEXT | filters.COMMAND,
+            filters.TEXT | filters.COMMAND | filters.PHOTO
+            | filters.VOICE | filters.AUDIO | filters.Document.ALL,
             self._on_message
         ))
 
@@ -85,34 +89,102 @@ class TelegramChannel(ChannelBase):
 
         logger.info("[Telegram] Bot stopped")
 
+    # 媒體暫存目錄
+    MEDIA_DIR = Path("/tmp/aegis-media")
+
     async def _on_message(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """
         收到訊息回調
 
-        將 Telegram 訊息翻譯為 InboundMessage，發送到 Bus
+        將 Telegram 訊息翻譯為 InboundMessage（含媒體），發送到 Bus
         """
-        if not update.message or not update.message.text:
+        if not update.message:
             return
 
-        # 翻譯為統一格式
+        msg_id = str(update.message.message_id)
+        text = update.message.text or update.message.caption or ""
+        message_type = MessageType.TEXT
+        media_type = None
+        media_path = None
+        media_mime = None
+
+        # 處理媒體
+        try:
+            if update.message.photo:
+                # 取最大尺寸的圖片
+                photo = update.message.photo[-1]
+                media_type = "photo"
+                media_mime = "image/jpeg"
+                media_path = await self._download_file(
+                    await photo.get_file(), f"{msg_id}.jpg"
+                )
+                message_type = MessageType.PHOTO
+
+            elif update.message.voice:
+                media_type = "voice"
+                media_mime = update.message.voice.mime_type or "audio/ogg"
+                media_path = await self._download_file(
+                    await update.message.voice.get_file(), f"{msg_id}.ogg"
+                )
+                message_type = MessageType.VOICE
+
+            elif update.message.audio:
+                media_type = "audio"
+                media_mime = update.message.audio.mime_type or "audio/mpeg"
+                ext = update.message.audio.file_name or f"{msg_id}.mp3"
+                media_path = await self._download_file(
+                    await update.message.audio.get_file(), ext
+                )
+                message_type = MessageType.AUDIO
+
+            elif update.message.document:
+                doc = update.message.document
+                media_type = "document"
+                media_mime = doc.mime_type or "application/octet-stream"
+                fname = doc.file_name or f"{msg_id}_file"
+                media_path = await self._download_file(
+                    await doc.get_file(), f"{msg_id}_{fname}"
+                )
+                message_type = MessageType.DOCUMENT
+
+            elif not text:
+                # 不是文字也不是支援的媒體，跳過
+                return
+
+        except Exception as e:
+            logger.warning(f"[Telegram] Failed to download media: {e}")
+            # 下載失敗，仍處理文字部分
+            if not text:
+                return
+
+        if text and text.startswith("/"):
+            message_type = MessageType.COMMAND
+
         msg = InboundMessage(
-            id=str(update.message.message_id),
+            id=msg_id,
             platform=self.PLATFORM,
             user_id=str(update.effective_user.id),
             chat_id=str(update.effective_chat.id),
-            text=update.message.text,
+            text=text,
             timestamp=datetime.now(timezone.utc),
-            message_type=(
-                MessageType.COMMAND
-                if update.message.text.startswith("/")
-                else MessageType.TEXT
-            ),
+            message_type=message_type,
             user_name=update.effective_user.full_name,
             raw_data={"update_id": update.update_id},
+            media_type=media_type,
+            media_path=media_path,
+            media_mime=media_mime,
+            caption=update.message.caption,
         )
 
-        # 發送到 Bus
         await message_bus.publish_inbound(msg)
+
+    async def _download_file(self, tg_file, filename: str) -> str:
+        """下載 Telegram 檔案到暫存目錄"""
+        self.MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+        path = self.MEDIA_DIR / filename
+        await tg_file.download_to_drive(str(path))
+        logger.info(f"[Telegram] Downloaded media: {path}")
+        return str(path)
 
     async def send(self, msg: OutboundMessage) -> str | bool:
         """
@@ -143,7 +215,17 @@ class TelegramChannel(ChannelBase):
                 )
                 return msg.edit_message_id
 
-            # 發送新訊息
+            # 發送附件（如有）
+            for att in msg.attachments:
+                try:
+                    await self._send_attachment(int(msg.chat_id), att)
+                except Exception as att_err:
+                    logger.warning(f"[Telegram] Failed to send attachment: {att_err}")
+
+            # 發送新訊息（文字部分，可能為空如果只有附件）
+            if not msg.text and msg.attachments:
+                return "attachment_sent"
+
             result = await self._app.bot.send_message(
                 chat_id=int(msg.chat_id),
                 text=msg.text,
@@ -195,6 +277,27 @@ class TelegramChannel(ChannelBase):
             # 此方法只是為了符合介面
             if False:
                 yield  # type: ignore
+
+    async def _send_attachment(self, chat_id: int, att: Attachment):
+        """發送附件到 Telegram"""
+        if not os.path.exists(att.path):
+            logger.warning(f"[Telegram] Attachment not found: {att.path}")
+            return
+
+        with open(att.path, "rb") as f:
+            if att.type == "photo":
+                await self._app.bot.send_photo(
+                    chat_id=chat_id, photo=f, caption=att.caption or None,
+                )
+            elif att.type in ("document", "audio"):
+                await self._app.bot.send_document(
+                    chat_id=chat_id, document=f, caption=att.caption or None,
+                )
+            elif att.type == "voice":
+                await self._app.bot.send_voice(
+                    chat_id=chat_id, voice=f, caption=att.caption or None,
+                )
+        logger.info(f"[Telegram] Sent {att.type}: {att.path}")
 
     async def health_check(self) -> ChannelStatus:
         """健康檢查"""
