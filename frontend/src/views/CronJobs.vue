@@ -43,38 +43,8 @@ const fetchStageLists = async (projectId: number) => {
   } catch { projectStageLists.value = [] }
 }
 
-// 編輯 Modal
-const showEditModal = ref(false)
-const editJobForm = ref<any>(null)
-useEscapeKey(showEditModal, () => { showEditModal.value = false })
-
-function openEditModal(job: any) {
-  editJobForm.value = { ...job }
-  showEditModal.value = true
-  if (job.project_id) fetchStageLists(job.project_id)
-}
-
-const saveEditJob = async () => {
-  if (!editJobForm.value) return
-  try {
-    const res = await fetch(`/api/v1/cron-jobs/${editJobForm.value.id}`, {
-      method: 'PATCH',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({
-        name: editJobForm.value.name,
-        description: editJobForm.value.description,
-        cron_expression: editJobForm.value.cron_expression,
-        prompt_template: editJobForm.value.prompt_template,
-        target_list_id: editJobForm.value.target_list_id || 0,
-      })
-    })
-    if (!res.ok) throw new Error('更新排程失敗')
-    showEditModal.value = false
-    store.addToast('排程已更新', 'success')
-    await fetchCronJobs()
-  } catch (e) {
-    store.addToast('更新排程失敗', 'error')
-  }
+function goToEdit(job: any) {
+  router.push(`/cron/${job.id}`)
 }
 
 // 刪除確認
@@ -172,10 +142,6 @@ const fetchCronPausedProjects = async () => {
   } catch (e) {
     console.error('Failed to fetch cron paused projects', e)
   }
-}
-
-function projectName(projectId: number) {
-  return projects.value.find((p: any) => p.id === projectId)?.name ?? `#${projectId}`
 }
 
 const isCronPaused = computed(() => {
@@ -318,7 +284,7 @@ const formatTime = (iso: string) => {
               <Zap class="w-3.5 h-3.5" />
               <span class="text-[10px]">執行</span>
             </button>
-            <button @click="openEditModal(job)" class="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-slate-400 hover:text-blue-400 hover:bg-blue-400/5 transition-colors">
+            <button @click="goToEdit(job)" class="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-slate-400 hover:text-blue-400 hover:bg-blue-400/5 transition-colors">
               <Pencil class="w-3.5 h-3.5" />
               <span class="text-[10px]">編輯</span>
             </button>
@@ -396,7 +362,7 @@ const formatTime = (iso: string) => {
                     <Zap class="w-4 h-4" />
                   </button>
                   <button
-                    @click="openEditModal(job)"
+                    @click="goToEdit(job)"
                     class="p-2.5 text-slate-500 hover:text-blue-400 hover:bg-blue-400/10 rounded-lg transition-colors"
                     title="編輯排程"
                   >
@@ -489,67 +455,6 @@ const formatTime = (iso: string) => {
           <button @click="showAddModal = false" class="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">取消</button>
           <button @click="createCronJob" :disabled="!newJobForm.name || !(newJobForm.project_id || selectedProjectId)" class="px-6 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold transition-all shadow-lg shadow-emerald-500/20">
             建立排程
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Edit Job Modal -->
-    <div v-if="showEditModal && editJobForm" class="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div class="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
-        <div class="p-6 border-b border-slate-700 flex justify-between items-center bg-slate-800/50">
-          <h3 class="text-xl font-bold text-slate-100">編輯排程</h3>
-          <button @click="showEditModal = false" class="text-slate-400 hover:text-slate-200"><X class="w-6 h-6" /></button>
-        </div>
-
-        <div class="p-6 overflow-y-auto custom-scrollbar space-y-4">
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1">所屬專案</label>
-              <div class="w-full bg-slate-900/50 border border-slate-700 rounded-lg p-2.5 text-slate-500 text-sm">{{ projectName(editJobForm.project_id) }}</div>
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1">排程名稱</label>
-              <input v-model="editJobForm.name" type="text" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none">
-            </div>
-          </div>
-
-          <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1">Cron 表達式</label>
-            <div class="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-lg p-1">
-              <Clock class="w-4 h-4 ml-2 text-slate-500" />
-              <input v-model="editJobForm.cron_expression" type="text" class="flex-1 bg-transparent border-none p-2 text-blue-400 font-mono focus:ring-0 outline-none">
-              <span class="text-[10px] text-slate-500 px-3 border-l border-slate-700">{{ store.settings.timezone || 'Asia/Taipei' }}</span>
-            </div>
-          </div>
-
-          <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1">描述</label>
-            <textarea v-model="editJobForm.description" rows="2" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none resize-none"></textarea>
-          </div>
-
-          <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1">目標列表</label>
-            <select
-              v-model="editJobForm.target_list_id"
-              class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
-            >
-              <option :value="null">預設（Scheduled）</option>
-              <option v-for="sl in projectStageLists" :key="sl.id" :value="sl.id">{{ sl.name }}</option>
-            </select>
-            <p class="text-[10px] text-slate-500 mt-1">指定卡片建立後要放入的列表，會依該列表的行為設定執行</p>
-          </div>
-
-          <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1">提示詞模板</label>
-            <textarea v-model="editJobForm.prompt_template" rows="5" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 font-mono text-sm focus:ring-2 focus:ring-emerald-500 outline-none"></textarea>
-          </div>
-        </div>
-
-        <div class="p-4 border-t border-slate-700 bg-slate-800/50 flex justify-end gap-3">
-          <button @click="showEditModal = false" class="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">取消</button>
-          <button @click="saveEditJob" :disabled="!editJobForm.name" class="px-6 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold transition-all shadow-lg shadow-emerald-500/20">
-            儲存變更
           </button>
         </div>
       </div>

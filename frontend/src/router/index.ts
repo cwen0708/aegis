@@ -18,6 +18,7 @@ import SettingsArchive from '../views/settings/SettingsArchive.vue'
 import SettingsInvitations from '../views/settings/SettingsInvitations.vue'
 import SettingsUpdate from '../views/settings/SettingsUpdate.vue'
 import SettingsOneStack from '../views/settings/SettingsOneStack.vue'
+import SettingsProjectDetail from '../views/settings/SettingsProjectDetail.vue'
 import FileBrowser from '../views/FileBrowser.vue'
 import { useAuthStore } from '../stores/auth'
 
@@ -44,6 +45,7 @@ const router = createRouter({
         { path: 'tools', component: SettingsTools },
         { path: 'channels', component: SettingsChannels },
         { path: 'projects', component: SettingsProjects },
+        { path: 'projects/:id', component: SettingsProjectDetail },
         { path: 'invitations', component: SettingsInvitations },
         { path: 'archive', component: SettingsArchive },
         { path: 'team', component: Team },

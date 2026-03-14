@@ -3,9 +3,10 @@ import logging
 import re
 import json
 from pathlib import Path
+from typing import Optional
 from sqlmodel import Session, select
 from app.database import engine
-from app.models.core import Card, CardIndex, StageList, Project, SystemSetting, Member
+from app.models.core import Card, CardIndex, StageList, Project, SystemSetting, Member, MemberDialogue
 from app.core.card_file import CardData, read_card, write_card, card_file_path
 from app.core.card_index import sync_card_to_index, query_pending_cards, next_card_id
 from app.core.runner import run_ai_task, busy_members
@@ -17,6 +18,40 @@ logger = logging.getLogger(__name__)
 
 # 全域暫停旗標，供 API 控制
 is_paused = False
+
+
+def _extract_dialogue(output: str) -> Optional[str]:
+    """從 AI 輸出中解析 <!-- dialogue: xxx --> 標記"""
+    m = re.search(r'<!--\s*dialogue:\s*(.+?)\s*-->', output)
+    return m.group(1).strip() if m else None
+
+
+async def _save_member_dialogue(member_id: int, card_id: int, card_title: str,
+                                project_name: str, dialogue_type: str, text: str):
+    """儲存成員對話到 DB 並透過 WebSocket 推送"""
+    try:
+        from app.core.ws_manager import broadcast_event
+        with Session(engine) as session:
+            d = MemberDialogue(
+                member_id=member_id,
+                card_id=card_id,
+                card_title=card_title,
+                project_name=project_name,
+                dialogue_type=dialogue_type,
+                text=text,
+                status="success" if dialogue_type == "task_complete" else "error",
+            )
+            session.add(d)
+            session.commit()
+        await broadcast_event("member_dialogue", {
+            "member_id": member_id,
+            "text": text,
+            "dialogue_type": dialogue_type,
+            "card_title": card_title,
+        })
+        logger.info(f"[Dialogue] {dialogue_type}: {text[:40]}")
+    except Exception as e:
+        logger.warning(f"[Dialogue] Failed to save: {e}")
 
 # Card-level locks for safe concurrent MD file writes
 _card_locks: dict[int, asyncio.Lock] = {}
@@ -498,7 +533,7 @@ async def _execute_and_update(
         effective_cwd = workspace_dir or project_path
         effective_prompt = "請閱讀你的設定檔並執行本次任務。" if workspace_dir else prompt
 
-        result = await run_ai_task(card_id, effective_cwd, effective_prompt, phase, forced_provider=forced_provider, card_title=card_title, project_name=project_name, member_id=member_id)
+        result = await run_ai_task(card_id, effective_cwd, effective_prompt, phase, forced_provider=forced_provider, card_title=card_title, project_name=project_name, member_id=member_id, project_id=project_id)
 
         async with get_card_lock(card_id):
             file_path = Path(file_path_str) if file_path_str else card_file_path(project_path, card_id)
@@ -561,6 +596,16 @@ async def _execute_and_update(
         # 在 index 更新並 commit 之後才廣播，避免前端刷看板時拿到舊狀態
         event = "task_completed" if new_status == "completed" else "task_failed"
         await broadcast_event(event, {"card_id": card_id, "status": new_status})
+
+        # 生成 AVG 對話（從 AI 輸出解析 <!-- dialogue: xxx --> 標記）
+        if member_id:
+            dialogue_text = _extract_dialogue(result.get("output", ""))
+            if dialogue_text:
+                await _save_member_dialogue(
+                    member_id, card_id, card_title, project_name,
+                    "task_complete" if new_status == "completed" else "task_failed",
+                    dialogue_text,
+                )
 
         # 發送頻道通知（如有啟用）
         await _notify_channels(card_id, card_title, project_name, new_status, result)

@@ -23,6 +23,21 @@ const expandedLogId = ref<number | null>(null)
 const editing = ref(false)
 const editForm = ref<any>(null)
 
+// 目標列表選擇器
+const projectStageLists = ref<any[]>([])
+const fetchStageLists = async (projectId: number) => {
+  try {
+    const res = await fetch(`/api/v1/projects/${projectId}/board`)
+    if (res.ok) projectStageLists.value = await res.json()
+  } catch { projectStageLists.value = [] }
+}
+
+const targetListName = computed(() => {
+  if (!job.value?.target_list_id) return '預設（Scheduled）'
+  const sl = projectStageLists.value.find((s: any) => s.id === job.value.target_list_id)
+  return sl ? sl.name : `#${job.value.target_list_id}`
+})
+
 const formatTime = (iso: string) => {
   if (!iso) return '-'
   const tz = store.settings.timezone || 'Asia/Taipei'
@@ -109,8 +124,10 @@ function startEdit() {
     description: job.value.description || '',
     cron_expression: job.value.cron_expression,
     prompt_template: job.value.prompt_template,
+    target_list_id: job.value.target_list_id || null,
   }
   editing.value = true
+  if (job.value.project_id) fetchStageLists(job.value.project_id)
 }
 
 async function saveEdit() {
@@ -151,6 +168,10 @@ const statusColor = (status: string) => {
 
 onMounted(async () => {
   await Promise.all([fetchJob(), fetchLogs()])
+  // 載入列表名稱（供檢視模式顯示目標列表）
+  if (job.value?.project_id) {
+    fetchStageLists(job.value.project_id)
+  }
   loading.value = false
 })
 
@@ -235,6 +256,17 @@ watch(jobId, async () => {
               <textarea v-model="editForm.description" rows="2" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none resize-none"></textarea>
             </div>
             <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">目標列表</label>
+              <select
+                v-model="editForm.target_list_id"
+                class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
+              >
+                <option :value="null">預設（Scheduled）</option>
+                <option v-for="sl in projectStageLists" :key="sl.id" :value="sl.id">{{ sl.name }}</option>
+              </select>
+              <p class="text-[10px] text-slate-500 mt-1">指定卡片建立後要放入的列表，會依該列表的行為設定執行</p>
+            </div>
+            <div>
               <label class="block text-xs font-medium text-slate-400 mb-1">提示詞模板</label>
               <textarea v-model="editForm.prompt_template" rows="8" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 font-mono text-sm focus:ring-2 focus:ring-emerald-500 outline-none"></textarea>
             </div>
@@ -260,12 +292,12 @@ watch(jobId, async () => {
               <div class="text-sm text-slate-200">{{ logsTotal }} 次</div>
             </div>
             <div>
-              <div class="text-[10px] text-slate-500 uppercase tracking-wider mb-1">建立時間</div>
-              <div class="text-sm text-slate-200">{{ formatTime(job.created_at) }}</div>
-            </div>
-            <div>
               <div class="text-[10px] text-slate-500 uppercase tracking-wider mb-1">排程週期</div>
               <div class="text-sm text-blue-400 font-mono">{{ job.cron_expression }}</div>
+            </div>
+            <div>
+              <div class="text-[10px] text-slate-500 uppercase tracking-wider mb-1">目標列表</div>
+              <div class="text-sm text-slate-200">{{ targetListName }}</div>
             </div>
           </div>
           <div v-if="job.description" class="text-xs text-slate-400 mb-3">{{ job.description }}</div>

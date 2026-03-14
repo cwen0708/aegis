@@ -1108,6 +1108,131 @@ def delete_project(project_id: int, session: Session = Depends(get_session)):
 
 
 # ==========================================
+# Project Environment Variables
+# ==========================================
+class EnvVarCreate(BaseModel):
+    key: str
+    value: str
+    is_secret: bool = True
+    description: Optional[str] = None
+
+class EnvVarUpdate(BaseModel):
+    key: Optional[str] = None
+    value: Optional[str] = None
+    is_secret: Optional[bool] = None
+    description: Optional[str] = None
+
+class EnvVarResponse(BaseModel):
+    id: int
+    project_id: int
+    key: str
+    value: str  # masked if is_secret
+    is_secret: bool
+    description: Optional[str]
+
+@router.get("/projects/{project_id}/env-vars", response_model=List[EnvVarResponse])
+def list_env_vars(project_id: int, session: Session = Depends(get_session)):
+    from app.models.core import ProjectEnvVar
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    env_vars = session.exec(
+        select(ProjectEnvVar).where(ProjectEnvVar.project_id == project_id)
+    ).all()
+    result = []
+    for v in env_vars:
+        result.append(EnvVarResponse(
+            id=v.id,
+            project_id=v.project_id,
+            key=v.key,
+            value="••••••" if v.is_secret else v.value,
+            is_secret=v.is_secret,
+            description=v.description,
+        ))
+    return result
+
+@router.post("/projects/{project_id}/env-vars", response_model=EnvVarResponse)
+def create_env_var(project_id: int, data: EnvVarCreate, session: Session = Depends(get_session)):
+    from app.models.core import ProjectEnvVar
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    # Check duplicate key
+    existing = session.exec(
+        select(ProjectEnvVar).where(
+            ProjectEnvVar.project_id == project_id,
+            ProjectEnvVar.key == data.key,
+        )
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail=f"Key '{data.key}' already exists")
+    env_var = ProjectEnvVar(
+        project_id=project_id,
+        key=data.key,
+        value=data.value,
+        is_secret=data.is_secret,
+        description=data.description,
+    )
+    session.add(env_var)
+    session.commit()
+    session.refresh(env_var)
+    return EnvVarResponse(
+        id=env_var.id,
+        project_id=env_var.project_id,
+        key=env_var.key,
+        value="••••••" if env_var.is_secret else env_var.value,
+        is_secret=env_var.is_secret,
+        description=env_var.description,
+    )
+
+@router.patch("/projects/{project_id}/env-vars/{var_id}", response_model=EnvVarResponse)
+def update_env_var(project_id: int, var_id: int, data: EnvVarUpdate, session: Session = Depends(get_session)):
+    from app.models.core import ProjectEnvVar
+    env_var = session.get(ProjectEnvVar, var_id)
+    if not env_var or env_var.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Env var not found")
+    if data.key is not None:
+        # Check duplicate key
+        existing = session.exec(
+            select(ProjectEnvVar).where(
+                ProjectEnvVar.project_id == project_id,
+                ProjectEnvVar.key == data.key,
+                ProjectEnvVar.id != var_id,
+            )
+        ).first()
+        if existing:
+            raise HTTPException(status_code=409, detail=f"Key '{data.key}' already exists")
+        env_var.key = data.key
+    if data.value is not None:
+        env_var.value = data.value
+    if data.is_secret is not None:
+        env_var.is_secret = data.is_secret
+    if data.description is not None:
+        env_var.description = data.description
+    session.add(env_var)
+    session.commit()
+    session.refresh(env_var)
+    return EnvVarResponse(
+        id=env_var.id,
+        project_id=env_var.project_id,
+        key=env_var.key,
+        value="••••••" if env_var.is_secret else env_var.value,
+        is_secret=env_var.is_secret,
+        description=env_var.description,
+    )
+
+@router.delete("/projects/{project_id}/env-vars/{var_id}")
+def delete_env_var(project_id: int, var_id: int, session: Session = Depends(get_session)):
+    from app.models.core import ProjectEnvVar
+    env_var = session.get(ProjectEnvVar, var_id)
+    if not env_var or env_var.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Env var not found")
+    session.delete(env_var)
+    session.commit()
+    return {"ok": True}
+
+
+# ==========================================
 # Project Reindex
 # ==========================================
 @router.post("/projects/{project_id}/reindex")

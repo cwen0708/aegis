@@ -406,6 +406,17 @@ class ChatMessage(SQLModel, table=True):
 # ==========================================
 # Email 頻道
 # ==========================================
+class ProjectEnvVar(SQLModel, table=True):
+    """專案環境變數（注入到 AI 任務的 subprocess 環境）"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    project_id: int = Field(foreign_key="project.id", index=True)
+    key: str          # 變數名稱，如 SUPABASE_URL
+    value: str        # 變數值
+    is_secret: bool = Field(default=True)  # True = 前端只顯示 ****
+    description: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class EmailMessage(SQLModel, table=True):
     """收到的 Email 紀錄（含 AI 分類結果）"""
     id: Optional[int] = Field(default=None, primary_key=True)

@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 
 from app.core.member_profile import get_member_dir, get_soul_content, get_skills_dir, get_member_memory_dir, get_mcp_config_path
+from app.core.sandbox import build_sanitized_env
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +45,29 @@ def _build_config_content(
             parts.append(f"\n## 階段指令\n{stage_instruction}")
         stage_section = "\n".join(parts) + "\n"
 
+    # 安全限制區塊
+    install_root = str(_INSTALL_ROOT)
+    security_section = f"""# 安全限制
+你只能在以下目錄操作：
+1. {project_path} — 專案目錄
+2. 當前工作區目錄（臨時）
+
+禁止存取：
+- Aegis 安裝目錄（{install_root}）
+- ~/.claude/、~/.ssh/、~/.config/
+- 任何 .env、*.db、credentials 檔案
+- 禁止執行 kill/pkill/killall/taskkill 等進程管理命令
+- 禁止修改系統設定或安裝全域套件
+"""
+
     return f"""# 工作目錄
 你的專案在 {project_path}
 所有程式碼修改都在那個目錄進行。
 
 # 你的身份
 {soul_content}
+
+{security_section}
 
 # 記憶
 你的個人記憶存放在：
