@@ -332,6 +332,8 @@ EOF
 print_success "Created aegis.service (systemd unit file)"
 
 # Create worker systemd service file
+# PATH includes npm global bin so worker can find claude/gemini CLI
+NPM_GLOBAL_BIN=$(npm -g bin 2>/dev/null || echo "/usr/local/bin")
 cat > aegis-worker.service << EOF
 [Unit]
 Description=Aegis AI Task Worker
@@ -341,7 +343,7 @@ After=aegis.service
 Type=simple
 User=$USER
 WorkingDirectory=$INSTALL_DIR/backend
-Environment=PATH=$INSTALL_DIR/backend/venv/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=$INSTALL_DIR/backend/venv/bin:$NPM_GLOBAL_BIN:/usr/local/bin:/usr/bin:/bin
 Environment=HOME=$HOME
 ExecStart=$INSTALL_DIR/backend/venv/bin/python worker.py
 Restart=always
