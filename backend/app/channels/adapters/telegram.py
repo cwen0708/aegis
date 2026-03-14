@@ -213,6 +213,12 @@ class TelegramChannel(ChannelBase):
                     text=msg.text,
                     parse_mode=parse_mode,
                 )
+                # 附件在 edit 後仍需發送（edit_message_text 不支援附件）
+                for att in msg.attachments:
+                    try:
+                        await self._send_attachment(int(msg.chat_id), att)
+                    except Exception as att_err:
+                        logger.warning(f"[Telegram] Failed to send attachment: {att_err}")
                 return msg.edit_message_id
 
             # 發送附件（如有）
