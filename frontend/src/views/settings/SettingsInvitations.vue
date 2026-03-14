@@ -310,16 +310,35 @@ function getLevelText(level: number) {
     <div class="bg-slate-800/30 rounded-xl border border-slate-700/30 p-5 space-y-3">
       <p class="text-sm text-slate-300">
         邀請碼用於控制誰可以透過 Telegram、LINE 等頻道與你的 AI 成員互動。
-        用戶在 Bot 中輸入 <code class="text-sky-400 bg-slate-800 px-1.5 py-0.5 rounded text-xs">/verify 邀請碼</code> 驗證身份後，即可開始對話。
+        用戶在 Bot 中輸入 <code class="text-sky-400 bg-slate-800 px-1.5 py-0.5 rounded text-xs">/verify 邀請碼</code> 驗證身份後，即獲得對應權限，可開始對話。
       </p>
-      <div class="text-xs text-slate-500 space-y-1.5">
-        <p class="font-medium text-slate-400">使用範例：</p>
-        <ul class="space-y-1 ml-3">
-          <li><span class="text-slate-400">客戶查詢</span> — 為客戶建立 L1 唯讀邀請碼，限定只能存取其專案，用完即失效</li>
-          <li><span class="text-slate-400">內部同事</span> — 建立 L2 進階邀請碼，可建卡片、執行任務，綁定到特定 AI 成員</li>
-          <li><span class="text-slate-400">展示用途</span> — 建立不限次數的邀請碼分享給多人體驗，設定 30 天到期</li>
-          <li><span class="text-slate-400">案場業主</span> — 限定存取特定專案，附上身份描述讓 AI 知道對方是誰</li>
-          <li><span class="text-slate-400">臨時訪客</span> — 一次性邀請碼，驗證後自動失效，適合一對一場景</li>
+      <p class="text-xs text-slate-500">
+        每組邀請碼可限制使用次數（幾人可用它驗證）。用戶驗證成功後身份永久保留，不受邀請碼過期影響。
+        身份描述會注入到 AI 的 prompt 中，讓 AI 知道對方是誰、能做什麼。
+      </p>
+      <div class="text-xs text-slate-500 space-y-2">
+        <p class="font-medium text-slate-400">情境範例：</p>
+        <ul class="space-y-2 ml-3">
+          <li>
+            <span class="text-slate-300">案場業主（王先生）</span>
+            — L1 唯讀、限定「OM AI」專案、使用 1 次。身份描述填：<span class="text-slate-400 italic">「王先生是良輝畜牧場業主，可查看發電數據和設備狀態，不可查看財務報表和合約條款」</span>
+          </li>
+          <li>
+            <span class="text-slate-300">內部工程師</span>
+            — L2 進階、可建卡片和執行任務、綁定「小牧」成員。身份描述填：<span class="text-slate-400 italic">「張工程師是維運部同事，負責台南區案場巡檢，可存取所有設備數據和派工單」</span>
+          </li>
+          <li>
+            <span class="text-slate-300">產品展示</span>
+            — L1 唯讀、不限次數、30 天到期。分享給多人體驗 AI 對話功能，無需個別設定身份
+          </li>
+          <li>
+            <span class="text-slate-300">合作廠商</span>
+            — L1 唯讀、限定特定專案、使用 3 次（團隊共用）。身份描述填：<span class="text-slate-400 italic">「六和機械維修團隊，可查看設備告警和維修記錄，不可操作排程」</span>
+          </li>
+          <li>
+            <span class="text-slate-300">臨時訪客</span>
+            — L1 唯讀、使用 1 次、7 天到期。一對一場景，對方驗證後邀請碼自動失效
+          </li>
         </ul>
       </div>
     </div>
