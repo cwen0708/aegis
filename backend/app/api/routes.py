@@ -3951,10 +3951,16 @@ async def check_for_updates(payload: CheckUpdatePayload = None, session: Session
 
         current = updater.get_current_version()
 
+        # 使用 GitHub PAT 避免 rate limit（未認證 60/hr，認證 5000/hr）
+        gh_headers = {"Accept": "application/vnd.github.v3+json"}
+        pat_setting = session.get(SystemSetting, "github_pat")
+        if pat_setting and pat_setting.value:
+            gh_headers["Authorization"] = f"token {pat_setting.value}"
+
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 "https://api.github.com/repos/cwen0708/aegis/tags",
-                headers={"Accept": "application/vnd.github.v3+json"},
+                headers=gh_headers,
                 timeout=30.0
             )
             if resp.status_code != 200:

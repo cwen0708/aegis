@@ -94,11 +94,23 @@ async def check_for_updates(repo: str = "cwen0708/aegis", channel: str = "develo
 
         _state.current_version = get_current_version()
 
-        # 查詢 GitHub API 取得 tags
+        # 查詢 GitHub API 取得 tags（使用 PAT 避免 rate limit）
+        gh_headers = {"Accept": "application/vnd.github.v3+json"}
+        try:
+            from sqlmodel import Session as _S
+            from app.database import engine as _e
+            from app.models.core import SystemSetting as _SS
+            with _S(_e) as _s:
+                _pat = _s.get(_SS, "github_pat")
+                if _pat and _pat.value:
+                    gh_headers["Authorization"] = f"token {_pat.value}"
+        except Exception:
+            pass
+
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"https://api.github.com/repos/{repo}/tags",
-                headers={"Accept": "application/vnd.github.v3+json"},
+                headers=gh_headers,
                 timeout=30.0
             )
 
