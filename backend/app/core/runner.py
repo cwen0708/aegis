@@ -66,6 +66,24 @@ def _parse_claude_json(output: str) -> Dict[str, Any]:
         return {}
 
 
+def _get_member_mcp_config(member_id: int) -> Optional[str]:
+    """查找成員的 mcp.json 路徑，存在則回傳絕對路徑"""
+    try:
+        from sqlmodel import Session
+        from app.database import engine
+        from app.models.core import Member
+        from app.core.member_profile import get_member_dir
+        with Session(engine) as session:
+            member = session.get(Member, member_id)
+            if member and member.slug:
+                mcp_path = get_member_dir(member.slug) / "mcp.json"
+                if mcp_path.exists():
+                    return str(mcp_path)
+    except Exception:
+        pass
+    return None
+
+
 async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
                       forced_provider: Optional[str] = None, card_title: str = "",
                       project_name: str = "", member_id: Optional[int] = None,
@@ -96,6 +114,12 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
             if arg == "--model" and i + 1 < len(cmd):
                 cmd[i + 1] = model_override
                 break
+
+    # 如果有成員且是 claude，注入 MCP 設定
+    if provider_name == "claude" and member_id:
+        mcp_config_path = _get_member_mcp_config(member_id)
+        if mcp_config_path:
+            cmd.extend(["--mcp-config", mcp_config_path])
 
     stdin_prompt = config.get("stdin_prompt", False)
 
