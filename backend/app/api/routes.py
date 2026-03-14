@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from sqlmodel import Session, select
 from sqlalchemy import func as sa_func
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
