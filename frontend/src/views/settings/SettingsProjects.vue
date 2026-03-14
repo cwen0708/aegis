@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { FolderKanban, Plus, FolderOpen, Lock, Loader2, Github, Search, Globe, ChevronRight, X } from 'lucide-vue-next'
+import { Plus, FolderOpen, Lock, Loader2, Github, Search, Globe, ChevronRight, X } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 
 import { config } from '../../config'
@@ -301,20 +301,16 @@ const canSaveGithub = computed(() => {
 
 <template>
   <div class="space-y-6">
-    <!-- Header -->
-    <div class="flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <FolderKanban class="w-6 h-6 text-emerald-400" />
-        <h2 class="text-xl font-semibold">專案管理</h2>
-      </div>
+    <!-- Header Actions (Teleport to layout header) -->
+    <Teleport to="#settings-header-actions">
       <button
         @click="openCreateDialog()"
-        class="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg transition"
+        class="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-xs font-medium transition"
       >
-        <Plus class="w-4 h-4" />
+        <Plus class="w-3.5 h-3.5" />
         新增專案
       </button>
-    </div>
+    </Teleport>
 
     <!-- Loading -->
     <div v-if="loading" class="flex justify-center py-12">

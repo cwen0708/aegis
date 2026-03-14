@@ -285,6 +285,18 @@ onUnmounted(() => {
 
 <template>
   <div class="max-w-2xl space-y-6">
+    <!-- Header Actions (Teleport to layout header) -->
+    <Teleport to="#settings-header-actions">
+      <button
+        @click="checkBothChannels"
+        :disabled="devInfo.checking || stableInfo.checking || updateStatus.is_updating"
+        class="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-200 rounded-lg text-xs font-medium transition"
+      >
+        <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': devInfo.checking || stableInfo.checking }" />
+        檢查更新
+      </button>
+    </Teleport>
+
     <!-- 系統更新 -->
     <div class="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
       <div class="px-6 py-4 border-b border-slate-700/50">
@@ -392,16 +404,6 @@ onUnmounted(() => {
             </button>
           </div>
         </div>
-
-        <!-- 檢查更新 -->
-        <button
-          @click="checkBothChannels"
-          :disabled="devInfo.checking || stableInfo.checking || updateStatus.is_updating"
-          class="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-200 rounded-lg text-xs transition-all"
-        >
-          <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': devInfo.checking || stableInfo.checking }" />
-          檢查更新
-        </button>
 
         <!-- 更新狀態訊息 -->
         <div v-if="updateStatus.message" class="text-xs px-3 py-2 rounded-lg" :class="updateStatus.error ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-slate-700/50 text-slate-400'">

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { Settings, Globe, Terminal, TerminalSquare, MessageSquare, Users, Bot, Activity, Lock, Loader2, FolderKanban, Mail, ChevronDown, Download, Layers, LogOut, Rocket } from 'lucide-vue-next'
+import { Settings, Globe, Terminal, TerminalSquare, MessageSquare, Users, Bot, Activity, Lock, Loader2, FolderKanban, Mail, ChevronDown, Download, Layers, Rocket } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { useResponsive } from '../../composables/useResponsive'
 import { useAuthStore } from '../../stores/auth'
@@ -59,11 +59,7 @@ async function verifyPassword() {
   }
 }
 
-function handleLogout() {
-  auth.logout()
-  authenticated.value = false
-  password.value = ''
-}
+// 登出功能已移至 SettingsGeneral.vue
 
 const currentMenuItem = computed(() => menuItems.find(m => route.path === m.path || route.path.startsWith(m.path + '/')))
 const triggerEl = ref<HTMLElement | null>(null)
@@ -104,14 +100,8 @@ const mobileDropdownStyle = computed(() => {
           <h1 class="text-base sm:text-lg font-bold text-slate-100">系統設定</h1>
         </template>
       </div>
-      <button
-        v-if="authenticated"
-        @click="handleLogout"
-        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-      >
-        <LogOut class="w-3.5 h-3.5" />
-        登出
-      </button>
+      <!-- 各頁面的 action 按鈕 Teleport 到這裡 -->
+      <div id="settings-header-actions" class="flex items-center gap-2"></div>
     </div>
 
     <!-- Mobile: Dropdown (Teleport to body，跟 PageHeader 同樣式) -->

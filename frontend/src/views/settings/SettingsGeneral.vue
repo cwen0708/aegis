@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Globe, Cpu, Save, Loader2, Lock, Sparkles, ShieldCheck, Github, CheckCircle2, Unplug } from 'lucide-vue-next'
+import { Globe, Cpu, Save, Loader2, Lock, Sparkles, ShieldCheck, Github, CheckCircle2, Unplug, LogOut } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 import { useAuthStore } from '../../stores/auth'
 
@@ -10,6 +10,11 @@ import { authHeaders } from '../../utils/authFetch'
 const store = useAegisStore()
 const auth = useAuthStore()
 const API = config.apiUrl
+
+function handleLogout() {
+  auth.logout()
+  window.location.reload()
+}
 
 // Worker 暫停控制
 const workerPaused = ref(false)
@@ -206,6 +211,19 @@ async function saveSettings() {
 
 <template>
   <div class="max-w-2xl space-y-6">
+    <!-- Header Actions (Teleport to layout header) -->
+    <Teleport to="#settings-header-actions">
+      <button
+        @click="saveSettings"
+        :disabled="saving || loading"
+        class="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white rounded-lg font-bold text-xs transition-all"
+      >
+        <Loader2 v-if="saving" class="w-3.5 h-3.5 animate-spin" />
+        <Save v-else class="w-3.5 h-3.5" />
+        {{ saving ? '儲存中' : '儲存' }}
+      </button>
+    </Teleport>
+
     <!-- 一般設定 -->
     <div class="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
       <div class="px-6 py-4 border-b border-slate-700/50">
@@ -398,18 +416,6 @@ async function saveSettings() {
       </div>
     </div>
 
-    <!-- 儲存按鈕 -->
-    <div class="flex justify-end">
-      <button
-        @click="saveSettings"
-        :disabled="saving || loading"
-        class="flex items-center gap-2 px-6 py-2.5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white rounded-lg font-bold text-sm transition-all shadow-lg shadow-emerald-500/20"
-      >
-        <Save class="w-4 h-4" />
-        {{ saving ? '儲存中...' : '儲存設定' }}
-      </button>
-    </div>
-
     <!-- 管理員密碼 -->
     <div class="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
       <div class="px-6 py-4 border-b border-slate-700/50">
@@ -464,6 +470,16 @@ async function saveSettings() {
           </button>
         </div>
       </div>
+    </div>
+    <!-- 登出 -->
+    <div class="pt-4 border-t border-slate-700/50">
+      <button
+        @click="handleLogout"
+        class="flex items-center gap-2 px-4 py-2 text-sm text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+      >
+        <LogOut class="w-4 h-4" />
+        登出管理員
+      </button>
     </div>
   </div>
 </template>
