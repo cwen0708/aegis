@@ -127,11 +127,26 @@ class FileEntry(BaseModel):
 
 
 def _is_authenticated(authorization: str | None) -> bool:
-    """從 Authorization header 檢查是否已登入"""
-    if not authorization:
-        return False
-    if authorization.startswith("Bearer "):
-        return verify_session_token(authorization[7:])
+    """從 Authorization header 檢查是否已登入
+
+    - 有帶有效 token → True
+    - 沒帶 token 但系統沒設密碼 → True（開放環境）
+    - 沒帶 token 且系統有密碼 → False
+    """
+    if authorization and authorization.startswith("Bearer "):
+        if verify_session_token(authorization[7:]):
+            return True
+    # 沒有有效 token：檢查系統是否有設密碼
+    try:
+        from sqlmodel import Session as SqlSession
+        from app.database import engine
+        from app.models.core import SystemSetting
+        with SqlSession(engine) as s:
+            pwd = s.get(SystemSetting, "admin_password")
+            if not pwd or not pwd.value:
+                return True  # 沒設密碼，視為開放環境
+    except Exception:
+        pass
     return False
 
 
