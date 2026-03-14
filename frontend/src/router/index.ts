@@ -11,7 +11,7 @@ import Onboarding from '../views/Onboarding.vue'
 import Login from '../views/Login.vue'
 import SettingsLayout from '../views/settings/SettingsLayout.vue'
 import SettingsGeneral from '../views/settings/SettingsGeneral.vue'
-import SettingsTools from '../views/settings/SettingsTools.vue'
+// SettingsTools removed — CLI tools merged into Dashboard (status page)
 import SettingsChannels from '../views/settings/SettingsChannels.vue'
 import SettingsProjects from '../views/settings/SettingsProjects.vue'
 import SettingsArchive from '../views/settings/SettingsArchive.vue'
@@ -44,7 +44,7 @@ const router = createRouter({
       meta: { requiresAuth: true },
       children: [
         { path: 'general', component: SettingsGeneral },
-        { path: 'tools', component: SettingsTools },
+        { path: 'tools', redirect: '/settings/status' },
         { path: 'channels', component: SettingsChannels },
         { path: 'projects', component: SettingsProjects },
         { path: 'projects/:id', component: SettingsProjectDetail },
