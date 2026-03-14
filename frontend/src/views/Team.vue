@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
-import { Plus, Save, Edit3, Upload, Sparkles, Image, BookOpen, ChevronLeft, Trash2, Plug } from 'lucide-vue-next'
+import { Plus, Save, Edit3, Upload, Sparkles, Image, BookOpen, ChevronLeft, ChevronRight, Trash2, Plug } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 import { useEscapeKey } from '../composables/useEscapeKey'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -579,58 +579,46 @@ async function saveMcp() {
               尚未建立成員，點擊右上角按鈕新增
             </div>
 
-            <div v-for="member in members" :key="member.id" class="bg-slate-800/50 rounded-xl border border-slate-700/50 p-4">
-              <div class="flex items-center justify-between mb-3">
-                <div class="flex items-center gap-3">
-                  <span class="text-xl">{{ member.avatar || '🤖' }}</span>
-                  <div>
-                    <div class="flex items-center gap-2">
-                      <span class="text-sm font-semibold text-slate-200">{{ member.name }}</span>
-                    </div>
-                    <div class="text-xs text-slate-500">{{ member.role }}</div>
+            <div
+              v-for="member in members"
+              :key="member.id"
+              @click="$router.push(`/settings/team/${member.id}`)"
+              class="bg-slate-800/50 rounded-xl border border-slate-700/50 p-4 cursor-pointer hover:bg-slate-700/30 hover:border-slate-600/50 transition-all"
+            >
+              <div class="flex items-center gap-4">
+                <!-- 立繪 -->
+                <div class="w-[100px] h-[100px] sm:w-[120px] sm:h-[120px] shrink-0 rounded-xl overflow-hidden bg-slate-900/50">
+                  <img
+                    v-if="member.portrait"
+                    :src="`${API}${member.portrait}`"
+                    :alt="member.name"
+                    class="w-full h-full object-cover"
+                  />
+                  <div v-else class="w-full h-full flex items-center justify-center text-4xl">
+                    {{ member.avatar || '🤖' }}
                   </div>
                 </div>
-                <div class="flex items-center gap-1">
-                  <button @click="openMemberDialog(member)" class="p-1.5 rounded-lg hover:bg-slate-700/50 text-slate-400 hover:text-slate-200 transition-colors">
-                    <Edit3 class="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
 
-              <!-- 綁定帳號 -->
-              <div class="space-y-1.5">
-                <div v-for="(acc, idx) in member.accounts" :key="acc.account_id"
-                  @click="openEditBindDialog(member.id, acc)"
-                  class="flex items-center justify-between px-3 py-2 bg-slate-800/50 rounded-lg text-xs cursor-pointer hover:bg-slate-800 transition-colors"
-                >
-                  <div class="flex items-center gap-2 min-w-0">
-                    <span class="text-slate-500 font-mono text-[11px] w-5 shrink-0 text-center">{{ idx === 0 ? '主' : (member.accounts.length > 2 ? `備${idx}` : '備') }}</span>
-                    <span :class="acc.is_healthy ? 'text-emerald-500' : 'text-red-400'" class="shrink-0">●</span>
-                    <span class="text-slate-300 truncate">{{ acc.name }}</span>
-                    <span class="text-slate-600 shrink-0">{{ acc.subscription }}</span>
-                  </div>
-                  <div class="flex items-center gap-1.5 shrink-0">
-                    <span v-if="acc.model" class="text-[10px] px-1.5 py-0.5 rounded border" :class="providerBadgeClass(acc.provider)">
-                      {{ acc.model }}
+                <!-- 資訊 -->
+                <div class="flex-1 min-w-0">
+                  <div class="text-sm font-semibold text-slate-200">{{ member.name }}</div>
+                  <div class="text-xs text-slate-500 mt-0.5">{{ member.role }}</div>
+
+                  <!-- 帳號摘要 -->
+                  <div class="flex flex-wrap gap-1.5 mt-2">
+                    <span
+                      v-for="acc in member.accounts"
+                      :key="acc.account_id"
+                      class="text-[10px] px-1.5 py-0.5 rounded border"
+                      :class="providerBadgeClass(acc.provider)"
+                    >
+                      {{ acc.model || acc.name }}
                     </span>
-                    <span v-else class="text-[10px] text-slate-600">未設定模型</span>
-                    <Edit3 class="w-3 h-3 text-slate-600" />
                   </div>
                 </div>
-                <div class="flex items-center gap-2">
-                  <button @click="openBindDialog(member.id)" class="flex items-center gap-1.5 px-3 py-2 text-xs text-slate-500 hover:text-emerald-400 hover:bg-emerald-400/10 rounded-lg transition-colors">
-                    <Plus class="w-4 h-4" />
-                    <span class="hidden sm:inline">綁定帳號</span>
-                  </button>
-                  <button @click="openSkillsDialog(member)" class="flex items-center gap-1.5 px-3 py-2 text-xs text-slate-500 hover:text-purple-400 hover:bg-purple-400/10 rounded-lg transition-colors">
-                    <BookOpen class="w-4 h-4" />
-                    <span class="hidden sm:inline">技能</span>
-                  </button>
-                  <button @click="openMcpDialog(member)" class="flex items-center gap-1.5 px-3 py-2 text-xs text-slate-500 hover:text-cyan-400 hover:bg-cyan-400/10 rounded-lg transition-colors">
-                    <Plug class="w-4 h-4" />
-                    <span class="hidden sm:inline">MCP</span>
-                  </button>
-                </div>
+
+                <!-- 箭頭 -->
+                <ChevronRight class="w-4 h-4 text-slate-600 shrink-0" />
               </div>
             </div>
           </div>

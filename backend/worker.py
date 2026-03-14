@@ -164,6 +164,25 @@ def cleanup_broadcast_logs():
         logger.warning(f"[Cleanup] Failed: {e}")
 
 
+def cleanup_media_files():
+    """清理超過 24 小時的媒體暫存檔案（/tmp/aegis-media/）"""
+    import glob
+    media_dir = "/tmp/aegis-media"
+    if not os.path.exists(media_dir):
+        return
+    try:
+        cutoff = time.time() - 86400  # 24 小時
+        count = 0
+        for f in glob.glob(os.path.join(media_dir, "*")):
+            if os.path.isfile(f) and os.path.getmtime(f) < cutoff:
+                os.unlink(f)
+                count += 1
+        if count:
+            logger.info(f"[Cleanup] Deleted {count} media files older than 24h")
+    except Exception as e:
+        logger.warning(f"[Cleanup] Media cleanup failed: {e}")
+
+
 def broadcast_event(event_type: str, payload: dict):
     """透過 HTTP 發送事件給 FastAPI 廣播"""
     try:
@@ -1314,9 +1333,10 @@ def main():
             else:
                 process_pending_cards()
 
-            # 每小時清理過期廣播記錄
+            # 每小時清理過期記錄和暫存檔案
             if time.time() - last_cleanup > 3600:
                 cleanup_broadcast_logs()
+                cleanup_media_files()
                 last_cleanup = time.time()
         except Exception as e:
             logger.error(f"[Worker Error] {e}")
