@@ -10,7 +10,12 @@ import { config } from '../config'
 const store = useAegisStore()
 const API = config.apiUrl
 
-const avatarOptions = ['🤖', '👨‍💼', '👩‍💻', '🧪', '📊', '🔧', '🎯', '🧠', '🦊', '🐱', '🐶', '🦉', '🚀', '⚡', '🔥', '💎']
+const avatarOptions = [
+  '\u{1F916}', '\u{1F468}\u{200D}\u{1F4BC}', '\u{1F469}\u{200D}\u{1F4BB}', '\u{1F9EA}',
+  '\u{1F4CA}', '\u{1F527}', '\u{1F3AF}', '\u{1F9E0}',
+  '\u{1F98A}', '\u{1F431}', '\u{1F436}', '\u{1F989}',
+  '\u{1F680}', '\u26A1', '\u{1F525}', '\u{1F48E}',
+]
 
 interface AccountInfo {
   id: number
