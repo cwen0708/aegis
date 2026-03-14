@@ -3794,24 +3794,65 @@ class CheckUpdatePayload(BaseModel):
 
 @router.post("/update/check")
 async def check_for_updates(payload: CheckUpdatePayload = None, session: Session = Depends(get_session)):
-    """檢查是否有新版本"""
-    # 決定使用的頻道：payload > DB 設定 > 預設
+    """檢查是否有新版本（獨立查詢，不污染全域 _state）"""
     if payload and payload.channel:
         channel = payload.channel
     else:
         channel_setting = session.get(SystemSetting, "update_channel")
         channel = channel_setting.value if channel_setting else "development"
 
-    state = await updater.check_for_updates(channel=channel)
-    return {
-        "current_version": state.current_version,
-        "latest_version": state.latest_version,
-        "has_update": state.has_update,
-        "available_versions": state.available_versions,
-        "message": state.message,
-        "error": state.error,
-        "channel": channel,
-    }
+    # 獨立查詢 GitHub，避免並行 check 互相覆蓋全域 _state
+    try:
+        import httpx
+
+        current = updater.get_current_version()
+
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                "https://api.github.com/repos/cwen0708/aegis/tags",
+                headers={"Accept": "application/vnd.github.v3+json"},
+                timeout=30.0
+            )
+            if resp.status_code != 200:
+                raise Exception(f"GitHub API {resp.status_code}")
+            tags = resp.json()
+
+        if channel == "stable":
+            tag_pattern = re.compile(r"^v\d+\.\d+\.\d+-stable$")
+            channel_name = "穩定版"
+        else:
+            tag_pattern = re.compile(r"^v\d+\.\d+\.\d+(-dev\.\d+)?$")
+            channel_name = "開發版"
+
+        filtered = [t["name"] for t in tags if tag_pattern.match(t["name"])]
+
+        if not filtered:
+            return {
+                "current_version": current, "latest_version": current,
+                "has_update": False, "available_versions": [],
+                "message": f"已是最新{channel_name}", "error": "", "channel": channel,
+            }
+
+        filtered.sort(key=updater.parse_version, reverse=True)
+        latest = filtered[0].lstrip("v").replace("-stable", "")
+        has_update = updater.is_newer_version(latest, current)
+
+        return {
+            "current_version": current,
+            "latest_version": latest,
+            "has_update": has_update,
+            "available_versions": filtered[:10],
+            "message": f"發現新{channel_name} {latest}" if has_update else f"已是最新{channel_name}",
+            "error": "",
+            "channel": channel,
+        }
+    except Exception as e:
+        return {
+            "current_version": updater.get_current_version(),
+            "latest_version": "", "has_update": False,
+            "available_versions": [], "message": "", "error": str(e),
+            "channel": channel,
+        }
 
 
 @router.get("/update/versions")
