@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
-import { Plus, UserPlus, Save, Edit3, Upload, Sparkles, Image, BookOpen, ChevronLeft, Trash2, Plug } from 'lucide-vue-next'
+import { Plus, Save, Edit3, Upload, Sparkles, Image, BookOpen, ChevronLeft, Trash2, Plug } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 import { useEscapeKey } from '../composables/useEscapeKey'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -564,29 +564,22 @@ async function saveMcp() {
 
 <template>
   <div class="max-w-4xl">
+    <!-- Header action: 新增成員按鈕 -->
+    <Teleport to="#settings-header-actions">
+      <button @click="openMemberDialog()" class="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-xs font-medium transition-colors">
+        <Plus class="w-3.5 h-3.5" />
+        新增成員
+      </button>
+    </Teleport>
+
     <div v-if="loading" class="text-sm text-slate-500 text-center py-20">載入中...</div>
 
-    <div v-else class="space-y-8">
-
-        <!-- 成員管理 -->
-        <div class="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
-          <div class="px-6 py-4 border-b border-slate-700/50 flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <UserPlus class="w-4 h-4 text-emerald-400" />
-              <h2 class="text-sm font-semibold text-slate-200">成員管理</h2>
-            </div>
-            <button @click="openMemberDialog()" class="flex items-center gap-1 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg text-xs font-medium transition-colors">
-              <Plus class="w-3.5 h-3.5" />
-              新增成員
-            </button>
-          </div>
-
-          <div class="p-4 space-y-3">
+    <div v-else class="space-y-3">
             <div v-if="members.length === 0" class="text-center text-sm text-slate-500 py-8">
-              尚未建立成員，點擊上方按鈕新增
+              尚未建立成員，點擊右上角按鈕新增
             </div>
 
-            <div v-for="member in members" :key="member.id" class="bg-slate-900/50 rounded-xl border border-slate-700/50 p-4">
+            <div v-for="member in members" :key="member.id" class="bg-slate-800/50 rounded-xl border border-slate-700/50 p-4">
               <div class="flex items-center justify-between mb-3">
                 <div class="flex items-center gap-3">
                   <span class="text-xl">{{ member.avatar || '🤖' }}</span>
@@ -641,9 +634,6 @@ async function saveMcp() {
               </div>
             </div>
           </div>
-        </div>
-
-      </div>
 
     <!-- Member Dialog -->
     <Teleport to="body">

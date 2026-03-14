@@ -5,7 +5,7 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
-import { TerminalSquare, Circle, Loader2 } from 'lucide-vue-next'
+import { Circle, Loader2 } from 'lucide-vue-next'
 import { config } from '../../config'
 
 const route = useRoute()
@@ -141,20 +141,16 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex flex-col h-[calc(100vh-8rem)]">
-    <!-- Header -->
-    <div class="flex items-center justify-between mb-3">
-      <div class="flex items-center gap-3">
-        <TerminalSquare class="w-6 h-6 text-emerald-400" />
-        <h2 class="text-xl font-semibold">Web Terminal</h2>
-      </div>
-      <div class="flex items-center gap-3">
+  <div class="flex flex-col h-[calc(100vh-5rem)]">
+    <!-- Header actions -->
+    <Teleport to="#settings-header-actions">
+      <div class="flex items-center gap-2">
         <!-- Status -->
-        <div class="flex items-center gap-2 text-sm">
-          <Loader2 v-if="status === 'connecting'" class="w-4 h-4 animate-spin text-amber-400" />
-          <Circle v-else-if="status === 'connected'" class="w-3 h-3 fill-green-400 text-green-400" />
-          <Circle v-else class="w-3 h-3 fill-slate-500 text-slate-500" />
-          <span :class="status === 'connected' ? 'text-green-400' : status === 'connecting' ? 'text-amber-400' : 'text-slate-500'">
+        <div class="flex items-center gap-1.5 text-xs">
+          <Loader2 v-if="status === 'connecting'" class="w-3.5 h-3.5 animate-spin text-amber-400" />
+          <Circle v-else-if="status === 'connected'" class="w-2.5 h-2.5 fill-green-400 text-green-400" />
+          <Circle v-else class="w-2.5 h-2.5 fill-slate-500 text-slate-500" />
+          <span class="hidden sm:inline" :class="status === 'connected' ? 'text-green-400' : status === 'connecting' ? 'text-amber-400' : 'text-slate-500'">
             {{ status === 'connected' ? '已連線' : status === 'connecting' ? '連線中...' : '未連線' }}
           </span>
         </div>
@@ -162,21 +158,21 @@ onUnmounted(() => {
         <button
           v-if="status === 'disconnected'"
           @click="connect"
-          class="px-3 py-1.5 text-sm bg-emerald-600 hover:bg-emerald-500 rounded-lg transition"
+          class="px-3 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-500 rounded-lg transition"
         >
           連線
         </button>
         <button
           v-else-if="status === 'connected'"
           @click="disconnect"
-          class="px-3 py-1.5 text-sm bg-slate-700 hover:bg-red-600/80 text-slate-300 hover:text-white rounded-lg transition"
+          class="px-3 py-1.5 text-xs bg-slate-700 hover:bg-red-600/80 text-slate-300 hover:text-white rounded-lg transition"
         >
           斷線
         </button>
       </div>
-    </div>
+    </Teleport>
 
-    <!-- Terminal -->
+    <!-- Terminal (full area) -->
     <div
       ref="termRef"
       class="flex-1 rounded-xl border border-slate-700 overflow-hidden bg-[#0f172a]"
