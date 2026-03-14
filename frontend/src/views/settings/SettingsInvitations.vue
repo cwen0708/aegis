@@ -306,6 +306,24 @@ function getLevelText(level: number) {
       </button>
     </Teleport>
 
+    <!-- 說明 -->
+    <div class="bg-slate-800/30 rounded-xl border border-slate-700/30 p-5 space-y-3">
+      <p class="text-sm text-slate-300">
+        邀請碼用於控制誰可以透過 Telegram、LINE 等頻道與你的 AI 成員互動。
+        用戶在 Bot 中輸入 <code class="text-sky-400 bg-slate-800 px-1.5 py-0.5 rounded text-xs">/verify 邀請碼</code> 驗證身份後，即可開始對話。
+      </p>
+      <div class="text-xs text-slate-500 space-y-1.5">
+        <p class="font-medium text-slate-400">使用範例：</p>
+        <ul class="space-y-1 ml-3">
+          <li><span class="text-slate-400">客戶查詢</span> — 為客戶建立 L1 唯讀邀請碼，限定只能存取其專案，用完即失效</li>
+          <li><span class="text-slate-400">內部同事</span> — 建立 L2 進階邀請碼，可建卡片、執行任務，綁定到特定 AI 成員</li>
+          <li><span class="text-slate-400">展示用途</span> — 建立不限次數的邀請碼分享給多人體驗，設定 30 天到期</li>
+          <li><span class="text-slate-400">案場業主</span> — 限定存取特定專案，附上身份描述讓 AI 知道對方是誰</li>
+          <li><span class="text-slate-400">臨時訪客</span> — 一次性邀請碼，驗證後自動失效，適合一對一場景</li>
+        </ul>
+      </div>
+    </div>
+
     <!-- Loading -->
     <div v-if="loading" class="flex justify-center py-12">
       <Loader2 class="w-8 h-8 animate-spin text-slate-400" />
