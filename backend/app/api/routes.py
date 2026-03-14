@@ -3812,6 +3812,69 @@ async def check_for_updates(payload: CheckUpdatePayload = None, session: Session
     }
 
 
+@router.get("/update/versions")
+async def list_versions():
+    """列出所有版本 tag（含 commit 訊息和時間），最近 15 筆"""
+    import httpx
+    repo = "cwen0708/aegis"
+    current = updater.get_current_version()
+    tag_pattern = re.compile(r"^v\d+\.\d+\.\d+(-dev\.\d+|-stable)?$")
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"https://api.github.com/repos/{repo}/tags?per_page=50",
+                headers={"Accept": "application/vnd.github.v3+json"},
+                timeout=30.0,
+            )
+            if resp.status_code != 200:
+                raise HTTPException(status_code=502, detail=f"GitHub API {resp.status_code}")
+            tags = resp.json()
+
+        # 過濾合法 tag
+        filtered = [t for t in tags if tag_pattern.match(t["name"])]
+        # 排序（用 updater.parse_version）
+        filtered.sort(key=lambda t: updater.parse_version(t["name"]), reverse=True)
+        filtered = filtered[:15]
+
+        # 批次查 commit 訊息和時間
+        results = []
+        async with httpx.AsyncClient() as client:
+            for t in filtered:
+                sha = t["commit"]["sha"]
+                try:
+                    cr = await client.get(
+                        f"https://api.github.com/repos/{repo}/commits/{sha}",
+                        headers={"Accept": "application/vnd.github.v3+json"},
+                        timeout=15.0,
+                    )
+                    if cr.status_code == 200:
+                        cd = cr.json()
+                        msg = cd["commit"]["message"].split("\n")[0]  # 首行
+                        date = cd["commit"]["committer"]["date"]  # ISO 8601
+                    else:
+                        msg = ""
+                        date = ""
+                except Exception:
+                    msg = ""
+                    date = ""
+
+                tag_name = t["name"]
+                channel = "stable" if tag_name.endswith("-stable") else "dev"
+                ver_clean = tag_name.lstrip("v").replace("-stable", "")
+                results.append({
+                    "tag": tag_name,
+                    "channel": channel,
+                    "message": msg,
+                    "date": date,
+                    "is_current": ver_clean == current,
+                })
+        return results
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 @router.post("/update/download")
 async def download_update(version: Optional[str] = None):
     """下載指定版本"""

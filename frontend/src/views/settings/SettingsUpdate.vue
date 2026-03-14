@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
-import { Download, RefreshCw, Clock } from 'lucide-vue-next'
+import { Download, RefreshCw, Clock, Loader2 } from 'lucide-vue-next'
 
 import { config } from '../../config'
 import { authHeaders } from '../../utils/authFetch'
@@ -26,44 +26,21 @@ const updateStatus = ref({
 })
 
 // 各通道版本資訊
-const devInfo = ref({ latest: '', has_update: false, checking: false, versions: [] as string[] })
-const stableInfo = ref({ latest: '', has_update: false, checking: false, versions: [] as string[] })
+const devInfo = ref({ latest: '', has_update: false, checking: false })
+const stableInfo = ref({ latest: '', has_update: false, checking: false })
 
 const applyingUpdate = ref(false)
 
-// 合併兩個通道的版本並排序（最新在前），限 15 筆
-const allVersions = computed(() => {
-  const all = [
-    ...devInfo.value.versions.map(v => ({ tag: v, channel: 'dev' as const })),
-    ...stableInfo.value.versions.map(v => ({ tag: v, channel: 'stable' as const })),
-  ]
-  // 去重（同一 commit 可能有多個 tag）
-  const seen = new Set<string>()
-  const unique = all.filter(v => {
-    if (seen.has(v.tag)) return false
-    seen.add(v.tag)
-    return true
-  })
-  // tag 已經從 API 各自排序好了，合併後用字串比較排序
-  unique.sort((a, b) => {
-    const pa = parseTag(a.tag)
-    const pb = parseTag(b.tag)
-    for (let i = 0; i < 5; i++) {
-      if (pa[i] !== pb[i]) return (pb[i] ?? 0) - (pa[i] ?? 0)
-    }
-    return 0
-  })
-  return unique.slice(0, 15)
-})
-
-function parseTag(tag: string): number[] {
-  // v0.3.2 → [0,3,2,1,0], v0.3.1-dev.5 → [0,3,1,0,5], v0.3.2-stable → [0,3,2,1,0]
-  const clean = tag.replace(/^v/, '').replace('-stable', '')
-  const devMatch = clean.match(/^(\d+)\.(\d+)\.(\d+)(?:-dev\.(\d+))?$/)
-  if (!devMatch) return [0, 0, 0, 0, 0]
-  const maj = devMatch[1], min = devMatch[2], patch = devMatch[3], dev = devMatch[4]
-  return [+(maj!), +(min!), +(patch!), dev !== undefined ? 0 : 1, dev !== undefined ? +dev : 0]
+// 版本歷史（從 API 取得，含 commit 訊息和時間）
+interface VersionEntry {
+  tag: string
+  channel: 'dev' | 'stable'
+  message: string
+  date: string
+  is_current: boolean
 }
+const versionHistory = ref<VersionEntry[]>([])
+const versionHistoryLoading = ref(false)
 
 const updateStageText = computed(() => {
   const stages: Record<string, string> = {
@@ -97,10 +74,8 @@ const autoUpdateChannel = computed<'development' | 'stable' | null>({
 
 function toggleAutoUpdate(channel: 'development' | 'stable') {
   if (autoUpdateChannel.value === channel) {
-    // 已選中 → 取消
     autoUpdateChannel.value = null
   } else {
-    // 選中新通道
     autoUpdateChannel.value = channel
   }
   saveAutoUpdateSettings()
@@ -130,7 +105,6 @@ async function checkChannel(channel: 'development' | 'stable') {
       const data = await res.json()
       info.value.latest = data.latest_version || ''
       info.value.has_update = data.has_update || false
-      info.value.versions = data.available_versions || []
     }
   } catch (e) {
     console.error(`Failed to check ${channel} channel:`, e)
@@ -141,6 +115,20 @@ async function checkChannel(channel: 'development' | 'stable') {
 
 async function checkBothChannels() {
   await Promise.all([checkChannel('development'), checkChannel('stable')])
+}
+
+async function fetchVersionHistory() {
+  versionHistoryLoading.value = true
+  try {
+    const res = await fetch(`${API}/api/v1/update/versions`)
+    if (res.ok) {
+      versionHistory.value = await res.json()
+    }
+  } catch (e) {
+    console.error('Failed to fetch version history:', e)
+  } finally {
+    versionHistoryLoading.value = false
+  }
 }
 
 let pollInterval: ReturnType<typeof setInterval> | null = null
@@ -224,6 +212,12 @@ async function saveAutoUpdateSettings() {
   }
 }
 
+function formatDate(iso: string) {
+  if (!iso) return ''
+  const tz = 'Asia/Taipei'
+  return new Date(iso).toLocaleString('zh-TW', { timeZone: tz, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
 onMounted(async () => {
   await fetchUpdateStatus()
 
@@ -233,6 +227,7 @@ onMounted(async () => {
   }
 
   checkBothChannels()
+  fetchVersionHistory()
 })
 
 onUnmounted(() => {
@@ -283,20 +278,23 @@ onUnmounted(() => {
             >
               更新
             </button>
-            <!-- 自動更新核選方塊 -->
-            <label
+            <!-- 自動更新 toggle -->
+            <button
               v-if="updateStatus.is_deployed"
-              class="flex items-center gap-1.5 cursor-pointer select-none shrink-0"
+              @click="toggleAutoUpdate('development')"
+              :class="[
+                'relative w-11 h-6 rounded-full transition-colors shrink-0',
+                autoUpdateChannel === 'development' ? 'bg-cyan-500' : 'bg-slate-600'
+              ]"
               title="自動更新至開發版"
             >
-              <input
-                type="checkbox"
-                :checked="autoUpdateChannel === 'development'"
-                @change="toggleAutoUpdate('development')"
-                class="w-4 h-4 rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-cyan-500/50 cursor-pointer"
-              />
-              <span class="text-[10px] text-slate-500">自動</span>
-            </label>
+              <div
+                :class="[
+                  'absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform shadow',
+                  autoUpdateChannel === 'development' ? 'left-5.5' : 'left-0.5'
+                ]"
+              ></div>
+            </button>
           </div>
 
           <!-- 穩定版 -->
@@ -327,20 +325,23 @@ onUnmounted(() => {
             >
               更新
             </button>
-            <!-- 自動更新核選方塊 -->
-            <label
+            <!-- 自動更新 toggle -->
+            <button
               v-if="updateStatus.is_deployed"
-              class="flex items-center gap-1.5 cursor-pointer select-none shrink-0"
+              @click="toggleAutoUpdate('stable')"
+              :class="[
+                'relative w-11 h-6 rounded-full transition-colors shrink-0',
+                autoUpdateChannel === 'stable' ? 'bg-emerald-500' : 'bg-slate-600'
+              ]"
               title="自動更新至穩定版"
             >
-              <input
-                type="checkbox"
-                :checked="autoUpdateChannel === 'stable'"
-                @change="toggleAutoUpdate('stable')"
-                class="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500/50 cursor-pointer"
-              />
-              <span class="text-[10px] text-slate-500">自動</span>
-            </label>
+              <div
+                :class="[
+                  'absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform shadow',
+                  autoUpdateChannel === 'stable' ? 'left-5.5' : 'left-0.5'
+                ]"
+              ></div>
+            </button>
           </div>
         </div>
 
@@ -379,11 +380,14 @@ onUnmounted(() => {
           本地開發環境請使用 <code class="bg-slate-600 px-1 rounded">git pull</code> 手動更新。
         </div>
 
-        <!-- 自動更新時間設定（僅部署環境 + 有開啟自動更新時顯示） -->
+        <!-- 自動更新設定（僅部署環境 + 有開啟自動更新時顯示） -->
         <div v-if="updateStatus.is_deployed && updateStatus.auto_update_enabled" class="pt-4 border-t border-slate-700/50">
-          <div class="flex items-center gap-4">
+          <div class="flex items-center justify-between">
             <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1">更新時間</label>
+              <label class="text-xs font-medium text-slate-400">自動更新</label>
+              <p class="text-[11px] text-slate-500 mt-0.5">每天定時檢查並套用{{ autoUpdateChannel === 'stable' ? '穩定版' : '開發版' }}更新</p>
+            </div>
+            <div class="flex items-center gap-4">
               <div class="flex items-center gap-2">
                 <Clock class="w-3.5 h-3.5 text-slate-500" />
                 <input
@@ -393,17 +397,18 @@ onUnmounted(() => {
                   class="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-mono focus:ring-2 focus:ring-cyan-500 outline-none"
                 />
               </div>
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1">保留版本數</label>
-              <input
-                v-model.number="updateStatus.update_keep_versions"
-                type="number"
-                min="1"
-                max="10"
-                @change="saveAutoUpdateSettings"
-                class="w-16 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-mono focus:ring-2 focus:ring-cyan-500 outline-none"
-              />
+              <div class="flex items-center gap-1.5">
+                <span class="text-[10px] text-slate-500">保留</span>
+                <input
+                  v-model.number="updateStatus.update_keep_versions"
+                  type="number"
+                  min="1"
+                  max="10"
+                  @change="saveAutoUpdateSettings"
+                  class="w-14 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-slate-200 text-xs font-mono text-center focus:ring-2 focus:ring-cyan-500 outline-none"
+                />
+                <span class="text-[10px] text-slate-500">版</span>
+              </div>
             </div>
           </div>
         </div>
@@ -411,37 +416,49 @@ onUnmounted(() => {
     </div>
 
     <!-- 版本歷史 -->
-    <div v-if="allVersions.length > 0" class="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
+    <div class="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
       <div class="px-6 py-4 border-b border-slate-700/50">
         <div class="flex items-center gap-2">
           <Clock class="w-4 h-4 text-slate-400" />
           <h2 class="text-sm font-semibold text-slate-200">版本歷史</h2>
-          <span class="text-[10px] text-slate-500">最近 {{ allVersions.length }} 筆</span>
         </div>
       </div>
-      <div class="divide-y divide-slate-700/30">
+
+      <div v-if="versionHistoryLoading" class="flex justify-center py-8">
+        <Loader2 class="w-5 h-5 animate-spin text-slate-400" />
+      </div>
+
+      <div v-else-if="versionHistory.length === 0" class="px-6 py-8 text-center text-xs text-slate-500">
+        尚無版本資訊
+      </div>
+
+      <div v-else class="divide-y divide-slate-700/30">
         <div
-          v-for="v in allVersions"
+          v-for="v in versionHistory"
           :key="v.tag"
-          class="flex items-center gap-3 px-6 py-2.5 hover:bg-slate-700/20 transition-colors"
+          class="px-6 py-3 hover:bg-slate-700/20 transition-colors"
         >
-          <span class="text-sm font-mono text-slate-200 flex-1">{{ v.tag }}</span>
-          <span
-            :class="[
-              'px-1.5 py-0.5 rounded text-[10px] font-medium border',
-              v.channel === 'stable'
-                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                : 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20'
-            ]"
-          >
-            {{ v.channel === 'stable' ? '穩定' : '開發' }}
-          </span>
-          <span
-            v-if="v.tag.replace(/^v/, '').replace('-stable', '') === updateStatus.current_version"
-            class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-700 text-slate-300 border border-slate-600"
-          >
-            目前
-          </span>
+          <div class="flex items-center gap-3">
+            <span class="text-sm font-mono text-slate-200 shrink-0">{{ v.tag }}</span>
+            <span
+              :class="[
+                'px-1.5 py-0.5 rounded text-[10px] font-medium border shrink-0',
+                v.channel === 'stable'
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                  : 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20'
+              ]"
+            >
+              {{ v.channel === 'stable' ? '穩定' : '開發' }}
+            </span>
+            <span
+              v-if="v.is_current"
+              class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-700 text-slate-300 border border-slate-600 shrink-0"
+            >
+              目前
+            </span>
+            <span class="text-[10px] text-slate-500 ml-auto shrink-0">{{ formatDate(v.date) }}</span>
+          </div>
+          <div v-if="v.message" class="text-xs text-slate-500 mt-1 truncate">{{ v.message }}</div>
         </div>
       </div>
     </div>
