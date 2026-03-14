@@ -181,7 +181,7 @@ async def _process_pending_cards():
                 # 決定 Phase、Member 和 Provider（三層路由）
                 # phase 用於向後相容，從列表名稱推導
                 phase = list_name.upper() if list_name else "DEVELOPING"
-                member_id, forced_provider = _resolve_member(stage_list, project, phase, session)
+                member_id, forced_provider, auth_info = _resolve_member(stage_list, project, phase, session)
 
                 # 成員忙碌檢查：先檢查再標記，避免不必要的 pending→running→pending 狀態翻轉
                 if member_id and member_id in busy_members:
@@ -222,14 +222,16 @@ async def _process_pending_cards():
                     card_title, project_name, forced_provider, member_id,
                     idx.project_id, str(idx.file_path),
                     workspace_dir=workspace_dir, member_slug=member_slug,
+                    auth_info=auth_info,
                 ))
             else:
                 # 非 AI 處理階段，清除 pending 狀態
                 project_path = project.path if project else "."
                 _update_card_status(session, idx, "idle", project_path)
 
-def _get_primary_provider(member_id: int, session) -> str | None:
-    """從成員的主帳號（priority 最低）取得 provider"""
+def _get_primary_account_info(member_id: int, session) -> tuple[str | None, dict]:
+    """從成員的主帳號（priority 最低）取得 provider 和認證資訊
+    回傳 (provider, auth_info) tuple"""
     from app.models.core import MemberAccount, Account
     binding = session.exec(
         select(MemberAccount)
@@ -239,32 +241,37 @@ def _get_primary_provider(member_id: int, session) -> str | None:
     if binding:
         account = session.get(Account, binding.account_id)
         if account:
-            return account.provider
-    return None
+            auth_info = {
+                'auth_type': getattr(account, 'auth_type', 'cli'),
+                'oauth_token': getattr(account, 'oauth_token', '') or '',
+                'api_key': getattr(account, 'api_key', '') or '',
+            }
+            return account.provider, auth_info
+    return None, {}
 
-def _resolve_member(stage_list, project, phase: str, session) -> tuple[int | None, str | None]:
+def _resolve_member(stage_list, project, phase: str, session) -> tuple[int | None, str | None, dict]:
     """三層路由：列表指派 → 專案預設 → 全域預設
-    回傳 (member_id, provider) tuple"""
+    回傳 (member_id, provider, auth_info) tuple"""
     from app.models.core import Member
 
     # 1. 列表級指派
     if stage_list and stage_list.member_id:
         member = session.get(Member, stage_list.member_id)
         if member:
-            provider = _get_primary_provider(member.id, session)
+            provider, auth_info = _get_primary_account_info(member.id, session)
             logger.info(f"[Router] List '{stage_list.name}' assigned → {member.name} ({provider})")
-            return member.id, provider
+            return member.id, provider, auth_info
 
     # 2. 專案預設成員
     if project and project.default_member_id:
         member = session.get(Member, project.default_member_id)
         if member:
-            provider = _get_primary_provider(member.id, session)
+            provider, auth_info = _get_primary_account_info(member.id, session)
             logger.info(f"[Router] Project '{project.name}' default → {member.name} ({provider})")
-            return member.id, provider
+            return member.id, provider, auth_info
 
     # 3. 無路由，使用第一個可用成員
-    return None, None
+    return None, None, {}
 
 
 def _parse_and_create_cards(
@@ -535,6 +542,7 @@ async def _execute_and_update(
     forced_provider: str | None = None, member_id: int | None = None,
     project_id: int = 0, file_path_str: str = "",
     workspace_dir: str | None = None, member_slug: str | None = None,
+    auth_info: dict | None = None,
 ):
     """包裝 run_ai_task，並在完成後更新 MD 檔案與資料庫卡片狀態"""
     global _dispatched_count
@@ -545,7 +553,7 @@ async def _execute_and_update(
         effective_cwd = workspace_dir or project_path
         effective_prompt = "請閱讀你的設定檔並執行本次任務。" if workspace_dir else prompt
 
-        result = await run_ai_task(card_id, effective_cwd, effective_prompt, phase, forced_provider=forced_provider, card_title=card_title, project_name=project_name, member_id=member_id, project_id=project_id)
+        result = await run_ai_task(card_id, effective_cwd, effective_prompt, phase, forced_provider=forced_provider, card_title=card_title, project_name=project_name, member_id=member_id, project_id=project_id, auth_info=auth_info)
 
         async with get_card_lock(card_id):
             file_path = Path(file_path_str) if file_path_str else card_file_path(project_path, card_id)

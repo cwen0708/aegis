@@ -125,7 +125,7 @@ def _save_task_log(card_id: int, card_title: str, project_name: str, provider: s
         logger.warning(f"[TaskLog] Failed to save: {e}")
 
 
-async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str, forced_provider: Optional[str] = None, card_title: str = "", project_name: str = "", member_id: Optional[int] = None, model_override: Optional[str] = None, project_id: Optional[int] = None) -> Dict[str, Any]:
+async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str, forced_provider: Optional[str] = None, card_title: str = "", project_name: str = "", member_id: Optional[int] = None, model_override: Optional[str] = None, project_id: Optional[int] = None, auth_info: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """
     執行單一 AI 任務，受 Semaphore 保護。
     使用 asyncio subprocess 支援即時 log streaming 和 abort。
@@ -158,6 +158,21 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str, 
     from app.core.sandbox import build_sanitized_env, get_popen_kwargs
     env = build_sanitized_env(project_id=project_id)
     env.update(config.get("env", {}))
+
+    # 注入 Account 認證資訊（從 DB 的 MemberAccount → Account 取得）
+    auth_info = auth_info or {}
+    auth_type = auth_info.get('auth_type', 'cli')
+    if provider_name == "claude":
+        if auth_type == 'api_key' and auth_info.get('api_key'):
+            env["ANTHROPIC_API_KEY"] = auth_info['api_key']
+            logger.info(f"[Task {task_id}] Using Claude API Key")
+        elif auth_info.get('oauth_token'):
+            env["CLAUDE_CODE_OAUTH_TOKEN"] = auth_info['oauth_token']
+            logger.info(f"[Task {task_id}] Using Claude OAuth Token")
+    elif provider_name == "gemini":
+        if auth_info.get('api_key'):
+            env["GEMINI_API_KEY"] = auth_info['api_key']
+            logger.info(f"[Task {task_id}] Using Gemini API Key")
 
     logger.info(f"[Task {task_id}] Waiting for workstation... (Phase: {phase}, Provider: {provider_name})")
 
