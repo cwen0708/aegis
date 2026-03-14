@@ -29,6 +29,11 @@ ALLOWED_ENV_KEYS = {
     "GIT_CONFIG_GLOBAL", "GIT_EXEC_PATH",
     # Node / npm / pnpm
     "NODE_PATH", "NVM_DIR",
+    # AI CLI 認證（這些由 Account 系統管理，但部分環境仍需透過環境變數傳遞）
+    "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY", "GOOGLE_API_KEY",
+    # XDG（Linux CLI 可能依賴）
+    "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME",
 }
 
 

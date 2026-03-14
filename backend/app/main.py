@@ -12,7 +12,7 @@ from pathlib import Path
 from app.database import init_db
 from app.api import routes, webhooks, files
 from app.core.telemetry import get_system_metrics
-# start_poller 已移到獨立的 worker.py 程序
+from app.core.poller import start_poller
 from app.core.cron_poller import start_cron_poller
 from app.core.usage_poller import start_usage_poller
 from app.core.ws_manager import websocket_clients, periodic_broadcast, broadcast_message
@@ -348,8 +348,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to run seed: {e}")
 
-    # 注意：AI Task Poller 已移到獨立的 worker.py 程序
-    # 透過 dev.bat 啟動，避免阻塞 FastAPI event loop
+    # 啟動 AI Task Poller（掃描 pending 卡片並派發給 AI）
+    task_poller_task = asyncio.create_task(start_poller())
 
     # 啟動本地 Cron Job Poller
     cron_poller_task = asyncio.create_task(start_cron_poller())
@@ -376,6 +376,7 @@ async def lifespan(app: FastAPI):
     await stop_onestack_connector()
     await channel_manager.stop_all()
     await stop_card_watcher()
+    task_poller_task.cancel()
     cron_poller_task.cancel()
     ws_broadcast_task.cancel()
     usage_poller_task.cancel()

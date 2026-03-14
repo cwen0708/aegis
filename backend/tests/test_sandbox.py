@@ -28,7 +28,7 @@ class TestBuildSanitizedEnv:
     def test_dangerous_keys_excluded(self):
         """Sensitive keys should NOT leak through."""
         dangerous_keys = [
-            "CLAUDE_CODE_OAUTH_TOKEN", "AWS_SECRET_ACCESS_KEY",
+            "AWS_SECRET_ACCESS_KEY",
             "DATABASE_URL", "SUPABASE_KEY", "OPENAI_API_KEY",
             "CLAUDECODE",
         ]
