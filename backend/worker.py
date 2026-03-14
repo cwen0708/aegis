@@ -823,15 +823,16 @@ def run_task_pty_windows(
     output_lines = []
     result_text_parts = []  # 收集實際的文字輸出
 
-    # 心跳機制：每 5 秒發送進度更新
+    # 心跳機制：只有靜止超過 20 秒才發送
     heartbeat_stop = threading.Event()
-    heartbeat_interval = 5  # 秒
+    last_activity = time.time()
+    _idle_threshold = 20  # 秒
 
     def heartbeat_worker():
-        elapsed = 0
-        while not heartbeat_stop.wait(heartbeat_interval):
-            elapsed += heartbeat_interval
-            broadcast_log(card_id, f"⏳ 處理中... ({elapsed}s)\n")
+        while not heartbeat_stop.wait(5):
+            idle = time.time() - last_activity
+            if idle >= _idle_threshold:
+                broadcast_log(card_id, f"⏳ 處理中... ({int(idle)}s)\n")
 
     heartbeat_thread = threading.Thread(target=heartbeat_worker, daemon=True)
     heartbeat_thread.start()
@@ -862,6 +863,7 @@ def run_task_pty_windows(
 
                 chunk = pty_process.read(512)
                 if chunk:
+                    last_activity = time.time()
                     output_lines.append(chunk)
                     buffer += chunk
 
@@ -966,15 +968,16 @@ def run_task_subprocess(
     """一般 subprocess 執行（fallback）"""
     import threading
 
-    # 心跳機制
+    # 心跳機制：只有靜止超過 20 秒才發送
     heartbeat_stop = threading.Event()
-    heartbeat_interval = 5
+    last_activity = time.time()
+    _idle_threshold = 20
 
     def heartbeat_worker():
-        elapsed = 0
-        while not heartbeat_stop.wait(heartbeat_interval):
-            elapsed += heartbeat_interval
-            broadcast_log(card_id, f"⏳ 處理中... ({elapsed}s)\n")
+        while not heartbeat_stop.wait(5):
+            idle = time.time() - last_activity
+            if idle >= _idle_threshold:
+                broadcast_log(card_id, f"⏳ 處理中... ({int(idle)}s)\n")
 
     heartbeat_thread = threading.Thread(target=heartbeat_worker, daemon=True)
     heartbeat_thread.start()
@@ -999,6 +1002,7 @@ def run_task_subprocess(
 
         output_lines = []
         for raw_line in proc.stdout:
+            last_activity = time.time()
             line = raw_line.decode("utf-8", errors="replace")
             output_lines.append(line)
             broadcast_log(card_id, line)
