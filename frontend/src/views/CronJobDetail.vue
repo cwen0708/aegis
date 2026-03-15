@@ -118,6 +118,48 @@ async function toggleEnabled() {
   }
 }
 
+// 即時計算下次執行時間（從 cron 表達式）
+const nextRunPreview = computed(() => {
+  if (!editForm.value?.cron_expression) return ''
+  try {
+    return calcNextRuns(editForm.value.cron_expression, 3)
+  } catch {
+    return '無效的 Cron 表達式'
+  }
+})
+
+function calcNextRuns(cronExpr: string, count: number): string {
+  // 簡易解析 cron（分 時 日 月 週）→ 計算接下來 N 次的 UTC 時間並轉台北時間
+  const parts = cronExpr.trim().split(/\s+/)
+  if (parts.length !== 5) return '格式錯誤（需要 5 個欄位）'
+
+  const [minStr, hourStr] = parts
+  const min = minStr === '*' ? 0 : parseInt(minStr)
+  const hour = hourStr === '*' ? -1 : parseInt(hourStr)
+  if (isNaN(min) || (hour !== -1 && isNaN(hour))) return ''
+
+  const now = new Date()
+  const results: string[] = []
+  const d = new Date(now)
+
+  for (let i = 0; i < count * 48 && results.length < count; i++) {
+    d.setTime(now.getTime() + i * 3600000)
+    const utcH = d.getUTCHours()
+    const utcM = d.getUTCMinutes()
+
+    if (hour !== -1 && utcH !== hour) continue
+    if (utcM !== min && minStr !== '*') continue
+
+    const local = new Date(d)
+    local.setUTCMinutes(min)
+    if (hour !== -1) local.setUTCHours(hour)
+    const str = local.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+    if (!results.includes(str)) results.push(str)
+  }
+
+  return results.length > 0 ? results.join('、') : '無法計算'
+}
+
 function startEdit() {
   editForm.value = {
     name: job.value.name,
@@ -247,8 +289,11 @@ watch(jobId, async () => {
                 <input v-model="editForm.name" type="text" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none">
               </div>
               <div>
-                <label class="block text-xs font-medium text-slate-400 mb-1">Cron 表達式</label>
+                <label class="block text-xs font-medium text-slate-400 mb-1">Cron 表達式 <span class="text-slate-600">(UTC)</span></label>
                 <input v-model="editForm.cron_expression" type="text" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-blue-400 font-mono focus:ring-2 focus:ring-emerald-500 outline-none">
+                <p v-if="nextRunPreview" class="text-[11px] text-sky-400 mt-1">
+                  下次執行（台北）：{{ nextRunPreview }}
+                </p>
               </div>
             </div>
             <div>
