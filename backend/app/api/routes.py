@@ -4625,9 +4625,11 @@ def list_rooms(session: Session = Depends(get_session)):
 def create_room(data: RoomCreate, session: Session = Depends(get_session)):
     # 自動設 position 為最大值 + 1
     max_pos = session.exec(select(sa_func.max(Room.position))).one()
+    from app.core.default_office_layout import get_default_office_layout_json
     room = Room(
         name=data.name,
         description=data.description,
+        layout_json=get_default_office_layout_json(),
         position=(max_pos or 0) + 1,
     )
     session.add(room)
