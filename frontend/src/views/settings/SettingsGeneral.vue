@@ -50,12 +50,11 @@ async function toggleTtsEnabled() {
   } catch { store.addToast('操作失敗', 'error') }
 }
 
-async function toggleTtsGemini() {
-  const newVal = !ttsGemini.value
+async function changeTtsProvider(provider: string) {
   try {
-    await store.updateSettings({ tts_gemini: String(newVal) })
-    ttsGemini.value = newVal
-    store.addToast(newVal ? 'Gemini TTS 已啟用' : '改用瀏覽器語音', 'success')
+    await store.updateSettings({ tts_provider: provider })
+    ttsProvider.value = provider
+    store.addToast(`TTS 已切換為 ${{ web: '瀏覽器語音', gemini: 'Gemini TTS', ttsmaker: 'TTSMaker' }[provider] || provider}`, 'success')
   } catch { store.addToast('操作失敗', 'error') }
 }
 
@@ -75,13 +74,14 @@ const saving = ref(false)
 
 const requireLoginToView = ref(false)
 const ttsEnabled = ref(false)
-const ttsGemini = ref(false)
+const ttsProvider = ref('web')
 
 const form = ref({
   timezone: 'Asia/Taipei',
   max_workstations: '3',
   memory_short_term_days: '30',
   gemini_api_key: '',
+  ttsmaker_api_key: '',
 })
 
 // 密碼修改
@@ -205,9 +205,10 @@ onMounted(async () => {
   form.value.max_workstations = store.settings.max_workstations || '3'
   form.value.memory_short_term_days = store.settings.memory_short_term_days || '30'
   form.value.gemini_api_key = store.settings.gemini_api_key || ''
+  form.value.ttsmaker_api_key = store.settings.ttsmaker_api_key || ''
   requireLoginToView.value = store.settings.require_login_to_view === 'true'
   ttsEnabled.value = store.settings.tts_enabled === 'true'
-  ttsGemini.value = store.settings.tts_gemini === 'true'
+  ttsProvider.value = store.settings.tts_provider || (store.settings.tts_gemini === 'true' ? 'gemini' : 'web')
   loading.value = false
 })
 
@@ -219,6 +220,7 @@ async function saveSettings() {
       max_workstations: form.value.max_workstations,
       memory_short_term_days: form.value.memory_short_term_days,
       gemini_api_key: form.value.gemini_api_key,
+      ttsmaker_api_key: form.value.ttsmaker_api_key,
     })
   } finally {
     saving.value = false
@@ -454,17 +456,29 @@ async function saveSettings() {
             <div :class="['absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform shadow', ttsEnabled ? 'left-5.5' : 'left-0.5']"></div>
           </button>
         </div>
-        <div v-if="ttsEnabled" class="flex items-center justify-between">
+        <div v-if="ttsEnabled" class="space-y-3">
           <div>
-            <label class="block text-xs font-medium text-slate-400">使用 Gemini TTS（高品質）</label>
-            <p class="text-[11px] text-slate-500 mt-0.5">關閉時使用瀏覽器內建語音（免費但品質較低）。需要 Gemini API Key。</p>
+            <label class="block text-xs font-medium text-slate-400 mb-1">語音引擎</label>
+            <select
+              :value="ttsProvider"
+              @change="changeTtsProvider(($event.target as HTMLSelectElement).value)"
+              class="w-full px-3 py-2 bg-slate-900 text-slate-200 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-violet-500"
+            >
+              <option value="web">瀏覽器內建語音（免費）</option>
+              <option value="gemini">Gemini TTS（需 API Key）</option>
+              <option value="ttsmaker">TTSMaker（需 API Key）</option>
+            </select>
           </div>
-          <button
-            @click="toggleTtsGemini"
-            :class="['relative w-11 h-6 rounded-full transition-colors shrink-0 ml-4', ttsGemini ? 'bg-violet-500' : 'bg-slate-600']"
-          >
-            <div :class="['absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform shadow', ttsGemini ? 'left-5.5' : 'left-0.5']"></div>
-          </button>
+          <div v-if="ttsProvider === 'ttsmaker'">
+            <label class="block text-xs font-medium text-slate-400 mb-1">TTSMaker API Key</label>
+            <input
+              v-model="form.ttsmaker_api_key"
+              type="password"
+              placeholder="從 pro.ttsmaker.com 取得"
+              class="w-full px-3 py-2 bg-slate-900 text-slate-200 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-violet-500"
+            />
+            <p class="text-[11px] text-slate-500 mt-0.5">免費額度每月約 5000 字。<a href="https://pro.ttsmaker.com/api-platform/api-key-list" target="_blank" class="text-violet-400 hover:underline">取得 API Key</a></p>
+          </div>
         </div>
       </div>
     </div>

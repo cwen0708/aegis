@@ -67,20 +67,19 @@ function startTypewriter(text: string) {
 
 // TTS 語音播放 — 讀取 DB 設定（透過 store）
 const ttsEnabled = ref(false)
-const ttsGemini = ref(false)
+const ttsProvider = ref('web')
 let currentAudio: HTMLAudioElement | null = null
 
 // 初始化：從 store settings 讀取（DB 來源）
 watch(() => store.settings, (s) => {
   if (s) {
     ttsEnabled.value = s.tts_enabled === 'true'
-    ttsGemini.value = s.tts_gemini === 'true'
+    ttsProvider.value = s.tts_provider || (s.tts_gemini === 'true' ? 'gemini' : 'web')
   }
 }, { immediate: true })
 
 function toggleTts() {
   ttsEnabled.value = !ttsEnabled.value
-  // 同步到 DB
   store.updateSettings({ tts_enabled: String(ttsEnabled.value) })
   if (!ttsEnabled.value) stopTts()
 }
@@ -97,8 +96,8 @@ async function playTts(text: string) {
   if (!ttsEnabled.value || !text) return
   stopTts()
 
-  // 只在 Gemini TTS 啟用時嘗試
-  if (ttsGemini.value) {
+  // Gemini 或 TTSMaker → 呼叫後端 TTS API
+  if (ttsProvider.value !== 'web') {
     try {
       const res = await fetch(`${config.apiUrl}/api/v1/tts`, {
         method: 'POST',
