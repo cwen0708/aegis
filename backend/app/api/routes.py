@@ -3584,6 +3584,27 @@ def delete_bot_user(user_id: int, session: Session = Depends(get_session)):
 
 
 # ==========================================
+# TTS 語音合成
+# ==========================================
+
+class TTSRequest(BaseModel):
+    text: str
+    voice: Optional[str] = "Kore"
+
+@router.post("/tts")
+async def text_to_speech(data: TTSRequest):
+    """Gemini TTS 語音合成，回傳 WAV 音檔。無 Gemini 時回 204（前端降級 Web Speech）"""
+    from app.core.tts import synthesize
+    from fastapi.responses import Response
+
+    audio = await synthesize(data.text, voice=data.voice or "Kore")
+    if audio is None:
+        return Response(status_code=204)  # No Content → 前端降級
+
+    return Response(content=audio, media_type="audio/wav")
+
+
+# ==========================================
 # OneStack Node API（供 OneStack 查詢/派發任務）
 # ==========================================
 

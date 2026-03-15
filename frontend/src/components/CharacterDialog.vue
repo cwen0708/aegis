@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { X, CheckCircle, XCircle, Clock, Loader2, ListTodo, BookOpen, ChevronLeft, ChevronRight } from 'lucide-vue-next'
+import { X, CheckCircle, XCircle, Clock, Loader2, ListTodo, BookOpen, ChevronLeft, ChevronRight, Volume2, VolumeX } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 
 const store = useAegisStore()
@@ -49,8 +49,10 @@ const CHAR_DELAY = 35
 
 function startTypewriter(text: string) {
   stopTypewriter()
+  stopTts()
   displayedText.value = ''
   isTyping.value = true
+  playTts(text)  // 同步播放語音
   let i = 0
   typewriterTimer = window.setInterval(() => {
     if (i < text.length) {
@@ -60,6 +62,52 @@ function startTypewriter(text: string) {
       stopTypewriter()
     }
   }, CHAR_DELAY)
+}
+
+// TTS 語音播放
+const ttsEnabled = ref(localStorage.getItem('aegis-tts') !== 'off')
+let currentAudio: HTMLAudioElement | null = null
+
+function toggleTts() {
+  ttsEnabled.value = !ttsEnabled.value
+  localStorage.setItem('aegis-tts', ttsEnabled.value ? 'on' : 'off')
+  if (!ttsEnabled.value) stopTts()
+}
+
+function stopTts() {
+  if (currentAudio) {
+    currentAudio.pause()
+    currentAudio = null
+  }
+  window.speechSynthesis?.cancel()
+}
+
+async function playTts(text: string) {
+  if (!ttsEnabled.value || !text) return
+  stopTts()
+
+  // 嘗試 Gemini TTS
+  try {
+    const res = await fetch('/api/v1/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    })
+    if (res.ok && res.status === 200) {
+      const blob = await res.blob()
+      currentAudio = new Audio(URL.createObjectURL(blob))
+      currentAudio.play()
+      return
+    }
+  } catch {}
+
+  // 降級 Web Speech
+  if (window.speechSynthesis) {
+    const utterance = new SpeechSynthesisUtterance(text)
+    utterance.lang = 'zh-TW'
+    utterance.rate = 1.0
+    window.speechSynthesis.speak(utterance)
+  }
 }
 
 function stopTypewriter() {
@@ -270,6 +318,7 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown)
   window.removeEventListener('aegis:member-dialogue', onDialogueEvent)
   stopTypewriter()
+  stopTts()
 })
 
 watch(() => props.memberId, () => {
@@ -431,6 +480,15 @@ function providerLabel(provider: string): string {
               </button>
               <span class="mx-0.5 text-slate-600">|</span>
             </template>
+            <button
+              @click="toggleTts"
+              class="p-0.5 rounded transition-colors"
+              :class="ttsEnabled ? 'text-emerald-400 hover:bg-white/10' : 'text-slate-600 hover:text-slate-400 hover:bg-white/10'"
+              :title="ttsEnabled ? '語音開啟' : '語音關閉'"
+            >
+              <Volume2 v-if="ttsEnabled" class="w-3.5 h-3.5" />
+              <VolumeX v-else class="w-3.5 h-3.5" />
+            </button>
             <button
               @click="emit('close')"
               class="p-0.5 rounded text-slate-400 hover:text-white hover:bg-white/10 transition-colors"

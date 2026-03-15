@@ -47,6 +47,24 @@ async function toggleWorkerPaused() {
   }
 }
 
+async function toggleTtsEnabled() {
+  const newVal = !ttsEnabled.value
+  try {
+    await store.updateSettings({ tts_enabled: String(newVal) })
+    ttsEnabled.value = newVal
+    store.addToast(newVal ? '語音已啟用' : '語音已關閉', 'success')
+  } catch { store.addToast('操作失敗', 'error') }
+}
+
+async function toggleTtsGemini() {
+  const newVal = !ttsGemini.value
+  try {
+    await store.updateSettings({ tts_gemini: String(newVal) })
+    ttsGemini.value = newVal
+    store.addToast(newVal ? 'Gemini TTS 已啟用' : '改用瀏覽器語音', 'success')
+  } catch { store.addToast('操作失敗', 'error') }
+}
+
 async function toggleLoginToView() {
   const newVal = !requireLoginToView.value
   try {
@@ -62,6 +80,8 @@ const loading = ref(true)
 const saving = ref(false)
 
 const requireLoginToView = ref(false)
+const ttsEnabled = ref(false)
+const ttsGemini = ref(false)
 
 const form = ref({
   timezone: 'Asia/Taipei',
@@ -191,6 +211,8 @@ onMounted(async () => {
   form.value.memory_short_term_days = store.settings.memory_short_term_days || '30'
   form.value.gemini_api_key = store.settings.gemini_api_key || ''
   requireLoginToView.value = store.settings.require_login_to_view === 'true'
+  ttsEnabled.value = store.settings.tts_enabled === 'true'
+  ttsGemini.value = store.settings.tts_gemini === 'true'
   loading.value = false
 })
 
@@ -411,6 +433,42 @@ async function saveSettings() {
                 requireLoginToView ? 'left-5.5' : 'left-0.5'
               ]"
             ></div>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 語音播放 -->
+    <div class="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
+      <div class="px-6 py-4 border-b border-slate-700/50">
+        <div class="flex items-center gap-2">
+          <Sparkles class="w-4 h-4 text-violet-400" />
+          <h2 class="text-sm font-semibold text-slate-200">語音播放</h2>
+        </div>
+      </div>
+      <div class="p-6 space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <label class="block text-xs font-medium text-slate-400">啟用 AVG 對話語音</label>
+            <p class="text-[11px] text-slate-500 mt-0.5">角色對話時自動播放語音。可在對話框用音量按鈕臨時開關。</p>
+          </div>
+          <button
+            @click="toggleTtsEnabled"
+            :class="['relative w-11 h-6 rounded-full transition-colors shrink-0 ml-4', ttsEnabled ? 'bg-violet-500' : 'bg-slate-600']"
+          >
+            <div :class="['absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform shadow', ttsEnabled ? 'left-5.5' : 'left-0.5']"></div>
+          </button>
+        </div>
+        <div v-if="ttsEnabled" class="flex items-center justify-between">
+          <div>
+            <label class="block text-xs font-medium text-slate-400">使用 Gemini TTS（高品質）</label>
+            <p class="text-[11px] text-slate-500 mt-0.5">關閉時使用瀏覽器內建語音（免費但品質較低）。需要 Gemini API Key。</p>
+          </div>
+          <button
+            @click="toggleTtsGemini"
+            :class="['relative w-11 h-6 rounded-full transition-colors shrink-0 ml-4', ttsGemini ? 'bg-violet-500' : 'bg-slate-600']"
+          >
+            <div :class="['absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform shadow', ttsGemini ? 'left-5.5' : 'left-0.5']"></div>
           </button>
         </div>
       </div>
