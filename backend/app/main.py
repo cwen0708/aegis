@@ -369,10 +369,33 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# 加入 CORS Middleware 允許前端呼叫
+# 加入 CORS Middleware — 從 Domain 表動態讀取允許的 origins
+def _build_cors_origins():
+    origins = [
+        "http://localhost:5173", "http://127.0.0.1:5173",
+        "http://localhost:8888", "http://127.0.0.1:8888",
+    ]
+    try:
+        from sqlmodel import Session as _S, select as _sel
+        from app.models.core import Domain
+        with _S(engine) as sess:
+            domains = sess.exec(_sel(Domain).where(Domain.is_active == True)).all()
+            for d in domains:
+                if d.hostname:
+                    origins.append(f"https://{d.hostname}")
+                    origins.append(f"http://{d.hostname}")
+    except Exception:
+        pass
+    # 環境變數額外 origins
+    import os
+    extra = os.getenv("CORS_ORIGINS", "")
+    if extra:
+        origins.extend(o.strip() for o in extra.split(",") if o.strip())
+    return origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8888", "http://127.0.0.1:8888"],
+    allow_origins=_build_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

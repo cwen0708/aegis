@@ -48,6 +48,8 @@ const router = createRouter({
         { path: 'channels', component: SettingsChannels },
         { path: 'projects', component: SettingsProjects },
         { path: 'projects/:id', component: SettingsProjectDetail },
+        { path: 'rooms', component: () => import('../views/settings/SettingsRooms.vue') },
+        { path: 'domains', component: () => import('../views/settings/SettingsDomains.vue') },
         { path: 'users', component: SettingsUsers },
         { path: 'invitations', redirect: '/settings/users' },
         { path: 'archive', component: SettingsArchive },

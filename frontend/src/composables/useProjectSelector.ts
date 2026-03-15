@@ -21,7 +21,18 @@ async function fetchProjects() {
   const res = await fetch(`${API}/api/v1/projects/`)
   if (res.ok) {
     const data = await res.json()
-    projects.value = data.filter((p: any) => p.is_active)
+    let filtered = data.filter((p: any) => p.is_active)
+
+    // 網域過濾：只顯示當前網域可見的專案
+    try {
+      const { useDomainStore } = await import('../stores/domain')
+      const domainStore = useDomainStore()
+      if (domainStore.resolved && domainStore.visibleProjectIds !== null) {
+        filtered = filtered.filter((p: any) => domainStore.isProjectVisible(p.id))
+      }
+    } catch {}
+
+    projects.value = filtered
   }
 }
 

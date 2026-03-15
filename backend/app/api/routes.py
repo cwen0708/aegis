@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from app.database import get_session
-from app.models.core import Project, Card, StageList, CronJob, CronLog, SystemSetting, Account, Member, MemberAccount, TaskLog, CardIndex, InviteCode, BotUser, BotUserProject, EmailMessage
+from app.models.core import Project, Card, StageList, CronJob, CronLog, SystemSetting, Account, Member, MemberAccount, TaskLog, CardIndex, InviteCode, BotUser, BotUserProject, EmailMessage, Room, RoomProject, RoomMember, Domain
 from typing import Any
 # Worker 負責卡片任務執行，runner.py 只用於 chat/email 即時互動
 from app.core.usage_poller import get_cached_claude_usage, get_cached_gemini_usage, get_last_updated
@@ -4450,3 +4450,265 @@ async def classify_emails_batch(
 
     session.commit()
     return {"updated": updated, "count": len(updated)}
+
+
+# ==========================================
+# Room & Domain Schemas
+# ==========================================
+class RoomCreate(BaseModel):
+    name: str
+    description: str = ""
+
+class RoomUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    position: Optional[int] = None
+    is_active: Optional[bool] = None
+
+class DomainCreate(BaseModel):
+    hostname: str
+    name: str = ""
+    room_ids_json: str = "[]"
+    is_default: bool = False
+
+class DomainUpdate(BaseModel):
+    hostname: Optional[str] = None
+    name: Optional[str] = None
+    room_ids_json: Optional[str] = None
+    is_default: Optional[bool] = None
+    is_active: Optional[bool] = None
+
+class RoomAssignment(BaseModel):
+    project_ids: Optional[list[int]] = None
+    member_ids: Optional[list[int]] = None
+
+
+# ==========================================
+# Domain Resolution (public)
+# ==========================================
+@router.get("/domain/current")
+def resolve_domain(hostname: str = "", session: Session = Depends(get_session)):
+    """根據 hostname 解析對應的 Domain 和 Rooms"""
+    domain = None
+    if hostname:
+        domain = session.exec(
+            select(Domain).where(Domain.hostname == hostname, Domain.is_active == True)
+        ).first()
+    if not domain:
+        domain = session.exec(
+            select(Domain).where(Domain.is_default == True, Domain.is_active == True)
+        ).first()
+
+    if not domain:
+        return {"domain": None, "rooms": []}
+
+    # 解析 room_ids_json
+    try:
+        room_ids = json_module.loads(domain.room_ids_json) if domain.room_ids_json else []
+    except (json_module.JSONDecodeError, TypeError):
+        room_ids = []
+
+    rooms = []
+    if room_ids:
+        room_list = session.exec(
+            select(Room).where(Room.id.in_(room_ids), Room.is_active == True)
+        ).all()
+    else:
+        room_list = []
+
+    for room in room_list:
+        project_links = session.exec(
+            select(RoomProject).where(RoomProject.room_id == room.id)
+        ).all()
+        member_links = session.exec(
+            select(RoomMember).where(RoomMember.room_id == room.id)
+        ).all()
+        rooms.append({
+            "id": room.id,
+            "name": room.name,
+            "description": room.description,
+            "project_ids": [lnk.project_id for lnk in project_links],
+            "member_ids": [lnk.member_id for lnk in member_links],
+        })
+
+    return {"domain": domain, "rooms": rooms}
+
+
+# ==========================================
+# Domain CRUD
+# ==========================================
+@router.get("/domains/", response_model=list[Domain])
+def list_domains(session: Session = Depends(get_session)):
+    return session.exec(select(Domain)).all()
+
+
+@router.post("/domains/", response_model=Domain)
+def create_domain(data: DomainCreate, session: Session = Depends(get_session)):
+    if data.is_default:
+        # 清除其他 domain 的 is_default
+        existing = session.exec(select(Domain).where(Domain.is_default == True)).all()
+        for d in existing:
+            d.is_default = False
+            session.add(d)
+
+    domain = Domain(
+        hostname=data.hostname,
+        name=data.name,
+        room_ids_json=data.room_ids_json,
+        is_default=data.is_default,
+    )
+    session.add(domain)
+    session.commit()
+    session.refresh(domain)
+    return domain
+
+
+@router.patch("/domains/{domain_id}", response_model=Domain)
+def update_domain(domain_id: int, data: DomainUpdate, session: Session = Depends(get_session)):
+    domain = session.get(Domain, domain_id)
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+
+    if data.is_default is True:
+        # 清除其他 domain 的 is_default
+        existing = session.exec(
+            select(Domain).where(Domain.is_default == True, Domain.id != domain_id)
+        ).all()
+        for d in existing:
+            d.is_default = False
+            session.add(d)
+
+    update_data = data.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(domain, key, value)
+
+    session.add(domain)
+    session.commit()
+    session.refresh(domain)
+    return domain
+
+
+@router.delete("/domains/{domain_id}")
+def delete_domain(domain_id: int, session: Session = Depends(get_session)):
+    domain = session.get(Domain, domain_id)
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+    session.delete(domain)
+    session.commit()
+    return {"ok": True}
+
+
+# ==========================================
+# Room CRUD
+# ==========================================
+@router.get("/rooms/", response_model=list[Room])
+def list_rooms(session: Session = Depends(get_session)):
+    return session.exec(select(Room).order_by(Room.position)).all()
+
+
+@router.post("/rooms/", response_model=Room)
+def create_room(data: RoomCreate, session: Session = Depends(get_session)):
+    # 自動設 position 為最大值 + 1
+    max_pos = session.exec(select(sa_func.max(Room.position))).one()
+    room = Room(
+        name=data.name,
+        description=data.description,
+        position=(max_pos or 0) + 1,
+    )
+    session.add(room)
+    session.commit()
+    session.refresh(room)
+    return room
+
+
+@router.patch("/rooms/{room_id}", response_model=Room)
+def update_room(room_id: int, data: RoomUpdate, session: Session = Depends(get_session)):
+    room = session.get(Room, room_id)
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    update_data = data.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(room, key, value)
+
+    session.add(room)
+    session.commit()
+    session.refresh(room)
+    return room
+
+
+@router.patch("/rooms/{room_id}/layout")
+def update_room_layout(room_id: int, body: dict, session: Session = Depends(get_session)):
+    """獨立更新 layout_json（可能很大，不與其他欄位一起 PATCH）"""
+    room = session.get(Room, room_id)
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    if "layout_json" in body:
+        room.layout_json = body["layout_json"] if isinstance(body["layout_json"], str) else json_module.dumps(body["layout_json"])
+    session.add(room)
+    session.commit()
+    session.refresh(room)
+    return {"ok": True, "id": room.id}
+
+
+@router.delete("/rooms/{room_id}")
+def delete_room(room_id: int, session: Session = Depends(get_session)):
+    room = session.get(Room, room_id)
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    # 刪除關聯的 RoomProject 和 RoomMember
+    for rp in session.exec(select(RoomProject).where(RoomProject.room_id == room_id)).all():
+        session.delete(rp)
+    for rm in session.exec(select(RoomMember).where(RoomMember.room_id == room_id)).all():
+        session.delete(rm)
+
+    session.delete(room)
+    session.commit()
+    return {"ok": True}
+
+
+# ==========================================
+# Room Assignments
+# ==========================================
+@router.put("/rooms/{room_id}/projects")
+def set_room_projects(room_id: int, data: RoomAssignment, session: Session = Depends(get_session)):
+    """全量替換房間的專案列表"""
+    room = session.get(Room, room_id)
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    # 刪除舊的
+    old = session.exec(select(RoomProject).where(RoomProject.room_id == room_id)).all()
+    for rp in old:
+        session.delete(rp)
+
+    # 新增
+    project_ids = data.project_ids or []
+    for pid in project_ids:
+        session.add(RoomProject(room_id=room_id, project_id=pid))
+
+    session.commit()
+    return {"ok": True, "project_ids": project_ids}
+
+
+@router.put("/rooms/{room_id}/members")
+def set_room_members(room_id: int, data: RoomAssignment, session: Session = Depends(get_session)):
+    """全量替換房間的成員列表"""
+    room = session.get(Room, room_id)
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    # 刪除舊的
+    old = session.exec(select(RoomMember).where(RoomMember.room_id == room_id)).all()
+    for rm in old:
+        session.delete(rm)
+
+    # 新增
+    member_ids = data.member_ids or []
+    for idx, mid in enumerate(member_ids):
+        session.add(RoomMember(room_id=room_id, member_id=mid, desk_index=idx))
+
+    session.commit()
+    return {"ok": True, "member_ids": member_ids}

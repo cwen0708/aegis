@@ -41,6 +41,12 @@ const settingsReady = ref(false)
 
 onMounted(async () => {
   await store.fetchSettings()
+
+  // 解析當前網域 → 決定可見的專案和成員
+  const { useDomainStore } = await import('./stores/domain')
+  const domainStore = useDomainStore()
+  await domainStore.resolve()
+
   settingsReady.value = true
 
   // 檢查 onboarding 狀態，未完成則導向
