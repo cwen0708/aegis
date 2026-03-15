@@ -80,9 +80,11 @@ def _migrate_db():
                 except Exception:
                     pass
 
+                from datetime import datetime, timezone
+                now = datetime.now(timezone.utc).isoformat()
                 cur.execute(
-                    "INSERT INTO room (name, description, layout_json, position, is_active) VALUES (?, ?, ?, 0, 1)",
-                    ("主辦公室", "預設辦公空間", layout)
+                    "INSERT INTO room (name, description, layout_json, position, is_active, created_at) VALUES (?, ?, ?, 0, 1, ?)",
+                    ("主辦公室", "預設辦公空間", layout, now)
                 )
                 room_id = cur.lastrowid
 
@@ -101,8 +103,8 @@ def _migrate_db():
 
                 # 建立預設網域
                 cur.execute(
-                    "INSERT INTO domain (hostname, name, room_ids_json, is_default, is_active) VALUES ('', ?, ?, 1, 1)",
-                    ("預設", f"[{room_id}]")
+                    "INSERT INTO domain (hostname, name, room_ids_json, is_default, is_active, created_at) VALUES ('', ?, ?, 1, 1, ?)",
+                    ("預設", f"[{room_id}]", now)
                 )
 
                 logger.info(f"[Migration] Created default room (id={room_id}) with all projects and members")
