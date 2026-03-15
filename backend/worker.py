@@ -521,8 +521,9 @@ def _apply_worker_stage_action(idx, new_status: str):
 
 
 def delete_card_completely(card_id: int):
-    """完全刪除卡片（MD 檔 + CardIndex + Card ORM）"""
+    """完全刪除卡片（MD 檔 + CardIndex + Card ORM + BroadcastLog）"""
     try:
+        from app.models.core import BroadcastLog
         with Session(engine) as session:
             idx = session.get(CardIndex, card_id)
             if idx and idx.file_path:
@@ -534,6 +535,13 @@ def delete_card_completely(card_id: int):
             orm_card = session.get(Card, card_id)
             if orm_card:
                 session.delete(orm_card)
+
+            # 清除廣播記錄（防止 card_id 重用時 log 混淆）
+            old_logs = session.exec(
+                select(BroadcastLog).where(BroadcastLog.card_id == card_id)
+            ).all()
+            for bl in old_logs:
+                session.delete(bl)
 
             session.commit()
         logger.info(f"[Worker] Card {card_id} deleted completely")

@@ -107,8 +107,12 @@ def rebuild_index(session: Session, project_id: int, project_path: str) -> int:
 
 
 def next_card_id(session: Session) -> int:
-    """Get next available global card ID from index."""
-    result = session.exec(
-        select(func.max(CardIndex.card_id))
-    ).first()
-    return (result or 0) + 1
+    """Get next available global card ID (never reuses deleted IDs).
+
+    Checks both CardIndex and TaskLog to find the true max,
+    preventing ID collision when cron cards are deleted.
+    """
+    from app.models.core import TaskLog
+    idx_max = session.exec(select(func.max(CardIndex.card_id))).first() or 0
+    log_max = session.exec(select(func.max(TaskLog.card_id))).first() or 0
+    return max(idx_max, log_max) + 1
