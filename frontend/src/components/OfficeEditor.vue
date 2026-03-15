@@ -198,6 +198,18 @@ function setSlotDir(dir: 'down' | 'left' | 'right' | 'up') {
   editorScene?.setSlotDirection(dir)
 }
 
+function clearLayout() {
+  if (!confirm('確定要清空所有地面、家具和小物嗎？')) return
+  if (!editorScene) return
+  const layout = editorScene.getLayout()
+  layout.ground = new Array(layout.cols * layout.rows).fill(0)
+  layout.furniture = []
+  layout.props = []
+  layout.workstations = []
+  layout.slots = []
+  editorScene.loadLayout(layout)
+}
+
 function handleSave() {
   if (!editorScene) return
   const layout = editorScene.getLayout()
@@ -365,6 +377,12 @@ function tileThumbStyle(frameIdx: number) {
             : 'bg-slate-700 text-slate-400 hover:bg-slate-600'"
         >
           刪除
+        </button>
+        <button
+          @click="clearLayout"
+          class="px-2 py-1 text-[10px] font-mono rounded transition-colors bg-slate-700 text-orange-400 hover:bg-orange-600 hover:text-white"
+        >
+          清空
         </button>
       </div>
 

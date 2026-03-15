@@ -34,21 +34,44 @@ def _get_gemini_api_key() -> Optional[str]:
     return None
 
 
-def _get_tts_settings() -> tuple[bool, bool]:
-    """讀取 TTS 設定：(tts_enabled, tts_gemini)"""
+def _get_tts_settings() -> tuple[bool, str]:
+    """讀取 TTS 設定：(tts_enabled, tts_provider)
+    tts_provider: 'web' | 'gemini' | 'ttsmaker'
+    """
     try:
         from sqlmodel import Session
         from app.database import engine
         from app.models.core import SystemSetting
         with Session(engine) as session:
             enabled = session.get(SystemSetting, "tts_enabled")
-            gemini = session.get(SystemSetting, "tts_gemini")
+            provider = session.get(SystemSetting, "tts_provider")
+            # 向後相容：舊的 tts_gemini=true → provider=gemini
+            if not provider or not provider.value:
+                gemini = session.get(SystemSetting, "tts_gemini")
+                prov = "gemini" if (gemini and gemini.value == "true") else "web"
+            else:
+                prov = provider.value
             return (
                 enabled and enabled.value == "true",
-                gemini and gemini.value == "true",
+                prov,
             )
     except Exception:
-        return False, False
+        return False, "web"
+
+
+def _get_ttsmaker_api_key() -> Optional[str]:
+    """從 SystemSetting 讀取 TTSMaker API Key"""
+    try:
+        from sqlmodel import Session
+        from app.database import engine
+        from app.models.core import SystemSetting
+        with Session(engine) as session:
+            setting = session.get(SystemSetting, "ttsmaker_api_key")
+            if setting and setting.value:
+                return setting.value
+    except Exception:
+        pass
+    return None
 
 
 def _pcm_to_wav(pcm_data: bytes, sample_rate: int = 24000, channels: int = 1, sample_width: int = 2) -> bytes:
@@ -122,17 +145,74 @@ async def synthesize_gemini(text: str, voice: str = "Kore", api_key: str = "") -
     return await asyncio.to_thread(_call)
 
 
+async def synthesize_ttsmaker(text: str, voice_id: int = 1480, api_key: str = "") -> Optional[bytes]:
+    """呼叫 TTSMaker API v2，回傳 MP3 bytes"""
+    if not api_key:
+        return None
+
+    # 檢查快取
+    cached = _cache_path(text, f"ttsmaker-{voice_id}")
+    if cached.exists():
+        return cached.read_bytes()
+
+    def _call():
+        import urllib.request
+        import json as _json
+
+        data = _json.dumps({
+            "api_key": api_key,
+            "text": text,
+            "voice_id": voice_id,
+            "audio_format": "mp3",
+            "audio_speed": 1.0,
+            "audio_volume": 1,
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            "https://api.ttsmaker.com/v2/create-tts-order",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        try:
+            resp = urllib.request.urlopen(req, timeout=30)
+            result = _json.loads(resp.read())
+
+            if result.get("status") == "ok" and result.get("audio_file_url"):
+                # 下載音檔
+                audio_resp = urllib.request.urlopen(result["audio_file_url"], timeout=30)
+                audio_data = audio_resp.read()
+
+                # 寫入快取
+                TTS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                cached.write_bytes(audio_data)
+                logger.info(f"[TTS] TTSMaker synthesized {len(text)} chars → {len(audio_data)} bytes")
+                return audio_data
+
+        except Exception as e:
+            logger.warning(f"[TTS] TTSMaker synthesis failed: {e}")
+        return None
+
+    return await asyncio.to_thread(_call)
+
+
 async def synthesize(text: str, voice: str = "Kore") -> Optional[bytes]:
-    """TTS 入口：有 Gemini key 且啟用就用 Gemini，否則回 None（前端降級到 Web Speech）"""
-    tts_enabled, tts_gemini = _get_tts_settings()
+    """TTS 入口：根據 tts_provider 設定選擇引擎"""
+    tts_enabled, tts_provider = _get_tts_settings()
 
     if not tts_enabled:
         return None
 
-    if tts_gemini:
+    if tts_provider == "gemini":
         api_key = _get_gemini_api_key()
         if api_key:
             return await synthesize_gemini(text, voice=voice, api_key=api_key)
 
-    # 沒有 Gemini → 回 None，前端用 Web Speech
+    elif tts_provider == "ttsmaker":
+        api_key = _get_ttsmaker_api_key()
+        if api_key:
+            return await synthesize_ttsmaker(text, api_key=api_key)
+
+    # web 或 fallback → 回 None，前端用 Web Speech
     return None

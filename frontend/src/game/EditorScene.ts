@@ -55,6 +55,12 @@ export class EditorScene extends Phaser.Scene {
     this.layout = JSON.parse(JSON.stringify(data.layout))
   }
 
+  /** 動態替換 layout 並重繪（用於清空等操作） */
+  loadLayout(layout: OfficeLayout) {
+    this.layout = JSON.parse(JSON.stringify(layout))
+    this.renderAll()
+  }
+
   preload() {
     preloadOfficeAssets(this)
   }
