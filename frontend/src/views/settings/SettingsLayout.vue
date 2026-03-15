@@ -11,21 +11,39 @@ const { isMobile } = useResponsive()
 const auth = useAuthStore()
 const showMobileMenu = ref(false)
 
-const menuItems = [
-  { path: '/settings/general', label: '一般設定', icon: Globe },
-  { path: '/settings/onestack', label: 'OneStack', icon: Layers },
-  { path: '/settings/channels', label: '頻道設定', icon: MessageSquare },
-  { path: '/settings/projects', label: '專案管理', icon: FolderKanban },
-  { path: '/settings/rooms', label: '房間管理', icon: Building2 },
-  { path: '/settings/domains', label: '網域綁定', icon: Globe },
-  { path: '/settings/users', label: '用戶與邀請', icon: UserCheck },
-  { path: '/settings/team', label: '團隊管理', icon: Users },
-  { path: '/settings/agents', label: '代理設定', icon: Bot },
-  { path: '/settings/status', label: '服務狀態', icon: Activity },
-  { path: '/settings/update', label: '系統更新', icon: Download },
-  { path: '/settings/terminal', label: 'Web Terminal', icon: TerminalSquare },
-  { path: '/onboarding', label: '設定引導', icon: Rocket },
+const menuGroups = [
+  {
+    label: '系統',
+    items: [
+      { path: '/onboarding', label: '設定引導', icon: Rocket },
+      { path: '/settings/general', label: '一般設定', icon: Settings },
+      { path: '/settings/status', label: '服務狀態', icon: Activity },
+      { path: '/settings/update', label: '系統更新', icon: Download },
+    ],
+  },
+  {
+    label: '連線',
+    items: [
+      { path: '/settings/channels', label: '頻道設定', icon: MessageSquare },
+      { path: '/settings/users', label: '用戶管理', icon: UserCheck },
+      { path: '/settings/domains', label: '網域綁定', icon: Globe },
+      { path: '/settings/onestack', label: 'OneStack', icon: Layers },
+    ],
+  },
+  {
+    label: '工作空間',
+    items: [
+      { path: '/settings/projects', label: '專案管理', icon: FolderKanban },
+      { path: '/settings/rooms', label: '房間管理', icon: Building2 },
+      { path: '/settings/team', label: '團隊管理', icon: Users },
+      { path: '/settings/agents', label: '代理設定', icon: Bot },
+      { path: '/settings/terminal', label: '網頁終端', icon: TerminalSquare },
+    ],
+  },
 ]
+
+// 扁平化（用於 mobile dropdown 和路由匹配）
+const menuItems = menuGroups.flatMap(g => g.items)
 
 // 驗證狀態
 const authenticated = ref(false)
@@ -175,20 +193,25 @@ const mobileDropdownStyle = computed(() => {
     <!-- 已驗證：顯示設定內容 -->
     <div v-else class="flex-1 flex flex-col sm:flex-row overflow-hidden">
       <!-- Desktop: Left Menu -->
-      <div v-if="!isMobile" class="w-48 shrink-0 border-r border-slate-800 bg-slate-900/30 p-4">
-        <nav class="space-y-1">
-          <router-link
-            v-for="item in menuItems"
-            :key="item.path"
-            :to="item.path"
-            class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors"
-            :class="route.path === item.path
-              ? 'bg-emerald-500/20 text-emerald-400'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'"
-          >
-            <component :is="item.icon" class="w-4 h-4" />
-            {{ item.label }}
-          </router-link>
+      <div v-if="!isMobile" class="w-48 shrink-0 border-r border-slate-800 bg-slate-900/30 p-4 overflow-y-auto">
+        <nav>
+          <div v-for="group in menuGroups" :key="group.label" class="mb-3">
+            <p class="px-3 mb-1 text-[10px] font-semibold text-slate-600 tracking-widest uppercase">{{ group.label }}</p>
+            <div class="space-y-0.5">
+              <router-link
+                v-for="item in group.items"
+                :key="item.path"
+                :to="item.path"
+                class="flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm transition-colors"
+                :class="route.path === item.path
+                  ? 'bg-emerald-500/20 text-emerald-400'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'"
+              >
+                <component :is="item.icon" class="w-4 h-4" />
+                {{ item.label }}
+              </router-link>
+            </div>
+          </div>
         </nav>
       </div>
 
