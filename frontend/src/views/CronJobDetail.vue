@@ -118,6 +118,9 @@ async function toggleEnabled() {
   }
 }
 
+// 系統時區（從設定讀取）
+const systemTimezone = computed(() => store.settings.timezone || 'Asia/Taipei')
+
 // 即時計算下次執行時間（從 cron 表達式）
 const nextRunPreview = computed(() => {
   if (!editForm.value?.cron_expression) return ''
@@ -129,7 +132,6 @@ const nextRunPreview = computed(() => {
 })
 
 function calcNextRuns(cronExpr: string, count: number): string {
-  // 簡易解析 cron（分 時 日 月 週）→ 計算接下來 N 次的 UTC 時間並轉台北時間
   const parts = cronExpr.trim().split(/\s+/)
   if (parts.length !== 5) return '格式錯誤（需要 5 個欄位）'
 
@@ -138,6 +140,7 @@ function calcNextRuns(cronExpr: string, count: number): string {
   const hour = hourStr === '*' ? -1 : parseInt(hourStr)
   if (isNaN(min) || (hour !== -1 && isNaN(hour))) return ''
 
+  const tz = systemTimezone.value
   const now = new Date()
   const results: string[] = []
   const d = new Date(now)
@@ -153,11 +156,14 @@ function calcNextRuns(cronExpr: string, count: number): string {
     const local = new Date(d)
     local.setUTCMinutes(min)
     if (hour !== -1) local.setUTCHours(hour)
-    const str = local.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+    const str = local.toLocaleString('zh-TW', { timeZone: tz, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
     if (!results.includes(str)) results.push(str)
   }
 
-  return results.length > 0 ? results.join('、') : '無法計算'
+  // 計算 UTC offset 顯示
+  const offsetStr = new Date().toLocaleString('en', { timeZone: tz, timeZoneName: 'shortOffset' }).split(' ').pop() || ''
+
+  return results.length > 0 ? results.join('、') + ` (${offsetStr})` : '無法計算'
 }
 
 function startEdit() {
@@ -292,7 +298,7 @@ watch(jobId, async () => {
                 <label class="block text-xs font-medium text-slate-400 mb-1">Cron 表達式 <span class="text-slate-600">(UTC)</span></label>
                 <input v-model="editForm.cron_expression" type="text" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-blue-400 font-mono focus:ring-2 focus:ring-emerald-500 outline-none">
                 <p v-if="nextRunPreview" class="text-[11px] text-sky-400 mt-1">
-                  下次執行（台北）：{{ nextRunPreview }}
+                  下次執行：{{ nextRunPreview }}
                 </p>
               </div>
             </div>
