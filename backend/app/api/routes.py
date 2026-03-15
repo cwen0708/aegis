@@ -46,9 +46,14 @@ def get_card_lock(card_id: int) -> asyncio.Lock:
 def _get_domain_filter(request: Request, session: Session):
     """根據 Host header 回傳 (visible_project_ids, visible_member_ids)。
     回傳 (None, None) 表示不過濾（admin / localhost / 無網域設定）。"""
-    # ?all=true → 不過濾（settings 頁面用）
+    # ?all=true → 不過濾（需登入，settings 頁面用）
     if request.query_params.get("all") == "true":
-        return None, None
+        from app.core.auth import verify_session_token
+        auth_header = request.headers.get("authorization", "")
+        token = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else ""
+        if token and verify_session_token(token):
+            return None, None
+        # 未登入，忽略 all=true，走正常過濾
 
     # localhost → 不過濾（worker / 內部呼叫）
     client_host = request.client.host if request.client else ""
