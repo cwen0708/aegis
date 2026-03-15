@@ -1,7 +1,7 @@
 # Aegis 功能開發清單摘要
 
 > 基於 14 個 AI Agent 專案優點整合
-> 初版：2026-03-09 ｜ 更新：2026-03-13
+> 初版：2026-03-09 ｜ 更新：2026-03-14
 
 ---
 
@@ -9,14 +9,14 @@
 
 | 功能 | 現狀 | 目標 | 參考專案 |
 |------|:----:|:----:|----------|
-| 多頻道通訊 | △ | ✓ (3+) | Nanobot, PicoClaw, ZeroClaw |
+| 多頻道通訊 | ✓ (Telegram) | ✓ (3+) | Nanobot, PicoClaw, ZeroClaw |
 | 多 LLM 支援 | △ (2) | ✓ (6+) | ZeroClaw, ClawRouter |
 | 智能路由 | △ (fallback) | ✓✓ | ClawRouter, Spacebot |
-| 容器隔離 | ❌ | ✓ | IronClaw, NanoClaw |
-| 安全機制 | ❌ | ✓✓ | IronClaw, Spacebot |
+| 容器隔離 | △ (sandbox) | ✓ | IronClaw, NanoClaw |
+| 安全機制 | ✓ (sandbox) | ✓✓ | IronClaw, Spacebot |
 | 向量搜索 | ❌ | ✓✓ | IronClaw, Spacebot |
 | CLI 工具 | ❌ | ✓ | Nanobot, ZeroClaw |
-| 技能系統 | △ | ✓✓ | ClawHub, IronClaw |
+| 技能系統 | ✓ (MCP+skills) | ✓✓ | ClawHub, IronClaw |
 | 瀏覽器自動化 | ❌ | ✓ | CoPaw, Spacebot |
 | 多代理協作 | △ (收件匣) | ✓✓ | Spacebot, TinyClaw |
 | 虛擬辦公室 | ✓✓ | ✓✓ | 獨有優勢 |
@@ -60,15 +60,25 @@
 | 預設路由移除 | 移除 phase_routing 遺留系統，簡化成員路由邏輯 |
 | 對話框優化 | Claude JSON 解析、工具詳情顯示、UTC 時區修正、摘要 70 字 |
 | Auth 中介層 | CI/CD deploy 路徑豁免認證 |
+| AI 任務安全隔離 | sandbox 白名單環境變數、process group 隔離、CLAUDE.md 安全指令 |
+| 專案環境變數 | ProjectEnvVar CRUD + 前端 UI，AI 任務自動注入 |
+| Telegram 多模態 | 接收圖片/語音/文件、AI 回傳圖片（Gemini 生成）、MCP 注入 chat |
+| NAS MCP | ZeroTier VPN + nas-mcp 部署、NAS 檔案搜尋/瀏覽/讀取 |
+| 用戶存取期限 | BotUser access_expires_at、邀請碼 access_valid_days、過期自動擋 |
+| 用戶管理頁面 | /settings/users 合併邀請碼+用戶管理、Bot User CRUD API |
+| CLI 合併到 Dashboard | 服務狀態頁整合 CLI 安裝、骨架先渲染 |
+| Claude Remote Control | 專案詳情頁「遠端」按鈕、RC session API |
+| Web Terminal | xterm.js 瀏覽器終端、WebSocket PTY |
+| Worker 強化 | abort 檔案信號、自動重試一次、updater 重啟 worker |
 
 ---
 
 ## 待開發
 
-### P1: 多頻道通訊（2-3 週）⏳ 前置 UI 已完成
+### P1: 多頻道通訊（2-3 週）✅ Telegram 完成
 | 頻道 | 技術 | 說明 | 狀態 |
 |------|------|------|:----:|
-| Telegram | python-telegram-bot | 建卡、查詢、中止 | 待開發 |
+| Telegram | python-telegram-bot | 對話、建卡、查詢、多模態（圖片/語音/文件） | ✅ |
 | LINE | line-bot-sdk | LINE Bot 整合 | 待開發 |
 | Discord | discord.py | 團隊協作 | 待開發 |
 
@@ -90,13 +100,16 @@
 | 代碼審查 | Claude | DeepSeek |
 | 文檔生成 | GPT-4o-mini | DeepSeek |
 
-### P4: 安全機制（1-2 週）
-| 功能 | 參考 |
-|------|------|
-| 提示注入防禦 | IronClaw SafetyLayer |
-| 敏感資料洩漏檢測 | IronClaw LeakDetector |
-| 工具輸出清洗 | Spacebot |
-| API 速率限制 | ZeroClaw |
+### P4: 安全機制（1-2 週）△ 基礎完成
+| 功能 | 參考 | 狀態 |
+|------|------|:----:|
+| sandbox 環境隔離 | — | ✅ |
+| Process Group 隔離 | — | ✅ |
+| CLAUDE.md 軟限制 | — | ✅ |
+| 提示注入防禦 | IronClaw SafetyLayer | 待開發 |
+| 敏感資料洩漏檢測 | IronClaw LeakDetector | 待開發 |
+| 工具輸出清洗 | Spacebot | 待開發 |
+| API 速率限制 | ZeroClaw | 待開發 |
 
 ### P5: 向量搜索（2-3 週）
 | 組件 | 選型 |
@@ -124,12 +137,13 @@ aegis logs <card_id>    # 查看日誌
 aegis cron list/add/rm  # 排程管理
 ```
 
-### P8: 技能系統（2 週）
-| 功能 | 說明 |
-|------|------|
-| SKILL.md 格式 | 標準化技能定義 |
-| 本地註冊表 | Skills 管理 |
-| MCP 協議 | 外部工具整合 |
+### P8: 技能系統（2 週）✅ 基礎完成
+| 功能 | 說明 | 狀態 |
+|------|------|:----:|
+| SKILL.md 格式 | 標準化技能定義（shared + 成員專屬） | ✅ |
+| 本地註冊表 | 成員技能目錄管理 | ✅ |
+| MCP 協議 | NAS/Supabase/TDEngine MCP 工具 | ✅ |
+| 前端技能編輯 | 團隊詳情頁技能管理 UI | ✅ |
 
 ### P9: 瀏覽器自動化（1-2 週）
 | 功能 | 技術 |
@@ -153,7 +167,8 @@ aegis cron list/add/rm  # 排程管理
 2026 Q1 (3月)
 ├── Week 1-2: P0 緊急修復 ✅
 ├── Week 2-3: 虛擬辦公室 + 排程 + 部署 ✅
-├── Week 3-4: P1 多頻道通訊（後端接入）
+├── Week 3: P1 Telegram 多模態 + P4 安全隔離 + P8 MCP/技能 ✅
+├── Week 3-4: 用戶管理 + UX 改善 + NAS MCP + Remote Control ✅
 └── Week 5-6: P2 擴展 LLM
 
 2026 Q2 (4-6月)
@@ -183,7 +198,7 @@ aegis cron list/add/rm  # 排程管理
 
 | 現有系統 | 整合方式 | 狀態 |
 |---------|---------|:----:|
-| HappyNAS | 復用 LINE/Telegram Bot | 待開發 |
+| HappyNAS | NAS MCP 部署完成（ZeroTier VPN 連通） | ✅ 運作中 |
 | AutoDev | Aegis 作為 Web UI | ✅ 運作中 |
 | Trello | 保留整合，Aegis 執行 | ✅ 運作中 |
 | OneStack | 雙向同步（Phase 1-3） | △ 規劃中 |
