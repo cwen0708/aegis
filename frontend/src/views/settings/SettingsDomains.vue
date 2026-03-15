@@ -61,7 +61,11 @@ async function fetchDomains() {
   try {
     const res = await fetch(`${API}/api/v1/domains`, { headers: authHeaders() })
     if (!res.ok) throw new Error('載入失敗')
-    domains.value = await res.json()
+    const raw = await res.json()
+    domains.value = raw.map((d: any) => ({
+      ...d,
+      room_ids: typeof d.room_ids_json === 'string' ? JSON.parse(d.room_ids_json || '[]') : (d.room_ids || []),
+    }))
   } catch (e: any) {
     store.addToast(e.message || '網域載入失敗', 'error')
   }
@@ -107,10 +111,15 @@ async function saveDomain() {
   }
   saving.value = true
   try {
+    const payload = {
+      ...editForm.value,
+      room_ids_json: JSON.stringify(editForm.value.room_ids),
+    }
+    delete (payload as any).room_ids
     const res = await fetch(`${API}/api/v1/domains/${expandedId.value}`, {
       method: 'PATCH',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(editForm.value),
+      body: JSON.stringify(payload),
     })
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: '儲存失敗' }))
@@ -139,10 +148,15 @@ async function createDomain() {
   }
   creating.value = true
   try {
+    const payload = {
+      ...createForm.value,
+      room_ids_json: JSON.stringify(createForm.value.room_ids),
+    }
+    delete (payload as any).room_ids
     const res = await fetch(`${API}/api/v1/domains`, {
       method: 'POST',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(createForm.value),
+      body: JSON.stringify(payload),
     })
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: '建立失敗' }))

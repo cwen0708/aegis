@@ -4601,9 +4601,24 @@ def delete_domain(domain_id: int, session: Session = Depends(get_session)):
 # ==========================================
 # Room CRUD
 # ==========================================
-@router.get("/rooms", response_model=list[Room])
+@router.get("/rooms")
 def list_rooms(session: Session = Depends(get_session)):
-    return session.exec(select(Room).order_by(Room.position)).all()
+    rooms = session.exec(select(Room).order_by(Room.position)).all()
+    result = []
+    for room in rooms:
+        project_ids = [rp.project_id for rp in session.exec(
+            select(RoomProject).where(RoomProject.room_id == room.id)
+        ).all()]
+        member_ids = [rm.member_id for rm in session.exec(
+            select(RoomMember).where(RoomMember.room_id == room.id)
+        ).all()]
+        d = room.model_dump() if hasattr(room, 'model_dump') else dict(room)
+        d["project_ids"] = project_ids
+        d["member_ids"] = member_ids
+        # 不回傳 layout_json（太大），前端需要時另外 fetch
+        d.pop("layout_json", None)
+        result.append(d)
+    return result
 
 
 @router.post("/rooms", response_model=Room)
