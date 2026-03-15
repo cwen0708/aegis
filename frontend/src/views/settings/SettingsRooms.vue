@@ -122,15 +122,32 @@ async function saveRoom() {
   }
   saving.value = true
   try {
-    const res = await fetch(`${API}/api/v1/rooms/${expandedId.value}`, {
+    const roomId = expandedId.value
+    // 1. 更新房間基本資訊
+    const res = await fetch(`${API}/api/v1/rooms/${roomId}`, {
       method: 'PATCH',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(editForm.value),
+      body: JSON.stringify({ name: editForm.value.name, description: editForm.value.description }),
     })
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: '儲存失敗' }))
       throw new Error(err.detail)
     }
+    // 2. 更新專案綁定
+    const projRes = await fetch(`${API}/api/v1/rooms/${roomId}/projects`, {
+      method: 'PUT',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ project_ids: editForm.value.project_ids }),
+    })
+    if (!projRes.ok) throw new Error('專案綁定失敗')
+    // 3. 更新成員綁定
+    const memRes = await fetch(`${API}/api/v1/rooms/${roomId}/members`, {
+      method: 'PUT',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ member_ids: editForm.value.member_ids }),
+    })
+    if (!memRes.ok) throw new Error('成員綁定失敗')
+
     store.addToast('房間已更新', 'success')
     expandedId.value = null
     await fetchRooms()
@@ -162,6 +179,22 @@ async function createRoom() {
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: '建立失敗' }))
       throw new Error(err.detail)
+    }
+    const newRoom = await res.json()
+    // 綁定專案和成員
+    if (createForm.value.project_ids.length > 0) {
+      await fetch(`${API}/api/v1/rooms/${newRoom.id}/projects`, {
+        method: 'PUT',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ project_ids: createForm.value.project_ids }),
+      })
+    }
+    if (createForm.value.member_ids.length > 0) {
+      await fetch(`${API}/api/v1/rooms/${newRoom.id}/members`, {
+        method: 'PUT',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ member_ids: createForm.value.member_ids }),
+      })
     }
     store.addToast('房間已建立', 'success')
     showCreateDialog.value = false
