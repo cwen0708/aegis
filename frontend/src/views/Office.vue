@@ -26,7 +26,7 @@ const currentRoomId = computed(() => {
   const id = route.params.roomId as string | undefined
   if (id) return id
   // Fallback: if domain has rooms, use the first one
-  if (domainStore.rooms.length > 0) return String(domainStore.rooms[0].id)
+  if (domainStore.rooms && domainStore.rooms.length > 0) return String(domainStore.rooms[0]!.id)
   return null
 })
 
