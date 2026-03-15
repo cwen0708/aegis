@@ -242,7 +242,16 @@ async function fetchMembers() {
   try {
     const res = await fetch('/api/v1/members')
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    allMembers.value = await res.json()
+    let all = await res.json()
+    // 網域過濾：只顯示當前網域所有空間中的成員
+    try {
+      const { useDomainStore } = await import('../stores/domain')
+      const domainStore = useDomainStore()
+      if (domainStore.resolved && domainStore.visibleMemberIds !== null) {
+        all = all.filter((m: any) => domainStore.isMemberVisible(m.id))
+      }
+    } catch {}
+    allMembers.value = all
   } catch {}
 }
 
