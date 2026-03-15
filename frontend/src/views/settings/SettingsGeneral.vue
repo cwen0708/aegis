@@ -20,14 +20,8 @@ function handleLogout() {
 const workerPaused = ref(false)
 const workerToggling = ref(false)
 
-async function fetchWorkerStatus() {
-  try {
-    const res = await fetch(`${API}/api/v1/system/services`)
-    if (res.ok) {
-      const data = await res.json()
-      workerPaused.value = data.engines?.task_worker?.is_paused ?? false
-    }
-  } catch {}
+function loadWorkerStatus() {
+  workerPaused.value = store.settings.worker_paused === 'true'
 }
 
 async function toggleWorkerPaused() {
@@ -205,7 +199,8 @@ const timezoneOptions = [
 ]
 
 onMounted(async () => {
-  await Promise.all([store.fetchSettings(), fetchWorkerStatus(), fetchGithubStatus()])
+  await Promise.all([store.fetchSettings(), fetchGithubStatus()])
+  loadWorkerStatus()
   form.value.timezone = store.settings.timezone || 'Asia/Taipei'
   form.value.max_workstations = store.settings.max_workstations || '3'
   form.value.memory_short_term_days = store.settings.memory_short_term_days || '30'

@@ -452,3 +452,49 @@ class EmailMessage(SQLModel, table=True):
     card_id: Optional[int] = Field(default=None)
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# ==========================================
+# 房間 & 網域（多空間 + 網域綁定）
+# ==========================================
+class Room(SQLModel, table=True):
+    """虛擬辦公室房間 — 每個房間有自己的佈局、專案和成員"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str                                    # "研發部", "維運中心"
+    description: str = Field(default="")
+    layout_json: str = Field(default="{}")       # Phaser 辦公室佈局
+    position: int = Field(default=0)             # 顯示順序
+    is_active: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class RoomProject(SQLModel, table=True):
+    """房間可見專案（多對多）"""
+    __table_args__ = (
+        UniqueConstraint("room_id", "project_id", name="uq_roomproject"),
+    )
+    id: Optional[int] = Field(default=None, primary_key=True)
+    room_id: int = Field(foreign_key="room.id", index=True)
+    project_id: int = Field(foreign_key="project.id", index=True)
+
+
+class RoomMember(SQLModel, table=True):
+    """房間成員（多對多）"""
+    __table_args__ = (
+        UniqueConstraint("room_id", "member_id", name="uq_roommember"),
+    )
+    id: Optional[int] = Field(default=None, primary_key=True)
+    room_id: int = Field(foreign_key="room.id", index=True)
+    member_id: int = Field(foreign_key="member.id", index=True)
+    desk_index: int = Field(default=0)           # 房間內的座位位置
+
+
+class Domain(SQLModel, table=True):
+    """網域綁定 — 每個 hostname 指定可見的房間"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    hostname: str = Field(index=True, unique=True)  # "aegis.greenshepherd.com.tw"
+    name: str = Field(default="")                    # 顯示名稱
+    room_ids_json: str = Field(default="[]")         # JSON: [1, 2]
+    is_default: bool = Field(default=False)          # 未匹配時的 fallback
+    is_active: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

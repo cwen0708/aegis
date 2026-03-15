@@ -186,19 +186,18 @@ export const useAegisStore = defineStore('aegis', () => {
   }
 
   async function updateSettings(data: Record<string, string>) {
-    try {
-      const res = await fetch(`${API}/api/v1/settings`, {
-        method: 'PUT',
-        headers: _authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify(data),
-      })
-      if (res.ok) {
-        settings.value = await res.json()
-        addToast('設定已儲存', 'success')
+    const res = await fetch(`${API}/api/v1/settings`, {
+      method: 'PUT',
+      headers: _authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(data),
+    })
+    if (!res.ok) {
+      if (res.status === 401) {
+        _handle401(res)
       }
-    } catch (e) {
-      addToast('儲存設定失敗', 'error')
+      throw new Error(`設定儲存失敗 (${res.status})`)
     }
+    settings.value = await res.json()
   }
 
   // 運行中任務數量（by project）
