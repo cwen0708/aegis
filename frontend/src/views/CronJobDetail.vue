@@ -135,7 +135,8 @@ function calcNextRuns(cronExpr: string, count: number): string {
   const parts = cronExpr.trim().split(/\s+/)
   if (parts.length !== 5) return '格式錯誤（需要 5 個欄位）'
 
-  const [minStr, hourStr] = parts
+  const minStr = parts[0] ?? '*'
+  const hourStr = parts[1] ?? '*'
   const min = minStr === '*' ? 0 : parseInt(minStr)
   const hour = hourStr === '*' ? -1 : parseInt(hourStr)
   if (isNaN(min) || (hour !== -1 && isNaN(hour))) return ''
