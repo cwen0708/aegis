@@ -4677,6 +4677,24 @@ def list_rooms(session: Session = Depends(get_session)):
     return result
 
 
+@router.get("/rooms/{room_id}")
+def get_room(room_id: int, session: Session = Depends(get_session)):
+    """取得單一房間（含 layout_json）"""
+    room = session.get(Room, room_id)
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+    project_ids = [rp.project_id for rp in session.exec(
+        select(RoomProject).where(RoomProject.room_id == room.id)
+    ).all()]
+    member_ids = [rm.member_id for rm in session.exec(
+        select(RoomMember).where(RoomMember.room_id == room.id)
+    ).all()]
+    d = room.model_dump() if hasattr(room, 'model_dump') else dict(room)
+    d["project_ids"] = project_ids
+    d["member_ids"] = member_ids
+    return d
+
+
 @router.post("/rooms", response_model=Room)
 def create_room(data: RoomCreate, session: Session = Depends(get_session)):
     # 自動設 position 為最大值 + 1

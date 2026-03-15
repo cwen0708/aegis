@@ -37,13 +37,12 @@ const isEditing = ref(false)
 
 async function loadLayoutFromSettings() {
   if (currentRoomId.value) {
-    // Load layout from rooms list API
+    // Load layout from single room API (includes layout_json)
     try {
-      const res = await fetch('/api/v1/rooms?all=true', { headers: authHeaders() })
+      const res = await fetch(`/api/v1/rooms/${currentRoomId.value}`)
       if (res.ok) {
-        const rooms = await res.json()
-        const room = rooms.find((r: any) => r.id === currentRoomId.value)
-        if (room && room.layout_json) {
+        const room = await res.json()
+        if (room.layout_json) {
           const layout = deserializeLayout(room.layout_json)
           if (layout) {
             if (!layout.slots || layout.slots.length === 0) {
