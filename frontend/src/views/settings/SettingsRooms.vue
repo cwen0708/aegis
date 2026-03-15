@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Building2, Plus, Edit3, Trash2, Users, FolderKanban, Loader2, ChevronDown, ChevronUp } from 'lucide-vue-next'
+import { Building2, Plus, Trash2, Users, FolderKanban, Loader2, ChevronDown, ChevronUp } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 import ConfirmDialog from '../../components/ConfirmDialog.vue'
 import { config } from '../../config'
@@ -198,16 +198,6 @@ async function doDelete() {
   }
 }
 
-// ─── Helpers ────────────────────────────────────────────
-
-function getProjectName(id: number): string {
-  return projects.value.find(p => p.id === id)?.name || `#${id}`
-}
-
-function getMemberName(id: number): string {
-  const m = members.value.find(m => m.id === id)
-  return m ? `${m.avatar} ${m.name}` : `#${id}`
-}
 </script>
 
 <template>

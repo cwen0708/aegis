@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Globe, Plus, Edit3, Trash2, Loader2, ChevronDown, ChevronUp, Building2, Star } from 'lucide-vue-next'
+import { Globe, Plus, Trash2, Loader2, ChevronDown, ChevronUp, Building2, Star } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 import ConfirmDialog from '../../components/ConfirmDialog.vue'
 import { config } from '../../config'
