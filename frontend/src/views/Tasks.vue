@@ -62,7 +62,7 @@ function formatDuration(ms: number): string {
 }
 
 function formatTime(dateStr: string): string {
-  const d = new Date(dateStr)
+  const d = new Date(dateStr.endsWith('Z') ? dateStr : dateStr + 'Z')
   const now = new Date()
   const diff = now.getTime() - d.getTime()
   if (diff < 3600000) return `${Math.floor(diff / 60000)} 分鐘前`
