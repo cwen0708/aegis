@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { X, CheckCircle, XCircle, Clock, Loader2, ListTodo, BookOpen, ChevronLeft, ChevronRight, Volume2, VolumeX } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
+import { config } from '../config'
 
 const store = useAegisStore()
 
@@ -64,13 +65,23 @@ function startTypewriter(text: string) {
   }, CHAR_DELAY)
 }
 
-// TTS 語音播放
-const ttsEnabled = ref(localStorage.getItem('aegis-tts') !== 'off')
+// TTS 語音播放 — 讀取 DB 設定（透過 store）
+const ttsEnabled = ref(false)
+const ttsGemini = ref(false)
 let currentAudio: HTMLAudioElement | null = null
+
+// 初始化：從 store settings 讀取（DB 來源）
+watch(() => store.settings, (s) => {
+  if (s) {
+    ttsEnabled.value = s.tts_enabled === 'true'
+    ttsGemini.value = s.tts_gemini === 'true'
+  }
+}, { immediate: true })
 
 function toggleTts() {
   ttsEnabled.value = !ttsEnabled.value
-  localStorage.setItem('aegis-tts', ttsEnabled.value ? 'on' : 'off')
+  // 同步到 DB
+  store.updateSettings({ tts_enabled: String(ttsEnabled.value) })
   if (!ttsEnabled.value) stopTts()
 }
 
@@ -86,20 +97,22 @@ async function playTts(text: string) {
   if (!ttsEnabled.value || !text) return
   stopTts()
 
-  // 嘗試 Gemini TTS
-  try {
-    const res = await fetch('/api/v1/tts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
-    })
-    if (res.ok && res.status === 200) {
-      const blob = await res.blob()
-      currentAudio = new Audio(URL.createObjectURL(blob))
-      currentAudio.play()
-      return
-    }
-  } catch {}
+  // 只在 Gemini TTS 啟用時嘗試
+  if (ttsGemini.value) {
+    try {
+      const res = await fetch(`${config.apiUrl}/api/v1/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      })
+      if (res.ok && res.status === 200) {
+        const blob = await res.blob()
+        currentAudio = new Audio(URL.createObjectURL(blob))
+        currentAudio.play()
+        return
+      }
+    } catch {}
+  }
 
   // 降級 Web Speech
   if (window.speechSynthesis) {
