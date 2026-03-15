@@ -39,7 +39,7 @@ async function loadLayoutFromSettings() {
   if (currentRoomId.value) {
     // Load layout from rooms list API
     try {
-      const res = await fetch('/api/v1/rooms/?all=true', { headers: authHeaders() })
+      const res = await fetch('/api/v1/rooms?all=true', { headers: authHeaders() })
       if (res.ok) {
         const rooms = await res.json()
         const room = rooms.find((r: any) => r.id === currentRoomId.value)

@@ -4592,6 +4592,7 @@ def resolve_domain(hostname: str = "", session: Session = Depends(get_session)):
 # Domain CRUD
 # ==========================================
 @router.get("/domains", response_model=list[Domain])
+@router.get("/domains/", response_model=list[Domain])
 def list_domains(session: Session = Depends(get_session)):
     return session.exec(select(Domain)).all()
 
@@ -4656,6 +4657,7 @@ def delete_domain(domain_id: int, session: Session = Depends(get_session)):
 # Room CRUD
 # ==========================================
 @router.get("/rooms")
+@router.get("/rooms/")
 def list_rooms(session: Session = Depends(get_session)):
     rooms = session.exec(select(Room).order_by(Room.position)).all()
     result = []
