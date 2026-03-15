@@ -79,6 +79,7 @@ const ttsProvider = ref('web')
 const form = ref({
   timezone: 'Asia/Taipei',
   max_workstations: '3',
+  poll_interval: '3',
   memory_short_term_days: '30',
   gemini_api_key: '',
   ttsmaker_api_key: '',
@@ -203,6 +204,7 @@ onMounted(async () => {
   loadWorkerStatus()
   form.value.timezone = store.settings.timezone || 'Asia/Taipei'
   form.value.max_workstations = store.settings.max_workstations || '3'
+  form.value.poll_interval = store.settings.poll_interval || '3'
   form.value.memory_short_term_days = store.settings.memory_short_term_days || '30'
   form.value.gemini_api_key = store.settings.gemini_api_key || ''
   form.value.ttsmaker_api_key = store.settings.ttsmaker_api_key || ''
@@ -218,6 +220,7 @@ async function saveSettings() {
     await store.updateSettings({
       timezone: form.value.timezone,
       max_workstations: form.value.max_workstations,
+      poll_interval: form.value.poll_interval,
       memory_short_term_days: form.value.memory_short_term_days,
       gemini_api_key: form.value.gemini_api_key,
       ttsmaker_api_key: form.value.ttsmaker_api_key,
@@ -309,6 +312,17 @@ async function saveSettings() {
             class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-mono"
           />
           <p class="text-[11px] text-slate-500 mt-1">同時間可使用的工作台數量</p>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1.5">輪詢間隔（秒）</label>
+          <input
+            v-model="form.poll_interval"
+            type="number"
+            min="1"
+            max="60"
+            class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-mono"
+          />
+          <p class="text-[11px] text-slate-500 mt-1">Worker 掃描待執行卡片的頻率（1~60 秒，預設 3）</p>
         </div>
         <div>
           <label class="block text-xs font-medium text-slate-400 mb-1.5">短期記憶保留天數</label>

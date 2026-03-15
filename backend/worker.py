@@ -1349,7 +1349,14 @@ def main():
         except Exception as e:
             logger.error(f"[Worker Error] {e}")
 
-        time.sleep(POLL_INTERVAL)
+        # 從 DB 讀取輪詢間隔（允許動態調整）
+        try:
+            with Session(engine) as _s:
+                _setting = _s.get(SystemSetting, "poll_interval")
+                _interval = int(_setting.value) if _setting and _setting.value else POLL_INTERVAL
+        except Exception:
+            _interval = POLL_INTERVAL
+        time.sleep(max(1, _interval))
 
 
 if __name__ == "__main__":
