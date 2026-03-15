@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { useRoute } from 'vue-router'
 import { useAegisStore } from '../stores/aegis'
 import { useAuthStore } from '../stores/auth'
+import { useDomainStore } from '../stores/domain'
 import { useResponsive } from '../composables/useResponsive'
 
 const { isMobile } = useResponsive()
+const route = useRoute()
 const auth = useAuthStore()
+const domainStore = useDomainStore()
 import { Settings } from 'lucide-vue-next'
 import { createOfficeGame, OfficeScene } from '../game/OfficeScene'
 import OfficeEditor from '../components/OfficeEditor.vue'
@@ -17,31 +21,75 @@ import type Phaser from 'phaser'
 
 const store = useAegisStore()
 
+// ===== Room support =====
+const currentRoomId = computed(() => {
+  const id = route.params.roomId as string | undefined
+  if (id) return id
+  // Fallback: if domain has rooms, use the first one
+  if (domainStore.rooms.length > 0) return String(domainStore.rooms[0].id)
+  return null
+})
+
 // ===== Layout management =====
 const currentLayout = ref<OfficeLayout | null>(null)
 const isEditing = ref(false)
 
 async function loadLayoutFromSettings() {
-  await store.fetchSettings()
-  const raw = store.settings.office_layout
-  if (raw) {
-    const layout = deserializeLayout(raw)
-    if (layout) {
-      // Ensure slots exist - if not, use default layout's slots
-      if (!layout.slots || layout.slots.length === 0) {
-        const defaultLayout = buildDefaultLayout(totalDesks.value || 4)
-        layout.slots = defaultLayout.slots
+  if (currentRoomId.value) {
+    // Load layout from room API
+    try {
+      const res = await fetch(`/api/v1/rooms/${currentRoomId.value}`)
+      if (res.ok) {
+        const room = await res.json()
+        if (room.layout_json) {
+          const layout = deserializeLayout(room.layout_json)
+          if (layout) {
+            if (!layout.slots || layout.slots.length === 0) {
+              const defaultLayout = buildDefaultLayout(totalDesks.value || 4)
+              layout.slots = defaultLayout.slots
+            }
+            currentLayout.value = layout
+            return
+          }
+        }
       }
-      currentLayout.value = layout
-      return
+    } catch (e) {
+      console.warn('Failed to load room layout:', e)
     }
+    // Fallback to default layout if room API fails
+    currentLayout.value = buildDefaultLayout(totalDesks.value || 4)
+  } else {
+    // Original behavior: load from system settings
+    await store.fetchSettings()
+    const raw = store.settings.office_layout
+    if (raw) {
+      const layout = deserializeLayout(raw)
+      if (layout) {
+        if (!layout.slots || layout.slots.length === 0) {
+          const defaultLayout = buildDefaultLayout(totalDesks.value || 4)
+          layout.slots = defaultLayout.slots
+        }
+        currentLayout.value = layout
+        return
+      }
+    }
+    currentLayout.value = buildDefaultLayout(totalDesks.value || 4)
   }
-  currentLayout.value = buildDefaultLayout(totalDesks.value || 4)
 }
 
 async function handleSaveLayout(layout: OfficeLayout) {
   currentLayout.value = layout
-  await store.updateSettings({ office_layout: serializeLayout(layout) })
+  if (currentRoomId.value) {
+    // Save to room
+    await fetch(`/api/v1/rooms/${currentRoomId.value}/layout`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ layout_json: serializeLayout(layout) }),
+    })
+  } else {
+    // Save to system settings
+    await store.updateSettings({ office_layout: serializeLayout(layout) })
+  }
 }
 
 function handleExitEdit() {
@@ -354,6 +402,16 @@ watch(
   [deskAssignments, restingMembers, bubbles, () => store.systemInfo, members],
   pushDataToScene,
   { deep: true }
+)
+
+// Watch room changes — reload layout and rebuild game
+watch(
+  () => route.params.roomId,
+  async () => {
+    await loadLayoutFromSettings()
+    await fetchMembers()
+    rebuildOfficeGame()
+  }
 )
 </script>
 

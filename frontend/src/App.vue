@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Shield, ListTodo, Settings, Clock, FolderOpen, Wifi, WifiOff, Sun, Moon, Zap, Building2, PanelLeftClose, PanelLeftOpen, Rocket } from 'lucide-vue-next'
+import { Shield, ListTodo, Settings, Clock, FolderOpen, Wifi, WifiOff, Sun, Moon, Zap, Building2, Home, PanelLeftClose, PanelLeftOpen, Rocket } from 'lucide-vue-next'
 import { useWebSocket } from './composables/useWebSocket'
 import { useResponsive } from './composables/useResponsive'
 import { useAegisStore } from './stores/aegis'
+import { useDomainStore } from './stores/domain'
 import ToastNotification from './components/ToastNotification.vue'
 
 const router = useRouter()
 const route = useRoute()
 const store = useAegisStore()
+const domainStore = useDomainStore()
 // 初始化 WebSocket
 useWebSocket()
 
@@ -113,7 +115,21 @@ function mobileNavClass(path: string) {
               <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
             </span>
           </router-link>
-          <router-link to="/office" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/office')">
+          <!-- Dynamic room entries (when domain has rooms) -->
+          <template v-if="domainStore.rooms.length > 0">
+            <router-link
+              v-for="(room, idx) in domainStore.rooms"
+              :key="room.id"
+              :to="`/office/${room.id}`"
+              class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium"
+              :class="navClass(`/office/${room.id}`)"
+            >
+              <component :is="idx === 0 ? Home : Building2" class="w-5 h-5 shrink-0" />
+              <span v-if="!sidebarCollapsed">{{ room.name }}</span>
+            </router-link>
+          </template>
+          <!-- Fallback: single office entry -->
+          <router-link v-else to="/office" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/office')">
             <Building2 class="w-5 h-5 shrink-0" />
             <span v-if="!sidebarCollapsed">{{ store.settings.office_name || '辦公室' }}</span>
           </router-link>

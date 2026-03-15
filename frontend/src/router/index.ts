@@ -30,7 +30,7 @@ const router = createRouter({
     { path: '/', redirect: '/office' },
     { path: '/login', component: Login },
     { path: '/onboarding', component: Onboarding },
-    { path: '/office', component: Office },
+    { path: '/office/:roomId?', name: 'office', component: Office },
     { path: '/kanban', component: Kanban, meta: { requiresAuth: true } },
     { path: '/cron', component: CronJobs, meta: { requiresAuth: true } },
     { path: '/cron/:id', component: CronJobDetail, meta: { requiresAuth: true } },
