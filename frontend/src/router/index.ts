@@ -65,11 +65,24 @@ const router = createRouter({
   ],
 })
 
-// Navigation guard: 依系統設定決定是否強制登入才能瀏覽
+// Navigation guard: 依系統設定決定是否強制登入才能瀏覽 + 網域房間存取控制
 router.beforeEach(async (to) => {
   // /settings 本身不擋（內建密碼閘門）
   if (to.path.startsWith('/settings') || to.path === '/login' || to.path === '/onboarding') {
     return
+  }
+
+  // 網域房間存取控制：/office/:roomId 必須是當前網域允許的房間
+  if (to.name === 'office' && to.params.roomId) {
+    const { useDomainStore } = await import('../stores/domain')
+    const domainStore = useDomainStore()
+    if (domainStore.resolved && domainStore.rooms.length > 0) {
+      const allowedIds = domainStore.rooms.map(r => String(r.id))
+      if (!allowedIds.includes(String(to.params.roomId))) {
+        // 導回第一個允許的房間
+        return { path: `/office/${domainStore.rooms[0]!.id}` }
+      }
+    }
   }
 
   if (to.meta.requiresAuth) {
