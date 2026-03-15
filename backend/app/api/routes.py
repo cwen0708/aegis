@@ -4537,12 +4537,12 @@ def resolve_domain(hostname: str = "", session: Session = Depends(get_session)):
 # ==========================================
 # Domain CRUD
 # ==========================================
-@router.get("/domains/", response_model=list[Domain])
+@router.get("/domains", response_model=list[Domain])
 def list_domains(session: Session = Depends(get_session)):
     return session.exec(select(Domain)).all()
 
 
-@router.post("/domains/", response_model=Domain)
+@router.post("/domains", response_model=Domain)
 def create_domain(data: DomainCreate, session: Session = Depends(get_session)):
     if data.is_default:
         # 清除其他 domain 的 is_default
@@ -4601,12 +4601,12 @@ def delete_domain(domain_id: int, session: Session = Depends(get_session)):
 # ==========================================
 # Room CRUD
 # ==========================================
-@router.get("/rooms/", response_model=list[Room])
+@router.get("/rooms", response_model=list[Room])
 def list_rooms(session: Session = Depends(get_session)):
     return session.exec(select(Room).order_by(Room.position)).all()
 
 
-@router.post("/rooms/", response_model=Room)
+@router.post("/rooms", response_model=Room)
 def create_room(data: RoomCreate, session: Session = Depends(get_session)):
     # 自動設 position 為最大值 + 1
     max_pos = session.exec(select(sa_func.max(Room.position))).one()
