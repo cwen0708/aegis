@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAegisStore } from '../stores/aegis'
 import { useAuthStore } from '../stores/auth'
+import { authHeaders } from '../utils/authFetch'
 import { useDomainStore } from '../stores/domain'
 import { useResponsive } from '../composables/useResponsive'
 
@@ -36,12 +37,13 @@ const isEditing = ref(false)
 
 async function loadLayoutFromSettings() {
   if (currentRoomId.value) {
-    // Load layout from room API
+    // Load layout from rooms list API
     try {
-      const res = await fetch(`/api/v1/rooms/${currentRoomId.value}`)
+      const res = await fetch('/api/v1/rooms/?all=true', { headers: authHeaders() })
       if (res.ok) {
-        const room = await res.json()
-        if (room.layout_json) {
+        const rooms = await res.json()
+        const room = rooms.find((r: any) => r.id === currentRoomId.value)
+        if (room && room.layout_json) {
           const layout = deserializeLayout(room.layout_json)
           if (layout) {
             if (!layout.slots || layout.slots.length === 0) {
@@ -83,7 +85,7 @@ async function handleSaveLayout(layout: OfficeLayout) {
     // Save to room
     await fetch(`/api/v1/rooms/${currentRoomId.value}/layout`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ layout_json: serializeLayout(layout) }),
     })
   } else {
