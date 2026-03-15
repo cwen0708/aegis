@@ -3653,7 +3653,9 @@ async def text_to_speech(data: TTSRequest):
     if audio is None:
         return Response(status_code=204)  # No Content → 前端降級
 
-    return Response(content=audio, media_type="audio/wav")
+    # 偵測格式：WAV 開頭是 RIFF，否則當 MP3
+    media_type = "audio/wav" if audio[:4] == b"RIFF" else "audio/mpeg"
+    return Response(content=audio, media_type=media_type)
 
 
 # ==========================================
@@ -4752,6 +4754,7 @@ def set_room_projects(room_id: int, data: RoomAssignment, session: Session = Dep
     old = session.exec(select(RoomProject).where(RoomProject.room_id == room_id)).all()
     for rp in old:
         session.delete(rp)
+    session.flush()  # 確保 DELETE 先執行，避免 UNIQUE 衝突
 
     # 新增
     project_ids = data.project_ids or []
@@ -4773,6 +4776,7 @@ def set_room_members(room_id: int, data: RoomAssignment, session: Session = Depe
     old = session.exec(select(RoomMember).where(RoomMember.room_id == room_id)).all()
     for rm in old:
         session.delete(rm)
+    session.flush()
 
     # 新增
     member_ids = data.member_ids or []
