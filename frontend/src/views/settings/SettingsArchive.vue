@@ -29,7 +29,7 @@ const actionLoading = ref<number | null>(null)
 
 async function fetchProjects() {
   try {
-    const res = await fetch('/api/v1/projects/')
+    const res = await fetch('/api/v1/projects/?all=true')
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     projects.value = await res.json()
     if (projects.value.length > 0 && !selectedProjectId.value) {

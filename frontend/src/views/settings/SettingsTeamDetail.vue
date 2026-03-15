@@ -152,7 +152,7 @@ const confirmDelete = ref(false)
 
 async function fetchMember() {
   try {
-    const res = await fetch(`${API}/api/v1/members`)
+    const res = await fetch(`${API}/api/v1/members?all=true`)
     if (!res.ok) throw new Error('載入失敗')
     const members: MemberInfo[] = await res.json()
     const m = members.find((m) => m.id === memberId)

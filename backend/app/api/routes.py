@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
 from fastapi.responses import FileResponse
 from sqlmodel import Session, select
 from sqlalchemy import func as sa_func
@@ -41,6 +41,48 @@ _card_locks: dict[int, asyncio.Lock] = {}
 
 def get_card_lock(card_id: int) -> asyncio.Lock:
     return _card_locks.setdefault(card_id, asyncio.Lock())
+
+
+def _get_domain_filter(request: Request, session: Session):
+    """根據 Host header 回傳 (visible_project_ids, visible_member_ids)。
+    回傳 (None, None) 表示不過濾（admin / localhost / 無網域設定）。"""
+    # ?all=true → 不過濾（settings 頁面用）
+    if request.query_params.get("all") == "true":
+        return None, None
+
+    # localhost → 不過濾（worker / 內部呼叫）
+    client_host = request.client.host if request.client else ""
+    if client_host in ("127.0.0.1", "::1", "localhost"):
+        return None, None
+
+    # Host header → Domain → Rooms
+    host = (request.headers.get("host") or "").split(":")[0]
+    if not host:
+        return None, None
+
+    from app.models.core import Domain, RoomProject, RoomMember
+    domain = session.exec(
+        select(Domain).where(Domain.hostname == host, Domain.is_active == True)
+    ).first()
+    if not domain:
+        domain = session.exec(
+            select(Domain).where(Domain.is_default == True, Domain.is_active == True)
+        ).first()
+    if not domain:
+        return None, None
+
+    room_ids = json_module.loads(domain.room_ids_json or "[]")
+    if not room_ids:
+        return None, None
+
+    project_ids = {rp.project_id for rp in session.exec(
+        select(RoomProject).where(RoomProject.room_id.in_(room_ids))
+    ).all()}
+    member_ids = {rm.member_id for rm in session.exec(
+        select(RoomMember).where(RoomMember.room_id.in_(room_ids))
+    ).all()}
+
+    return project_ids or None, member_ids or None
 
 
 def _get_project_for_list(session: Session, list_id: int):
@@ -124,9 +166,11 @@ class ProjectUpdate(BaseModel):
 # Project Routes
 # ==========================================
 @router.get("/projects/", response_model=List[Project])
-def read_projects(session: Session = Depends(get_session)):
-    # 回傳所有專案，讓前端可以顯示停用狀態
+def read_projects(request: Request, session: Session = Depends(get_session)):
     projects = session.exec(select(Project)).all()
+    visible_project_ids, _ = _get_domain_filter(request, session)
+    if visible_project_ids is not None:
+        projects = [p for p in projects if p.id in visible_project_ids]
     return projects
 
 @router.post("/projects/", response_model=Project)
@@ -2362,7 +2406,7 @@ class MemberCreateRequest(BaseModel):
 
 
 @router.get("/members")
-def list_members(session: Session = Depends(get_session)):
+def list_members(request: Request, session: Session = Depends(get_session)):
     """列出所有成員 + 綁定帳號"""
     members = session.exec(select(Member).order_by(Member.id)).all()
     result = []
@@ -2393,6 +2437,9 @@ def list_members(session: Session = Depends(get_session)):
             "provider": primary_provider,
             "accounts": accounts,
         })
+    _, visible_member_ids = _get_domain_filter(request, session)
+    if visible_member_ids is not None:
+        result = [m for m in result if m["id"] in visible_member_ids]
     return result
 
 

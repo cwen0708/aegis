@@ -66,7 +66,7 @@ async function fetchAll() {
   try {
     const [accRes, memRes] = await Promise.all([
       fetch(`${API}/api/v1/accounts`),
-      fetch(`${API}/api/v1/members`),
+      fetch(`${API}/api/v1/members?all=true`),
     ])
     if (!accRes.ok) throw new Error(`帳號載入失敗: HTTP ${accRes.status}`)
     if (!memRes.ok) throw new Error(`成員載入失敗: HTTP ${memRes.status}`)
