@@ -120,7 +120,19 @@ let pollId: number
 async function fetchMembers() {
   try {
     const res = await fetch('/api/v1/members')
-    if (res.ok) members.value = await res.json()
+    if (res.ok) {
+      let all = await res.json()
+      // 如果有指定房間，只顯示該房間的成員
+      const rid = currentRoomId.value
+      if (rid) {
+        const room = domainStore.rooms.find(r => String(r.id) === String(rid))
+        if (room && room.member_ids && room.member_ids.length > 0) {
+          const allowed = new Set(room.member_ids)
+          all = all.filter((m: any) => allowed.has(m.id))
+        }
+      }
+      members.value = all
+    }
   } catch {}
 }
 
