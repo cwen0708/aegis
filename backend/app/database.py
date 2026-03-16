@@ -53,11 +53,14 @@ def _migrate_db():
         if renamed:
             logger.info(f"[Migration] Renamed {renamed} 'OneStack' list(s) to 'Inbound'")
 
-        # BotUser 加 access_expires_at
+        # BotUser 加 access_expires_at, extra_json
         cols = [row[1] for row in cur.execute("PRAGMA table_info(botuser)").fetchall()]
         if "access_expires_at" not in cols:
             cur.execute("ALTER TABLE botuser ADD COLUMN access_expires_at DATETIME")
             logger.info("[Migration] Added 'access_expires_at' to botuser")
+        if "extra_json" not in cols:
+            cur.execute("ALTER TABLE botuser ADD COLUMN extra_json TEXT DEFAULT '{}'")
+            logger.info("[Migration] Added 'extra_json' to botuser")
 
         # InviteCode 加 access_valid_days
         tables = [row[0] for row in cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
