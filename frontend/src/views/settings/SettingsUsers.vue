@@ -226,7 +226,7 @@ async function fetchInvitations() {
 
 async function fetchProjects() {
   try {
-    const res = await fetch(`${API}/api/v1/projects/?all=true`)
+    const res = await fetch(`${API}/api/v1/projects/?all=true`, { headers: authHeaders() })
     if (res.ok) {
       const data = await res.json()
       projects.value = data.map((p: any) => ({ id: p.id, name: p.name }))
@@ -236,7 +236,7 @@ async function fetchProjects() {
 
 async function fetchMembers() {
   try {
-    const res = await fetch(`${API}/api/v1/members?all=true`)
+    const res = await fetch(`${API}/api/v1/members?all=true`, { headers: authHeaders() })
     if (res.ok) members.value = await res.json()
   } catch {}
 }

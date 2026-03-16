@@ -66,7 +66,7 @@ const saving = ref(false)
 async function fetchProjects() {
   loading.value = true
   try {
-    const res = await fetch(`${API}/api/v1/projects/?all=true`)
+    const res = await fetch(`${API}/api/v1/projects/?all=true`, { headers: authHeaders() })
     if (!res.ok) throw new Error('載入失敗')
     projects.value = await res.json()
   } catch (e: any) {
@@ -77,7 +77,7 @@ async function fetchProjects() {
 
 async function fetchMembers() {
   try {
-    const res = await fetch(`${API}/api/v1/members?all=true`)
+    const res = await fetch(`${API}/api/v1/members?all=true`, { headers: authHeaders() })
     if (res.ok) members.value = await res.json()
   } catch {}
 }

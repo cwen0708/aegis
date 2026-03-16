@@ -44,7 +44,7 @@ const confirmDelete = ref(false)
 
 async function fetchProject() {
   try {
-    const res = await fetch(`${API}/api/v1/projects/?all=true`)
+    const res = await fetch(`${API}/api/v1/projects/?all=true`, { headers: authHeaders() })
     if (!res.ok) throw new Error('載入失敗')
     const projects = await res.json()
     const p = projects.find((p: any) => p.id === projectId)
@@ -67,7 +67,7 @@ async function fetchProject() {
 
 async function fetchMembers() {
   try {
-    const res = await fetch(`${API}/api/v1/members?all=true`)
+    const res = await fetch(`${API}/api/v1/members?all=true`, { headers: authHeaders() })
     if (res.ok) members.value = await res.json()
   } catch {}
 }

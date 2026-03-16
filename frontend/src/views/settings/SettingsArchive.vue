@@ -3,8 +3,10 @@ import { ref, onMounted, watch } from 'vue'
 import { Archive, RotateCcw, Trash2, Loader2 } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 import { authHeaders } from '../../utils/authFetch'
+import { config } from '../../config'
 
 const store = useAegisStore()
+const API = config.apiUrl
 
 interface ArchivedCard {
   id: number
@@ -29,7 +31,7 @@ const actionLoading = ref<number | null>(null)
 
 async function fetchProjects() {
   try {
-    const res = await fetch('/api/v1/projects/?all=true')
+    const res = await fetch(`${API}/api/v1/projects/?all=true`, { headers: authHeaders() })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     projects.value = await res.json()
     if (projects.value.length > 0 && !selectedProjectId.value) {
