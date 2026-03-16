@@ -478,13 +478,15 @@ def switch_member(bot_user: BotUser, member_id: int) -> tuple[bool, str]:
         if not member:
             return False, "找不到此角色"
 
+        member_name = member.name  # commit 前先取，避免 expire 後讀到錯誤值
+
         # 更新預設 Member
         db_user = session.get(BotUser, bot_user.id)
         if db_user:
             db_user.default_member_id = member_id
             session.commit()
 
-        return True, f"已切換到 {member.name}"
+        return True, f"已切換到 {member_name}"
 
 
 def get_available_members(bot_user: BotUser) -> List[dict]:
