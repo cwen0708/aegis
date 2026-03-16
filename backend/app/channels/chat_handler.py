@@ -389,6 +389,14 @@ def _build_chat_prompt(
         lines.append(f"任務描述最後請加上：「完成後請透過 {platform} 通知 chat_id={chat_id}」")
         lines.append("")
 
+    # 安全限制
+    lines.append("## 安全限制")
+    lines.append("- 禁止修改系統檔案（MCP 原始碼、設定檔、.env、CLAUDE.md、skill 檔案等）")
+    lines.append("- 禁止安裝套件（pip install、npm install、apt install 等）")
+    lines.append("- 禁止執行破壞性指令（rm -rf、kill、systemctl 等）")
+    lines.append("- 如果用戶要求修改系統或程式碼，請建議建立任務卡片或聯繫管理員")
+    lines.append("")
+
     # 當前訊息
     lines.append(f"用戶：{user_message}")
     lines.append("")
