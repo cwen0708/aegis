@@ -783,6 +783,20 @@ onMounted(() => {
               </select>
             </div>
 
+            <div>
+              <label class="block text-sm text-slate-400 mb-1">預設 AI 成員</label>
+              <select
+                v-model="invForm.target_member_id"
+                class="w-full px-3 py-2 bg-slate-900 text-slate-200 border border-slate-600 rounded-lg focus:outline-none focus:border-sky-500"
+              >
+                <option :value="null">不指定</option>
+                <option v-for="m in members" :key="m.id" :value="m.id">
+                  {{ m.avatar || '' }} {{ m.name }}
+                </option>
+              </select>
+              <p class="text-[11px] text-slate-600 mt-1">用戶驗證後預設與哪個 AI 成員對話</p>
+            </div>
+
             <div v-if="!editingInvitation && projects.length > 0">
               <label class="block text-sm text-slate-400 mb-1">可存取專案</label>
               <div class="space-y-2 max-h-32 overflow-y-auto">
