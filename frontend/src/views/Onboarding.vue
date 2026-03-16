@@ -139,7 +139,7 @@ const steps: Step[] = [
   },
   {
     id: 'cron',
-    title: '排程任務（選用）',
+    title: '排程任務',
     description: '設定定時執行的自動化任務。',
     icon: Clock,
     details: [

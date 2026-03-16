@@ -453,9 +453,8 @@ onMounted(() => {
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="font-medium text-slate-200">{{ u.username || u.platform_user_id }}</span>
                 <span :class="['px-2 py-0.5 text-xs rounded border', userLevelColor(u.level)]">
-                  {{ userLevelLabel(u.level) }}
+                  {{ userLevelLabel(u.level) }} · {{ u.platform }}
                 </span>
-                <span class="text-xs text-slate-500 bg-slate-800 px-1.5 py-0.5 rounded">{{ u.platform }}</span>
                 <span v-if="!u.is_active" class="px-2 py-0.5 text-xs rounded bg-red-500/20 text-red-400 border border-red-500/30">
                   已封鎖
                 </span>

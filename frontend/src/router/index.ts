@@ -50,6 +50,7 @@ const router = createRouter({
         { path: 'projects/:id', component: SettingsProjectDetail },
         { path: 'rooms', component: () => import('../views/settings/SettingsRooms.vue') },
         { path: 'domains', component: () => import('../views/settings/SettingsDomains.vue') },
+        { path: 'domains/:id', component: () => import('../views/settings/SettingsDomainDetail.vue') },
         { path: 'users', component: SettingsUsers },
         { path: 'invitations', redirect: '/settings/users' },
         { path: 'archive', component: SettingsArchive },

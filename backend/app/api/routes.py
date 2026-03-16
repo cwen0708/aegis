@@ -4618,6 +4618,14 @@ def create_domain(data: DomainCreate, session: Session = Depends(get_session)):
     return domain
 
 
+@router.get("/domains/{domain_id}", response_model=Domain)
+def get_domain(domain_id: int, session: Session = Depends(get_session)):
+    domain = session.get(Domain, domain_id)
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+    return domain
+
+
 @router.patch("/domains/{domain_id}", response_model=Domain)
 def update_domain(domain_id: int, data: DomainUpdate, session: Session = Depends(get_session)):
     domain = session.get(Domain, domain_id)
