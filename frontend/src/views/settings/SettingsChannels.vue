@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { MessageSquare, Loader2, ChevronRight, RefreshCw, Layers } from 'lucide-vue-next'
+import { Loader2, ChevronRight, RefreshCw, Layers } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 import { config } from '../../config'
 import { authHeaders } from '../../utils/authFetch'
@@ -25,9 +25,6 @@ const channelDefs = [
   { name: 'feishu', label: '飛書 / Lark', icon: '🐦', iconColor: 'bg-cyan-500/20' },
   { name: 'email', label: 'Email (IMAP/SMTP)', icon: '📧', iconColor: 'bg-amber-500/20' },
 ]
-
-// OneStack 也放在列表裡
-const onestackItem = { name: 'onestack', label: 'OneStack', icon: '🔗', iconColor: 'bg-violet-500/20' }
 
 function getStatus(name: string) {
   const cfg = channelConfigs.value[name]
