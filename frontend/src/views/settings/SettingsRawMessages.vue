@@ -448,8 +448,8 @@ onMounted(() => {
                 <div class="text-sm font-medium text-slate-200">{{ g.group_name || g.group_id.slice(0, 16) + '...' }}</div>
                 <div class="flex items-center gap-3 text-[10px] text-slate-500 mt-0.5">
                   <span>{{ g.member_count }} 人</span>
-                  <span v-if="statsMap[g.group_id]">{{ statsMap[g.group_id].message_count }} 則訊息</span>
-                  <span v-if="statsMap[g.group_id]?.last_message_at">最後: {{ formatTime(statsMap[g.group_id].last_message_at!) }}</span>
+                  <span v-if="statsMap[g.group_id]">{{ statsMap[g.group_id]?.message_count }} 則訊息</span>
+                  <span v-if="statsMap[g.group_id]?.last_message_at">最後: {{ formatTime(statsMap[g.group_id]?.last_message_at ?? '') }}</span>
                 </div>
               </div>
               <button @click="viewGroupMessages(g.group_id)" class="text-[11px] text-green-400 hover:text-green-300 px-2 py-1 rounded-lg hover:bg-green-500/10 transition-colors">查看訊息</button>
