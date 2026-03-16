@@ -80,8 +80,8 @@ async def _register_channels_from_config():
                     mode=line_mode,
                 ))
                 logger.info(f"LINE channel registered (mode={line_mode})")
-    except ImportError as e:
-        logger.warning(f"LINE adapter unavailable: {e}")
+    except Exception as e:
+        logger.warning(f"LINE adapter unavailable: {e}", exc_info=True)
 
     # Discord: DB 優先，env 備援
     try:
