@@ -39,6 +39,9 @@ class CommandType(str, Enum):
     # P2: 角色切換
     SWITCH = "switch"
 
+    # 個人資料
+    PROFILE = "profile"
+
     # 系統操作
     STATUS = "status"
     HELP = "help"
@@ -97,6 +100,12 @@ COMMAND_PATTERNS: list[tuple[str, CommandType]] = [
     # P2: 角色切換
     (r"^/switch\s+(\d+)$", CommandType.SWITCH),      # /switch 2 (member_id)
     (r"^/switch\s+(.+)$", CommandType.SWITCH),       # /switch 小美 (member name)
+
+    # 個人資料
+    (r"^/profile$", CommandType.PROFILE),                          # /profile (查看)
+    (r"^/profile\s+set\s+(\S+)\s+(.+)$", CommandType.PROFILE),   # /profile set ad_user john
+    (r"^/profile\s+del\s+(\S+)$", CommandType.PROFILE),           # /profile del ad_user
+    (r"^/profile\s+clear$", CommandType.PROFILE),                  # /profile clear
 
     # 系統命令
     (r"^/status$", CommandType.STATUS),
@@ -160,6 +169,9 @@ def get_help_text(level: int = 0) -> str:
     if level >= 1:
         lines.append("👤 *個人*")
         lines.append("/me — 查看我的資訊")
+        lines.append("/profile — 查看/設定額外資料")
+        lines.append("/profile set <key> <value> — 設定欄位")
+        lines.append("/profile del <key> — 刪除欄位")
         lines.append("")
 
         lines.append("📋 *卡片*")

@@ -21,7 +21,7 @@ COMMAND_PERMISSIONS = {
     # L0: 任何人
     "help": 0, "start": 0, "verify": 0,
     # L1: 訪客
-    "me": 1, "status": 1, "card_list": 1, "card": 1, "bind": 1, "unbind": 1, "bindings": 1,
+    "me": 1, "status": 1, "card_list": 1, "card": 1, "bind": 1, "unbind": 1, "bindings": 1, "profile": 1,
     # L2: 成員
     "run": 2, "stop": 2, "card_create": 2, "switch": 2,
     # L3: 管理員
@@ -677,3 +677,80 @@ def grant_project_access(
 
         logger.info(f"[BotUserProject] Granted: user={bot_user_id}, project={project_id}")
         return bup
+
+
+# ==========================================
+# 額外資料 (extra_json) CRUD
+# ==========================================
+
+def get_user_extra(bot_user_id: int) -> dict:
+    """取得用戶的 extra_json（解析為 dict）"""
+    with Session(engine) as session:
+        user = session.get(BotUser, bot_user_id)
+        if not user:
+            return {}
+        try:
+            return json.loads(user.extra_json or "{}")
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+
+def set_user_extra(bot_user_id: int, data: dict) -> bool:
+    """整筆覆寫 extra_json"""
+    with Session(engine) as session:
+        user = session.get(BotUser, bot_user_id)
+        if not user:
+            return False
+        user.extra_json = json.dumps(data, ensure_ascii=False)
+        session.commit()
+        return True
+
+
+def merge_user_extra(bot_user_id: int, updates: dict, mode: str = "union") -> dict:
+    """
+    合併更新 extra_json
+
+    mode:
+      - "union": 聯集 — 新 key 加入，已有 key 覆蓋值（預設）
+      - "intersect": 交集 — 只更新已存在的 key
+      - "deep": 深度合併 — 遇到 dict 值遞迴合併
+
+    Returns: 合併後的完整 dict
+    """
+    current = get_user_extra(bot_user_id)
+
+    if mode == "intersect":
+        # 只更新已存在的 key
+        merged = {**current}
+        for k, v in updates.items():
+            if k in current:
+                merged[k] = v
+    elif mode == "deep":
+        # 深度合併
+        merged = _deep_merge(current, updates)
+    else:
+        # union: 直接覆蓋
+        merged = {**current, **updates}
+
+    set_user_extra(bot_user_id, merged)
+    return merged
+
+
+def delete_user_extra_keys(bot_user_id: int, keys: list[str]) -> dict:
+    """刪除 extra_json 中的指定 key"""
+    current = get_user_extra(bot_user_id)
+    for k in keys:
+        current.pop(k, None)
+    set_user_extra(bot_user_id, current)
+    return current
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """遞迴合併兩個 dict"""
+    result = {**base}
+    for k, v in override.items():
+        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+            result[k] = _deep_merge(result[k], v)
+        else:
+            result[k] = v
+    return result

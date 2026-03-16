@@ -276,6 +276,9 @@ class BotUser(SQLModel, table=True):
     # 存取期限
     access_expires_at: Optional[datetime] = None     # 存取過期時間（None = 永不過期）
 
+    # 額外資料（JSON，供 MCP/Skill 讀取，如 AD 帳密、自訂欄位等）
+    extra_json: str = Field(default="{}")
+
     # 安全性
     failed_verify_count: int = Field(default=0)      # 驗證失敗次數
     last_failed_at: Optional[datetime] = None        # 最後失敗時間

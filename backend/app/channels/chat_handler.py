@@ -17,13 +17,13 @@ from app.core.card_index import sync_card_to_index, next_card_id
 from app.core.member_profile import get_soul_content, list_skills, get_skill_content
 from app.core.runner import run_ai_task
 from .types import InboundMessage
-from .bot_user import get_user_projects, get_user_context, get_default_project
+from .bot_user import get_user_projects, get_user_context, get_default_project, get_user_extra
 
 logger = logging.getLogger(__name__)
 
 # 限流設定
 MAX_MESSAGE_LENGTH = 2000
-MAX_HISTORY_MESSAGES = 10
+MAX_HISTORY_MESSAGES = 25
 MONTHLY_TOKEN_LIMIT_L1 = 100_000
 MONTHLY_TOKEN_LIMIT_L2 = 1_000_000
 
@@ -119,6 +119,9 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser) -> Optional[str]:
             media_hint += f"\n[附帶說明: {msg.caption}]"
         user_message = (user_message + media_hint).strip()
 
+    # 7.6 取得用戶額外資料（供 AI/MCP 使用）
+    user_extra = get_user_extra(bot_user.id)
+
     # 8. 建構 prompt（含用戶身份和專案範圍）
     prompt = _build_chat_prompt(
         soul=soul,
@@ -131,6 +134,7 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser) -> Optional[str]:
         user_level=bot_user.level,
         chat_id=msg.chat_id,
         platform=bot_user.platform,
+        user_extra=user_extra,
     )
 
     # 9. 取得 AI 帳號和模型
@@ -289,6 +293,7 @@ def _build_chat_prompt(
     user_level: int = 0,
     chat_id: str = "",
     platform: str = "",
+    user_extra: Optional[dict] = None,
 ) -> str:
     """
     組合完整 prompt = 靈魂 + 技能 + 用戶身份 + 專案範圍 + 歷史 + 新訊息
@@ -333,6 +338,16 @@ def _build_chat_prompt(
             lines.append(f"身份描述：{user_context.description}")
         lines.append("")
         lines.append("請根據用戶的身份和權限範圍回答，用適當的稱呼和語氣。")
+        lines.append("")
+
+    # 用戶額外資料（供 MCP/Skill 使用，如 AD 帳號等）
+    if user_extra:
+        lines.append("## 用戶額外資料")
+        for k, v in user_extra.items():
+            lines.append(f"- {k}: {v}")
+        lines.append("")
+        lines.append("這些資料可用於 MCP 工具存取外部系統（如 NAS、AD 等）。")
+        lines.append("如果需要存取外部系統但缺少必要的認證資料（如 ad_user, ad_pass），請引導用戶使用 /profile set 指令設定。")
         lines.append("")
 
     # 用戶可存取的專案（讓 AI 知道範圍）

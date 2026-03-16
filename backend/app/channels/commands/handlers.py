@@ -9,6 +9,7 @@ from ..bot_user import (
     get_or_create_bot_user, check_permission, verify_invite_code,
     create_invite_code, get_user_info, list_users, set_user_level,
     ban_user, assign_member, switch_member, get_available_members,
+    get_user_extra, merge_user_extra, delete_user_extra_keys, set_user_extra,
     # P2: 專案權限檢查
     get_user_projects, can_user_view_project, can_user_create_card, can_user_run_task,
 )
@@ -65,6 +66,8 @@ async def handle_command(cmd: ParsedCommand, msg: InboundMessage, bot_user: Opti
         CommandType.USER_ASSIGN: _handle_user_assign,
         # P2: 角色切換
         CommandType.SWITCH: _handle_switch,
+        # 個人資料
+        CommandType.PROFILE: _handle_profile,
         # 系統操作
         CommandType.STATUS: _handle_status,
         CommandType.HELP: _handle_help,
@@ -750,3 +753,70 @@ async def _handle_switch(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotU
         return f"✅ {message}"
     else:
         return f"❌ {message}"
+
+
+# ===== 個人資料命令 =====
+
+async def _handle_profile(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
+    """管理用戶額外資料 (extra_json)"""
+    import json
+
+    if not cmd.args:
+        # /profile — 查看
+        data = get_user_extra(bot_user.id)
+        if not data:
+            return (
+                "📋 *個人資料*\n\n"
+                "（尚無額外資料）\n\n"
+                "使用方式:\n"
+                "/profile set <key> <value> — 設定欄位\n"
+                "/profile del <key> — 刪除欄位\n\n"
+                "例如:\n"
+                "/profile set ad\\_user john.doe\n"
+                "/profile set ad\\_pass mypassword"
+            )
+
+        lines = ["📋 *個人資料*\n"]
+        for k, v in data.items():
+            # 密碼類欄位遮蔽顯示
+            display = "****" if "pass" in k.lower() or "secret" in k.lower() or "token" in k.lower() else str(v)
+            lines.append(f"  `{k}`: {display}")
+        return "\n".join(lines)
+
+    action = cmd.args[0].lower() if cmd.args else ""
+
+    if action == "clear":
+        # /profile clear
+        set_user_extra(bot_user.id, {})
+        return "🗑️ 已清空所有額外資料"
+
+    if len(cmd.args) == 1 and action not in ("set", "del", "clear"):
+        # /profile del <key> — args = [key] from regex
+        # This happens when the regex matched /profile del <key>
+        key = cmd.args[0]
+        result = delete_user_extra_keys(bot_user.id, [key])
+        return f"🗑️ 已刪除 `{key}`"
+
+    if len(cmd.args) >= 2:
+        key = cmd.args[0]
+        value = cmd.args[1]
+
+        # /profile set <key> <value> 的情境
+        # 嘗試解析 JSON 值（支援物件、陣列）
+        try:
+            parsed_value = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            parsed_value = value
+
+        result = merge_user_extra(bot_user.id, {key: parsed_value})
+        # 密碼類欄位遮蔽
+        display = "****" if "pass" in key.lower() or "secret" in key.lower() or "token" in key.lower() else str(parsed_value)
+        return f"✅ 已設定 `{key}` = {display}"
+
+    return (
+        "使用方式:\n"
+        "/profile — 查看額外資料\n"
+        "/profile set <key> <value> — 設定欄位\n"
+        "/profile del <key> — 刪除欄位\n"
+        "/profile clear — 清空所有"
+    )
