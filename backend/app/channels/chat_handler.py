@@ -157,6 +157,14 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser) -> Optional[str]:
         elif provider == "claude":
             model = "haiku"
 
+    # 9.5 從 extra_json 建構 MCP 用的環境變數（如 AD 帳密）
+    mcp_extra_env: dict[str, str] = {}
+    if user_extra:
+        if user_extra.get("ad_user"):
+            mcp_extra_env["SYNO_AD_USERNAME"] = user_extra["ad_user"]
+        if user_extra.get("ad_pass"):
+            mcp_extra_env["SYNO_AD_PASSWORD"] = user_extra["ad_pass"]
+
     # 10. 呼叫 AI
     try:
         result = await run_ai_task(
@@ -170,6 +178,7 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser) -> Optional[str]:
             member_id=member.id,
             model_override=model,
             auth_info=auth_info,
+            extra_env=mcp_extra_env or None,
         )
     except Exception as e:
         logger.error(f"[Chat] AI task failed: {e}")

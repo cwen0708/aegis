@@ -89,7 +89,8 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
                       project_name: str = "", member_id: Optional[int] = None,
                       model_override: Optional[str] = None,
                       project_id: Optional[int] = None,
-                      auth_info: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+                      auth_info: Optional[Dict[str, str]] = None,
+                      extra_env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """
     執行單一 AI 呼叫（用於 chat / email 等即時場景）。
 
@@ -126,6 +127,10 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
     from app.core.sandbox import build_sanitized_env, get_popen_kwargs
     env = build_sanitized_env(project_id=project_id)
     env.update(config.get("env", {}))
+
+    # 注入額外環境變數（如 per-user AD 帳密 for MCP）
+    if extra_env:
+        env.update(extra_env)
 
     # 注入 Account 認證資訊
     auth_info = auth_info or {}
