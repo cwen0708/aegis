@@ -159,11 +159,12 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser) -> Optional[str]:
 
     # 9.5 從 extra_json 建構 MCP 用的環境變數（如 AD 帳密）
     mcp_extra_env: dict[str, str] = {}
-    if user_extra:
-        if user_extra.get("ad_user"):
-            mcp_extra_env["SYNO_AD_USERNAME"] = user_extra["ad_user"]
-        if user_extra.get("ad_pass"):
-            mcp_extra_env["SYNO_AD_PASSWORD"] = user_extra["ad_pass"]
+    if user_extra and user_extra.get("ad_user") and user_extra.get("ad_pass"):
+        mcp_extra_env["SYNO_AD_USERNAME"] = user_extra["ad_user"]
+        mcp_extra_env["SYNO_AD_PASSWORD"] = user_extra["ad_pass"]
+    else:
+        # 硬擋：沒有 AD 帳密就封鎖 NAS MCP
+        mcp_extra_env["NAS_AUTH_BLOCKED"] = "1"
 
     # 10. 呼叫 AI
     try:
