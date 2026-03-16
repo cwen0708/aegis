@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { Settings, Globe, TerminalSquare, MessageSquare, Users, UserCheck, Bot, Activity, Lock, Loader2, FolderKanban, ChevronDown, Download, Layers, Rocket, Building2 } from 'lucide-vue-next'
+import { Settings, Globe, TerminalSquare, MessageSquare, Users, UserCheck, Bot, Activity, Lock, Loader2, FolderKanban, ChevronDown, Download, Layers, Rocket, Building2, Inbox } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { useResponsive } from '../../composables/useResponsive'
 import { useAuthStore } from '../../stores/auth'
@@ -34,6 +34,7 @@ const menuGroups = [
     label: '工作空間',
     items: [
       { path: '/settings/rooms', label: '空間管理', icon: Building2 },
+      { path: '/settings/raw-messages', label: '訊息收整', icon: Inbox },
       { path: '/settings/projects', label: '專案管理', icon: FolderKanban },
       { path: '/settings/team', label: '團隊管理', icon: Users },
       { path: '/settings/agents', label: '代理設定', icon: Bot },

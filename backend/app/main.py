@@ -73,11 +73,13 @@ async def _register_channels_from_config():
         if line_config.get("enabled") or (not line_config and line_secret and line_token):
             if line_secret and line_token:
                 from app.channels.adapters.line import LineChannel
+                line_mode = line_config.get("mode", "active")  # active | passive
                 channel_manager.register(LineChannel(
                     channel_secret=line_secret,
                     access_token=line_token,
+                    mode=line_mode,
                 ))
-                logger.info("LINE channel registered")
+                logger.info(f"LINE channel registered (mode={line_mode})")
     except ImportError as e:
         logger.warning(f"LINE adapter unavailable: {e}")
 

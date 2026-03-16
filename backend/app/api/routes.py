@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from app.database import get_session
-from app.models.core import Project, Card, StageList, CronJob, CronLog, SystemSetting, Account, Member, MemberAccount, TaskLog, CardIndex, InviteCode, BotUser, BotUserProject, EmailMessage, Room, RoomProject, RoomMember, Domain
+from app.models.core import Project, Card, StageList, CronJob, CronLog, SystemSetting, Account, Member, MemberAccount, TaskLog, CardIndex, InviteCode, BotUser, BotUserProject, EmailMessage, Room, RoomProject, RoomMember, Domain, RawMessage, RawMessageUser, RawMessageGroup
 from typing import Any
 # Worker 負責卡片任務執行，runner.py 只用於 chat/email 即時互動
 from app.core.usage_poller import get_cached_claude_usage, get_cached_gemini_usage, get_last_updated
@@ -4813,3 +4813,155 @@ def set_room_members(room_id: int, data: RoomAssignment, session: Session = Depe
 
     session.commit()
     return {"ok": True, "member_ids": member_ids}
+
+
+# ==========================================
+# 原始訊息收集 (RawMessage)
+# ==========================================
+
+@router.get("/raw-messages/")
+async def list_raw_messages(
+    session: Session = Depends(get_session),
+    source_id: Optional[str] = None,
+    platform: Optional[str] = None,
+    event_type: Optional[str] = None,
+    is_processed: Optional[bool] = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """列出原始訊息（支援篩選群組/平台/事件類型）"""
+    q = select(RawMessage).order_by(RawMessage.created_at.desc())
+    if source_id:
+        q = q.where(RawMessage.source_id == source_id)
+    if platform:
+        q = q.where(RawMessage.platform == platform)
+    if event_type:
+        q = q.where(RawMessage.event_type == event_type)
+    if is_processed is not None:
+        q = q.where(RawMessage.is_processed == is_processed)
+    q = q.offset(offset).limit(limit)
+
+    messages = session.exec(q).all()
+
+    # 批次查詢 user display_name
+    user_ids = list({m.user_id for m in messages if m.user_id})
+    user_map = {}
+    if user_ids:
+        users = session.exec(
+            select(RawMessageUser).where(RawMessageUser.user_id.in_(user_ids))
+        ).all()
+        user_map = {u.user_id: u.display_name for u in users}
+
+    # 組合回傳
+    result = []
+    for m in messages:
+        d = {
+            "id": m.id,
+            "platform": m.platform,
+            "source_type": m.source_type,
+            "source_id": m.source_id,
+            "user_id": m.user_id,
+            "user_name": user_map.get(m.user_id, ""),
+            "event_type": m.event_type,
+            "content_type": m.content_type,
+            "content": m.content,
+            "is_processed": m.is_processed,
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+        }
+        result.append(d)
+    return result
+
+
+@router.get("/raw-messages/stats")
+async def raw_message_stats(
+    session: Session = Depends(get_session),
+):
+    """統計各群組的訊息數量"""
+    from sqlalchemy import func as sa_fn
+    rows = session.exec(
+        select(
+            RawMessage.source_id,
+            sa_fn.count(RawMessage.id).label("count"),
+            sa_fn.max(RawMessage.created_at).label("last_at"),
+        )
+        .where(RawMessage.event_type == "message")
+        .group_by(RawMessage.source_id)
+    ).all()
+
+    # 查群組名稱
+    source_ids = [r[0] for r in rows]
+    groups = session.exec(
+        select(RawMessageGroup).where(RawMessageGroup.group_id.in_(source_ids))
+    ).all() if source_ids else []
+    group_map = {g.group_id: g for g in groups}
+
+    result = []
+    for source_id, count, last_at in rows:
+        g = group_map.get(source_id)
+        result.append({
+            "source_id": source_id,
+            "group_name": g.group_name if g else "",
+            "project_id": g.project_id if g else None,
+            "member_count": g.member_count if g else 0,
+            "message_count": count,
+            "last_message_at": last_at.isoformat() if last_at else None,
+        })
+    return sorted(result, key=lambda x: x["message_count"], reverse=True)
+
+
+# ==========================================
+# 群組管理 (RawMessageGroup)
+# ==========================================
+
+@router.get("/raw-messages/groups/")
+async def list_raw_message_groups(
+    session: Session = Depends(get_session),
+    platform: Optional[str] = None,
+):
+    """列出所有收集中的群組"""
+    q = select(RawMessageGroup)
+    if platform:
+        q = q.where(RawMessageGroup.platform == platform)
+    return session.exec(q.order_by(RawMessageGroup.updated_at.desc())).all()
+
+
+class GroupUpdatePayload(BaseModel):
+    project_id: Optional[int] = None
+    group_name: Optional[str] = None
+
+
+@router.patch("/raw-messages/groups/{group_id}")
+async def update_raw_message_group(
+    group_id: int,
+    payload: GroupUpdatePayload,
+    session: Session = Depends(get_session),
+):
+    """更新群組設定（指派專案等）"""
+    g = session.get(RawMessageGroup, group_id)
+    if not g:
+        raise HTTPException(404, "Group not found")
+    if payload.project_id is not None:
+        g.project_id = payload.project_id
+    if payload.group_name is not None:
+        g.group_name = payload.group_name
+    g.updated_at = datetime.now(timezone.utc)
+    session.add(g)
+    session.commit()
+    session.refresh(g)
+    return g
+
+
+# ==========================================
+# 用戶快取 (RawMessageUser)
+# ==========================================
+
+@router.get("/raw-messages/users/")
+async def list_raw_message_users(
+    session: Session = Depends(get_session),
+    platform: Optional[str] = None,
+):
+    """列出所有收集到的用戶"""
+    q = select(RawMessageUser)
+    if platform:
+        q = q.where(RawMessageUser.platform == platform)
+    return session.exec(q.order_by(RawMessageUser.updated_at.desc())).all()

@@ -40,6 +40,10 @@ const channelDefs = [
     fields: [
       { key: 'channel_secret', label: 'Channel Secret', type: 'password' as const, placeholder: '' },
       { key: 'access_token', label: 'Access Token', type: 'password' as const, placeholder: '' },
+      { key: 'mode', label: '模式', type: 'select' as const, options: [
+        { value: 'active', label: '互動模式（收發訊息）' },
+        { value: 'passive', label: '收集模式（只收不回）' },
+      ], hint: 'Passive 模式會將訊息存入 RawMessage 表，不觸發 AI 回應' },
     ],
   },
   {

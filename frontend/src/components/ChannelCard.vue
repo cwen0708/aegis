@@ -10,9 +10,10 @@ interface ChannelConfig {
 interface FieldDef {
   key: string
   label: string
-  type: 'text' | 'password' | 'checkbox'
+  type: 'text' | 'password' | 'checkbox' | 'select'
   placeholder?: string
   hint?: string
+  options?: { value: string; label: string }[]
 }
 
 const props = defineProps<{
@@ -122,6 +123,17 @@ function saveConfig() {
             />
             <span class="text-xs text-slate-300">{{ field.label }}</span>
           </label>
+        </template>
+        <template v-else-if="field.type === 'select'">
+          <label class="block text-xs font-medium text-slate-400 mb-1">{{ field.label }}</label>
+          <select
+            :value="localConfig[field.key] || field.options?.[0]?.value"
+            @change="updateField(field.key, ($event.target as HTMLSelectElement).value)"
+            class="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none"
+          >
+            <option v-for="opt in field.options" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+          </select>
+          <p v-if="field.hint" class="text-[10px] text-slate-500 mt-0.5">{{ field.hint }}</p>
         </template>
         <template v-else>
           <label class="block text-xs font-medium text-slate-400 mb-1">{{ field.label }}</label>

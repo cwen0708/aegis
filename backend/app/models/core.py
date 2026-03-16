@@ -455,6 +455,67 @@ class EmailMessage(SQLModel, table=True):
 
 
 # ==========================================
+# 原始訊息收集（Passive 模式）
+# ==========================================
+class RawMessage(SQLModel, table=True):
+    """原始訊息存檔（passive 模式，只收不回）"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    # 來源識別
+    platform: str = Field(index=True)             # "line"
+    source_type: str = Field(default="user")      # "user" | "group" | "room"
+    source_id: str = Field(index=True)             # group_id / room_id / user_id
+    user_id: str = Field(default="")               # 發話者（群組中可能為空）
+
+    # 事件
+    event_type: str = Field(default="message")     # message / follow / join / leave / postback
+    content_type: str = Field(default="text")      # text / image / video / audio / sticker / file
+    content: str = Field(default="")               # 文字內容（非文字則為空）
+    payload: str = Field(default="{}")             # 完整原始 event JSON
+
+    # 處理狀態
+    is_processed: bool = Field(default=False, index=True)
+    processed_at: Optional[datetime] = None
+
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class RawMessageUser(SQLModel, table=True):
+    """外部平台用戶快取（LINE profile 等）"""
+    __table_args__ = (
+        UniqueConstraint("platform", "user_id", name="uq_rawmsguser"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    platform: str = Field(index=True)
+    user_id: str = Field(index=True)
+    display_name: str = Field(default="")
+    picture_url: str = Field(default="")
+    status_message: str = Field(default="")
+
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class RawMessageGroup(SQLModel, table=True):
+    """外部平台群組快取（LINE group summary 等）"""
+    __table_args__ = (
+        UniqueConstraint("platform", "group_id", name="uq_rawmsggroup"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    platform: str = Field(index=True)
+    group_id: str = Field(index=True)
+    group_name: str = Field(default="")
+    picture_url: str = Field(default="")
+    member_count: int = Field(default=0)
+    project_id: Optional[int] = Field(default=None, foreign_key="project.id", index=True)
+
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# ==========================================
 # 房間 & 網域（多空間 + 網域綁定）
 # ==========================================
 class Room(SQLModel, table=True):
