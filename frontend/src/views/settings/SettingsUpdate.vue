@@ -445,7 +445,7 @@ onUnmounted(() => {
                 v-model="updateStatus.auto_update_time"
                 type="time"
                 @change="saveAutoUpdateSettings"
-                class="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-mono focus:ring-2 focus:ring-cyan-500 outline-none"
+                class="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-mono focus:ring-2 focus:ring-cyan-500 outline-none [color-scheme:dark]"
               />
             </div>
           </div>

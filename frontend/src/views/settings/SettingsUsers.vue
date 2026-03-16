@@ -669,7 +669,7 @@ onMounted(() => {
             <label class="block text-sm text-slate-400 mb-1">權限等級</label>
             <select
               v-model.number="editUserForm.level"
-              class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm"
+              class="w-full px-3 py-2 bg-slate-900 text-slate-200 border border-slate-600 rounded-lg text-sm [color-scheme:dark]"
             >
               <option :value="0">L0 — 未驗證</option>
               <option :value="1">L1 — 訪客（唯讀）</option>
@@ -704,7 +704,7 @@ onMounted(() => {
             <input
               v-model="editUserForm.access_expires_at"
               type="date"
-              class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm"
+              class="w-full px-3 py-2 bg-slate-900 text-slate-200 border border-slate-600 rounded-lg text-sm [color-scheme:dark]"
             />
             <p class="text-[11px] text-slate-600 mt-1">留空表示永不過期。過期後用戶無法對話，但資料保留。</p>
           </div>
@@ -775,7 +775,7 @@ onMounted(() => {
               <label class="block text-sm text-slate-400 mb-1">權限等級</label>
               <select
                 v-model="invForm.target_level"
-                class="w-full px-3 py-2 bg-slate-900 text-slate-200 border border-slate-600 rounded-lg focus:outline-none focus:border-sky-500"
+                class="w-full px-3 py-2 bg-slate-900 text-slate-200 border border-slate-600 rounded-lg focus:outline-none focus:border-sky-500 [color-scheme:dark]"
               >
                 <option :value="1">L1 一般用戶（查看、留言）</option>
                 <option :value="2">L2 進階用戶（建卡、執行任務）</option>
@@ -787,7 +787,7 @@ onMounted(() => {
               <label class="block text-sm text-slate-400 mb-1">預設 AI 成員</label>
               <select
                 v-model="invForm.target_member_id"
-                class="w-full px-3 py-2 bg-slate-900 text-slate-200 border border-slate-600 rounded-lg focus:outline-none focus:border-sky-500"
+                class="w-full px-3 py-2 bg-slate-900 text-slate-200 border border-slate-600 rounded-lg focus:outline-none focus:border-sky-500 [color-scheme:dark]"
               >
                 <option :value="null">不指定</option>
                 <option v-for="m in members" :key="m.id" :value="m.id">
@@ -867,7 +867,7 @@ onMounted(() => {
                 v-model.number="invForm.max_uses"
                 type="number"
                 min="1"
-                class="w-full px-3 py-2 bg-slate-900 text-slate-200 border border-slate-600 rounded-lg focus:outline-none focus:border-sky-500"
+                class="w-full px-3 py-2 bg-slate-900 text-slate-200 border border-slate-600 rounded-lg focus:outline-none focus:border-sky-500 [color-scheme:dark]"
               />
             </div>
 
