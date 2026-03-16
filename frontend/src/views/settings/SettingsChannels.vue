@@ -1,122 +1,60 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { MessageSquare, Loader2, RefreshCw } from 'lucide-vue-next'
+import { ref, onMounted, computed } from 'vue'
+import { useRouter } from 'vue-router'
+import { MessageSquare, Loader2, ChevronRight, RefreshCw, Layers } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
-import ChannelCard from '../../components/ChannelCard.vue'
-
 import { config } from '../../config'
 import { authHeaders } from '../../utils/authFetch'
 
+const router = useRouter()
 const store = useAegisStore()
 const API = config.apiUrl
 
-// 頻道設定狀態
-interface ChannelConfig {
-  enabled: boolean
-  [key: string]: any
-}
-const channelsLoading = ref(true)
-const channelConfigs = ref<Record<string, ChannelConfig>>({})
+const loading = ref(true)
+const channelConfigs = ref<Record<string, any>>({})
 const channelStatuses = ref<Record<string, { connected: boolean; error?: string }>>({})
-const channelSaving = ref<string | null>(null)
 const channelRestarting = ref(false)
 
 // 頻道定義
 const channelDefs = [
-  {
-    name: 'telegram',
-    label: 'Telegram',
-    icon: '✈️',
-    iconColor: 'bg-sky-500/20',
-    fields: [
-      { key: 'bot_token', label: 'Bot Token', type: 'password' as const, placeholder: '123456:ABC-DEF...', hint: '從 @BotFather 取得' },
-    ],
-  },
-  {
-    name: 'line',
-    label: 'LINE',
-    icon: '💬',
-    iconColor: 'bg-green-500/20',
-    fields: [
-      { key: 'channel_secret', label: 'Channel Secret', type: 'password' as const, placeholder: '' },
-      { key: 'access_token', label: 'Access Token', type: 'password' as const, placeholder: '' },
-      { key: 'mode', label: '模式', type: 'select' as const, options: [
-        { value: 'active', label: '互動模式（收發訊息）' },
-        { value: 'passive', label: '收集模式（只收不回）' },
-      ], hint: 'Passive 模式會將訊息存入 RawMessage 表，不觸發 AI 回應' },
-    ],
-  },
-  {
-    name: 'discord',
-    label: 'Discord',
-    icon: '🎮',
-    iconColor: 'bg-indigo-500/20',
-    fields: [
-      { key: 'bot_token', label: 'Bot Token', type: 'password' as const, placeholder: '' },
-    ],
-  },
-  {
-    name: 'slack',
-    label: 'Slack',
-    icon: '💼',
-    iconColor: 'bg-purple-500/20',
-    fields: [
-      { key: 'bot_token', label: 'Bot Token (xoxb-)', type: 'password' as const, placeholder: 'xoxb-...' },
-      { key: 'app_token', label: 'App Token (xapp-)', type: 'password' as const, placeholder: 'xapp-...' },
-    ],
-  },
-  {
-    name: 'wecom',
-    label: '企業微信',
-    icon: '🏢',
-    iconColor: 'bg-blue-500/20',
-    fields: [
-      { key: 'corp_id', label: '企業 ID', type: 'text' as const, placeholder: '' },
-      { key: 'corp_secret', label: '應用 Secret', type: 'password' as const, placeholder: '' },
-      { key: 'agent_id', label: 'Agent ID', type: 'text' as const, placeholder: '1000001' },
-    ],
-  },
-  {
-    name: 'feishu',
-    label: '飛書 / Lark',
-    icon: '🐦',
-    iconColor: 'bg-cyan-500/20',
-    fields: [
-      { key: 'app_id', label: 'App ID', type: 'text' as const, placeholder: '' },
-      { key: 'app_secret', label: 'App Secret', type: 'password' as const, placeholder: '' },
-      { key: 'is_lark', label: '使用 Lark 國際版', type: 'checkbox' as const },
-    ],
-  },
-  {
-    name: 'email',
-    label: 'Email (IMAP/SMTP)',
-    icon: '📧',
-    iconColor: 'bg-amber-500/20',
-    fields: [
-      { key: 'imap_host', label: 'IMAP Host', type: 'text' as const, placeholder: 'imap.gmail.com' },
-      { key: 'imap_port', label: 'IMAP Port', type: 'text' as const, placeholder: '993' },
-      { key: 'imap_user', label: 'IMAP 帳號', type: 'text' as const, placeholder: 'user@example.com' },
-      { key: 'imap_pass', label: 'IMAP 密碼', type: 'password' as const, placeholder: '' },
-      { key: 'smtp_host', label: 'SMTP Host', type: 'text' as const, placeholder: 'smtp.gmail.com' },
-      { key: 'smtp_port', label: 'SMTP Port', type: 'text' as const, placeholder: '587' },
-      { key: 'smtp_user', label: 'SMTP 帳號', type: 'text' as const, placeholder: '' },
-      { key: 'smtp_pass', label: 'SMTP 密碼', type: 'password' as const, placeholder: '' },
-      { key: 'poll_interval', label: '輪詢間隔 (秒)', type: 'text' as const, placeholder: '60' },
-      { key: 'auto_reply_enabled', label: '啟用自動回覆', type: 'checkbox' as const },
-      { key: 'ai_classify_enabled', label: '啟用 AI 分類摘要', type: 'checkbox' as const },
-    ],
-  },
+  { name: 'telegram', label: 'Telegram', icon: '✈️', iconColor: 'bg-sky-500/20' },
+  { name: 'line', label: 'LINE', icon: '💬', iconColor: 'bg-green-500/20' },
+  { name: 'discord', label: 'Discord', icon: '🎮', iconColor: 'bg-indigo-500/20' },
+  { name: 'slack', label: 'Slack', icon: '💼', iconColor: 'bg-purple-500/20' },
+  { name: 'wecom', label: '企業微信', icon: '🏢', iconColor: 'bg-blue-500/20' },
+  { name: 'feishu', label: '飛書 / Lark', icon: '🐦', iconColor: 'bg-cyan-500/20' },
+  { name: 'email', label: 'Email (IMAP/SMTP)', icon: '📧', iconColor: 'bg-amber-500/20' },
 ]
 
+// OneStack 也放在列表裡
+const onestackItem = { name: 'onestack', label: 'OneStack', icon: '🔗', iconColor: 'bg-violet-500/20' }
+
+function getStatus(name: string) {
+  const cfg = channelConfigs.value[name]
+  const st = channelStatuses.value[name]
+  if (!cfg || !cfg.enabled) return { text: '未啟用', color: 'bg-slate-500' }
+  if (st?.connected) return { text: '已連線', color: 'bg-emerald-500' }
+  if (st?.error) return { text: '錯誤', color: 'bg-red-500' }
+  return { text: '等待中', color: 'bg-amber-500' }
+}
+
+function getModeText(name: string) {
+  const cfg = channelConfigs.value[name]
+  if (!cfg) return ''
+  if (name === 'line' && cfg.mode === 'passive') return '收集模式'
+  if (name === 'email' && cfg.auto_reply_enabled) return '自動回覆'
+  return ''
+}
+
 async function fetchChannelConfigs() {
-  channelsLoading.value = true
+  loading.value = true
   try {
     const res = await fetch(`${API}/api/v1/channels`)
     channelConfigs.value = await res.json()
   } catch {
     channelConfigs.value = {}
   } finally {
-    channelsLoading.value = false
+    loading.value = false
   }
 }
 
@@ -131,27 +69,6 @@ async function fetchChannelStatuses() {
     channelStatuses.value = statuses
   } catch {
     channelStatuses.value = {}
-  }
-}
-
-async function updateChannelConfig(name: string, config: ChannelConfig) {
-  channelSaving.value = name
-  try {
-    const res = await fetch(`${API}/api/v1/channels/${name}`, {
-      method: 'PUT',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(config),
-    })
-    if (res.ok) {
-      channelConfigs.value[name] = config
-      store.addToast('頻道設定已儲存', 'success')
-    } else {
-      store.addToast('儲存失敗', 'error')
-    }
-  } catch {
-    store.addToast('儲存失敗', 'error')
-  } finally {
-    channelSaving.value = null
   }
 }
 
@@ -180,48 +97,74 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="max-w-2xl space-y-6">
-    <!-- 頻道設定 -->
-    <div class="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
-      <div class="px-6 py-4 border-b border-slate-700/50">
-        <div class="flex items-center gap-2">
-          <MessageSquare class="w-4 h-4 text-teal-400" />
-          <h2 class="text-sm font-semibold text-slate-200">頻道設定</h2>
-          <Loader2 v-if="channelsLoading" class="w-4 h-4 text-slate-500 animate-spin ml-auto" />
+  <div class="space-y-6">
+    <!-- Hint -->
+    <div class="bg-slate-800/30 rounded-xl border border-slate-700/30 p-4 text-sm text-slate-400 flex items-center justify-between">
+      <span>連接外部通訊平台，透過 Bot 接收指令和發送通知。設定變更後需重啟服務。</span>
+      <button
+        @click="restartChannels"
+        :disabled="channelRestarting"
+        class="flex items-center gap-1.5 px-3 py-1.5 bg-teal-500/20 hover:bg-teal-500/30 disabled:opacity-50 text-teal-400 rounded-lg text-xs font-medium transition-all shrink-0 ml-4"
+      >
+        <Loader2 v-if="channelRestarting" class="w-3 h-3 animate-spin" />
+        <RefreshCw v-else class="w-3 h-3" />
+        重啟服務
+      </button>
+    </div>
+
+    <!-- Loading -->
+    <div v-if="loading" class="flex justify-center py-12">
+      <Loader2 class="w-8 h-8 animate-spin text-slate-400" />
+    </div>
+
+    <!-- Channel List -->
+    <div v-else class="space-y-3">
+      <div
+        v-for="ch in channelDefs"
+        :key="ch.name"
+        class="bg-slate-900/50 rounded-xl border border-slate-700/50 p-4 cursor-pointer hover:border-slate-600 hover:bg-slate-800/50 transition-all"
+        @click="router.push(`/settings/channels/${ch.name}`)"
+      >
+        <div class="flex items-center justify-between">
+          <!-- Left: Info -->
+          <div class="flex items-center gap-3 flex-1 min-w-0">
+            <div :class="['w-8 h-8 rounded-lg flex items-center justify-center text-base shrink-0', ch.iconColor]">
+              {{ ch.icon }}
+            </div>
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="font-medium text-slate-200">{{ ch.label }}</span>
+                <!-- Status light -->
+                <span :class="['w-2 h-2 rounded-full shrink-0', getStatus(ch.name).color]" />
+                <span class="text-xs text-slate-500">{{ getStatus(ch.name).text }}</span>
+                <span v-if="getModeText(ch.name)" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                  {{ getModeText(ch.name) }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Chevron -->
+          <ChevronRight class="w-5 h-5 text-slate-600 ml-4 shrink-0" />
         </div>
-        <p class="text-[11px] text-slate-500 mt-1">連接外部通訊平台，透過 Bot 接收指令和發送通知</p>
       </div>
-      <div class="p-4 space-y-2">
-        <div v-if="channelsLoading" class="text-sm text-slate-500 px-2">讀取中...</div>
-        <template v-else>
-          <ChannelCard
-            v-for="ch in channelDefs"
-            :key="ch.name"
-            :name="ch.name"
-            :label="ch.label"
-            :icon="ch.icon"
-            :icon-color="ch.iconColor"
-            :config="channelConfigs[ch.name] || { enabled: false }"
-            :fields="ch.fields"
-            :status="channelStatuses[ch.name]"
-            :saving="channelSaving === ch.name"
-            @update="(cfg) => updateChannelConfig(ch.name, cfg)"
-          />
-        </template>
-        <!-- 重啟按鈕 + 提示 -->
-        <div class="flex items-center justify-between px-2 pt-3">
-          <p class="text-[10px] text-slate-500">
-            設定變更後需重啟服務才會生效
-          </p>
-          <button
-            @click="restartChannels"
-            :disabled="channelRestarting"
-            class="flex items-center gap-1.5 px-3 py-1.5 bg-teal-500 hover:bg-teal-600 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-all"
-          >
-            <Loader2 v-if="channelRestarting" class="w-3 h-3 animate-spin" />
-            <RefreshCw v-else class="w-3 h-3" />
-            重啟頻道服務
-          </button>
+
+      <!-- OneStack -->
+      <div
+        class="bg-slate-900/50 rounded-xl border border-slate-700/50 p-4 cursor-pointer hover:border-slate-600 hover:bg-slate-800/50 transition-all"
+        @click="router.push('/settings/onestack')"
+      >
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3 flex-1 min-w-0">
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-violet-500/20 shrink-0">
+              <Layers class="w-4 h-4 text-violet-400" />
+            </div>
+            <div>
+              <span class="font-medium text-slate-200">OneStack</span>
+              <span class="text-xs text-slate-500 ml-2">平台連接</span>
+            </div>
+          </div>
+          <ChevronRight class="w-5 h-5 text-slate-600 ml-4 shrink-0" />
         </div>
       </div>
     </div>

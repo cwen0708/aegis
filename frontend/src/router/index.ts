@@ -46,6 +46,7 @@ const router = createRouter({
         { path: 'general', component: SettingsGeneral },
         { path: 'tools', redirect: '/settings/status' },
         { path: 'channels', component: SettingsChannels },
+        { path: 'channels/:name', component: () => import('../views/settings/SettingsChannelDetail.vue') },
         { path: 'raw-messages', component: () => import('../views/settings/SettingsRawMessages.vue') },
         { path: 'projects', component: SettingsProjects },
         { path: 'projects/:id', component: SettingsProjectDetail },

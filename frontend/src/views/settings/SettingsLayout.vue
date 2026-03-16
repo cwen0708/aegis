@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { Settings, Globe, TerminalSquare, MessageSquare, Users, UserCheck, Bot, Activity, Lock, Loader2, FolderKanban, ChevronDown, Download, Layers, Rocket, Building2, Inbox } from 'lucide-vue-next'
+import { Settings, Globe, TerminalSquare, MessageSquare, Users, UserCheck, Bot, Activity, Lock, Loader2, FolderKanban, ChevronDown, Download, Rocket, Building2, Inbox } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { useResponsive } from '../../composables/useResponsive'
 import { useAuthStore } from '../../stores/auth'
@@ -27,7 +27,6 @@ const menuGroups = [
       { path: '/settings/channels', label: '頻道設定', icon: MessageSquare },
       { path: '/settings/users', label: '用戶管理', icon: UserCheck },
       { path: '/settings/domains', label: '網域綁定', icon: Globe },
-      { path: '/settings/onestack', label: 'OneStack', icon: Layers },
     ],
   },
   {
