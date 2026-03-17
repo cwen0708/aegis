@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Clock, Play, Pause, Pencil, Check, AlertCircle, CheckCircle2, XCircle, Timer, ChevronDown, ChevronRight, Zap } from 'lucide-vue-next'
+import { ArrowLeft, Play, Pause, Check, AlertCircle, CheckCircle2, XCircle, Timer, ChevronDown, ChevronRight, Zap } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 import { useAuthStore } from '../stores/auth'
 import { authHeaders } from '../utils/authFetch'
@@ -217,9 +217,12 @@ const statusColor = (status: string) => {
 
 onMounted(async () => {
   await Promise.all([fetchJob(), fetchLogs()])
-  // 載入列表名稱（供檢視模式顯示目標列表）
   if (job.value?.project_id) {
     fetchStageLists(job.value.project_id)
+  }
+  // 已登入 → 自動進入編輯模式
+  if (auth.isAuthenticated && job.value) {
+    startEdit()
   }
   loading.value = false
 })
@@ -233,43 +236,13 @@ watch(jobId, async () => {
 
 <template>
   <div class="h-full flex flex-col">
-    <!-- Header -->
-    <div class="sticky top-0 z-10 h-14 sm:h-16 shrink-0 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 px-2 sm:px-8 flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <button @click="router.push('/cron')" class="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50 rounded-lg transition-colors">
+    <!-- Header: 只放返回鍵 + 標題 -->
+    <div class="sticky top-0 z-10 h-14 sm:h-16 shrink-0 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 px-2 sm:px-8 flex items-center">
+      <div class="flex items-center gap-3 min-w-0">
+        <button @click="router.push('/cron')" class="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50 rounded-lg transition-colors shrink-0">
           <ArrowLeft class="w-5 h-5" />
         </button>
-        <div v-if="job">
-          <h1 class="text-sm sm:text-base font-bold text-slate-100">{{ job.name }}</h1>
-          <div class="flex items-center gap-2 text-[10px] text-slate-500">
-            <Clock class="w-3 h-3" />
-            <span class="font-mono">{{ job.cron_expression }}</span>
-            <span
-              :class="[
-                'px-1.5 py-0.5 rounded text-[10px] font-bold uppercase border',
-                job.is_enabled ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-slate-700 text-slate-500 border-slate-600'
-              ]"
-            >{{ job.is_enabled ? '啟用' : '停用' }}</span>
-          </div>
-        </div>
-      </div>
-      <div v-if="job && auth.isAuthenticated" class="flex items-center gap-2">
-        <button @click="triggerJob" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-cyan-400 hover:bg-cyan-400/10 transition-all">
-          <Zap class="w-3.5 h-3.5" />
-          手動執行
-        </button>
-        <button @click="toggleEnabled" :class="[
-          'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
-          job.is_enabled ? 'text-amber-400 hover:bg-amber-400/10' : 'text-emerald-400 hover:bg-emerald-400/10'
-        ]">
-          <Pause v-if="job.is_enabled" class="w-3.5 h-3.5" />
-          <Play v-else class="w-3.5 h-3.5" />
-          {{ job.is_enabled ? '停用' : '啟用' }}
-        </button>
-        <button @click="startEdit" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-700/50 transition-all">
-          <Pencil class="w-3.5 h-3.5" />
-          編輯
-        </button>
+        <h1 v-if="job" class="text-sm sm:text-base font-bold text-slate-100 truncate">{{ job.name }}</h1>
       </div>
     </div>
 
@@ -286,11 +259,11 @@ watch(jobId, async () => {
 
     <div v-else class="flex-1 overflow-auto p-2 sm:p-8 space-y-6">
       <!-- 排程資訊卡 -->
-      <div class="bg-slate-800/50 rounded-2xl border border-slate-700 p-6">
-        <!-- 編輯模式 -->
-        <template v-if="editing">
+      <div class="bg-slate-800/50 rounded-2xl border border-slate-700 p-4 sm:p-6">
+        <!-- 已登入：直接顯示編輯表單 -->
+        <template v-if="auth.isAuthenticated && editing">
           <div class="space-y-4">
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label class="block text-xs font-medium text-slate-400 mb-1">排程名稱</label>
                 <input v-model="editForm.name" type="text" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none">
@@ -322,17 +295,10 @@ watch(jobId, async () => {
               <label class="block text-xs font-medium text-slate-400 mb-1">提示詞模板</label>
               <textarea v-model="editForm.prompt_template" rows="8" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 font-mono text-sm focus:ring-2 focus:ring-emerald-500 outline-none"></textarea>
             </div>
-            <div class="flex justify-end gap-2">
-              <button @click="editing = false" class="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">取消</button>
-              <button @click="saveEdit" class="flex items-center gap-1.5 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm font-medium transition-all">
-                <Check class="w-4 h-4" />
-                儲存
-              </button>
-            </div>
           </div>
         </template>
 
-        <!-- 檢視模式 -->
+        <!-- 未登入：唯讀檢視 -->
         <template v-else>
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
             <div>
@@ -358,6 +324,28 @@ watch(jobId, async () => {
             <pre class="mt-2 p-4 bg-slate-900/50 rounded-lg border border-slate-700/50 text-xs text-slate-300 font-mono whitespace-pre-wrap overflow-auto max-h-64">{{ job.prompt_template }}</pre>
           </details>
         </template>
+      </div>
+
+      <!-- 操作按鈕列（卡片下方） -->
+      <div v-if="auth.isAuthenticated" class="flex flex-wrap gap-2">
+        <button v-if="editing" @click="saveEdit" class="flex items-center gap-1.5 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-xs font-medium transition-all">
+          <Check class="w-3.5 h-3.5" />
+          儲存變更
+        </button>
+        <button @click="triggerJob" class="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-cyan-400 bg-cyan-400/5 hover:bg-cyan-400/10 border border-cyan-400/20 transition-all">
+          <Zap class="w-3.5 h-3.5" />
+          手動執行
+        </button>
+        <button @click="toggleEnabled" :class="[
+          'flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-all',
+          job.is_enabled
+            ? 'text-amber-400 bg-amber-400/5 hover:bg-amber-400/10 border-amber-400/20'
+            : 'text-emerald-400 bg-emerald-400/5 hover:bg-emerald-400/10 border-emerald-400/20'
+        ]">
+          <Pause v-if="job.is_enabled" class="w-3.5 h-3.5" />
+          <Play v-else class="w-3.5 h-3.5" />
+          {{ job.is_enabled ? '停用' : '啟用' }}
+        </button>
       </div>
 
       <!-- 執行記錄 -->

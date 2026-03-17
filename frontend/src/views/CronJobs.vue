@@ -278,34 +278,7 @@ const formatTime = (iso: string) => {
               <div class="text-[10px] text-slate-500 truncate">{{ formatTime(job.next_scheduled_at) }}</div>
             </div>
           </div>
-          <!-- 操作列 -->
-          <div v-if="auth.isAuthenticated" class="flex border-t border-slate-700/30 divide-x divide-slate-700/30">
-            <button @click="triggerJob(job)" class="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-cyan-400 hover:bg-cyan-400/5 transition-colors">
-              <Zap class="w-3.5 h-3.5" />
-              <span class="text-[10px]">執行</span>
-            </button>
-            <button @click="goToEdit(job)" class="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-slate-400 hover:text-blue-400 hover:bg-blue-400/5 transition-colors">
-              <Pencil class="w-3.5 h-3.5" />
-              <span class="text-[10px]">編輯</span>
-            </button>
-            <button
-              @click="toggleJob(job)"
-              class="flex-1 flex items-center justify-center gap-1.5 py-2.5 transition-colors"
-              :class="job.is_enabled ? 'text-amber-400 hover:bg-amber-400/5' : 'text-emerald-400 hover:bg-emerald-400/5'"
-            >
-              <Pause v-if="job.is_enabled" class="w-3.5 h-3.5" />
-              <Play v-else class="w-3.5 h-3.5" />
-              <span class="text-[10px]">{{ job.is_enabled ? '停用' : '啟用' }}</span>
-            </button>
-            <button
-              v-if="!job.is_system"
-              @click="requestDelete(job.id)"
-              class="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-slate-400 hover:text-red-400 hover:bg-red-400/5 transition-colors"
-            >
-              <Trash2 class="w-3.5 h-3.5" />
-              <span class="text-[10px]">刪除</span>
-            </button>
-          </div>
+          <!-- 操作按鈕已移至詳情頁 -->
         </div>
       </div>
 
