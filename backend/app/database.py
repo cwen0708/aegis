@@ -12,8 +12,60 @@ sqlite_url = f"sqlite:///{DB_FILE}"
 # echo=True 可以在開發時看到 SQL 語法，正式環境可關閉
 engine = create_engine(sqlite_url, echo=False)
 
+def _auto_add_missing_columns():
+    """自動偵測 SQLModel 定義與實際 DB schema 的差異，補上缺少的欄位。
+    這讓 hot update 後新欄位自動生效，不需要手動寫 ALTER TABLE。"""
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        cur = conn.cursor()
+        existing_tables = {row[0] for row in cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+
+        for table_name, table in SQLModel.metadata.tables.items():
+            if table_name not in existing_tables:
+                continue  # 新表由 create_all 處理
+            existing_cols = {row[1] for row in cur.execute(f"PRAGMA table_info({table_name})").fetchall()}
+            for col in table.columns:
+                if col.name in existing_cols:
+                    continue
+                # 推斷 SQLite 類型
+                col_type = str(col.type)
+                if "INTEGER" in col_type or "BOOLEAN" in col_type:
+                    sql_type = "INTEGER"
+                elif "FLOAT" in col_type or "REAL" in col_type:
+                    sql_type = "REAL"
+                elif "DATETIME" in col_type:
+                    sql_type = "DATETIME"
+                else:
+                    sql_type = "TEXT"
+                # 推斷預設值
+                default = ""
+                if col.default is not None and col.default.arg is not None:
+                    d = col.default.arg
+                    if isinstance(d, bool):
+                        default = f" DEFAULT {1 if d else 0}"
+                    elif isinstance(d, (int, float)):
+                        default = f" DEFAULT {d}"
+                    elif isinstance(d, str):
+                        default = f" DEFAULT '{d}'"
+                elif col.nullable:
+                    default = ""  # nullable, no default needed
+                try:
+                    cur.execute(f"ALTER TABLE {table_name} ADD COLUMN {col.name} {sql_type}{default}")
+                    logger.info(f"[AutoMigrate] Added '{col.name}' ({sql_type}{default}) to {table_name}")
+                except Exception as e:
+                    logger.warning(f"[AutoMigrate] Failed to add {table_name}.{col.name}: {e}")
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"[AutoMigrate] {e}")
+    finally:
+        conn.close()
+
+
 def _migrate_db():
     """執行必要的 schema migration（SQLite ALTER TABLE）"""
+    # 先自動補缺欄位
+    _auto_add_missing_columns()
+
     conn = sqlite3.connect(DB_FILE)
     try:
         cur = conn.cursor()
