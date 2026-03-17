@@ -165,8 +165,16 @@ async function toggleCron() {
 
 // 依選中專案篩選
 const filteredJobs = computed(() => {
-  if (!selectedProjectId.value) return cronJobs.value
-  return cronJobs.value.filter(j => j.project_id === selectedProjectId.value)
+  const jobs = selectedProjectId.value
+    ? cronJobs.value.filter(j => j.project_id === selectedProjectId.value)
+    : cronJobs.value
+  return [...jobs].sort((a, b) => {
+    // 有下次執行時間的排前面，沒有的排最後
+    if (!a.next_scheduled_at && !b.next_scheduled_at) return 0
+    if (!a.next_scheduled_at) return 1
+    if (!b.next_scheduled_at) return -1
+    return a.next_scheduled_at.localeCompare(b.next_scheduled_at)
+  })
 })
 
 const enabledCount = computed(() => filteredJobs.value.filter(j => j.is_enabled).length)
