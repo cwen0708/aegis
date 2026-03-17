@@ -79,6 +79,8 @@ def main():
         run_command(["git", "checkout", "--", "backend/VERSION"], cwd=str(PROJECT_ROOT))
 
         # Git pull
+        # 先拉 tags（版本號依賴 git describe --tags）
+        run_command(["git", "fetch", "--tags", "--force", "origin"], cwd=str(PROJECT_ROOT))
         ret, out, err = run_command(["git", "pull", "--ff-only", "origin", "main"], cwd=str(PROJECT_ROOT))
         if ret != 0:
             update_status("failed", 0, "git pull 失敗", err)
