@@ -1078,8 +1078,198 @@ def run_task_subprocess(
 # ==========================================
 # 主處理迴圈
 # ==========================================
+def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, member_slug):
+    """在 thread 中執行單張卡片任務（含 fallback、結果處理、清理）"""
+    # 讀取卡片內容
+    with Session(engine) as session:
+        idx_fresh = session.get(CardIndex, idx.card_id)
+        project_obj = session.get(Project, idx.project_id)
+        project_path = project_obj.path if project_obj else "."
+        project_name = project_obj.name if project_obj else "Unknown"
+
+    try:
+        card_data = read_card(Path(idx.file_path))
+    except Exception as e:
+        logger.error(f"[Worker] Failed to read card {idx.card_id}: {e}")
+        cron_job_id = _parse_cron_job_id(idx.title)
+        if cron_job_id is not None and list_name in ("Scheduled", "Inbound"):
+            with Session(engine) as session:
+                from app.models.core import CronJob as CJ
+                cj = session.get(CJ, cron_job_id)
+                cj_name = cj.name if cj else ""
+            save_cron_log(cron_job_id, cj_name, idx.card_id, idx.title,
+                          idx.project_id, project_name, "", None,
+                          "error", "", str(e), "", {})
+            delete_card_completely(idx.card_id)
+        else:
+            update_card_status(idx.card_id, "failed", f"\n\n---\n\n### Error\n無法讀取卡片: {e}")
+        broadcast_event("task_failed", {"card_id": idx.card_id, "reason": str(e)})
+        return
+
+    # Inbound 任務：自動檢傷分類（成員 + 專案路徑）
+    if list_name == "Inbound" and card_data.content:
+        import re as _re
+        _pp_match = _re.search(r'<!-- project_path: (.+?) -->', card_data.content)
+        if _pp_match:
+            project_path = _pp_match.group(1)
+            logger.info(f"[Worker] Inbound task using project path: {project_path}")
+
+    # 準備工作區
+    workspace_dir = None
+    primary_provider = accounts_list[0][0] if accounts_list else "claude"
+    if member_slug:
+        workspace_dir = str(prepare_workspace(
+            card_id=idx.card_id,
+            member_slug=member_slug,
+            provider=primary_provider,
+            project_path=project_path,
+            card_content=card_data.content,
+            stage_name=stage_list.name if stage_list else "",
+            stage_description=stage_list.description or "" if stage_list else "",
+            stage_instruction=stage_list.system_instruction or "" if stage_list else "",
+        ))
+
+    effective_cwd = workspace_dir or project_path
+    _dialogue_hint = "\n\n請在所有輸出的最末行，用你的角色語氣寫一句簡短的任務總結（70字以內），格式：<!-- dialogue: 你的總結 -->"
+    effective_prompt = ("請閱讀你的設定檔並執行本次任務。" if workspace_dir else card_data.content) + _dialogue_hint
+
+    # 執行任務（含 fallback 機制）
+    if not accounts_list:
+        accounts_list = [("claude", "", {}, "default")]
+
+    result = None
+    for attempt_idx, (acct_provider, acct_model, acct_auth, acct_name) in enumerate(accounts_list):
+        if attempt_idx > 0:
+            logger.info(f"[Worker] Card {idx.card_id}: fallback → '{acct_name}' (priority={attempt_idx})")
+            broadcast_log(idx.card_id, f"\n⚠️ 主帳號失敗，切換至備用帳號: {acct_name}\n")
+
+        result = run_task(
+            card_id=idx.card_id,
+            project_path=effective_cwd,
+            prompt=effective_prompt,
+            phase=list_name.upper(),
+            forced_provider=acct_provider,
+            forced_model=acct_model,
+            card_title=idx.title,
+            project_name=project_name,
+            member_id=member_id,
+            auth_info=acct_auth,
+        )
+
+        if result["status"] == "success":
+            if attempt_idx > 0:
+                logger.info(f"[Worker] Card {idx.card_id}: succeeded with fallback account '{acct_name}'")
+            break
+
+        logger.warning(f"[Worker] Card {idx.card_id}: account '{acct_name}' failed (exit={result.get('exit_code')})")
+
+    # result 一定有值（accounts_list 至少有 default）
+
+    # 判斷是否為排程卡片
+    cron_job_id = _parse_cron_job_id(idx.title)
+    is_cron_card = cron_job_id is not None and list_name in ("Scheduled", "Inbound")
+
+    new_status = "completed" if result["status"] == "success" else "failed"
+    token_info = result.get("token_info", {})
+
+    # 自動重試：失敗且尚未重試過 → 重設為 pending，下一輪 poll 會再撿起
+    if new_status == "failed" and "### Error" not in card_data.content:
+        logger.info(f"[Worker] Card {idx.card_id}: first failure, scheduling retry")
+        error_note = f"\n\n### Error (retry scheduled)\n{result.get('output', '')[:200]}"
+        update_card_status(idx.card_id, "pending", error_note)
+        broadcast_event("task_failed", {"card_id": idx.card_id, "status": "retrying"})
+        if workspace_dir:
+            cleanup_workspace(idx.card_id)
+        return
+
+    if is_cron_card:
+        # === 排程卡片：寫入 CronLog + 刪除卡片 ===
+        output_text = result.get("output", "")
+        error_msg = "" if new_status == "completed" else output_text
+
+        with Session(engine) as session:
+            from app.models.core import CronJob
+            cron_job = session.get(CronJob, cron_job_id)
+            cron_job_name = cron_job.name if cron_job else ""
+
+        save_cron_log(
+            cron_job_id=cron_job_id,
+            cron_job_name=cron_job_name,
+            card_id=idx.card_id,
+            card_title=idx.title,
+            project_id=idx.project_id,
+            project_name=project_name,
+            provider=result.get("provider", ""),
+            member_id=member_id,
+            status="success" if new_status == "completed" else "error",
+            output=output_text,
+            error_message=error_msg,
+            prompt_snapshot=card_data.content,
+            token_info=token_info,
+        )
+
+        # 排程卡片：依據 stage action 處理（預設 delete，可在 UI 調整）
+        _apply_worker_stage_action(idx, new_status)
+    else:
+        # === 一般卡片：輸出追加在 content 後面，用分隔線隔開 ===
+        if result["status"] == "success":
+            append_text = f"\n\n---\n\n### AI Output ({result['provider']})\n```\n{result['output'][:1000]}...\n```"
+        else:
+            append_text = f"\n\n---\n\n### Error ({result['provider']})\n{result['output']}"
+
+        update_card_status(idx.card_id, new_status, append_text)
+
+    # 廣播完成事件
+    event = "task_completed" if new_status == "completed" else "task_failed"
+    broadcast_event(event, {"card_id": idx.card_id, "status": new_status})
+
+    # 生成 AVG 對話（從 AI 輸出解析）
+    if member_id:
+        dialogue_text = _extract_dialogue(result.get("output", ""))
+        if dialogue_text:
+            _save_member_dialogue(
+                member_id, idx.card_id, idx.title, project_name,
+                "task_complete" if new_status == "completed" else "task_failed",
+                dialogue_text,
+            )
+
+    # OneStack 任務完成回報
+    try:
+        from app.core.onestack_connector import connector as _os_connector
+        if _os_connector.enabled:
+            import asyncio
+            asyncio.run(_os_connector.report_task_completion(
+                card_id=idx.card_id,
+                output=result.get("output", ""),
+                status=result.get("status", "error"),
+                duration_ms=token_info.get("duration_ms", 0),
+                cost_usd=token_info.get("total_cost_usd", 0),
+            ))
+    except Exception as e:
+        logger.debug(f"[OneStack] Report completion failed: {e}")
+
+    # 寫入成員記憶
+    if member_slug:
+        try:
+            output_preview = result.get("output", "")[:500]
+            write_member_short_term_memory(
+                member_slug,
+                f"## 任務: {idx.title}\n專案: {project_name}\n結果: {result['status']}\n\n{output_preview}"
+            )
+        except Exception as e:
+            logger.warning(f"[Memory] Failed: {e}")
+
+    # 清理工作區
+    if workspace_dir:
+        cleanup_workspace(idx.card_id)
+
+    logger.info(f"[Worker] Card {idx.card_id} {'cron_log+deleted' if is_cron_card else new_status}")
+
+
 def process_pending_cards():
-    """處理一輪 pending 卡片"""
+    """處理一輪 pending 卡片（不同成員並行執行）"""
+    import threading
+
     max_ws = get_max_workstations()
     running = get_running_count()
 
@@ -1120,197 +1310,18 @@ def process_pending_cards():
             logger.info(f"[Worker] Member {member_id} busy, skip card {idx.card_id}")
             continue
 
-        # 標記為 running
+        # 標記為 running（在主線程做，防止下一輪重複撿取）
         mark_card_running(idx.card_id, member_id)
-        logger.info(f"[Worker] Processing card {idx.card_id}: {idx.title}")
+        logger.info(f"[Worker] Processing card {idx.card_id}: {idx.title} (threaded)")
 
-        # 讀取卡片內容
-        with Session(engine) as session:
-            idx_fresh = session.get(CardIndex, idx.card_id)
-            project_obj = session.get(Project, idx.project_id)
-            project_path = project_obj.path if project_obj else "."
-            project_name = project_obj.name if project_obj else "Unknown"
-
-        try:
-            card_data = read_card(Path(idx.file_path))
-        except Exception as e:
-            logger.error(f"[Worker] Failed to read card {idx.card_id}: {e}")
-            cron_job_id = _parse_cron_job_id(idx.title)
-            if cron_job_id is not None and list_name in ("Scheduled", "Inbound"):
-                # 排程卡片讀取失敗：寫 CronLog + 刪除卡片
-                with Session(engine) as session:
-                    from app.models.core import CronJob as CJ
-                    cj = session.get(CJ, cron_job_id)
-                    cj_name = cj.name if cj else ""
-                save_cron_log(cron_job_id, cj_name, idx.card_id, idx.title,
-                              idx.project_id, project_name, "", None,
-                              "error", "", str(e), "", {})
-                delete_card_completely(idx.card_id)
-            else:
-                update_card_status(idx.card_id, "failed", f"\n\n---\n\n### Error\n無法讀取卡片: {e}")
-            broadcast_event("task_failed", {"card_id": idx.card_id, "reason": str(e)})
-            continue
-
-        # Inbound 任務：自動檢傷分類（成員 + 專案路徑）
-        if list_name == "Inbound" and card_data.content:
-            import re as _re
-            _pp_match = _re.search(r'<!-- project_path: (.+?) -->', card_data.content)
-            if _pp_match:
-                project_path = _pp_match.group(1)
-                logger.info(f"[Worker] Inbound task using project path: {project_path}")
-
-        # 準備工作區
-        workspace_dir = None
-        primary_provider = accounts_list[0][0] if accounts_list else "claude"
-        if member_slug:
-            workspace_dir = str(prepare_workspace(
-                card_id=idx.card_id,
-                member_slug=member_slug,
-                provider=primary_provider,
-                project_path=project_path,
-                card_content=card_data.content,
-                stage_name=stage_list.name if stage_list else "",
-                stage_description=stage_list.description or "" if stage_list else "",
-                stage_instruction=stage_list.system_instruction or "" if stage_list else "",
-            ))
-
-        effective_cwd = workspace_dir or project_path
-        _dialogue_hint = "\n\n請在所有輸出的最末行，用你的角色語氣寫一句簡短的任務總結（70字以內），格式：<!-- dialogue: 你的總結 -->"
-        effective_prompt = ("請閱讀你的設定檔並執行本次任務。" if workspace_dir else card_data.content) + _dialogue_hint
-
-        # 執行任務（含 fallback 機制）
-        if not accounts_list:
-            # 無帳號綁定，用預設 claude
-            accounts_list = [("claude", "", {}, "default")]
-
-        result = None
-        for attempt_idx, (acct_provider, acct_model, acct_auth, acct_name) in enumerate(accounts_list):
-            if attempt_idx > 0:
-                logger.info(f"[Worker] Card {idx.card_id}: fallback → '{acct_name}' (priority={attempt_idx})")
-                broadcast_log(idx.card_id, f"\n⚠️ 主帳號失敗，切換至備用帳號: {acct_name}\n")
-
-            result = run_task(
-                card_id=idx.card_id,
-                project_path=effective_cwd,
-                prompt=effective_prompt,
-                phase=list_name.upper(),
-                forced_provider=acct_provider,
-                forced_model=acct_model,
-                card_title=idx.title,
-                project_name=project_name,
-                member_id=member_id,
-                auth_info=acct_auth,
-            )
-
-            if result["status"] == "success":
-                if attempt_idx > 0:
-                    logger.info(f"[Worker] Card {idx.card_id}: succeeded with fallback account '{acct_name}'")
-                break
-
-            logger.warning(f"[Worker] Card {idx.card_id}: account '{acct_name}' failed (exit={result.get('exit_code')})")
-
-        # result 一定有值（accounts_list 至少有 default）
-
-        # 判斷是否為排程卡片
-        cron_job_id = _parse_cron_job_id(idx.title)
-        is_cron_card = cron_job_id is not None and list_name in ("Scheduled", "Inbound")
-
-        new_status = "completed" if result["status"] == "success" else "failed"
-        token_info = result.get("token_info", {})
-
-        # 自動重試：失敗且尚未重試過 → 重設為 pending，下一輪 poll 會再撿起
-        if new_status == "failed" and "### Error" not in card_data.content:
-            logger.info(f"[Worker] Card {idx.card_id}: first failure, scheduling retry")
-            error_note = f"\n\n### Error (retry scheduled)\n{result.get('output', '')[:200]}"
-            update_card_status(idx.card_id, "pending", error_note)
-            broadcast_event("task_failed", {"card_id": idx.card_id, "status": "retrying"})
-            if workspace_dir:
-                cleanup_workspace(idx.card_id)
-            continue
-
-        if is_cron_card:
-            # === 排程卡片：寫入 CronLog + 刪除卡片 ===
-            output_text = result.get("output", "")
-            error_msg = "" if new_status == "completed" else output_text
-
-            # 取得 cron_job_name
-            with Session(engine) as session:
-                from app.models.core import CronJob
-                cron_job = session.get(CronJob, cron_job_id)
-                cron_job_name = cron_job.name if cron_job else ""
-
-            save_cron_log(
-                cron_job_id=cron_job_id,
-                cron_job_name=cron_job_name,
-                card_id=idx.card_id,
-                card_title=idx.title,
-                project_id=idx.project_id,
-                project_name=project_name,
-                provider=result.get("provider", ""),
-                member_id=member_id,
-                status="success" if new_status == "completed" else "error",
-                output=output_text,
-                error_message=error_msg,
-                prompt_snapshot=card_data.content,
-                token_info=token_info,
-            )
-
-            # 排程卡片：依據 stage action 處理（預設 delete，可在 UI 調整）
-            _apply_worker_stage_action(idx, new_status)
-        else:
-            # === 一般卡片：輸出追加在 content 後面，用分隔線隔開 ===
-            if result["status"] == "success":
-                append_text = f"\n\n---\n\n### AI Output ({result['provider']})\n```\n{result['output'][:1000]}...\n```"
-            else:
-                append_text = f"\n\n---\n\n### Error ({result['provider']})\n{result['output']}"
-
-            update_card_status(idx.card_id, new_status, append_text)
-
-        # 廣播完成事件
-        event = "task_completed" if new_status == "completed" else "task_failed"
-        broadcast_event(event, {"card_id": idx.card_id, "status": new_status})
-
-        # 生成 AVG 對話（從 AI 輸出解析）
-        if member_id:
-            dialogue_text = _extract_dialogue(result.get("output", ""))
-            if dialogue_text:
-                _save_member_dialogue(
-                    member_id, idx.card_id, idx.title, project_name,
-                    "task_complete" if new_status == "completed" else "task_failed",
-                    dialogue_text,
-                )
-
-        # OneStack 任務完成回報
-        try:
-            from app.core.onestack_connector import connector as _os_connector
-            if _os_connector.enabled:
-                import asyncio
-                asyncio.run(_os_connector.report_task_completion(
-                    card_id=idx.card_id,
-                    output=result.get("output", ""),
-                    status=result.get("status", "error"),
-                    duration_ms=token_info.get("duration_ms", 0),
-                    cost_usd=token_info.get("total_cost_usd", 0),
-                ))
-        except Exception as e:
-            logger.debug(f"[OneStack] Report completion failed: {e}")
-
-        # 寫入成員記憶
-        if member_slug:
-            try:
-                output_preview = result.get("output", "")[:500]
-                write_member_short_term_memory(
-                    member_slug,
-                    f"## 任務: {idx.title}\n專案: {project_name}\n結果: {result['status']}\n\n{output_preview}"
-                )
-            except Exception as e:
-                logger.warning(f"[Memory] Failed: {e}")
-
-        # 清理工作區
-        if workspace_dir:
-            cleanup_workspace(idx.card_id)
-
-        logger.info(f"[Worker] Card {idx.card_id} {'cron_log+deleted' if is_cron_card else new_status}")
+        # 在獨立 thread 中執行任務
+        t = threading.Thread(
+            target=_execute_card_task,
+            args=(idx, list_name, stage_list, member_id, accounts_list, member_slug),
+            name=f"card-{idx.card_id}",
+            daemon=True,
+        )
+        t.start()
 
 
 def main():
