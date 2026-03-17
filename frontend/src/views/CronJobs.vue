@@ -190,7 +190,8 @@ watch(showAddModal, (v) => {
 const formatTime = (iso: string) => {
   if (!iso) return '從未執行'
   const tz = store.settings.timezone || 'Asia/Taipei'
-  return new Date(iso).toLocaleString('zh-TW', { timeZone: tz })
+  const normalized = iso.includes('Z') || iso.includes('+') ? iso : iso.replace(' ', 'T') + 'Z'
+  return new Date(normalized).toLocaleString('zh-TW', { timeZone: tz })
 }
 </script>
 

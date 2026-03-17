@@ -41,7 +41,9 @@ const targetListName = computed(() => {
 const formatTime = (iso: string) => {
   if (!iso) return '-'
   const tz = store.settings.timezone || 'Asia/Taipei'
-  return new Date(iso).toLocaleString('zh-TW', { timeZone: tz })
+  // DB 存的 UTC 時間可能沒有 Z 後綴，補上確保正確解析
+  const normalized = iso.includes('Z') || iso.includes('+') ? iso : iso.replace(' ', 'T') + 'Z'
+  return new Date(normalized).toLocaleString('zh-TW', { timeZone: tz })
 }
 
 const formatDuration = (ms: number) => {
