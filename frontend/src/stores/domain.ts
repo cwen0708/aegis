@@ -18,6 +18,8 @@ export const useDomainStore = defineStore('domain', () => {
     hostname: string
     name: string
     is_default: boolean
+    require_login: boolean
+    show_onboarding: boolean
   }
 
   const domain = ref<DomainInfo | null>(null)
@@ -61,5 +63,8 @@ export const useDomainStore = defineStore('domain', () => {
     resolved.value = true
   }
 
-  return { domain, rooms, resolved, visibleProjectIds, visibleMemberIds, isProjectVisible, isMemberVisible, resolve }
+  const requireLogin = computed(() => domain.value?.require_login ?? false)
+  const showOnboarding = computed(() => domain.value?.show_onboarding ?? true)
+
+  return { domain, rooms, resolved, visibleProjectIds, visibleMemberIds, isProjectVisible, isMemberVisible, requireLogin, showOnboarding, resolve }
 })

@@ -4531,6 +4531,8 @@ class DomainUpdate(BaseModel):
     room_ids_json: Optional[str] = None
     is_default: Optional[bool] = None
     is_active: Optional[bool] = None
+    require_login: Optional[bool] = None
+    show_onboarding: Optional[bool] = None
 
 class RoomAssignment(BaseModel):
     project_ids: Optional[list[int]] = None

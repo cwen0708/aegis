@@ -561,4 +561,6 @@ class Domain(SQLModel, table=True):
     room_ids_json: str = Field(default="[]")         # JSON: [1, 2]
     is_default: bool = Field(default=False)          # 未匹配時的 fallback
     is_active: bool = Field(default=True)
+    require_login: bool = Field(default=False)       # 此網域是否強制登入
+    show_onboarding: bool = Field(default=True)      # 此網域是否顯示引導頁
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

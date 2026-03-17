@@ -96,14 +96,20 @@ router.beforeEach(async (to) => {
 
   if (to.meta.requiresAuth) {
     const auth = useAuthStore()
+    const { useDomainStore } = await import('../stores/domain')
+    const domainStore = useDomainStore()
 
     // 確保已載入設定
     if (!auth.policyLoaded) {
       await auth.fetchAuthPolicy()
     }
 
-    // 如果開啟路由守衛 → 強制登入
-    if (auth.requireLoginToView && !auth.isAuthenticated) {
+    // 優先使用網域設定，fallback 到全域設定
+    const requireLogin = domainStore.resolved && domainStore.domain
+      ? domainStore.requireLogin
+      : auth.requireLoginToView
+
+    if (requireLogin && !auth.isAuthenticated) {
       return { path: '/settings', query: { redirect: to.fullPath } }
     }
   }

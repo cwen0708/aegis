@@ -30,6 +30,8 @@ const form = ref({
   name: '',
   is_default: false,
   is_active: true,
+  require_login: false,
+  show_onboarding: true,
   room_ids: [] as number[],
 })
 
@@ -56,6 +58,8 @@ async function fetchDomain() {
       name: d.name || '',
       is_default: d.is_default,
       is_active: d.is_active ?? true,
+      require_login: d.require_login ?? false,
+      show_onboarding: d.show_onboarding ?? true,
       room_ids: roomIds,
     }
   } catch (e: any) {
@@ -90,6 +94,8 @@ async function saveDomain() {
       name: form.value.name,
       is_default: form.value.is_default,
       is_active: form.value.is_active,
+      require_login: form.value.require_login,
+      show_onboarding: form.value.show_onboarding,
       room_ids_json: JSON.stringify(form.value.room_ids),
     }
     const res = await fetch(`${API}/api/v1/domains/${domainId}`, {
@@ -233,7 +239,57 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- ═══ Section 2: 房間指派 ═══ -->
+      <!-- ═══ Section 2: 存取控制 ═══ -->
+      <div class="bg-slate-800/50 rounded-2xl border border-slate-700 p-6 space-y-4">
+        <div class="flex items-center gap-2">
+          <ArrowLeft class="w-4 h-4 text-amber-400 rotate-180" />
+          <h3 class="text-sm font-bold text-slate-300 uppercase tracking-wider">存取控制</h3>
+        </div>
+
+        <div class="flex items-center justify-between">
+          <div>
+            <span class="text-sm text-slate-300">強制登入才能瀏覽</span>
+            <p class="text-xs text-slate-500 mt-0.5">開啟後，未登入的使用者會被導向登入畫面</p>
+          </div>
+          <button
+            @click="form.require_login = !form.require_login"
+            :class="[
+              'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+              form.require_login ? 'bg-amber-600' : 'bg-slate-600'
+            ]"
+          >
+            <span
+              :class="[
+                'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
+                form.require_login ? 'translate-x-6' : 'translate-x-1'
+              ]"
+            />
+          </button>
+        </div>
+
+        <div class="flex items-center justify-between">
+          <div>
+            <span class="text-sm text-slate-300">顯示設定引導頁</span>
+            <p class="text-xs text-slate-500 mt-0.5">關閉後，此網域不會顯示初始設定引導</p>
+          </div>
+          <button
+            @click="form.show_onboarding = !form.show_onboarding"
+            :class="[
+              'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+              form.show_onboarding ? 'bg-emerald-600' : 'bg-slate-600'
+            ]"
+          >
+            <span
+              :class="[
+                'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
+                form.show_onboarding ? 'translate-x-6' : 'translate-x-1'
+              ]"
+            />
+          </button>
+        </div>
+      </div>
+
+      <!-- ═══ Section 3: 房間指派 ═══ -->
       <div class="bg-slate-800/50 rounded-2xl border border-slate-700 p-6 space-y-4">
         <div class="flex items-center gap-2">
           <Building2 class="w-4 h-4 text-sky-400" />
