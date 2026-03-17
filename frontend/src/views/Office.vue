@@ -350,6 +350,29 @@ interface CharacterInfo {
 const showCharacterDialog = ref(false)
 const selectedCharacter = ref<CharacterInfo | null>(null)
 
+// ===== Task completion auto-popup =====
+// Triggered by member_dialogue event (sent after task completes with summary text)
+function onMemberDialoguePopup(e: Event) {
+  const detail = (e as CustomEvent).detail
+  if (!detail.member_id) return
+  // Only auto-popup for task completion/failure dialogues
+  if (detail.dialogue_type !== 'task_complete' && detail.dialogue_type !== 'task_failed') return
+  // Don't interrupt if dialog is already open for a different member
+  if (showCharacterDialog.value && selectedCharacter.value?.memberId !== detail.member_id) return
+
+  const member = members.value.find(m => m.id === detail.member_id)
+  if (!member) return
+
+  selectedCharacter.value = {
+    memberId: member.id,
+    name: member.name,
+    provider: member.provider,
+    role: member.role || (member.provider === 'claude' ? 'Claude 開發者' : '開發者'),
+    portrait: member.portrait || '',
+  }
+  showCharacterDialog.value = true
+}
+
 function setupCharacterClickListener() {
   const scene = getScene()
   if (!scene) return
@@ -403,9 +426,13 @@ onMounted(async () => {
   const layout = currentLayout.value || buildDefaultLayout(totalDesks.value || 4)
   game = createOfficeGame('office-canvas', layout)
   setupGameListeners()
+
+  // Listen for task completion dialogue to auto-popup character
+  window.addEventListener('aegis:member-dialogue', onMemberDialoguePopup)
 })
 
 onUnmounted(() => {
+  window.removeEventListener('aegis:member-dialogue', onMemberDialoguePopup)
   game?.destroy(true)
   game = null
 })
