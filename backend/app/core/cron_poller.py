@@ -113,20 +113,17 @@ def _get_system_timezone(session: Session = None) -> str:
     return "Asia/Taipei"
 
 
-def _calculate_next_time(cron_expression: str, tz_name: str = "Asia/Taipei") -> datetime:
-    """計算下一次執行時間。Cron 表達式以使用者時區解析，返回 UTC aware datetime。"""
+def _calculate_next_time(cron_expression: str, tz_name: str = "UTC") -> datetime:
+    """計算下一次執行時間。Cron 表達式統一以 UTC 解析，返回 UTC aware datetime。"""
     if not cron_expression:
         return None
     try:
-        local_tz = ZoneInfo(tz_name)
-        now_local = datetime.now(local_tz)
-        cron = croniter(cron_expression, now_local)
-        next_local = cron.get_next(datetime)
-        # croniter 可能返回 naive datetime，補上本地時區
-        if next_local.tzinfo is None:
-            next_local = next_local.replace(tzinfo=local_tz)
-        # 轉為 UTC 存儲
-        return next_local.astimezone(timezone.utc)
+        now_utc = datetime.now(timezone.utc)
+        cron = croniter(cron_expression, now_utc)
+        next_utc = cron.get_next(datetime)
+        if next_utc.tzinfo is None:
+            next_utc = next_utc.replace(tzinfo=timezone.utc)
+        return next_utc
     except Exception as e:
         logger.error(f"Invalid cron expression: {cron_expression}, error: {e}")
         return None

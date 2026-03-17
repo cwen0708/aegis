@@ -189,9 +189,8 @@ watch(showAddModal, (v) => {
 
 const formatTime = (iso: string) => {
   if (!iso) return '從未執行'
-  const tz = store.settings.timezone || 'Asia/Taipei'
   const normalized = iso.includes('Z') || iso.includes('+') ? iso : iso.replace(' ', 'T') + 'Z'
-  return new Date(normalized).toLocaleString('zh-TW', { timeZone: tz })
+  return new Date(normalized).toLocaleString('zh-TW', { timeZone: 'UTC' }) + ' UTC'
 }
 </script>
 
@@ -398,7 +397,7 @@ const formatTime = (iso: string) => {
             <div class="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-lg p-1">
               <Clock class="w-4 h-4 ml-2 text-slate-500" />
               <input v-model="newJobForm.cron_expression" type="text" class="flex-1 bg-transparent border-none p-2 text-blue-400 font-mono focus:ring-0 outline-none">
-              <span class="text-[10px] text-slate-500 px-3 border-l border-slate-700">{{ store.settings.timezone || 'Asia/Taipei' }}</span>
+              <span class="text-[10px] text-blue-400/60 px-3 border-l border-slate-700">UTC+0</span>
             </div>
           </div>
 

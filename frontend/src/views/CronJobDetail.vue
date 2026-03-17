@@ -40,10 +40,8 @@ const targetListName = computed(() => {
 
 const formatTime = (iso: string) => {
   if (!iso) return '-'
-  const tz = store.settings.timezone || 'Asia/Taipei'
-  // DB 存的 UTC 時間可能沒有 Z 後綴，補上確保正確解析
   const normalized = iso.includes('Z') || iso.includes('+') ? iso : iso.replace(' ', 'T') + 'Z'
-  return new Date(normalized).toLocaleString('zh-TW', { timeZone: tz })
+  return new Date(normalized).toLocaleString('zh-TW', { timeZone: 'UTC' }) + ' UTC'
 }
 
 const formatDuration = (ms: number) => {
@@ -120,8 +118,8 @@ async function toggleEnabled() {
   }
 }
 
-// 系統時區（從設定讀取）
-const systemTimezone = computed(() => store.settings.timezone || 'Asia/Taipei')
+// 排程統一使用 UTC
+const systemTimezone = computed(() => 'UTC')
 
 // 即時計算下次執行時間（從 cron 表達式）
 const nextRunPreview = computed(() => {
@@ -271,7 +269,7 @@ watch(jobId, async () => {
                 <input v-model="editForm.name" type="text" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none">
               </div>
               <div>
-                <label class="block text-xs font-medium text-slate-400 mb-1">Cron 表達式 <span class="text-slate-600">(UTC)</span></label>
+                <label class="block text-xs font-medium text-slate-400 mb-1">Cron 表達式 <span class="text-blue-400/60">(UTC+0)</span></label>
                 <input v-model="editForm.cron_expression" type="text" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-blue-400 font-mono focus:ring-2 focus:ring-emerald-500 outline-none">
                 <p v-if="nextRunPreview" class="text-[11px] text-sky-400 mt-1">
                   下次執行：{{ nextRunPreview }}
