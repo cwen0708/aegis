@@ -158,7 +158,7 @@ async function fetchUsers() {
 
 async function fetchProjects() {
   try {
-    const res = await fetch(`${API}/api/v1/projects/`)
+    const res = await fetch(`${API}/api/v1/projects/?all=true`, { headers: authHeaders() })
     const data = await res.json()
     projects.value = data.map((p: any) => ({ id: p.id, name: p.name }))
   } catch { projects.value = [] }
