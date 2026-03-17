@@ -40,8 +40,9 @@ const targetListName = computed(() => {
 
 const formatTime = (iso: string) => {
   if (!iso) return '-'
+  const tz = store.settings.timezone || 'Asia/Taipei'
   const normalized = iso.includes('Z') || iso.includes('+') ? iso : iso.replace(' ', 'T') + 'Z'
-  return new Date(normalized).toLocaleString('zh-TW', { timeZone: 'UTC' }) + ' UTC'
+  return new Date(normalized).toLocaleString('zh-TW', { timeZone: tz })
 }
 
 const formatDuration = (ms: number) => {
