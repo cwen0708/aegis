@@ -41,6 +41,25 @@ def update_status(stage: str, progress: int, message: str, error: str = ""):
         session.commit()
 
 
+def resume_worker():
+    """更新失敗時恢復 Worker 到更新前的狀態"""
+    try:
+        with Session(engine) as session:
+            # 讀取更新前的狀態
+            before = session.get(SystemSetting, "worker_paused_before_update")
+            was_paused = before and before.value == "true"
+            if was_paused:
+                # 更新前就是暫停的，保持暫停
+                return
+            paused = session.get(SystemSetting, "worker_paused")
+            if paused and paused.value == "true":
+                paused.value = "false"
+                session.add(paused)
+                session.commit()
+    except Exception:
+        pass
+
+
 def run_command(cmd: list, cwd: str = None) -> tuple:
     """執行命令並返回結果"""
     proc = subprocess.run(
@@ -60,9 +79,10 @@ def main():
         run_command(["git", "checkout", "--", "backend/VERSION"], cwd=str(PROJECT_ROOT))
 
         # Git pull
-        ret, out, err = run_command(["git", "pull", "--ff-only"], cwd=str(PROJECT_ROOT))
+        ret, out, err = run_command(["git", "pull", "--ff-only", "origin", "main"], cwd=str(PROJECT_ROOT))
         if ret != 0:
             update_status("failed", 0, "git pull 失敗", err)
+            resume_worker()
             return 1
 
         update_status("building", 30, "正在安裝 Python 依賴...")
@@ -139,6 +159,7 @@ def main():
                 )
                 if proc.returncode != 0:
                     update_status("failed", 50, "前端建構失敗", proc.stderr[:500])
+                    resume_worker()
                     return 1
 
         update_status("applying", 80, "正在更新版本號並重啟服務...")
@@ -169,6 +190,7 @@ def main():
 
     except Exception as e:
         update_status("failed", 0, "更新失敗", str(e))
+        resume_worker()
         return 1
 
 

@@ -442,10 +442,19 @@ async def wait_for_tasks_completion(timeout: int = 300) -> bool:
     _state.stage = UPDATE_STAGE_WAITING
     _state.message = "等待執行中的任務完成..."
 
-    # 記住更新前 Worker 是否已被使用者手動暫停
+    # 記住更新前 Worker 是否已被使用者手動暫停（同時持久化到 DB 供 hot_update.py 讀取）
     with Session(engine) as session:
         paused = session.get(SystemSetting, "worker_paused")
         _was_paused_before_update = paused and paused.value == "true"
+        # 持久化到 DB，讓獨立進程 hot_update.py 也能讀取
+        before_key = "worker_paused_before_update"
+        before_setting = session.get(SystemSetting, before_key)
+        before_value = "true" if _was_paused_before_update else "false"
+        if before_setting:
+            before_setting.value = before_value
+        else:
+            before_setting = SystemSetting(key=before_key, value=before_value)
+        session.add(before_setting)
         if paused:
             paused.value = "true"
         else:
