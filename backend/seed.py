@@ -547,7 +547,7 @@ def _sync_system_cron_jobs(session: Session):
                 )
             ).first()
 
-        cron_expr = "0 */4 * * *"
+        cron_expr = "15 */4 * * *"  # 錯開整點，避免與其他排程撞
         crons_to_add.append(CronJob(
             project_id=aegis.id,
             name="Backlog 審查與任務分派",
