@@ -74,6 +74,7 @@ const createCard = async () => {
 // 卡片詳情 Modal
 const selectedCard = ref<any>(null)
 const isEditingContent = ref(false)
+const cardDetailTab = ref<'prompt' | 'result'>('prompt')
 
 const openCardDetail = async (cardId: number) => {
   openMenuCardId.value = null
@@ -81,6 +82,7 @@ const openCardDetail = async (cardId: number) => {
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   selectedCard.value = await res.json()
   isEditingContent.value = false
+  cardDetailTab.value = 'prompt'
 }
 
 const closeCardDetail = () => { selectedCard.value = null }
@@ -848,7 +850,7 @@ async function unarchiveCard(cardId: number) {
 
   <!-- Card Detail Modal -->
   <div v-if="selectedCard" class="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
-    <div class="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-5xl h-[80vh] flex flex-col shadow-2xl overflow-hidden">
+    <div class="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-3xl mx-2 h-[80vh] flex flex-col shadow-2xl overflow-hidden">
       <!-- Header -->
       <div class="p-6 border-b border-slate-700 flex justify-between items-start bg-slate-800/80">
         <div class="flex-1 pr-6">
@@ -880,10 +882,30 @@ async function unarchiveCard(cardId: number) {
         </div>
       </div>
 
+      <!-- Tab 頁籤 -->
+      <div class="flex border-b border-slate-700 bg-slate-800/50">
+        <button
+          @click="cardDetailTab = 'prompt'"
+          class="flex-1 px-4 py-2.5 text-sm font-medium transition-colors relative"
+          :class="cardDetailTab === 'prompt' ? 'text-emerald-400' : 'text-slate-400 hover:text-slate-200'"
+        >
+          AI 提示詞
+          <div v-if="cardDetailTab === 'prompt'" class="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400" />
+        </button>
+        <button
+          @click="cardDetailTab = 'result'"
+          class="flex-1 px-4 py-2.5 text-sm font-medium transition-colors relative"
+          :class="cardDetailTab === 'result' ? 'text-emerald-400' : 'text-slate-400 hover:text-slate-200'"
+        >
+          執行記錄
+          <div v-if="cardDetailTab === 'result'" class="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400" />
+        </button>
+      </div>
+
       <!-- Body -->
-      <div class="flex-1 flex overflow-hidden">
-        <!-- Left: Content -->
-        <div class="flex-1 border-r border-slate-700 p-6 overflow-y-auto custom-scrollbar flex flex-col">
+      <div class="flex-1 overflow-hidden">
+        <!-- Tab 1: 提示詞 -->
+        <div v-if="cardDetailTab === 'prompt'" class="h-full p-6 overflow-y-auto custom-scrollbar flex flex-col">
           <div class="flex items-center justify-between mb-4">
             <h3 class="text-sm font-semibold text-slate-400 tracking-wider">AI 提示詞</h3>
             <button @click="isEditingContent = !isEditingContent" class="text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 px-3 py-1.5 rounded-md transition-colors font-medium">
@@ -906,8 +928,8 @@ async function unarchiveCard(cardId: number) {
           </div>
         </div>
 
-        <!-- Right: Execution Log -->
-        <div class="w-96 bg-slate-800/30 p-6 overflow-y-auto custom-scrollbar flex flex-col">
+        <!-- Tab 2: 執行記錄 -->
+        <div v-else class="h-full bg-slate-800/30 p-6 overflow-y-auto custom-scrollbar flex flex-col">
           <h3 class="text-sm font-semibold text-slate-400 tracking-wider mb-4">執行記錄</h3>
           <div v-if="isCardRunning(selectedCard.id)" class="flex-1">
             <TerminalViewer :card-id="selectedCard.id" />
