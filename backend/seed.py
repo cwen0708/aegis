@@ -211,8 +211,8 @@ def _seed_shared_skills():
             "| 成員 | slug | 角色 | 專長 | 日常工作 |\n"
             "|------|------|------|------|--------|\n"
             "| 愛吉絲 | `aegis` | 系統助理 | 任務管理、系統狀態 | 回答問題、協調團隊 |\n"
-            "| 小筃 | `xiao-jun` | 資深開發者 | Vue 3、FastAPI、系統架構 | 功能開發、Bug 修復、程式碼撰寫 |\n"
-            "| 小良 | `xiao-liang` | 技術主管 | Code Review、架構規劃 | 審查程式碼、技術決策 |\n",
+            "| 小茵 | `xiao-yin` | 自我開發分析師 / 全端工程師 | Vue 3、FastAPI、程式碼品質分析 | 自我進化開發、Bug 修復、重構 |\n"
+            "| 小良 | `xiao-liang` | 技術主管 | Code Review、架構規劃、部署 | 審查程式碼、Backlog 審查、部署升級 |\n",
             encoding="utf-8",
         )
 
@@ -239,6 +239,69 @@ def _seed_shared_skills():
             "- 協作完成後，系統會自動通知請求者（寫入對方的短期記憶）\n",
             encoding="utf-8",
         )
+
+
+def _setup_dev_directory(install_root: Path) -> Path:
+    """建立自我進化用的開發目錄（與運行環境分離）。
+
+    架構：
+      install_root (.local/aegis/) — 運行環境，systemd 服務使用
+      dev_dir (projects/Aegis/)    — 開發目錄，AI 任務在此修改程式碼
+
+    自我進化流程：
+      小茵在 dev_dir 開發 → 小良審查 → 複製到 install_root → 重啟服務
+      上游更新時：在 dev_dir fetch + merge → 複製到 install_root
+    """
+    import subprocess
+
+    home = Path.home()
+    dev_dir = home / "projects" / "Aegis"
+
+    if dev_dir.exists() and (dev_dir / ".git").exists():
+        print(f"  - Dev directory already exists: {dev_dir}")
+        return dev_dir
+
+    # 從運行環境的 git remote 取得 clone URL
+    clone_url = "https://github.com/cwen0708/aegis.git"  # 預設
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=install_root, capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            clone_url = result.stdout.strip()
+    except Exception:
+        pass
+
+    dev_dir.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        subprocess.run(
+            ["git", "clone", clone_url, str(dev_dir)],
+            timeout=120, check=True,
+        )
+        print(f"  - Cloned dev directory: {dev_dir}")
+    except Exception as e:
+        # Clone 失敗時退回使用安裝目錄
+        print(f"  - Warning: Failed to clone dev directory ({e}), using install dir")
+        return install_root
+
+    # 寫入 CLAUDE.md（開發流程指引）
+    claude_md = dev_dir / "CLAUDE.md"
+    if not claude_md.exists():
+        claude_md.write_text(
+            "# Aegis — AI 代理管理儀表板\n\n"
+            "## 環境架構\n"
+            f"- **開發目錄**（本目錄）：`{dev_dir}`\n"
+            f"- **運行環境**：`{install_root}`（systemd 服務，勿直接修改）\n\n"
+            "## 開發完成後\n"
+            "**不要自己部署** — 建立審查卡片交給小良，由他負責審查和部署。\n\n"
+            "## 限制\n"
+            "- 不要 git push（推送權在管理者）\n"
+            "- 不要修改運行環境的 .env 或資料庫\n",
+            encoding="utf-8",
+        )
+
+    return dev_dir
 
 
 def _sync_system_cron_jobs(session: Session):
@@ -436,6 +499,42 @@ def _sync_system_cron_jobs(session: Session):
             metadata_json='{"target_list": "Inbound"}',
         ))
 
+    # Backlog 審查與任務分派（小良 → 小茵）
+    if "Backlog 審查與任務分派" not in existing_crons:
+        # 找小良的收件匣 list_id
+        liang_member = session.exec(select(Member).where(Member.slug == "xiao-liang")).first()
+        liang_inbox = None
+        if liang_member:
+            liang_inbox = session.exec(
+                select(StageList).where(
+                    StageList.project_id == aegis.id,
+                    StageList.member_id == liang_member.id,
+                )
+            ).first()
+
+        cron_expr = "0 */4 * * *"
+        crons_to_add.append(CronJob(
+            project_id=aegis.id,
+            name="Backlog 審查與任務分派",
+            description="小良每 4 小時審查 AEGIS Backlog，挑選適合的卡片規劃後分派給小茵開發。",
+            prompt_template=(
+                "請執行 Backlog 審查：\n\n"
+                "1. 掃描 AEGIS 專案 Backlog 中所有 idle 狀態的卡片標題\n"
+                "2. 跳過標題已含 [reviewed] 或 [blocked] 的卡片\n"
+                "3. 根據優先順序選出 1 張最適合的卡片\n"
+                "4. 確認小茵目前沒有 running 的任務（忙就不派）\n"
+                "5. 深入閱讀程式碼，進行修改規劃\n"
+                "6. 將規劃好的卡片分派給小茵（xiao-yin）\n"
+                "7. 不適合的卡片標記 [reviewed]\n\n"
+                "請參考你的 backlog-review skill 執行。"
+            ),
+            cron_expression=cron_expr,
+            next_scheduled_at=_calculate_next_scheduled_at(cron_expr),
+            is_enabled=True,
+            is_system=True,
+            target_list_id=liang_inbox.id if liang_inbox else None,
+        ))
+
     if crons_to_add:
         session.add_all(crons_to_add)
         session.commit()
@@ -571,16 +670,20 @@ def seed_data():
         # ── 3. AEGIS 系統專案（跳過已存在）──
         aegis = session.exec(select(Project).where(Project.name == "AEGIS")).first()
         if not aegis:
+            # 自我進化架構：開發目錄 (git clone) 與運行環境 (.local) 分離
+            install_root = Path(__file__).resolve().parent.parent
+            dev_dir = _setup_dev_directory(install_root)
+
             aegis = Project(
                 name="AEGIS",
-                path=str(Path(__file__).resolve().parent.parent),
+                path=str(dev_dir),
                 default_provider="gemini",
                 is_system=True,
             )
             session.add(aegis)
             session.commit()
             session.refresh(aegis)
-            print("  - Added AEGIS system project")
+            print(f"  - Added AEGIS system project (dev: {dev_dir})")
 
             # AEGIS 系統列表
             for pos, list_name in enumerate(["Scheduled", "Inbound"]):
