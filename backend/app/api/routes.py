@@ -317,13 +317,45 @@ def read_project_board(project_id: int, session: Session = Depends(get_session))
     for lst in cards_by_list.values():
         lst.sort(key=lambda c: c.created_at, reverse=True)
 
+    # 批量預載所有相關 Member，避免 N+1 查詢
+    member_ids = [l.member_id for l in lists if l.member_id]
+    if member_ids:
+        members_list = session.exec(select(Member).where(Member.id.in_(member_ids))).all()
+        members_map = {m.id: m for m in members_list}
+        # 批量預載 MemberAccount（取 priority 最低的）
+        bindings = session.exec(
+            select(MemberAccount)
+            .where(MemberAccount.member_id.in_(member_ids))
+            .order_by(MemberAccount.member_id, MemberAccount.priority)
+        ).all()
+        # 每個 member 只取第一筆 binding
+        first_binding: dict[int, MemberAccount] = {}
+        for b in bindings:
+            if b.member_id not in first_binding:
+                first_binding[b.member_id] = b
+        # 批量預載 Account
+        account_ids = [b.account_id for b in first_binding.values()]
+        if account_ids:
+            accounts_list = session.exec(select(Account).where(Account.id.in_(account_ids))).all()
+            accounts_map = {a.id: a for a in accounts_list}
+        else:
+            accounts_map = {}
+        # 建立 member_id -> provider 對照
+        provider_map: dict[int, str] = {}
+        for mid, b in first_binding.items():
+            acc = accounts_map.get(b.account_id)
+            provider_map[mid] = acc.provider if acc else ""
+    else:
+        members_map = {}
+        provider_map = {}
+
     result = []
     for l in lists:
         member_brief = None
         if l.member_id:
-            m = session.get(Member, l.member_id)
+            m = members_map.get(l.member_id)
             if m:
-                member_brief = MemberBrief(id=m.id, name=m.name, avatar=m.avatar, provider=_get_member_primary_provider(m.id, session))
+                member_brief = MemberBrief(id=m.id, name=m.name, avatar=m.avatar, provider=provider_map.get(m.id, ""))
         list_cards = cards_by_list.get(l.id, [])
         result.append(StageListResponse(
             id=l.id,
