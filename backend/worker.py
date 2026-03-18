@@ -65,6 +65,7 @@ def clear_abort_signal(card_id: int):
         f.unlink(missing_ok=True)
 from app.core.telemetry import is_system_overloaded
 from app.core.task_workspace import prepare_workspace, cleanup_workspace
+from app.core.poller import _parse_and_create_cards
 
 
 def _link_project_into_workspace(workspace_dir: str, project_path: str) -> None:
@@ -1294,6 +1295,24 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
             append_text = f"\n\n---\n\n### Error ({result['provider']})\n{result['output']}"
 
         update_card_status(idx.card_id, new_status, append_text)
+
+        # 解析 AI 輸出中的 json:create_cards 區塊（跨成員協作、審查卡片等）
+        output_text = result.get("output", "")
+        if "json:create_cards" in output_text:
+            try:
+                with Session(engine) as session:
+                    created_ids = _parse_and_create_cards(
+                        output_text,
+                        idx.project_id,
+                        project_path,
+                        session,
+                        member_slug=member_slug,
+                        source_card_id=idx.card_id,
+                    )
+                    if created_ids:
+                        logger.info(f"[Worker] Card {idx.card_id} auto-created {len(created_ids)} cards: {created_ids}")
+            except Exception as e:
+                logger.warning(f"[Worker] Failed to parse create_cards: {e}")
 
     # 廣播完成事件
     event = "task_completed" if new_status == "completed" else "task_failed"
