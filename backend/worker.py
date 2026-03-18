@@ -65,6 +65,67 @@ def clear_abort_signal(card_id: int):
         f.unlink(missing_ok=True)
 from app.core.telemetry import is_system_overloaded
 from app.core.task_workspace import prepare_workspace, cleanup_workspace
+import shutil as _shutil
+
+
+def _sync_workspace_config(workspace_dir: str, project_path: str) -> list:
+    """將 workspace 的設定檔（CLAUDE.md、.claude/skills/）同步到專案目錄。
+
+    讓 AI 直接在專案目錄工作，而非 workspace，使 git commit 等操作自然生效。
+    回傳同步的檔案清單，用於事後清理。
+    """
+    synced = []
+    ws = Path(workspace_dir)
+    proj = Path(project_path)
+
+    # 同步 CLAUDE.md
+    for config_file in ["CLAUDE.md", ".gemini.md"]:
+        src = ws / config_file
+        if src.exists():
+            dst = proj / config_file
+            _shutil.copy2(src, dst)
+            synced.append(str(dst))
+
+    # 同步 .claude/skills/ 或 .gemini/skills/
+    for dot_dir in [".claude", ".gemini"]:
+        src_dir = ws / dot_dir
+        if src_dir.exists():
+            dst_dir = proj / dot_dir
+            if dst_dir.exists():
+                _shutil.rmtree(dst_dir)
+            _shutil.copytree(src_dir, dst_dir)
+            synced.append(str(dst_dir))
+
+    # 同步 .mcp.json
+    mcp_src = ws / ".mcp.json"
+    if mcp_src.exists():
+        mcp_dst = proj / ".mcp.json"
+        _shutil.copy2(mcp_src, mcp_dst)
+        synced.append(str(mcp_dst))
+
+    # 同步 .gitconfig
+    gc_src = ws / ".gitconfig"
+    if gc_src.exists():
+        gc_dst = proj / ".gitconfig"
+        _shutil.copy2(gc_src, gc_dst)
+        synced.append(str(gc_dst))
+
+    if synced:
+        logger.info(f"[Workspace] Synced {len(synced)} config items to {project_path}")
+    return synced
+
+
+def _cleanup_synced_config(synced_files: list):
+    """清理同步到專案目錄的臨時設定檔。"""
+    for path_str in synced_files:
+        p = Path(path_str)
+        try:
+            if p.is_dir():
+                _shutil.rmtree(p)
+            elif p.exists():
+                p.unlink()
+        except Exception as e:
+            logger.warning(f"[Workspace] Failed to cleanup {p}: {e}")
 from app.core.memory_manager import write_member_short_term_memory
 
 # HTTP client for broadcasting
@@ -1129,7 +1190,12 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
             stage_instruction=stage_list.system_instruction or "" if stage_list else "",
         ))
 
-    effective_cwd = workspace_dir or project_path
+    # CWD 策略：AI 直接在專案目錄工作（非 workspace）
+    # workspace 只用於生成設定檔，同步到專案目錄讓 Claude Code 讀取
+    _synced_files = []
+    if workspace_dir:
+        _synced_files = _sync_workspace_config(workspace_dir, project_path)
+    effective_cwd = project_path
     _dialogue_hint = "\n\n請在所有輸出的最末行，用你的角色語氣寫一句簡短的任務總結（70字以內），格式：<!-- dialogue: 你的總結 -->"
     effective_prompt = ("請閱讀你的設定檔並執行本次任務。" if workspace_dir else card_data.content) + _dialogue_hint
 
@@ -1178,6 +1244,8 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
         error_note = f"\n\n### Error (retry scheduled)\n{result.get('output', '')[:200]}"
         update_card_status(idx.card_id, "pending", error_note)
         broadcast_event("task_failed", {"card_id": idx.card_id, "status": "retrying"})
+        if _synced_files:
+            _cleanup_synced_config(_synced_files)
         if workspace_dir:
             cleanup_workspace(idx.card_id)
         return
@@ -1259,7 +1327,9 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
         except Exception as e:
             logger.warning(f"[Memory] Failed: {e}")
 
-    # 清理工作區
+    # 清理工作區和同步的設定檔
+    if _synced_files:
+        _cleanup_synced_config(_synced_files)
     if workspace_dir:
         cleanup_workspace(idx.card_id)
 

@@ -61,11 +61,8 @@ def _build_config_content(
 """
 
     return f"""# 工作目錄
-你的專案在 {project_path}
-所有程式碼修改都在那個目錄進行。
-
-重要：你現在的工作目錄（cwd）是臨時工作區，不是專案目錄。
-讀取或修改專案檔案時，請一律使用絕對路徑 {project_path}/... 開頭。
+你的工作目錄（cwd）就是專案目錄：{project_path}
+可以直接用相對路徑操作檔案（如 backend/worker.py）。
 
 # 你的身份
 {soul_content}
