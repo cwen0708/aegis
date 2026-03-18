@@ -248,9 +248,14 @@ def _setup_dev_directory(install_root: Path) -> Path:
       install_root (.local/aegis/) — 運行環境，systemd 服務使用
       dev_dir (projects/Aegis/)    — 開發目錄，AI 任務在此修改程式碼
 
+    Git remote 策略（Fork 友善）：
+      upstream → 上游開源 repo（只讀，用於拉取更新）
+      origin   → 使用者自己的 fork（可 push，用於 PR 貢獻）
+
     自我進化流程：
-      小茵在 dev_dir 開發 → 小良審查 → 複製到 install_root → 重啟服務
-      上游更新時：在 dev_dir fetch + merge → 複製到 install_root
+      小茵在 dev_dir 開發 → git commit → 小良審查 → 部署到 install_root
+      上游更新：git fetch upstream → git merge upstream/main
+      貢獻回開源：git push origin → GitHub PR 到 upstream
     """
     import subprocess
 
@@ -261,31 +266,39 @@ def _setup_dev_directory(install_root: Path) -> Path:
         print(f"  - Dev directory already exists: {dev_dir}")
         return dev_dir
 
-    # 從運行環境的 git remote 取得 clone URL
-    clone_url = "https://github.com/cwen0708/aegis.git"  # 預設
+    # 從運行環境的 git remote 取得上游 URL
+    upstream_url = "https://github.com/cwen0708/aegis.git"
     try:
         result = subprocess.run(
             ["git", "remote", "get-url", "origin"],
             cwd=install_root, capture_output=True, text=True, timeout=10,
         )
         if result.returncode == 0 and result.stdout.strip():
-            clone_url = result.stdout.strip()
+            upstream_url = result.stdout.strip()
     except Exception:
         pass
 
     dev_dir.parent.mkdir(parents=True, exist_ok=True)
     try:
         subprocess.run(
-            ["git", "clone", clone_url, str(dev_dir)],
+            ["git", "clone", upstream_url, str(dev_dir)],
             timeout=120, check=True,
         )
+        # 將 origin 改名為 upstream（上游只讀）
+        # origin 留給使用者設定自己的 fork（用於 PR 貢獻）
+        subprocess.run(
+            ["git", "remote", "rename", "origin", "upstream"],
+            cwd=dev_dir, timeout=10,
+        )
         print(f"  - Cloned dev directory: {dev_dir}")
+        print(f"  - Remote 'upstream' → {upstream_url}")
+        print("  - To contribute: fork on GitHub, then:")
+        print(f"    cd {dev_dir} && git remote add origin YOUR_FORK_URL")
     except Exception as e:
-        # Clone 失敗時退回使用安裝目錄
         print(f"  - Warning: Failed to clone dev directory ({e}), using install dir")
         return install_root
 
-    # 寫入 CLAUDE.md（開發流程指引）
+    # 寫入 CLAUDE.md（開發流程 + 貢獻指引）
     claude_md = dev_dir / "CLAUDE.md"
     if not claude_md.exists():
         claude_md.write_text(
@@ -293,10 +306,30 @@ def _setup_dev_directory(install_root: Path) -> Path:
             "## 環境架構\n"
             f"- **開發目錄**（本目錄）：`{dev_dir}`\n"
             f"- **運行環境**：`{install_root}`（systemd 服務，勿直接修改）\n\n"
+            "## Git Remote\n"
+            "- `upstream` — 上游開源 repo（只讀，用於拉取更新）\n"
+            "- `origin` — 你的 fork（需自行設定，用於 PR 貢獻）\n\n"
+            "## 設定你的 Fork（可選，用於貢獻程式碼）\n"
+            "```bash\n"
+            "# 1. 在 GitHub 上 fork cwen0708/aegis\n"
+            "# 2. 設定 origin\n"
+            "git remote add origin https://github.com/YOUR_USERNAME/aegis.git\n"
+            "```\n\n"
             "## 開發完成後\n"
             "**不要自己部署** — 建立審查卡片交給小良，由他負責審查和部署。\n\n"
+            "## 貢獻回開源\n"
+            "部署驗證通過後，如果這個改動值得分享：\n"
+            "```bash\n"
+            "git push origin main\n"
+            "# 然後到 GitHub 建立 Pull Request\n"
+            "```\n\n"
+            "## 拉取上游更新\n"
+            "```bash\n"
+            "git fetch upstream\n"
+            "git merge upstream/main\n"
+            "# 解決衝突（如有），然後部署到運行環境\n"
+            "```\n\n"
             "## 限制\n"
-            "- 不要 git push（推送權在管理者）\n"
             "- 不要修改運行環境的 .env 或資料庫\n",
             encoding="utf-8",
         )
