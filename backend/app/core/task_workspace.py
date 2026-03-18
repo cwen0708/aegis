@@ -61,8 +61,11 @@ def _build_config_content(
 """
 
     return f"""# 工作目錄
-你的工作目錄（cwd）就是專案目錄：{project_path}
-可以直接用相對路徑操作檔案（如 backend/worker.py）。
+你的工作目錄（cwd）是臨時工作區，專案檔案已透過 symlink 連結進來。
+可以直接用相對路徑操作（如 backend/worker.py），改動會直接反映在專案目錄。
+
+專案實際路徑：{project_path}
+git 操作在此目錄中可直接執行（.git 已連結）。
 
 # 你的身份
 {soul_content}
