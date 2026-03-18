@@ -68,28 +68,37 @@ from app.core.task_workspace import prepare_workspace, cleanup_workspace
 
 
 def _link_project_into_workspace(workspace_dir: str, project_path: str) -> None:
-    """在 workspace 中建立 symlink 指向專案目錄的原始碼。
+    """在 workspace 中建立連結指向專案目錄的原始碼。
 
     策略：workspace 保持為 CWD（CLAUDE.md、.claude/ 安全在這裡），
-    專案的原始碼透過 symlink 連結進來，AI 透過 symlink 修改 → 改動直接落地。
+    專案的原始碼透過連結方式映射進來，AI 修改 → 改動直接落在開發目錄。
+
+    平台相容性：
+    - Linux/macOS：使用 symlink（無需額外權限）
+    - Windows 目錄：優先 junction（不需管理員權限），失敗才用 symlink
+    - Windows 檔案：使用 hardlink（不需管理員權限），失敗才用 symlink
 
     好處：
     - 設定檔不會污染專案目錄、不會蓋掉專案的 .claude/ 或 skills
     - 改動直接落在 git repo，commit 自然生效
-    - 清理 workspace 時 symlink 直接刪除，不影響專案
+    - 清理 workspace 時連結直接刪除，不影響專案
     """
+    import platform
     ws = Path(workspace_dir)
     proj = Path(project_path)
 
     if not proj.exists():
         return
 
-    # workspace 自己的檔案，不要被 symlink 覆蓋
+    is_windows = platform.system() == "Windows"
+
+    # workspace 自己的檔案，不要被覆蓋
     skip = {
         "CLAUDE.md", ".gemini.md", ".claude", ".gemini",
         ".mcp.json", ".gitconfig",
     }
 
+    linked = 0
     for item in proj.iterdir():
         if item.name in skip or item.name.startswith(".aegis"):
             continue
@@ -97,20 +106,37 @@ def _link_project_into_workspace(workspace_dir: str, project_path: str) -> None:
         if link_path.exists() or link_path.is_symlink():
             continue
         try:
-            link_path.symlink_to(item)
-        except OSError as e:
-            logger.warning(f"[Workspace] Failed to symlink {item.name}: {e}")
+            if is_windows and item.is_dir():
+                # Windows: junction 不需管理員權限（僅限目錄）
+                import subprocess
+                subprocess.run(
+                    ["cmd", "/c", "mklink", "/J", str(link_path), str(item)],
+                    check=True, capture_output=True, timeout=5,
+                )
+            else:
+                link_path.symlink_to(item)
+            linked += 1
+        except Exception as e:
+            logger.warning(f"[Workspace] Failed to link {item.name}: {e}")
 
-    # .git symlink（讓 git 指令在 workspace 中也能用）
+    # .git 連結（讓 git 指令在 workspace 中也能用）
     git_link = ws / ".git"
     git_src = proj / ".git"
     if git_src.exists() and not git_link.exists():
         try:
-            git_link.symlink_to(git_src)
-        except OSError:
+            if is_windows:
+                import subprocess
+                subprocess.run(
+                    ["cmd", "/c", "mklink", "/J", str(git_link), str(git_src)],
+                    check=True, capture_output=True, timeout=5,
+                )
+            else:
+                git_link.symlink_to(git_src)
+            linked += 1
+        except Exception:
             pass
 
-    logger.info(f"[Workspace] Linked project {proj} into workspace {ws}")
+    logger.info(f"[Workspace] Linked {linked} items from {proj} into {ws}")
 from app.core.memory_manager import write_member_short_term_memory
 
 # HTTP client for broadcasting
