@@ -2125,10 +2125,10 @@ class AuthSetInitialPasswordRequest(BaseModel):
 @router.post("/auth/verify")
 def verify_admin_password(req: AuthVerifyRequest, session: Session = Depends(get_session)):
     """驗證管理員密碼，回傳 session token"""
-    from app.core.auth import check_password, hash_password, generate_session_token
+    from app.core.auth import check_password, hash_password, generate_session_token, DEFAULT_PASSWORD
 
     setting = session.get(SystemSetting, "admin_password")
-    stored_password = setting.value if setting else os.getenv("AEGIS_DEFAULT_PASSWORD", "aegis2026!")
+    stored_password = setting.value if setting else DEFAULT_PASSWORD
 
     if not check_password(req.password, stored_password):
         raise HTTPException(status_code=401, detail="密碼錯誤")
@@ -2149,10 +2149,10 @@ def verify_admin_password(req: AuthVerifyRequest, session: Session = Depends(get
 @router.post("/auth/change-password")
 def change_admin_password(req: AuthChangePasswordRequest, session: Session = Depends(get_session)):
     """修改管理員密碼"""
-    from app.core.auth import check_password, hash_password
+    from app.core.auth import check_password, hash_password, DEFAULT_PASSWORD
 
     setting = session.get(SystemSetting, "admin_password")
-    stored_password = setting.value if setting else os.getenv("AEGIS_DEFAULT_PASSWORD", "aegis2026!")
+    stored_password = setting.value if setting else DEFAULT_PASSWORD
 
     if not check_password(req.current_password, stored_password):
         raise HTTPException(status_code=401, detail="目前密碼錯誤")
@@ -2171,9 +2171,9 @@ def change_admin_password(req: AuthChangePasswordRequest, session: Session = Dep
 @router.get("/auth/password-status")
 def get_password_status(session: Session = Depends(get_session)):
     """檢查密碼是否仍為預設值"""
-    from app.core.auth import check_password
+    from app.core.auth import check_password, DEFAULT_PASSWORD
 
-    default_password = os.getenv("AEGIS_DEFAULT_PASSWORD", "aegis2026!")
+    default_password = DEFAULT_PASSWORD
     setting = session.get(SystemSetting, "admin_password")
     stored_password = setting.value if setting else default_password
 
@@ -2183,9 +2183,9 @@ def get_password_status(session: Session = Depends(get_session)):
 @router.post("/auth/set-initial-password")
 def set_initial_password(req: AuthSetInitialPasswordRequest, session: Session = Depends(get_session)):
     """首次設定密碼（僅在密碼仍為預設值時可用）"""
-    from app.core.auth import check_password, hash_password
+    from app.core.auth import check_password, hash_password, DEFAULT_PASSWORD
 
-    default_password = os.getenv("AEGIS_DEFAULT_PASSWORD", "aegis2026!")
+    default_password = DEFAULT_PASSWORD
     setting = session.get(SystemSetting, "admin_password")
     stored_password = setting.value if setting else default_password
 

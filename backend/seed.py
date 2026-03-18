@@ -669,8 +669,9 @@ def seed_data():
 
         # ── 2c. 管理員密碼（跳過已存在）──
         if not session.get(SystemSetting, "admin_password"):
-            session.add(SystemSetting(key="admin_password", value="aegis2026!"))
-            print("  - Added admin_password setting (default: aegis2026!)")
+            from app.core.auth import hash_password, DEFAULT_PASSWORD
+            session.add(SystemSetting(key="admin_password", value=hash_password(DEFAULT_PASSWORD)))
+            print("  - Added admin_password setting (hashed default)")
 
         # ── 2d. 預設辦公室佈局（跳過已存在）──
         if not session.get(SystemSetting, "office_layout"):

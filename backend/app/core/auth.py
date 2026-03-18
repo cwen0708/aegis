@@ -22,6 +22,9 @@ logger = logging.getLogger(__name__)
 AUTH_MODE = os.getenv("AEGIS_AUTH_MODE", "local")  # local | supabase
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
 
+# 預設密碼（統一常數，避免硬編碼散佈）
+DEFAULT_PASSWORD = os.getenv("AEGIS_DEFAULT_PASSWORD", "aegis2026!")
+
 # ==========================================
 # Session Token（HMAC 簽名）
 # ==========================================
@@ -126,9 +129,8 @@ def verify_local_password(password: str, session: Session) -> bool:
     from app.models.core import SystemSetting
 
     setting = session.get(SystemSetting, "admin_password")
-    stored_password = setting.value if setting else os.getenv("AEGIS_DEFAULT_PASSWORD", "aegis2026!")
-    # 使用 constant-time 比對防止 timing attack
-    return secrets.compare_digest(password, stored_password)
+    stored_password = setting.value if setting else DEFAULT_PASSWORD
+    return check_password(password, stored_password)
 
 
 async def verify_supabase_jwt(token: str) -> dict:
