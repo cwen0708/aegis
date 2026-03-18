@@ -79,23 +79,24 @@ def _seed_member_profiles():
     (liang_dir / "skills" / "backlog-review.md").write_text(
         "---\n"
         "name: backlog-review\n"
-        'description: "Backlog 審查與任務分派。掃描標題挑選 1 張卡片，規劃後分派給小茵。"\n'
+        'description: "Backlog 審查與任務分派。選 1 張卡片深入規劃拆解後分派給小茵。"\n'
         "---\n\n"
         "# Backlog 審查與任務分派\n\n"
-        "定期審查 Backlog，挑選一張適合的卡片，規劃後分派給小茵。\n\n"
-        "**核心原則：一次只處理一張卡片。**\n\n"
+        "定期審查 Backlog，選 1 張卡片深入規劃後分派給小茵。\n\n"
+        "**核心原則：一次只深入處理一張卡片。不要批量標記。**\n\n"
         "## 流程\n\n"
-        "1. 掃描 Backlog 標題（不深入閱讀），跳過 [reviewed] 標記的\n"
-        "2. 根據優先順序選 1 張（Bug > UI > 品質改善 > 簡單功能）\n"
-        "3. 確認小茵沒有 running 的任務（忙就不派）\n"
-        "4. 深入閱讀程式碼，寫出修改規劃\n"
-        "5. 適合 → 建卡片到小茵收件匣，原卡標記 [reviewed]\n"
-        "6. 不適合 → 標記 [reviewed] 後結束，不再挑第二張\n\n"
-        "## 跳過的類型\n\n"
-        "- worker.py / runner.py 修改（重啟風險高）\n"
-        "- 跨多模組大型重構\n"
-        "- 資料庫 migration\n"
-        "- 安全性修改（需人工審查）\n",
+        "1. 掃描 Backlog 標題（不深入閱讀），跳過 [reviewed] / [blocked]\n"
+        "2. 選 1 張效益最高的（高效益 > Bug > UI > 品質改善）\n"
+        "3. 確認小茵沒在忙（忙就不派，結束）\n"
+        "4. **深入閱讀程式碼**，寫出具體修改步驟\n"
+        "5. **大任務要拆小**：例如 4 處 N+1 → 先修 1 處\n"
+        "6. 建立規劃卡片到小茵收件匣，原卡標記 [reviewed]\n"
+        "7. 不適合 → 標記 [reviewed] 並寫具體原因，結束\n\n"
+        "## 重要\n\n"
+        "- 高風險 ≠ 不能做，拆小就能做\n"
+        "- 唯一禁止的是資料庫 migration（schema 變更無法回滾）\n"
+        "- 不要一次標記多張卡片，只處理你選的那 1 張\n"
+        "- 規劃要具體到檔案、函式、行號\n",
         encoding="utf-8",
     )
     (liang_dir / "skills" / "self-upgrade.md").write_text(
@@ -298,39 +299,41 @@ def _setup_dev_directory(install_root: Path) -> Path:
         print(f"  - Warning: Failed to clone dev directory ({e}), using install dir")
         return install_root
 
-    # 寫入 CLAUDE.md（開發流程 + 貢獻指引）
-    claude_md = dev_dir / "CLAUDE.md"
-    if not claude_md.exists():
-        claude_md.write_text(
-            "# Aegis — AI 代理管理儀表板\n\n"
-            "## 環境架構\n"
-            f"- **開發目錄**（本目錄）：`{dev_dir}`\n"
-            f"- **運行環境**：`{install_root}`（systemd 服務，勿直接修改）\n\n"
-            "## Git Remote\n"
-            "- `upstream` — 上游開源 repo（只讀，用於拉取更新）\n"
-            "- `origin` — 你的 fork（需自行設定，用於 PR 貢獻）\n\n"
-            "## 設定你的 Fork（可選，用於貢獻程式碼）\n"
+    # 寫入 CONTRIBUTING.md（Fork 設定 + 貢獻指引，不綁定特定 AI 工具）
+    contrib_md = dev_dir / "CONTRIBUTING.md"
+    if not contrib_md.exists():
+        contrib_md.write_text(
+            "# 貢獻指南\n\n"
+            "## Git Remote 架構\n\n"
+            "開發目錄使用雙 remote 策略：\n"
+            "- `upstream` — 上游開源 repo（只讀，拉取更新用）\n"
+            "- `origin` — 你的 fork（可 push，PR 貢獻用）\n\n"
+            "## 設定你的 Fork\n\n"
             "```bash\n"
             "# 1. 在 GitHub 上 fork cwen0708/aegis\n"
             "# 2. 設定 origin\n"
             "git remote add origin https://github.com/YOUR_USERNAME/aegis.git\n"
             "```\n\n"
-            "## 開發完成後\n"
-            "**不要自己部署** — 建立審查卡片交給小良，由他負責審查和部署。\n\n"
-            "## 貢獻回開源\n"
-            "部署驗證通過後，如果這個改動值得分享：\n"
+            "## 貢獻流程\n\n"
             "```bash\n"
+            "# 開發完成後\n"
+            "git add <修改的檔案>\n"
+            "git commit -m 'feat: 描述改動'\n"
             "git push origin main\n"
-            "# 然後到 GitHub 建立 Pull Request\n"
+            "# 到 GitHub 建立 Pull Request\n"
             "```\n\n"
-            "## 拉取上游更新\n"
+            "## 拉取上游更新\n\n"
             "```bash\n"
             "git fetch upstream\n"
             "git merge upstream/main\n"
             "# 解決衝突（如有），然後部署到運行環境\n"
             "```\n\n"
-            "## 限制\n"
-            "- 不要修改運行環境的 .env 或資料庫\n",
+            "## 自我進化系統\n\n"
+            "Aegis 內建 AI 自我進化機制：\n"
+            f"- **開發目錄**：`{dev_dir}`（AI 在此修改程式碼）\n"
+            f"- **運行環境**：`{install_root}`（systemd 服務）\n"
+            "- 小良（AI）審查 Backlog → 小茵（AI）開發 → 小良審查部署\n"
+            "- 開發完成後的改動會 commit 在開發目錄，不會自動 push\n",
             encoding="utf-8",
         )
 
