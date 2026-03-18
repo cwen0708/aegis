@@ -547,7 +547,7 @@ def _sync_system_cron_jobs(session: Session):
                 )
             ).first()
 
-        cron_expr = "0 16,20 * * *"  # UTC 16:00, 20:00 = TPE 0:00, 4:00
+        cron_expr = "0 */4 * * *"
         crons_to_add.append(CronJob(
             project_id=aegis.id,
             name="Backlog 審查與任務分派",
