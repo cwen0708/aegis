@@ -821,6 +821,18 @@ async def full_update(version: str = None, wait_timeout: int = 300) -> bool:
     _state.is_updating = True
     _state.error = ""
 
+    # 記錄更新前 Worker 暫停狀態（用於 finally 判斷是否恢復）
+    _was_paused_before_update = False
+    try:
+        from app.database import engine as _eng
+        from app.models.core import SystemSetting as _SS
+        from sqlmodel import Session as _Ses
+        with _Ses(_eng) as _s:
+            _p = _s.get(_SS, "worker_paused")
+            _was_paused_before_update = bool(_p and _p.value == "true")
+    except Exception:
+        pass
+
     try:
         # 1. 檢查更新（如果沒指定版本）
         if not version:
