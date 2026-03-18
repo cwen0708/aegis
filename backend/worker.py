@@ -17,6 +17,7 @@ Aegis Worker — 卡片任務的主要執行引擎（獨立程序）
 """
 import os
 import sys
+import signal
 
 # 載入 .env 檔案（用於 CLAUDE_CODE_OAUTH_TOKEN 等環境變數）
 from pathlib import Path
@@ -150,6 +151,18 @@ logging.basicConfig(
     datefmt="%H:%M:%S"
 )
 logger = logging.getLogger(__name__)
+
+# ==========================================
+# Graceful Shutdown
+# ==========================================
+_shutdown_requested = False
+
+
+def _handle_shutdown(signum, frame):
+    global _shutdown_requested
+    _shutdown_requested = True
+    logger.info(f"[Worker] Received signal {signum}, will shutdown after current task completes...")
+
 
 # ==========================================
 # 配置
@@ -1427,6 +1440,10 @@ def main():
     logger.info(f"Poll Interval: {POLL_INTERVAL}s")
     logger.info("=" * 50)
 
+    signal.signal(signal.SIGTERM, _handle_shutdown)
+    signal.signal(signal.SIGINT, _handle_shutdown)
+    logger.info("[Worker] Signal handlers registered (graceful shutdown enabled)")
+
     # 啟動時清除暫停狀態（避免 updater 設了 paused=true 但重啟後無法恢復）
     try:
         with Session(engine) as session:
@@ -1440,7 +1457,7 @@ def main():
         logger.warning(f"[Worker] Failed to clear paused flag: {e}")
 
     last_cleanup = time.time()
-    while True:
+    while not _shutdown_requested:
         try:
             if is_worker_paused():
                 pass  # 靜默跳過
@@ -1463,6 +1480,8 @@ def main():
         except Exception:
             _interval = POLL_INTERVAL
         time.sleep(max(1, _interval))
+
+    logger.info("[Worker] Graceful shutdown complete.")
 
 
 if __name__ == "__main__":
