@@ -547,20 +547,19 @@ def _sync_system_cron_jobs(session: Session):
                 )
             ).first()
 
-        cron_expr = "0 */4 * * *"
+        cron_expr = "0 16,20 * * *"  # UTC 16:00, 20:00 = TPE 0:00, 4:00
         crons_to_add.append(CronJob(
             project_id=aegis.id,
             name="Backlog 審查與任務分派",
-            description="小良每 4 小時審查 AEGIS Backlog，挑選適合的卡片規劃後分派給小茵開發。",
+            description="小良每天深夜審查 AEGIS Backlog，挑選適合的卡片規劃後分派給小茵開發。",
             prompt_template=(
                 "請執行 Backlog 審查：\n\n"
                 "1. 掃描 AEGIS 專案 Backlog 中所有 idle 狀態的卡片標題\n"
                 "2. 跳過標題已含 [reviewed] 或 [blocked] 的卡片\n"
                 "3. 根據優先順序選出 1 張最適合的卡片\n"
-                "4. 確認小茵目前沒有 running 的任務（忙就不派）\n"
-                "5. 深入閱讀程式碼，進行修改規劃\n"
-                "6. 將規劃好的卡片分派給小茵（xiao-yin）\n"
-                "7. 不適合的卡片標記 [reviewed]\n\n"
+                "4. 深入閱讀程式碼，進行修改規劃\n"
+                "5. 將規劃好的卡片分派給小茵（xiao-yin）\n"
+                "6. 不適合的卡片標記 [reviewed]\n\n"
                 "請參考你的 backlog-review skill 執行。"
             ),
             cron_expression=cron_expr,
