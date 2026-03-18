@@ -1,6 +1,6 @@
 # Aegis — AI Agent Management Dashboard
 
-**Aegis（神盾）** 是一個開源的 AI 代理管理平台，讓你像管理真人團隊一樣管理 AI 代理。支援 Claude、Gemini 等多種 AI 引擎，提供看板任務管理、排程自動化、即時串流監控、多頻道通訊等功能。
+**Aegis（神盾）** 是一個開源的 AI 代理管理平台，讓你像管理真人團隊一樣管理 AI 代理。支援 Claude、Gemini 等多種 AI 引擎，提供看板任務管理、排程自動化、即時串流監控、多頻道通訊、以及 AI 自我進化開發等功能。
 
 ![Virtual Office](docs/screenshots/office.png)
 
