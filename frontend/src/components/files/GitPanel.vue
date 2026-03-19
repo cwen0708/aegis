@@ -133,57 +133,46 @@
           </div>
           <div class="relative" :style="{ minWidth: svgWidth + 'px' }">
             <svg :width="svgWidth" height="110" class="block">
-              <!-- 標籤列 -->
+              <!-- 標籤列：開發(上) 運行(中) 遠端(下) -->
               <text x="8" y="24" fill="#c084fc" font-size="9" font-weight="bold" text-anchor="end">開發</text>
-              <text x="8" y="54" fill="#60a5fa" font-size="9" font-weight="bold" text-anchor="end">遠端</text>
-              <text x="8" y="84" fill="#34d399" font-size="9" font-weight="bold" text-anchor="end">運行</text>
+              <text v-if="hasRuntime" x="8" y="54" fill="#34d399" font-size="9" font-weight="bold" text-anchor="end">運行</text>
+              <text x="8" :y="hasRuntime ? 84 : 54" fill="#60a5fa" font-size="9" font-weight="bold" text-anchor="end">遠端</text>
 
-              <!-- 三條平行線 -->
+              <!-- 三條平行線：開發(20) 運行(50) 遠端(80) -->
               <line :x1="lineStart" y1="20" :x2="lineEnd" y2="20" stroke="#7c3aed" stroke-width="1.5" opacity="0.3" />
-              <line :x1="lineStart" y1="50" :x2="lineEnd" y2="50" stroke="#3b82f6" stroke-width="1.5" opacity="0.3" />
-              <line v-if="hasRuntime" :x1="lineStart" y1="80" :x2="lineEnd" y2="80" stroke="#10b981" stroke-width="1.5" opacity="0.3" />
+              <line v-if="hasRuntime" :x1="lineStart" y1="50" :x2="lineEnd" y2="50" stroke="#10b981" stroke-width="1.5" opacity="0.3" />
+              <line :x1="lineStart" :y1="hasRuntime ? 80 : 50" :x2="lineEnd" :y2="hasRuntime ? 80 : 50" stroke="#3b82f6" stroke-width="1.5" opacity="0.3" />
 
               <!-- Commit 節點和連線 -->
               <g v-for="(c, i) in graph.commits" :key="c.sha_full">
-                <!-- 節點在 dev 線上（所有 commit 都在 dev 歷史） -->
+                <!-- dev 線(y=20)：所有 commit 都在 dev 歷史 -->
                 <circle
                   :cx="nodeX(i)" cy="20" r="4"
                   :fill="i === graph.dev_idx ? '#c084fc' : '#334155'"
-                  :stroke="i === graph.dev_idx ? '#c084fc' : 'none'" stroke-width="2"
                   class="cursor-pointer"
                 ><title>{{ c.sha }} {{ c.message }}</title></circle>
 
-                <!-- 同步連線：如果這個 commit 也是 origin HEAD -->
-                <line v-if="i === graph.origin_idx"
-                  :x1="nodeX(i)" y1="20" :x2="nodeX(i)" y2="50"
-                  stroke="#60a5fa" stroke-width="1.5"
-                />
-                <!-- origin HEAD 節點 -->
-                <circle v-if="i === graph.origin_idx"
-                  :cx="nodeX(i)" cy="50" r="5"
-                  fill="#3b82f6" stroke="#3b82f6" stroke-width="2"
-                />
-
-                <!-- 同步連線：如果這個 commit 也是 runtime HEAD -->
+                <!-- runtime 線(y=50)：同步連線從 dev 到 runtime -->
                 <template v-if="hasRuntime && i === graph.runtime_idx">
-                  <line
-                    :x1="nodeX(i)" :y1="i === graph.origin_idx ? 50 : 20"
-                    :x2="nodeX(i)" y2="80"
-                    stroke="#34d399" stroke-width="1.5"
-                  />
-                  <circle :cx="nodeX(i)" cy="80" r="5" fill="#10b981" stroke="#10b981" stroke-width="2" />
+                  <line :x1="nodeX(i)" y1="20" :x2="nodeX(i)" y2="50" stroke="#34d399" stroke-width="1.5" />
+                  <circle :cx="nodeX(i)" cy="50" r="5" fill="#10b981" stroke="#10b981" stroke-width="2" />
                 </template>
-
-                <!-- origin 線上的普通節點（在 origin HEAD 之前的） -->
-                <circle v-if="graph.origin_idx >= 0 && i <= graph.origin_idx && i !== graph.origin_idx"
-                  :cx="nodeX(i)" cy="50" r="3"
-                  fill="#334155"
+                <!-- runtime 線普通節點 -->
+                <circle v-else-if="hasRuntime && graph.runtime_idx >= 0 && i <= graph.runtime_idx"
+                  :cx="nodeX(i)" cy="50" r="3" fill="#334155"
                 />
 
-                <!-- runtime 線上的普通節點（在 runtime HEAD 之前的） -->
-                <circle v-if="hasRuntime && graph.runtime_idx >= 0 && i <= graph.runtime_idx && i !== graph.runtime_idx"
-                  :cx="nodeX(i)" cy="80" r="3"
-                  fill="#334155"
+                <!-- origin 線(y=80 or 50)：同步連線 -->
+                <template v-if="i === graph.origin_idx">
+                  <line :x1="nodeX(i)" :y1="hasRuntime && i === graph.runtime_idx ? 50 : 20"
+                    :x2="nodeX(i)" :y2="hasRuntime ? 80 : 50"
+                    stroke="#3b82f6" stroke-width="1.5"
+                  />
+                  <circle :cx="nodeX(i)" :cy="hasRuntime ? 80 : 50" r="5" fill="#3b82f6" stroke="#3b82f6" stroke-width="2" />
+                </template>
+                <!-- origin 線普通節點 -->
+                <circle v-else-if="graph.origin_idx >= 0 && i <= graph.origin_idx"
+                  :cx="nodeX(i)" :cy="hasRuntime ? 80 : 50" r="3" fill="#334155"
                 />
               </g>
 
@@ -196,15 +185,15 @@
               <!-- SHA 標籤 -->
               <text v-if="graph.dev_idx >= 0"
                 :x="nodeX(graph.dev_idx)" y="106"
-                text-anchor="middle" fill="#94a3b8" font-size="8" font-family="monospace"
+                text-anchor="middle" fill="#c084fc" font-size="8" font-family="monospace" opacity="0.7"
               >{{ graph.commits[graph.dev_idx]?.sha }}</text>
               <text v-if="graph.origin_idx >= 0 && graph.origin_idx !== graph.dev_idx"
                 :x="nodeX(graph.origin_idx)" y="106"
-                text-anchor="middle" fill="#94a3b8" font-size="8" font-family="monospace"
+                text-anchor="middle" fill="#60a5fa" font-size="8" font-family="monospace" opacity="0.7"
               >{{ graph.commits[graph.origin_idx]?.sha }}</text>
               <text v-if="hasRuntime && graph.runtime_idx >= 0 && graph.runtime_idx !== graph.origin_idx && graph.runtime_idx !== graph.dev_idx"
                 :x="nodeX(graph.runtime_idx)" y="106"
-                text-anchor="middle" fill="#94a3b8" font-size="8" font-family="monospace"
+                text-anchor="middle" fill="#34d399" font-size="8" font-family="monospace" opacity="0.7"
               >{{ graph.commits[graph.runtime_idx]?.sha }}</text>
             </svg>
           </div>
