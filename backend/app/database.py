@@ -114,13 +114,28 @@ def _migrate_db():
             cur.execute("ALTER TABLE botuser ADD COLUMN extra_json TEXT DEFAULT '{}'")
             logger.info("[Migration] Added 'extra_json' to botuser")
 
-        # InviteCode 加 access_valid_days
+        # BotUser 加 person_id（跨平台身份分組）
+        if "person_id" not in cols:
+            cur.execute("ALTER TABLE botuser ADD COLUMN person_id INTEGER DEFAULT 0")
+            cur.execute("UPDATE botuser SET person_id = id WHERE person_id = 0")
+            cur.execute("CREATE INDEX IF NOT EXISTS ix_botuser_person_id ON botuser(person_id)")
+            logger.info("[Migration] Added 'person_id' to botuser (set to self.id)")
+
+        # BotUser 加 password_hash（網頁登入）
+        if "password_hash" not in cols:
+            cur.execute("ALTER TABLE botuser ADD COLUMN password_hash TEXT")
+            logger.info("[Migration] Added 'password_hash' to botuser")
+
+        # InviteCode 加 access_valid_days, owner_person_id
         tables = [row[0] for row in cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
         if "invitecode" in tables:
             cols = [row[1] for row in cur.execute("PRAGMA table_info(invitecode)").fetchall()]
             if "access_valid_days" not in cols:
                 cur.execute("ALTER TABLE invitecode ADD COLUMN access_valid_days INTEGER")
                 logger.info("[Migration] Added 'access_valid_days' to invitecode")
+            if "owner_person_id" not in cols:
+                cur.execute("ALTER TABLE invitecode ADD COLUMN owner_person_id INTEGER")
+                logger.info("[Migration] Added 'owner_person_id' to invitecode")
 
         # Room: 首次建立時 seed 預設房間（重用上方的 tables 變數）
         if "room" in tables:

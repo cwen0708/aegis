@@ -279,6 +279,9 @@ class BotUser(SQLModel, table=True):
     # 額外資料（JSON，供 MCP/Skill 讀取，如 AD 帳密、自訂欄位等）
     extra_json: str = Field(default="{}")
 
+    # 跨平台身份分組（同一個人的不同平台帳號共享相同的 person_id）
+    person_id: int = Field(default=0, index=True)    # 0=未分組，遷移時 = self.id
+
     # 網頁登入（platform="web" 時使用）
     password_hash: Optional[str] = None              # scrypt 雜湊密碼
 
@@ -374,6 +377,9 @@ class InviteCode(SQLModel, table=True):
 
     # 存取期限（驗證後的有效天數）
     access_valid_days: Optional[int] = Field(default=None)  # None = 永久
+
+    # 跨平台綁定（第一個使用此邀請碼的人的 person_id）
+    owner_person_id: Optional[int] = None  # 後續使用者自動綁定到同一 person
 
     # 元資料
     created_by: Optional[int] = Field(default=None, foreign_key="botuser.id")
