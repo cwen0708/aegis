@@ -2,16 +2,23 @@
   <div class="h-full flex flex-col">
     <PageHeader :icon="Share2">
       <div class="flex items-center gap-2">
+        <!-- 起點選擇 -->
         <select v-model="centerType" class="bg-slate-700 text-slate-200 text-xs rounded-lg px-2 py-1 border border-slate-600 outline-none">
+          <option value="">全部</option>
           <option value="project">專案</option>
           <option value="member">成員</option>
           <option value="domain">網域</option>
           <option value="room">空間</option>
           <option value="user">用戶</option>
         </select>
-        <select v-model="centerId" class="bg-slate-700 text-slate-200 text-xs rounded-lg px-2 py-1 border border-slate-600 outline-none max-w-[200px]">
+        <select v-if="centerType" v-model="centerId" class="bg-slate-700 text-slate-200 text-xs rounded-lg px-2 py-1 border border-slate-600 outline-none max-w-[200px]">
           <option v-for="e in currentEntities" :key="e.id" :value="e.id">{{ e.label }}</option>
         </select>
+        <!-- Layout 切換 -->
+        <button
+          @click="toggleLayout"
+          class="text-[10px] px-2 py-1 rounded-md border text-slate-400 border-slate-600 hover:text-slate-200 hover:border-slate-500 transition-colors"
+        >{{ layoutName === 'breadthfirst' ? '樹狀' : layoutName === 'cose' ? '力導向' : '圓形' }}</button>
       </div>
     </PageHeader>
 
@@ -37,178 +44,34 @@ import { Share2 } from 'lucide-vue-next'
 import PageHeader from '../components/PageHeader.vue'
 import { config } from '../config'
 import cytoscape from 'cytoscape'
-import type { Core } from 'cytoscape'
+import type { Core, ElementDefinition } from 'cytoscape'
 
 const API = config.apiUrl
 
 // ── 狀態 ──
-const centerType = ref('project')
+const centerType = ref('')
 const centerId = ref<number>(0)
-const entities = ref<Record<string, { id: number; label: string }[]>>({})
 const cyContainer = ref<HTMLElement | null>(null)
 let cy: Core | null = null
+let allElements: ElementDefinition[] = []
+const layoutName = ref<'breadthfirst' | 'cose' | 'circle'>('cose')
 
-const currentEntities = computed(() => entities.value[centerType.value] || [])
+// ── 從 API 資料中提取各類型列表（給下拉選單用）──
+const entityLists = ref<Record<string, { id: number; label: string }[]>>({})
+const currentEntities = computed(() => entityLists.value[centerType.value] || [])
 
 // ── 顏色 ──
-const nodeColors: Record<string, { bg: string; border: string; text: string }> = {
-  project: { bg: '#7c3aed', border: '#a78bfa', text: '#e9d5ff' },
-  member: { bg: '#059669', border: '#34d399', text: '#d1fae5' },
-  domain: { bg: '#2563eb', border: '#60a5fa', text: '#dbeafe' },
-  user: { bg: '#d97706', border: '#fbbf24', text: '#fef3c7' },
-  room: { bg: '#ea580c', border: '#fb923c', text: '#ffedd5' },
-  account: { bg: '#db2777', border: '#f472b6', text: '#fce7f3' },
-  info: { bg: '#475569', border: '#94a3b8', text: '#e2e8f0' },
+const nodeColors: Record<string, { bg: string; border: string }> = {
+  project: { bg: '#7c3aed', border: '#a78bfa' },
+  member: { bg: '#059669', border: '#34d399' },
+  domain: { bg: '#2563eb', border: '#60a5fa' },
+  user: { bg: '#d97706', border: '#fbbf24' },
+  room: { bg: '#ea580c', border: '#fb923c' },
+  account: { bg: '#db2777', border: '#f472b6' },
 }
 
 function getColor(type: string) {
-  return nodeColors[type] || nodeColors.info!
-}
-
-// ── Cytoscape 初始化 ──
-function initCytoscape() {
-  if (!cyContainer.value) return
-
-  cy = cytoscape({
-    container: cyContainer.value,
-    style: [
-      {
-        selector: 'node',
-        style: {
-          'label': 'data(label)',
-          'text-valign': 'bottom',
-          'text-halign': 'center',
-          'font-size': '11px',
-          'color': '#e2e8f0',
-          'text-margin-y': 6,
-          'width': 40,
-          'height': 40,
-          'background-color': 'data(bgColor)',
-          'border-color': 'data(borderColor)',
-          'border-width': 2,
-          'text-wrap': 'ellipsis',
-          'text-max-width': '80px',
-        },
-      },
-      {
-        selector: 'node[?isCenter]',
-        style: {
-          'width': 56,
-          'height': 56,
-          'border-width': 3,
-          'font-size': '13px',
-          'font-weight': 'bold',
-        },
-      },
-      {
-        selector: 'node[sub]',
-        style: {
-          'label': 'data(fullLabel)',
-          'text-wrap': 'wrap',
-          'text-max-width': '100px',
-          'font-size': '10px',
-          'line-height': 1.3,
-        },
-      },
-      {
-        selector: 'edge',
-        style: {
-          'width': 1.5,
-          'line-color': '#334155',
-          'target-arrow-color': '#334155',
-          'target-arrow-shape': 'triangle',
-          'curve-style': 'bezier',
-          'arrow-scale': 0.8,
-          'label': 'data(relation)',
-          'font-size': '9px',
-          'color': '#64748b',
-          'text-rotation': 'autorotate',
-          'text-margin-y': -8,
-        },
-      },
-      {
-        selector: 'edge:selected',
-        style: {
-          'width': 2.5,
-          'line-color': '#60a5fa',
-        },
-      },
-    ],
-    layout: { name: 'preset' },
-    minZoom: 0.3,
-    maxZoom: 3,
-    wheelSensitivity: 0.3,
-  })
-
-  // 點擊節點 → 重新展開
-  cy.on('tap', 'node', (evt) => {
-    const node = evt.target
-    const type = node.data('nodeType')
-    const id = node.data('nodeId')
-    if (type && id && type !== 'info') {
-      centerType.value = type
-      centerId.value = id
-    }
-  })
-}
-
-// ── 渲染圖形 ──
-function renderGraph(data: { center: string; nodes: any[]; edges: any[] }) {
-  if (!cy) return
-
-  const elements: cytoscape.ElementDefinition[] = []
-  const centerKey = data.center
-
-  // 節點
-  for (const n of data.nodes) {
-    const key = `${n.type}:${n.id}`
-    const color = getColor(n.type)
-    const isCenter = key === centerKey
-    const sub = subLabel(n)
-
-    elements.push({
-      data: {
-        id: key,
-        label: n.label,
-        fullLabel: sub ? `${n.label}\n${sub}` : n.label,
-        sub: sub || undefined,
-        nodeType: n.type,
-        nodeId: n.id,
-        isCenter,
-        bgColor: color.bg,
-        borderColor: color.border,
-      },
-    })
-  }
-
-  // 邊
-  for (const e of data.edges) {
-    elements.push({
-      data: {
-        id: `${e.source}-${e.target}`,
-        source: e.source,
-        target: e.target,
-        relation: e.relation,
-      },
-    })
-  }
-
-  cy.elements().remove()
-  cy.add(elements)
-
-  // 階梯式佈局（從左到右）
-  cy.layout({
-    name: 'breadthfirst',
-    directed: true,
-    roots: centerKey ? [centerKey] : undefined,
-    spacingFactor: 1.5,
-    avoidOverlap: true,
-    // @ts-ignore - cytoscape 的 breadthfirst 支援但類型沒宣告
-    orientation: 'horizontal',
-  } as any).run()
-
-  // 動畫 fit
-  cy.animate({ fit: { eles: cy.elements(), padding: 40 } } as any, { duration: 300 })
+  return nodeColors[type] || { bg: '#475569', border: '#94a3b8' }
 }
 
 function subLabel(n: any): string {
@@ -225,46 +88,250 @@ function subLabel(n: any): string {
   return ''
 }
 
-// ── 資料載入 ──
-async function loadEntities() {
-  try {
-    const res = await fetch(`${API}/api/v1/graph/entities`)
-    if (res.ok) {
-      entities.value = await res.json()
-      if (!centerId.value && currentEntities.value.length) {
-        centerId.value = currentEntities.value[0]!.id
-      }
+// ── Cytoscape 初始化 ──
+function initCytoscape() {
+  if (!cyContainer.value) return
+
+  cy = cytoscape({
+    container: cyContainer.value,
+    style: [
+      {
+        selector: 'node',
+        style: {
+          'label': 'data(displayLabel)',
+          'text-valign': 'bottom',
+          'text-halign': 'center',
+          'font-size': '10px',
+          'color': '#cbd5e1',
+          'text-margin-y': 6,
+          'width': 36,
+          'height': 36,
+          'background-color': 'data(bgColor)',
+          'border-color': 'data(borderColor)',
+          'border-width': 2,
+          'text-wrap': 'ellipsis',
+          'text-max-width': '80px',
+        },
+      },
+      {
+        selector: 'node.center',
+        style: {
+          'width': 52,
+          'height': 52,
+          'border-width': 3,
+          'font-size': '12px',
+          'font-weight': 'bold',
+          'color': '#f1f5f9',
+        },
+      },
+      {
+        selector: 'node.dimmed',
+        style: {
+          'opacity': 0.2,
+        },
+      },
+      {
+        selector: 'edge',
+        style: {
+          'width': 1.5,
+          'line-color': '#1e293b',
+          'target-arrow-color': '#334155',
+          'target-arrow-shape': 'triangle',
+          'curve-style': 'bezier',
+          'arrow-scale': 0.7,
+          'label': 'data(relation)',
+          'font-size': '8px',
+          'color': '#475569',
+          'text-rotation': 'autorotate',
+          'text-margin-y': -8,
+        },
+      },
+      {
+        selector: 'edge.dimmed',
+        style: {
+          'opacity': 0.1,
+        },
+      },
+      {
+        selector: 'edge.highlighted',
+        style: {
+          'width': 2.5,
+          'line-color': '#60a5fa',
+          'target-arrow-color': '#60a5fa',
+          'opacity': 1,
+        },
+      },
+    ],
+    layout: { name: 'preset' },
+    minZoom: 0.2,
+    maxZoom: 3,
+    wheelSensitivity: 0.3,
+  })
+
+  // 點擊節點 → 以它為中心重新佈局
+  cy.on('tap', 'node', (evt) => {
+    const node = evt.target
+    const type = node.data('nodeType')
+    const id = node.data('nodeId')
+    if (type && id) {
+      centerType.value = type
+      centerId.value = id
     }
+  })
+
+  // 點空白 → 顯示全部
+  cy.on('tap', (evt) => {
+    if (evt.target === cy) {
+      centerType.value = ''
+      centerId.value = 0
+    }
+  })
+
+  // Hover highlight
+  cy.on('mouseover', 'node', (evt) => {
+    const node = evt.target
+    const neighborhood = node.closedNeighborhood()
+    cy!.elements().addClass('dimmed')
+    neighborhood.removeClass('dimmed')
+    neighborhood.edges().addClass('highlighted')
+  })
+
+  cy.on('mouseout', 'node', () => {
+    cy!.elements().removeClass('dimmed').removeClass('highlighted')
+  })
+}
+
+// ── 載入全部資料 ──
+async function loadAll() {
+  try {
+    const res = await fetch(`${API}/api/v1/graph/all`)
+    if (!res.ok) return
+    const data = await res.json()
+
+    // 建立下拉選單
+    const lists: Record<string, { id: number; label: string }[]> = {}
+    for (const n of data.nodes) {
+      if (!lists[n.type]) lists[n.type] = []
+      lists[n.type]!.push({ id: n.id, label: n.label })
+    }
+    entityLists.value = lists
+
+    // 轉成 Cytoscape elements
+    allElements = []
+    for (const n of data.nodes) {
+      const key = `${n.type}:${n.id}`
+      const color = getColor(n.type)
+      const sub = subLabel(n)
+      allElements.push({
+        data: {
+          id: key,
+          label: n.label,
+          displayLabel: sub ? `${n.label}\n${sub}` : n.label,
+          nodeType: n.type,
+          nodeId: n.id,
+          bgColor: color.bg,
+          borderColor: color.border,
+        },
+      })
+    }
+    for (const e of data.edges) {
+      allElements.push({
+        data: {
+          id: `${e.source}-${e.target}`,
+          source: e.source,
+          target: e.target,
+          relation: e.relation,
+        },
+      })
+    }
+
+    renderAll()
   } catch { /* silent */ }
 }
 
-async function loadGraph() {
-  if (!centerId.value) return
-  try {
-    const res = await fetch(`${API}/api/v1/graph/relations?center_type=${centerType.value}&center_id=${centerId.value}&depth=2`)
-    if (res.ok) {
-      const data = await res.json()
-      renderGraph(data)
+// ── 渲染 ──
+function renderAll() {
+  if (!cy) return
+
+  cy.elements().remove()
+  cy.add(allElements)
+
+  applyLayout()
+}
+
+function applyLayout() {
+  if (!cy) return
+
+  // 清除 center class
+  cy.nodes().removeClass('center')
+
+  const centerKey = centerType.value && centerId.value ? `${centerType.value}:${centerId.value}` : ''
+
+  // 設定中心節點樣式
+  if (centerKey) {
+    const centerNode = cy.getElementById(centerKey)
+    if (centerNode.length) {
+      centerNode.addClass('center')
     }
-  } catch { /* silent */ }
+  }
+
+  const opts: any = {
+    animate: true,
+    animationDuration: 400,
+    fit: true,
+    padding: 40,
+  }
+
+  if (layoutName.value === 'breadthfirst') {
+    cy.layout({
+      name: 'breadthfirst',
+      directed: true,
+      roots: centerKey ? [centerKey] : undefined,
+      spacingFactor: 1.2,
+      avoidOverlap: true,
+      ...opts,
+    } as any).run()
+  } else if (layoutName.value === 'cose') {
+    cy.layout({
+      name: 'cose',
+      nodeRepulsion: () => 8000,
+      idealEdgeLength: () => 120,
+      gravity: 0.3,
+      ...opts,
+    } as any).run()
+  } else {
+    cy.layout({
+      name: 'circle',
+      ...opts,
+    } as any).run()
+  }
+}
+
+function toggleLayout() {
+  if (layoutName.value === 'cose') layoutName.value = 'breadthfirst'
+  else if (layoutName.value === 'breadthfirst') layoutName.value = 'circle'
+  else layoutName.value = 'cose'
+  applyLayout()
 }
 
 // ── Watch ──
 watch(centerType, () => {
-  if (currentEntities.value.length) {
+  if (centerType.value && currentEntities.value.length) {
     centerId.value = currentEntities.value[0]!.id
+  } else {
+    centerId.value = 0
+    applyLayout()
   }
 })
 
 watch(centerId, () => {
-  if (centerId.value) loadGraph()
+  applyLayout()
 })
 
 onMounted(async () => {
-  await loadEntities()
   await nextTick()
   initCytoscape()
-  if (centerId.value) loadGraph()
+  await loadAll()
 })
 
 onUnmounted(() => {
