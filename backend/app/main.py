@@ -17,6 +17,7 @@ from app.api import github as github_routes, system as system_routes
 from app.api import onestack as onestack_routes, updater_routes
 from app.api import projects as projects_routes, cards as cards_routes
 from app.api import cron_jobs as cron_jobs_routes, members as members_routes
+from app.api import profile_page
 from app.core.telemetry import get_system_metrics
 from app.core.cron_poller import start_cron_poller
 from app.core.usage_poller import start_usage_poller
@@ -419,6 +420,7 @@ _AUTH_EXEMPT_PREFIXES = (
     "/api/v1/webhooks/",    # 平台簽名驗證
     "/api/v1/node/",        # API key 驗證
     "/api/v1/update/",      # CI/CD 部署觸發
+    "/api/v1/u/",           # Profile 頁面（自帶 token 驗證）
 )
 
 @app.middleware("http")
@@ -486,6 +488,7 @@ app.include_router(github_routes.router, prefix="/api/v1")
 app.include_router(system_routes.router, prefix="/api/v1")
 app.include_router(onestack_routes.router, prefix="/api/v1")
 app.include_router(updater_routes.router, prefix="/api/v1")
+app.include_router(profile_page.router)  # /u/profile（獨立頁面，無 prefix）
 app.include_router(webhooks.router, prefix="/api/v1")
 app.include_router(files.router, prefix="/api/v1")
 

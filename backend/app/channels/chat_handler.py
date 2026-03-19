@@ -357,7 +357,7 @@ def _build_chat_prompt(
             lines.append(f"- {k}: {v}")
         lines.append("")
         lines.append("這些資料可用於 MCP 工具存取外部系統（如 NAS、AD 等）。")
-        lines.append("如果需要存取外部系統但缺少必要的認證資料（如 ad_user, ad_pass），請引導用戶使用 /profile set 指令設定。")
+        lines.append("如果需要存取外部系統但缺少必要的認證資料（如 ad_user, ad_pass），請引導用戶使用 /profile 指令開啟設定頁面（不要讓用戶在聊天中輸入密碼）。")
         lines.append("")
 
     # 用戶可存取的專案（讓 AI 知道範圍）

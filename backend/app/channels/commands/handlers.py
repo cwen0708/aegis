@@ -758,30 +758,30 @@ async def _handle_switch(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotU
 # ===== 個人資料命令 =====
 
 async def _handle_profile(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
-    """管理用戶額外資料 (extra_json)"""
+    """管理用戶額外資料 — 回覆獨立設定頁面連結，避免密碼經過聊天記錄"""
     import json
+    from app.api.profile_page import resolve_domain_for_user, get_profile_url
 
     if not cmd.args:
-        # /profile — 查看
-        data = get_user_extra(bot_user.id)
-        if not data:
-            return (
-                "📋 *個人資料*\n\n"
-                "（尚無額外資料）\n\n"
-                "使用方式:\n"
-                "/profile set <key> <value> — 設定欄位\n"
-                "/profile del <key> — 刪除欄位\n\n"
-                "例如:\n"
-                "/profile set ad\\_user john.doe\n"
-                "/profile set ad\\_pass mypassword"
-            )
+        # /profile — 產生設定頁面連結
+        domain = resolve_domain_for_user(bot_user.id)
+        url = get_profile_url(bot_user.id, domain)
 
-        lines = ["📋 *個人資料*\n"]
-        for k, v in data.items():
-            # 密碼類欄位遮蔽顯示
-            display = "****" if "pass" in k.lower() or "secret" in k.lower() or "token" in k.lower() else str(v)
-            lines.append(f"  `{k}`: {display}")
-        return "\n".join(lines)
+        # 顯示目前狀態
+        data = get_user_extra(bot_user.id)
+        status_lines = []
+        if data:
+            for k, v in data.items():
+                display = "✅ 已設定" if "pass" in k.lower() or "secret" in k.lower() or "token" in k.lower() else str(v)
+                status_lines.append(f"  `{k}`: {display}")
+
+        return (
+            "📋 *個人資料設定*\n\n"
+            + ("目前狀態:\n" + "\n".join(status_lines) + "\n\n" if status_lines else "")
+            + f"👉 [點此設定個人資料]({url})\n\n"
+            + "連結 30 分鐘內有效，請在網頁上修改帳號密碼。\n"
+            + "⚠️ 請勿在聊天中直接輸入密碼。"
+        )
 
     action = cmd.args[0].lower() if cmd.args else ""
 
@@ -790,33 +790,22 @@ async def _handle_profile(cmd: ParsedCommand, msg: InboundMessage, bot_user: Bot
         set_user_extra(bot_user.id, {})
         return "🗑️ 已清空所有額外資料"
 
-    if len(cmd.args) == 1 and action not in ("set", "del", "clear"):
-        # /profile del <key> — args = [key] from regex
-        # This happens when the regex matched /profile del <key>
-        key = cmd.args[0]
-        result = delete_user_extra_keys(bot_user.id, [key])
-        return f"🗑️ 已刪除 `{key}`"
+    if action in ("set", "del"):
+        # 不再支援在聊天中設定，引導到網頁
+        domain = resolve_domain_for_user(bot_user.id)
+        url = get_profile_url(bot_user.id, domain)
+        return (
+            "⚠️ 為了安全，請改用網頁設定：\n\n"
+            f"👉 [點此設定個人資料]({url})\n\n"
+            "密碼等敏感資料不應在聊天中輸入。"
+        )
 
-    if len(cmd.args) >= 2:
-        key = cmd.args[0]
-        value = cmd.args[1]
-
-        # /profile set <key> <value> 的情境
-        # 嘗試解析 JSON 值（支援物件、陣列）
-        try:
-            parsed_value = json.loads(value)
-        except (json.JSONDecodeError, TypeError):
-            parsed_value = value
-
-        result = merge_user_extra(bot_user.id, {key: parsed_value})
-        # 密碼類欄位遮蔽
-        display = "****" if "pass" in key.lower() or "secret" in key.lower() or "token" in key.lower() else str(parsed_value)
-        return f"✅ 已設定 `{key}` = {display}"
-
+    # 其他未知的子指令
+    domain = resolve_domain_for_user(bot_user.id)
+    url = get_profile_url(bot_user.id, domain)
     return (
         "使用方式:\n"
-        "/profile — 查看額外資料\n"
-        "/profile set <key> <value> — 設定欄位\n"
-        "/profile del <key> — 刪除欄位\n"
-        "/profile clear — 清空所有"
+        "/profile — 開啟設定頁面\n"
+        "/profile clear — 清空所有資料\n\n"
+        f"👉 [設定頁面]({url})"
     )
