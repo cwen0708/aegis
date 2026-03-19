@@ -18,6 +18,66 @@
       </button>
     </div>
 
+    <!-- Overview -->
+    <div v-if="activeTab === 'overview'" class="flex-1 overflow-auto p-4 space-y-3">
+      <div v-if="!overview" class="text-slate-600 text-sm">載入中...</div>
+      <template v-else>
+        <!-- 三環境比較表 -->
+        <div class="space-y-2">
+          <div
+            v-for="env in envList"
+            :key="env.key"
+            class="flex items-center gap-3 px-3 py-2.5 rounded-lg border"
+            :class="env.key === 'dev' ? 'bg-purple-500/5 border-purple-500/20' :
+                    env.key === 'runtime' ? 'bg-emerald-500/5 border-emerald-500/20' :
+                    'bg-blue-500/5 border-blue-500/20'"
+          >
+            <!-- 標籤 -->
+            <div class="w-14 shrink-0">
+              <span class="text-[10px] font-bold uppercase tracking-wider"
+                :class="env.key === 'dev' ? 'text-purple-400' :
+                        env.key === 'runtime' ? 'text-emerald-400' : 'text-blue-400'"
+              >{{ env.data.label }}</span>
+            </div>
+
+            <!-- Commit info -->
+            <template v-if="env.data.exists">
+              <span class="text-xs font-mono text-slate-400">{{ env.data.sha }}</span>
+              <span class="text-xs text-slate-300 truncate flex-1">{{ env.data.message }}</span>
+              <span class="text-[10px] text-slate-600 shrink-0">{{ env.data.date ? formatDate(env.data.date) : '' }}</span>
+            </template>
+            <span v-else class="text-xs text-slate-600">不可用</span>
+          </div>
+        </div>
+
+        <!-- 同步狀態 -->
+        <div class="px-3 py-2 rounded-lg" :class="overview.all_synced ? 'bg-emerald-500/5 border border-emerald-500/20' : 'bg-amber-500/5 border border-amber-500/20'">
+          <div v-if="overview.all_synced" class="text-xs text-emerald-400 flex items-center gap-2">
+            <span>✓</span> 三個環境版本一致
+          </div>
+          <div v-else class="space-y-1">
+            <div v-if="overview.dev_ahead_of_runtime > 0" class="text-xs text-amber-400">
+              開發版 領先 運行版 {{ overview.dev_ahead_of_runtime }} 個 commit
+            </div>
+            <div v-if="overview.dev_ahead_of_origin > 0" class="text-xs text-purple-400">
+              開發版 領先 遠端 {{ overview.dev_ahead_of_origin }} 個 commit（未 push）
+            </div>
+            <div v-if="overview.runtime_ahead_of_origin > 0" class="text-xs text-emerald-400">
+              運行版 領先 遠端 {{ overview.runtime_ahead_of_origin }} 個 commit
+            </div>
+            <div v-if="overview.dev_ahead_of_runtime === 0 && overview.dev_ahead_of_origin === 0 && overview.runtime_ahead_of_origin === 0 && !overview.all_synced" class="text-xs text-amber-400">
+              版本不一致（可能需要 fetch 更新）
+            </div>
+          </div>
+        </div>
+
+        <!-- 遠端 URL -->
+        <div v-if="overview.origin?.url" class="text-[10px] text-slate-600 truncate">
+          {{ overview.origin.url }}
+        </div>
+      </template>
+    </div>
+
     <!-- Status -->
     <div v-if="activeTab === 'status'" class="flex-1 overflow-auto p-4 space-y-4">
       <div v-if="!status" class="text-slate-600 text-sm">載入中...</div>
@@ -32,7 +92,6 @@
           <span v-if="status.ahead > 0" class="text-xs text-emerald-400">↑{{ status.ahead }}</span>
           <span v-if="status.behind > 0" class="text-xs text-amber-400">↓{{ status.behind }}</span>
           <span v-if="status.is_clean && !status.behind" class="ml-auto text-xs text-emerald-500">Clean</span>
-          <!-- Fetch 按鈕 -->
           <button
             class="ml-auto text-xs px-2 py-0.5 rounded border transition-colors"
             :class="fetching
@@ -140,18 +199,29 @@ const emit = defineEmits<{
 const API = config.apiUrl
 
 const tabs = computed(() => [
+  { id: 'overview', label: 'Overview' },
   { id: 'status', label: 'Status', badge: changedCount.value || undefined },
   { id: 'log', label: 'Log' },
   { id: 'diff', label: 'Diff' },
 ])
 
-const activeTab = ref('status')
+const activeTab = ref('overview')
+const overview = ref<any>(null)
 const status = ref<any>(null)
 const commits = ref<any[]>([])
 const diffContent = ref('')
 const diffLoading = ref(false)
 const fetching = ref(false)
 const pulling = ref(false)
+
+const envList = computed(() => {
+  if (!overview.value) return []
+  return [
+    { key: 'dev', data: overview.value.dev },
+    { key: 'runtime', data: overview.value.runtime },
+    { key: 'origin', data: overview.value.origin },
+  ]
+})
 
 const changedCount = computed(() => {
   if (!status.value?.is_git) return 0
@@ -177,6 +247,13 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString('zh-TW', { month: 'short', day: 'numeric' })
 }
 
+async function loadOverview() {
+  try {
+    const res = await fetch(`${API}/api/v1/projects/${props.projectId}/git/overview`)
+    if (res.ok) overview.value = await res.json()
+  } catch { /* silent */ }
+}
+
 async function loadStatus() {
   const res = await fetch(`${API}/api/v1/projects/${props.projectId}/git/status`)
   if (res.ok) status.value = await res.json()
@@ -193,6 +270,8 @@ async function doFetch() {
         status.value.behind = data.behind
       }
     }
+    // 也更新 overview
+    await loadOverview()
   } finally {
     fetching.value = false
   }
@@ -237,17 +316,19 @@ async function viewDiff(file: string) {
 }
 
 watch(() => props.projectId, () => {
+  overview.value = null
   status.value = null
   commits.value = []
   diffContent.value = ''
+  loadOverview()
   loadStatus()
   loadLog()
 })
 
 onMounted(async () => {
+  await loadOverview()
   await loadStatus()
   loadLog()
-  // 自動 fetch 遠端狀態
   doFetch()
 })
 </script>

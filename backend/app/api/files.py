@@ -444,6 +444,99 @@ def git_fetch(
     return {"ok": True, "ahead": ahead, "behind": behind}
 
 
+def _git_commit_info(repo_path: str) -> dict:
+    """取得指定路徑的 HEAD commit 資訊"""
+    if not _is_git_repo(repo_path):
+        return {"exists": False}
+
+    ok, sha = _run_git(repo_path, ["rev-parse", "--short", "HEAD"])
+    ok2, sha_full = _run_git(repo_path, ["rev-parse", "HEAD"])
+    ok3, msg = _run_git(repo_path, ["log", "-1", "--format=%s"])
+    ok4, date = _run_git(repo_path, ["log", "-1", "--format=%ci"])
+    ok5, branch = _run_git(repo_path, ["rev-parse", "--abbrev-ref", "HEAD"])
+
+    return {
+        "exists": True,
+        "sha": sha if ok else "",
+        "sha_full": sha_full if ok2 else "",
+        "message": msg if ok3 else "",
+        "date": date if ok4 else "",
+        "branch": branch if ok5 else "",
+    }
+
+
+@router.get("/projects/{project_id}/git/overview")
+def git_overview(
+    project_id: int,
+    session: Session = Depends(get_session),
+):
+    """三環境版本比較：開發版 / 運行版 / 遠端"""
+    from app.core.task_workspace import _INSTALL_ROOT
+
+    project = _get_project(project_id, session)
+    dev_path = project.path
+    runtime_path = str(_INSTALL_ROOT)
+
+    # 1. 開發版（dev dir = project.path）
+    dev = _git_commit_info(dev_path)
+    dev["label"] = "開發版"
+
+    # 2. 運行版（.local/aegis）
+    runtime = _git_commit_info(runtime_path)
+    runtime["label"] = "運行版"
+
+    # 3. 遠端（origin/main）
+    origin: dict = {"exists": False, "label": "遠端"}
+    if _is_git_repo(dev_path):
+        ok, sha = _run_git(dev_path, ["rev-parse", "--short", "origin/main"])
+        ok2, sha_full = _run_git(dev_path, ["rev-parse", "origin/main"])
+        ok3, msg = _run_git(dev_path, ["log", "-1", "--format=%s", "origin/main"])
+        ok4, date = _run_git(dev_path, ["log", "-1", "--format=%ci", "origin/main"])
+        ok5, url = _run_git(dev_path, ["remote", "get-url", "origin"])
+        # 清理 PAT from URL
+        if ok5 and "@" in url:
+            url = "https://" + url.split("@")[-1]
+        origin = {
+            "exists": ok,
+            "label": "遠端",
+            "sha": sha if ok else "",
+            "sha_full": sha_full if ok2 else "",
+            "message": msg if ok3 else "",
+            "date": date if ok4 else "",
+            "url": url if ok5 else "",
+        }
+
+    # 4. 比較差異
+    dev_vs_runtime = 0
+    dev_vs_origin = 0
+    runtime_vs_origin = 0
+
+    if dev.get("sha_full") and runtime.get("sha_full") and _is_git_repo(dev_path):
+        ok, count = _run_git(dev_path, ["rev-list", "--count", f"{runtime['sha_full']}..HEAD"])
+        dev_vs_runtime = int(count) if ok and count.isdigit() else 0
+
+    if dev.get("sha_full") and origin.get("sha_full") and _is_git_repo(dev_path):
+        ok, count = _run_git(dev_path, ["rev-list", "--count", f"origin/main..HEAD"])
+        dev_vs_origin = int(count) if ok and count.isdigit() else 0
+
+    if runtime.get("sha_full") and origin.get("sha_full") and _is_git_repo(runtime_path):
+        ok, count = _run_git(runtime_path, ["rev-list", "--count", f"origin/main..HEAD"])
+        runtime_vs_origin = int(count) if ok and count.isdigit() else 0
+
+    # 同步狀態
+    all_synced = (dev.get("sha_full") == runtime.get("sha_full") == origin.get("sha_full"))
+
+    return {
+        "dev": dev,
+        "runtime": runtime,
+        "origin": origin,
+        "dev_ahead_of_runtime": dev_vs_runtime,
+        "dev_ahead_of_origin": dev_vs_origin,
+        "runtime_ahead_of_origin": runtime_vs_origin,
+        "all_synced": all_synced,
+    }
+
+
 @router.post("/projects/{project_id}/git/pull-task")
 def git_pull_task(
     project_id: int,
