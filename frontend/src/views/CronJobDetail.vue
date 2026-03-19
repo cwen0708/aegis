@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Play, Pause, Check, AlertCircle, CheckCircle2, XCircle, Timer, ChevronDown, ChevronRight, Zap } from 'lucide-vue-next'
+import ParsedOutput from '../components/ParsedOutput.vue'
 import { useAegisStore } from '../stores/aegis'
 import { useAuthStore } from '../stores/auth'
 import { authHeaders } from '../utils/authFetch'
@@ -400,7 +401,9 @@ watch(jobId, async () => {
               <!-- AI 輸出 -->
               <div v-if="log.output">
                 <div class="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Output</div>
-                <pre class="p-3 bg-slate-900/50 rounded-lg border border-slate-700/50 text-xs text-slate-300 font-mono whitespace-pre-wrap overflow-auto max-h-96">{{ log.output }}</pre>
+                <div class="p-3 bg-slate-900/50 rounded-lg border border-slate-700/50 overflow-auto max-h-96">
+                  <ParsedOutput :output="log.output" />
+                </div>
               </div>
             </div>
           </div>

@@ -8,7 +8,8 @@ import {
 import { useAegisStore } from '../../stores/aegis'
 import ConfirmDialog from '../../components/ConfirmDialog.vue'
 import { config } from '../../config'
-import { authHeaders } from '../../utils/authFetch'
+import * as membersApi from '../../services/api/members'
+import type { MemberAccount, MemberInfo, AccountInfo, SkillInfo } from '../../services/api/members'
 
 const route = useRoute()
 const router = useRouter()
@@ -18,44 +19,6 @@ const API = config.apiUrl
 const memberId = Number(route.params.id)
 const loading = ref(true)
 const saving = ref(false)
-
-// ── Types ──
-interface MemberAccount {
-  account_id: number
-  priority: number
-  model: string
-  name: string
-  provider: string
-  subscription: string
-  is_healthy: boolean
-}
-
-interface MemberInfo {
-  id: number
-  name: string
-  avatar: string
-  role: string
-  description: string
-  sprite_index: number
-  portrait: string
-  provider: string
-  accounts: MemberAccount[]
-}
-
-interface AccountInfo {
-  id: number
-  provider: string
-  name: string
-  credential_file: string
-  subscription: string
-  email: string
-  is_healthy: boolean
-}
-
-interface SkillInfo {
-  name: string
-  title: string
-}
 
 // ── Form ──
 const form = ref({
@@ -200,9 +163,7 @@ const confirmDelete = ref(false)
 
 async function fetchMember() {
   try {
-    const res = await fetch(`${API}/api/v1/members?all=true`, { headers: authHeaders() })
-    if (!res.ok) throw new Error('載入失敗')
-    const members: MemberInfo[] = await res.json()
+    const members = await membersApi.listMembers(true)
     const m = members.find((m) => m.id === memberId)
     if (!m) {
       store.addToast('成員不存在', 'error')
@@ -225,16 +186,14 @@ async function fetchMember() {
 
 async function fetchAccounts() {
   try {
-    const res = await fetch(`${API}/api/v1/accounts`)
-    if (res.ok) allAccounts.value = await res.json()
+    allAccounts.value = await membersApi.listAccounts()
   } catch {}
 }
 
 async function fetchSkills() {
   loadingSkills.value = true
   try {
-    const res = await fetch(`${API}/api/v1/members/${memberId}/skills`)
-    if (res.ok) skills.value = await res.json()
+    skills.value = await membersApi.listSkills(memberId)
   } catch {
     store.addToast('技能載入失敗', 'error')
   }
@@ -244,11 +203,8 @@ async function fetchSkills() {
 async function fetchMcp() {
   loadingMcp.value = true
   try {
-    const res = await fetch(`${API}/api/v1/members/${memberId}/mcp`, { headers: authHeaders() })
-    if (res.ok) {
-      const data = await res.json()
-      mcpContent.value = JSON.stringify(data, null, 2)
-    }
+    const data = await membersApi.getMcpConfig(memberId)
+    mcpContent.value = JSON.stringify(data, null, 2)
   } catch {
     store.addToast('MCP 設定載入失敗', 'error')
   }
@@ -263,15 +219,7 @@ async function saveMember() {
   if (!form.value.name.trim()) return
   saving.value = true
   try {
-    const res = await fetch(`${API}/api/v1/members/${memberId}`, {
-      method: 'PUT',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(form.value),
-    })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: '儲存失敗' }))
-      throw new Error(err.detail)
-    }
+    await membersApi.updateMember(memberId, form.value)
     store.addToast('成員已更新', 'success')
   } catch (e: any) {
     store.addToast(e.message, 'error')
@@ -283,7 +231,7 @@ async function saveMember() {
 // Portrait
 // ═══════════════════════════════════════
 
-async function uploadPortrait(event: Event) {
+async function handleUploadPortrait(event: Event) {
   const input = event.target as HTMLInputElement
   if (!input.files?.length) return
 
@@ -295,19 +243,7 @@ async function uploadPortrait(event: Event) {
 
   uploadingPortrait.value = true
   try {
-    const formData = new FormData()
-    formData.append('file', file)
-    const res = await fetch(`${API}/api/v1/members/${memberId}/portrait`, {
-      method: 'POST',
-      headers: authHeaders(),
-      body: formData,
-    })
-    if (res.status === 413) throw new Error('檔案過大，請壓縮後再試（上限 10MB）')
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: '上傳失敗' }))
-      throw new Error(err.detail || '上傳失敗')
-    }
-    const data = await res.json()
+    const data = await membersApi.uploadPortrait(memberId, file)
     form.value.portrait = data.portrait
     store.addToast('立繪已上傳', 'success')
   } catch (e: any) {
@@ -317,7 +253,7 @@ async function uploadPortrait(event: Event) {
   input.value = ''
 }
 
-async function generatePortrait(event: Event) {
+async function handleGeneratePortrait(event: Event) {
   const input = event.target as HTMLInputElement
   if (!input.files?.length) return
 
@@ -329,19 +265,7 @@ async function generatePortrait(event: Event) {
 
   generatingPortrait.value = true
   try {
-    const formData = new FormData()
-    formData.append('file', file)
-    const res = await fetch(`${API}/api/v1/members/${memberId}/generate-portrait`, {
-      method: 'POST',
-      headers: authHeaders(),
-      body: formData,
-    })
-    if (res.status === 413) throw new Error('檔案過大，請壓縮後再試（上限 10MB）')
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: '生成失敗' }))
-      throw new Error(err.detail || '生成失敗')
-    }
-    const data = await res.json()
+    const data = await membersApi.generatePortrait(memberId, file)
     form.value.portrait = data.portrait
     store.addToast('立繪已生成', 'success')
   } catch (e: any) {
@@ -363,12 +287,7 @@ function openBindDialog() {
 async function bindAccount() {
   if (!bindForm.value.account_id) return
   try {
-    const res = await fetch(`${API}/api/v1/members/${memberId}/accounts`, {
-      method: 'POST',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(bindForm.value),
-    })
-    if (!res.ok) throw new Error('綁定失敗')
+    await membersApi.createAccount(memberId, bindForm.value)
     store.addToast('帳號已綁定', 'success')
     showBindDialog.value = false
     await fetchMember()
@@ -386,19 +305,11 @@ function openEditBindDialog(acc: MemberAccount) {
 async function saveEditBinding() {
   if (!editingBinding.value) return
   try {
-    const res = await fetch(`${API}/api/v1/members/${memberId}/accounts`, {
-      method: 'POST',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({
-        account_id: editingBinding.value.account_id,
-        priority: editBindForm.value.priority,
-        model: editBindForm.value.model,
-      }),
+    await membersApi.createAccount(memberId, {
+      account_id: editingBinding.value.account_id,
+      priority: editBindForm.value.priority,
+      model: editBindForm.value.model,
     })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: '儲存失敗' }))
-      throw new Error(err.detail || '儲存失敗')
-    }
     store.addToast('綁定已更新', 'success')
     showEditBindDialog.value = false
     await fetchMember()
@@ -409,11 +320,7 @@ async function saveEditBinding() {
 
 async function unbindAccount(accountId: number) {
   try {
-    const res = await fetch(`${API}/api/v1/members/${memberId}/accounts/${accountId}`, {
-      method: 'DELETE',
-      headers: authHeaders(),
-    })
-    if (!res.ok) throw new Error('解綁失敗')
+    await membersApi.deleteAccount(memberId, accountId)
     store.addToast('帳號已解綁', 'success')
     showEditBindDialog.value = false
     await fetchMember()
@@ -442,9 +349,7 @@ async function toggleSkill(skill: SkillInfo) {
   editingSkill.value = false
   loadingSkillContent.value = true
   try {
-    const res = await fetch(`${API}/api/v1/members/${memberId}/skills/${skill.name}`)
-    if (!res.ok) throw new Error('載入失敗')
-    const data = await res.json()
+    const data = await membersApi.getSkill(memberId, skill.name)
     skillContent.value = data.content
   } catch {
     store.addToast('技能載入失敗', 'error')
@@ -462,12 +367,7 @@ async function saveSkill() {
   if (!expandedSkill.value) return
   savingSkill.value = true
   try {
-    const res = await fetch(`${API}/api/v1/members/${memberId}/skills/${expandedSkill.value}`, {
-      method: 'PUT',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ content: skillEditContent.value }),
-    })
-    if (!res.ok) throw new Error('儲存失敗')
+    await membersApi.updateSkill(memberId, expandedSkill.value, { content: skillEditContent.value })
     skillContent.value = skillEditContent.value
     editingSkill.value = false
     store.addToast('技能已更新', 'success')
@@ -478,14 +378,10 @@ async function saveSkill() {
   savingSkill.value = false
 }
 
-async function deleteSkill(skillName: string) {
+async function handleDeleteSkill(skillName: string) {
   if (!confirm(`確定刪除技能「${skillName}」？`)) return
   try {
-    const res = await fetch(`${API}/api/v1/members/${memberId}/skills/${skillName}`, {
-      method: 'DELETE',
-      headers: authHeaders(),
-    })
-    if (!res.ok) throw new Error('刪除失敗')
+    await membersApi.deleteSkill(memberId, skillName)
     store.addToast('技能已刪除', 'success')
     if (expandedSkill.value === skillName) expandedSkill.value = null
     await fetchSkills()
@@ -499,18 +395,10 @@ function openNewSkillDialog() {
   showNewSkillDialog.value = true
 }
 
-async function createSkill() {
+async function handleCreateSkill() {
   if (!newSkillForm.value.name) return
   try {
-    const res = await fetch(`${API}/api/v1/members/${memberId}/skills`, {
-      method: 'POST',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(newSkillForm.value),
-    })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: '建立失敗' }))
-      throw new Error(err.detail)
-    }
+    await membersApi.createSkill(memberId, newSkillForm.value)
     store.addToast('技能已建立', 'success')
     showNewSkillDialog.value = false
     await fetchSkills()
@@ -542,12 +430,7 @@ async function saveMcp() {
   if (!validateMcpJson()) return
   savingMcp.value = true
   try {
-    const res = await fetch(`${API}/api/v1/members/${memberId}/mcp`, {
-      method: 'PUT',
-      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-      body: mcpContent.value,
-    })
-    if (!res.ok) throw new Error('儲存失敗')
+    await membersApi.updateMcpConfig(memberId, mcpContent.value)
     store.addToast('MCP 設定已儲存', 'success')
     mcpEditing.value = false
   } catch {
@@ -562,14 +445,7 @@ async function saveMcp() {
 
 async function doDelete() {
   try {
-    const res = await fetch(`${API}/api/v1/members/${memberId}`, {
-      method: 'DELETE',
-      headers: authHeaders(),
-    })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: '刪除失敗' }))
-      throw new Error(err.detail)
-    }
+    await membersApi.deleteMember(memberId)
     store.addToast('成員已刪除', 'success')
     router.push('/settings/team')
   } catch (e: any) {
@@ -646,8 +522,8 @@ onUnmounted(() => {
             </div>
             <!-- Upload / Generate buttons -->
             <div class="flex gap-2">
-              <input ref="portraitInput" type="file" accept="image/*" class="hidden" @change="uploadPortrait" />
-              <input ref="generateInput" type="file" accept="image/*" class="hidden" @change="generatePortrait" />
+              <input ref="portraitInput" type="file" accept="image/*" class="hidden" @change="handleUploadPortrait" />
+              <input ref="generateInput" type="file" accept="image/*" class="hidden" @change="handleGeneratePortrait" />
               <button
                 @click="portraitInput?.click()"
                 :disabled="uploadingPortrait || generatingPortrait"
@@ -845,7 +721,7 @@ onUnmounted(() => {
 
                 <div class="flex items-center justify-between">
                   <button
-                    @click="deleteSkill(skill.name)"
+                    @click="handleDeleteSkill(skill.name)"
                     class="flex items-center gap-1 px-3 py-1.5 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors"
                   >
                     <Trash2 class="w-3.5 h-3.5" />
@@ -1091,7 +967,7 @@ onUnmounted(() => {
 
           <div class="flex justify-end gap-2 pt-2">
             <button @click="showNewSkillDialog = false" class="px-4 py-2 text-xs text-slate-400 hover:text-slate-200 transition-colors">取消</button>
-            <button @click="createSkill" :disabled="!newSkillForm.name" class="px-4 py-2 bg-purple-500 hover:bg-purple-600 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-all">建立</button>
+            <button @click="handleCreateSkill" :disabled="!newSkillForm.name" class="px-4 py-2 bg-purple-500 hover:bg-purple-600 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-all">建立</button>
           </div>
         </div>
       </div>
