@@ -23,6 +23,7 @@ import SettingsTeamDetail from '../views/settings/SettingsTeamDetail.vue'
 import SettingsTerminal from '../views/settings/SettingsTerminal.vue'
 import FileBrowser from '../views/FileBrowser.vue'
 import GitManager from '../views/GitManager.vue'
+import RelationGraph from '../views/RelationGraph.vue'
 import { useAuthStore } from '../stores/auth'
 
 const router = createRouter({
@@ -39,6 +40,7 @@ const router = createRouter({
     { path: '/files', component: FileBrowser, meta: { requiresAuth: true } },
     { path: '/files/:projectId', component: FileBrowser, meta: { requiresAuth: true } },
     { path: '/git', component: GitManager, meta: { requiresAuth: true } },
+    { path: '/graph', component: RelationGraph, meta: { requiresAuth: true } },
     {
       path: '/settings',
       component: SettingsLayout,
