@@ -19,72 +19,116 @@
     </div>
 
     <!-- Overview -->
-    <div v-if="activeTab === 'overview'" class="flex-1 overflow-auto p-4 space-y-3">
+    <div v-if="activeTab === 'overview'" class="flex-1 overflow-auto p-4 space-y-4">
       <div v-if="!overview" class="text-slate-600 text-sm">載入中...</div>
       <template v-else>
-        <!-- 三環境比較表 -->
-        <div class="space-y-2">
-          <div
-            v-for="env in envList"
-            :key="env.key"
-            class="flex items-center gap-3 px-3 py-2.5 rounded-lg border"
-            :class="env.key === 'dev' ? 'bg-purple-500/5 border-purple-500/20' :
-                    env.key === 'runtime' ? 'bg-emerald-500/5 border-emerald-500/20' :
-                    'bg-blue-500/5 border-blue-500/20'"
-          >
-            <!-- 標籤 -->
-            <div class="w-14 shrink-0">
-              <span class="text-[10px] font-bold uppercase tracking-wider"
-                :class="env.key === 'dev' ? 'text-purple-400' :
-                        env.key === 'runtime' ? 'text-emerald-400' : 'text-blue-400'"
-              >{{ env.data.label }}</span>
-            </div>
 
-            <!-- Commit info -->
-            <template v-if="env.data.exists">
-              <span class="text-xs font-mono text-slate-400">{{ env.data.sha }}</span>
-              <span class="text-xs text-slate-300 truncate flex-1">{{ env.data.message }}</span>
-              <span class="text-[10px] text-slate-600 shrink-0">{{ env.data.date ? formatDate(env.data.date) : '' }}</span>
-              <span v-if="env.key === 'origin' && fetching" class="text-[10px] text-slate-600 shrink-0">⟳</span>
-              <!-- 開發版按鈕群 -->
-              <div v-if="env.key === 'dev'" class="flex gap-1 shrink-0">
-                <button
-                  v-if="overview?.runtime?.exists && overview.dev_ahead_of_runtime > 0"
-                  class="text-[10px] px-2 py-0.5 rounded border transition-colors bg-purple-500/10 text-purple-400 border-purple-500/30 hover:bg-purple-500/20"
-                  :disabled="deploying"
-                  @click="deployToRuntime('dev')"
-                >
-                  {{ deploying ? '...' : '→ 部署' }}
-                </button>
-                <button
-                  v-if="overview.dev_ahead_of_origin > 0"
-                  class="text-[10px] px-2 py-0.5 rounded border transition-colors bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20"
-                  :disabled="pushing"
-                  @click="doPush"
-                >
-                  {{ pushing ? '...' : '↑ Push' }}
-                </button>
-              </div>
-              <!-- 遠端按鈕群 -->
-              <div v-if="env.key === 'origin'" class="flex gap-1 shrink-0">
-                <button
-                  v-if="overview?.runtime?.exists && overview.runtime_ahead_of_origin < 0"
-                  class="text-[10px] px-2 py-0.5 rounded border transition-colors bg-blue-500/10 text-blue-400 border-blue-500/30 hover:bg-blue-500/20"
-                  :disabled="deploying"
-                  @click="deployToRuntime('origin')"
-                >
-                  {{ deploying ? '...' : '→ 部署' }}
-                </button>
-              </div>
-            </template>
-            <span v-else class="text-xs text-slate-600">不可用</span>
+        <!-- 運行版卡片 -->
+        <div v-if="overview.runtime?.exists" class="rounded-xl border border-emerald-500/20 bg-emerald-500/5 overflow-hidden">
+          <div class="px-4 py-3 flex items-center gap-3">
+            <div class="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+            <span class="text-xs font-bold text-emerald-400 uppercase tracking-wider">運行版</span>
+            <span class="text-xs font-mono text-slate-400 ml-auto">{{ overview.runtime.sha }}</span>
+          </div>
+          <div class="px-4 pb-3">
+            <p class="text-sm text-slate-300 truncate">{{ overview.runtime.message }}</p>
+            <p class="text-[10px] text-slate-600 mt-1">{{ overview.runtime.date ? formatDate(overview.runtime.date) : '' }}</p>
+          </div>
+        </div>
+
+        <!-- 開發版卡片 -->
+        <div class="rounded-xl border border-purple-500/20 bg-purple-500/5 overflow-hidden">
+          <div class="px-4 py-3 flex items-center gap-3">
+            <div class="w-2 h-2 rounded-full bg-purple-400 shrink-0" />
+            <span class="text-xs font-bold text-purple-400 uppercase tracking-wider">開發版</span>
+            <span v-if="overview.dev?.exists" class="text-xs font-mono text-slate-400 ml-auto">{{ overview.dev.sha }}</span>
+          </div>
+          <div v-if="overview.dev?.exists" class="px-4 pb-3">
+            <p class="text-sm text-slate-300 truncate">{{ overview.dev.message }}</p>
+            <p class="text-[10px] text-slate-600 mt-1">{{ overview.dev.date ? formatDate(overview.dev.date) : '' }}</p>
+          </div>
+          <!-- 按鈕列 -->
+          <div class="px-4 py-2.5 border-t border-purple-500/10 flex gap-2 flex-wrap">
+            <button
+              class="text-[10px] px-3 py-1 rounded-md border font-medium transition-colors"
+              :class="canDeploy
+                ? 'bg-purple-500/10 text-purple-400 border-purple-500/30 hover:bg-purple-500/20'
+                : 'bg-slate-800/50 text-slate-600 border-slate-700 cursor-not-allowed'"
+              :disabled="!canDeploy || deploying"
+              @click="deployToRuntime('dev')"
+            >
+              {{ deploying ? '...' : '→ 部署到運行環境' }}
+            </button>
+            <button
+              class="text-[10px] px-3 py-1 rounded-md border font-medium transition-colors"
+              :class="canPush
+                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
+                : 'bg-slate-800/50 text-slate-600 border-slate-700 cursor-not-allowed'"
+              :disabled="!canPush || pushing"
+              @click="doPush"
+            >
+              {{ pushing ? '...' : '↑ Push' }}
+            </button>
+            <button
+              class="text-[10px] px-3 py-1 rounded-md border font-medium transition-colors"
+              :class="canPull
+                ? 'bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20'
+                : 'bg-slate-800/50 text-slate-600 border-slate-700 cursor-not-allowed'"
+              :disabled="!canPull || pulling"
+              @click="doPull"
+            >
+              {{ pulling ? '...' : '↓ Pull' }}
+            </button>
+          </div>
+        </div>
+
+        <!-- 遠端卡片 -->
+        <div class="rounded-xl border border-blue-500/20 bg-blue-500/5 overflow-hidden">
+          <div class="px-4 py-3 flex items-center gap-3">
+            <div class="w-2 h-2 rounded-full shrink-0" :class="fetching ? 'bg-blue-400 animate-pulse' : 'bg-blue-400'" />
+            <span class="text-xs font-bold text-blue-400 uppercase tracking-wider">遠端</span>
+            <span v-if="overview.origin?.exists" class="text-xs font-mono text-slate-400 ml-auto">{{ overview.origin.sha }}</span>
+          </div>
+          <div v-if="overview.origin?.exists" class="px-4 pb-3">
+            <p class="text-sm text-slate-300 truncate">{{ overview.origin.message }}</p>
+            <p class="text-[10px] text-slate-600 mt-1">{{ overview.origin.date ? formatDate(overview.origin.date) : '' }}</p>
+            <p v-if="overview.origin.url" class="text-[10px] text-slate-600 mt-1 truncate">{{ overview.origin.url }}</p>
+          </div>
+          <!-- 按鈕列 -->
+          <div class="px-4 py-2.5 border-t border-blue-500/10 flex gap-2 flex-wrap">
+            <button
+              class="text-[10px] px-3 py-1 rounded-md border font-medium transition-colors"
+              :class="canDeployOrigin
+                ? 'bg-blue-500/10 text-blue-400 border-blue-500/30 hover:bg-blue-500/20'
+                : 'bg-slate-800/50 text-slate-600 border-slate-700 cursor-not-allowed'"
+              :disabled="!canDeployOrigin || deploying"
+              @click="deployToRuntime('origin')"
+            >
+              {{ deploying ? '...' : '→ 更新運行環境' }}
+            </button>
+            <a
+              v-if="repoUrl"
+              :href="`${repoUrl}/issues/new`"
+              target="_blank"
+              class="text-[10px] px-3 py-1 rounded-md border font-medium transition-colors bg-slate-800/50 text-slate-400 border-slate-600 hover:text-slate-200 hover:border-slate-500"
+            >
+              💡 提出建議
+            </a>
+            <a
+              v-if="repoUrl"
+              :href="`${repoUrl}/compare/main...main?expand=1`"
+              target="_blank"
+              class="text-[10px] px-3 py-1 rounded-md border font-medium transition-colors bg-slate-800/50 text-slate-400 border-slate-600 hover:text-slate-200 hover:border-slate-500"
+            >
+              🔀 貢獻代碼
+            </a>
           </div>
         </div>
 
         <!-- 同步狀態 -->
         <div class="px-3 py-2 rounded-lg" :class="overview.all_synced ? 'bg-emerald-500/5 border border-emerald-500/20' : 'bg-amber-500/5 border border-amber-500/20'">
           <div v-if="overview.all_synced" class="text-xs text-emerald-400 flex items-center gap-2">
-            <span>✓</span> 三個環境版本一致
+            <span>✓</span> 所有環境版本一致
           </div>
           <div v-else class="space-y-1">
             <div v-if="overview.dev_ahead_of_runtime > 0" class="text-xs text-amber-400">
@@ -96,16 +140,9 @@
             <div v-if="overview.runtime_ahead_of_origin > 0" class="text-xs text-emerald-400">
               運行版 領先 遠端 {{ overview.runtime_ahead_of_origin }} 個 commit
             </div>
-            <div v-if="overview.dev_ahead_of_runtime === 0 && overview.dev_ahead_of_origin === 0 && overview.runtime_ahead_of_origin === 0 && !overview.all_synced" class="text-xs text-amber-400">
-              版本不一致（可能需要 fetch 更新）
-            </div>
           </div>
         </div>
 
-        <!-- 遠端 URL -->
-        <div v-if="overview.origin?.url" class="text-[10px] text-slate-600 truncate">
-          {{ overview.origin.url }}
-        </div>
       </template>
     </div>
 
@@ -116,43 +153,14 @@
         此專案不是 Git 儲存庫
       </div>
       <template v-else>
-        <!-- Branch -->
         <div class="flex items-center gap-2 text-sm">
           <GitBranch class="w-4 h-4 text-purple-400" />
           <span class="text-slate-300 font-mono">{{ status.branch }}</span>
           <span v-if="status.ahead > 0" class="text-xs text-emerald-400">↑{{ status.ahead }}</span>
           <span v-if="status.behind > 0" class="text-xs text-amber-400">↓{{ status.behind }}</span>
           <span v-if="status.is_clean && !status.behind" class="ml-auto text-xs text-emerald-500">Clean</span>
-          <button
-            class="ml-auto text-xs px-2 py-0.5 rounded border transition-colors"
-            :class="fetching
-              ? 'text-slate-600 border-slate-700 cursor-wait'
-              : 'text-slate-400 border-slate-600 hover:text-slate-200 hover:border-slate-500'"
-            :disabled="fetching"
-            @click="doFetch"
-          >
-            {{ fetching ? '檢查中...' : '⟳ Fetch' }}
-          </button>
         </div>
 
-        <!-- Pull 按鈕 -->
-        <div v-if="status.behind > 0" class="flex items-center gap-2 px-3 py-2 rounded bg-amber-500/10 border border-amber-500/20">
-          <span class="text-xs text-amber-400 flex-1">
-            遠端有 {{ status.behind }} 筆新 commit 可拉取
-          </span>
-          <button
-            class="text-xs px-3 py-1 rounded font-medium transition-colors"
-            :class="pulling
-              ? 'bg-slate-700 text-slate-500 cursor-wait'
-              : 'bg-amber-500 text-slate-900 hover:bg-amber-400'"
-            :disabled="pulling"
-            @click="doPull"
-          >
-            {{ pulling ? '拉取中...' : '↓ Pull' }}
-          </button>
-        </div>
-
-        <!-- Modified -->
         <div v-if="status.modified.length > 0">
           <p class="text-[10px] text-slate-600 uppercase tracking-wider mb-1">Modified</p>
           <div v-for="f in status.modified" :key="f" class="flex items-center gap-2 py-0.5 text-xs">
@@ -161,7 +169,6 @@
           </div>
         </div>
 
-        <!-- Staged -->
         <div v-if="status.staged.length > 0">
           <p class="text-[10px] text-slate-600 uppercase tracking-wider mb-1">Staged</p>
           <div v-for="f in status.staged" :key="f" class="flex items-center gap-2 py-0.5 text-xs">
@@ -170,7 +177,6 @@
           </div>
         </div>
 
-        <!-- Untracked -->
         <div v-if="status.untracked.length > 0">
           <p class="text-[10px] text-slate-600 uppercase tracking-wider mb-1">Untracked</p>
           <div v-for="f in status.untracked" :key="f" class="flex items-center gap-2 py-0.5 text-xs">
@@ -248,15 +254,16 @@ const pulling = ref(false)
 const deploying = ref(false)
 const pushing = ref(false)
 
-const envList = computed(() => {
-  if (!overview.value) return []
-  const list = []
-  if (overview.value.runtime?.exists) {
-    list.push({ key: 'runtime', data: overview.value.runtime })
-  }
-  list.push({ key: 'dev', data: overview.value.dev })
-  list.push({ key: 'origin', data: overview.value.origin })
-  return list
+// 按鈕狀態（始終可見，disabled 時灰色）
+const canDeploy = computed(() => overview.value?.runtime?.exists && overview.value?.dev_ahead_of_runtime > 0)
+const canPush = computed(() => overview.value?.dev_ahead_of_origin > 0)
+const canPull = computed(() => status.value?.behind > 0)
+const canDeployOrigin = computed(() => overview.value?.runtime?.exists && overview.value?.runtime_ahead_of_origin < 0)
+
+// 遠端 repo URL（去掉 .git 後綴）
+const repoUrl = computed(() => {
+  const url = overview.value?.origin?.url || ''
+  return url.replace(/\.git$/, '')
 })
 
 const changedCount = computed(() => {
@@ -306,7 +313,6 @@ async function doFetch() {
         status.value.behind = data.behind
       }
     }
-    // 也更新 overview
     await loadOverview()
   } finally {
     fetching.value = false
@@ -320,7 +326,6 @@ async function doPull() {
     if (res.ok) {
       const data = await res.json()
       if (data.ok) {
-        alert('拉取成功')
         await loadStatus()
         await loadOverview()
         loadLog()
@@ -341,7 +346,6 @@ async function doPush() {
     if (res.ok) {
       const data = await res.json()
       if (data.ok) {
-        alert('推送成功')
         await loadOverview()
       } else {
         alert(`推送失敗: ${data.error}`)
@@ -363,7 +367,7 @@ async function deployToRuntime(source: 'dev' | 'origin') {
     if (res.ok) {
       const data = await res.json()
       if (data.ok) {
-        alert(`部署任務已建立 #${data.card_id}\nAI 將自動部署到運行環境`)
+        alert(`部署任務已建立 #${data.card_id}`)
         emit('pull-triggered', data.card_id)
       } else {
         alert(`部署失敗: ${data.error || '未知錯誤'}`)
@@ -410,7 +414,6 @@ onMounted(async () => {
   await loadOverview()
   await loadStatus()
   loadLog()
-  // 自動 fetch 遠端狀態，完成後更新 overview
   doFetch()
 })
 </script>
