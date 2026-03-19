@@ -125,20 +125,45 @@
           </div>
         </div>
 
-        <!-- 同步狀態 -->
-        <div class="px-3 py-2 rounded-lg" :class="overview.all_synced ? 'bg-emerald-500/5 border border-emerald-500/20' : 'bg-amber-500/5 border border-amber-500/20'">
-          <div v-if="overview.all_synced" class="text-xs text-emerald-400 flex items-center gap-2">
-            <span>✓</span> 所有環境版本一致
+        <!-- 版本圖形 -->
+        <div class="rounded-xl border border-slate-700/30 bg-slate-800/30 px-4 py-3">
+          <div class="flex items-center gap-2 mb-3">
+            <span class="text-[10px] text-slate-600 uppercase tracking-wider font-bold">Commit Graph</span>
+            <span v-if="overview.all_synced" class="text-[10px] text-emerald-400 ml-auto">✓ 同步</span>
           </div>
-          <div v-else class="space-y-1">
-            <div v-if="overview.dev_ahead_of_runtime > 0" class="text-xs text-amber-400">
-              開發版 領先 運行版 {{ overview.dev_ahead_of_runtime }} 個 commit
-            </div>
-            <div v-if="overview.dev_ahead_of_origin > 0" class="text-xs text-purple-400">
-              開發版 領先 遠端 {{ overview.dev_ahead_of_origin }} 個 commit（未 push）
-            </div>
-            <div v-if="overview.runtime_ahead_of_origin > 0" class="text-xs text-emerald-400">
-              運行版 領先 遠端 {{ overview.runtime_ahead_of_origin }} 個 commit
+          <!-- 時間線 -->
+          <div class="relative pl-6">
+            <!-- 垂直線 -->
+            <div class="absolute left-[9px] top-1 bottom-1 w-px bg-slate-700" />
+
+            <!-- 每個 commit node -->
+            <div v-for="(node, i) in graphNodes" :key="i" class="relative flex items-start gap-3 pb-3 last:pb-0">
+              <!-- 圓點 -->
+              <div class="absolute -left-6 mt-1 flex items-center justify-center">
+                <div
+                  class="w-[18px] h-[18px] rounded-full border-2 flex items-center justify-center z-10"
+                  :class="node.dotClass"
+                >
+                  <div v-if="node.envs.length > 1" class="w-2 h-2 rounded-full" :class="node.innerClass" />
+                </div>
+              </div>
+              <!-- 內容 -->
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-mono text-slate-400">{{ node.sha }}</span>
+                  <div class="flex gap-1">
+                    <span
+                      v-for="env in node.envs"
+                      :key="env.key"
+                      class="text-[9px] px-1.5 py-0 rounded-full font-bold uppercase"
+                      :class="env.key === 'runtime' ? 'bg-emerald-500/20 text-emerald-400' :
+                              env.key === 'dev' ? 'bg-purple-500/20 text-purple-400' :
+                              'bg-blue-500/20 text-blue-400'"
+                    >{{ env.label }}</span>
+                  </div>
+                </div>
+                <p class="text-xs text-slate-400 truncate mt-0.5">{{ node.message }}</p>
+              </div>
             </div>
           </div>
         </div>
@@ -255,6 +280,53 @@ const deploying = ref(false)
 const pushing = ref(false)
 
 // 按鈕狀態（始終可見，disabled 時灰色）
+// Graph nodes — 根據 sha 合併相同 commit 的環境標記
+const graphNodes = computed(() => {
+  if (!overview.value) return []
+
+  const envs = [
+    overview.value.dev?.exists ? { key: 'dev', label: '開發', ...overview.value.dev } : null,
+    overview.value.runtime?.exists ? { key: 'runtime', label: '運行', ...overview.value.runtime } : null,
+    overview.value.origin?.exists ? { key: 'origin', label: '遠端', ...overview.value.origin } : null,
+  ].filter(Boolean) as any[]
+
+  // 按 sha 分組
+  const shaMap = new Map<string, { sha: string, message: string, date: string, envs: any[] }>()
+  for (const env of envs) {
+    const sha = env.sha_full || env.sha
+    if (!sha) continue
+    if (!shaMap.has(sha)) {
+      shaMap.set(sha, { sha: env.sha, message: env.message, date: env.date, envs: [] })
+    }
+    shaMap.get(sha)!.envs.push({ key: env.key, label: env.label })
+  }
+
+  // 排序：dev 最新在上
+  const nodes = Array.from(shaMap.values())
+  nodes.sort((a, b) => {
+    const aHasDev = a.envs.some((e: any) => e.key === 'dev')
+    const bHasDev = b.envs.some((e: any) => e.key === 'dev')
+    if (aHasDev && !bHasDev) return -1
+    if (!aHasDev && bHasDev) return 1
+    return new Date(b.date).getTime() - new Date(a.date).getTime()
+  })
+
+  // 加上樣式
+  return nodes.map(n => {
+    const hasMultiple = n.envs.length > 1
+    const primary = n.envs[0].key
+    return {
+      ...n,
+      dotClass: hasMultiple
+        ? 'border-emerald-400 bg-slate-900'
+        : primary === 'dev' ? 'border-purple-400 bg-purple-400/20'
+        : primary === 'runtime' ? 'border-emerald-400 bg-emerald-400/20'
+        : 'border-blue-400 bg-blue-400/20',
+      innerClass: hasMultiple ? 'bg-emerald-400' : '',
+    }
+  })
+})
+
 const canDeploy = computed(() => overview.value?.runtime?.exists && overview.value?.dev_ahead_of_runtime > 0)
 const canPush = computed(() => overview.value?.dev_ahead_of_origin > 0)
 const canPull = computed(() => status.value?.behind > 0)
