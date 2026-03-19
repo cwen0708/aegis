@@ -167,7 +167,7 @@ const positionedNodes = computed<PositionedNode[]>(() => {
   const total = others.length
 
   for (let ti = 0; ti < types.length; ti++) {
-    const group = grouped[types[ti]]
+    const group = grouped[types[ti]!]!
     for (let gi = 0; gi < group.length; gi++) {
       const n = group[gi]
       const angle = (idx / total) * Math.PI * 2 - Math.PI / 2
@@ -214,7 +214,7 @@ async function loadEntities() {
       entities.value = await res.json()
       // 預設選第一個
       if (!centerId.value && currentEntities.value.length) {
-        centerId.value = currentEntities.value[0].id
+        centerId.value = currentEntities.value[0]!.id
       }
     }
   } catch { /* silent */ }
@@ -245,7 +245,7 @@ function deselectNode() {
 // ── Watch ──
 watch(centerType, () => {
   if (currentEntities.value.length) {
-    centerId.value = currentEntities.value[0].id
+    centerId.value = currentEntities.value[0]!.id
   }
 })
 
