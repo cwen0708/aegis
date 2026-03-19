@@ -278,7 +278,7 @@ def register_with_invite(req: RegisterWithInviteRequest, session: Session = Depe
 def get_current_user(request_obj=Depends(lambda request: request), session: Session = Depends(get_session)):
     """根據 token 取得當前用戶資訊"""
     from app.core.auth import decode_session_token
-    from app.models.core import BotUser, BotUserProject, Project
+    from app.models.core import BotUser, PersonProject
 
     auth_header = request_obj.headers.get("authorization", "")
     token = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else ""
@@ -290,15 +290,15 @@ def get_current_user(request_obj=Depends(lambda request: request), session: Sess
     if payload["type"] == "admin":
         return {"authenticated": True, "type": "admin", "projects": None}
 
-    # user token → 查 BotUser 和授權專案
+    # user token → 查 BotUser → Person → PersonProject
     user = session.get(BotUser, payload["uid"])
     if not user:
         return {"authenticated": False}
 
     projects = session.exec(
-        select(BotUserProject).where(
-            BotUserProject.bot_user_id == user.id,
-            BotUserProject.can_view == True,
+        select(PersonProject).where(
+            PersonProject.person_id == user.person_id,
+            PersonProject.can_view == True,
         )
     ).all()
     project_ids = [p.project_id for p in projects]

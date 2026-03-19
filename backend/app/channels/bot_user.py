@@ -576,96 +576,94 @@ def get_available_members(bot_user: BotUser) -> List[dict]:
 
 
 # ==========================================
-# 專案存取查詢（P2 權限系統，支援 person_id 跨平台聯集）
+# 專案存取查詢（Person 表直達查詢）
 # ==========================================
 
-def _get_person_user_ids(bot_user_id: int) -> list[int]:
-    """取得同一 person 下所有 BotUser ID（跨平台權限聯集用）"""
+def _resolve_person_id(bot_user_id: int) -> int:
+    """從 BotUser ID 取得 person_id"""
     with Session(engine) as session:
         user = session.get(BotUser, bot_user_id)
-        if not user or not user.person_id or user.person_id == 0:
-            return [bot_user_id]
-        ids = session.exec(
-            select(BotUser.id).where(BotUser.person_id == user.person_id)
-        ).all()
-        return list(ids) if ids else [bot_user_id]
+        return user.person_id if user and user.person_id else 0
 
 
 def get_user_projects(bot_user_id: int, can_view_only: bool = True) -> List[Project]:
-    """取得用戶可存取的專案（含跨平台聯集）"""
-    user_ids = _get_person_user_ids(bot_user_id)
+    """取得用戶可存取的專案（透過 Person → PersonProject）"""
+    from app.models.core import PersonProject
+    person_id = _resolve_person_id(bot_user_id)
+    if not person_id:
+        return []
     with Session(engine) as session:
         stmt = (
             select(Project)
-            .join(BotUserProject, BotUserProject.project_id == Project.id)
-            .where(BotUserProject.bot_user_id.in_(user_ids))
+            .join(PersonProject, PersonProject.project_id == Project.id)
+            .where(PersonProject.person_id == person_id)
         )
         if can_view_only:
-            stmt = stmt.where(BotUserProject.can_view == True)
-        # 去重（多個平台帳號可能授權同一個專案）
-        return list({p.id: p for p in session.exec(stmt).all()}.values())
+            stmt = stmt.where(PersonProject.can_view == True)
+        return list(session.exec(stmt).all())
 
 
 def get_default_project(bot_user_id: int) -> Optional[Project]:
-    """取得用戶的預設專案（含跨平台）"""
-    user_ids = _get_person_user_ids(bot_user_id)
+    """取得用戶的預設專案"""
+    from app.models.core import PersonProject
+    person_id = _resolve_person_id(bot_user_id)
+    if not person_id:
+        return None
     with Session(engine) as session:
         stmt = (
             select(Project)
-            .join(BotUserProject, BotUserProject.project_id == Project.id)
-            .where(
-                BotUserProject.bot_user_id.in_(user_ids),
-                BotUserProject.is_default == True,
-            )
+            .join(PersonProject, PersonProject.project_id == Project.id)
+            .where(PersonProject.person_id == person_id, PersonProject.is_default == True)
         )
         return session.exec(stmt).first()
 
 
-def get_user_context(bot_user_id: int, project_id: int) -> Optional[BotUserProject]:
-    """取得用戶在指定專案的身份上下文（含跨平台）"""
-    user_ids = _get_person_user_ids(bot_user_id)
+def get_user_context(bot_user_id: int, project_id: int) -> Optional["PersonProject"]:
+    """取得用戶在指定專案的身份上下文（回傳 PersonProject）"""
+    from app.models.core import PersonProject
+    person_id = _resolve_person_id(bot_user_id)
+    if not person_id:
+        return None
     with Session(engine) as session:
-        stmt = select(BotUserProject).where(
-            BotUserProject.bot_user_id.in_(user_ids),
-            BotUserProject.project_id == project_id,
-        )
-        return session.exec(stmt).first()
+        return session.exec(
+            select(PersonProject).where(PersonProject.person_id == person_id, PersonProject.project_id == project_id)
+        ).first()
 
 
 def can_user_view_project(bot_user_id: int, project_id: int) -> bool:
-    """檢查用戶能否查看指定專案（含跨平台）"""
-    user_ids = _get_person_user_ids(bot_user_id)
+    """檢查用戶能否查看指定專案"""
+    from app.models.core import PersonProject
+    person_id = _resolve_person_id(bot_user_id)
+    if not person_id:
+        return False
     with Session(engine) as session:
-        stmt = select(BotUserProject).where(
-            BotUserProject.bot_user_id.in_(user_ids),
-            BotUserProject.project_id == project_id,
-            BotUserProject.can_view == True,
-        )
-        return session.exec(stmt).first() is not None
+        return session.exec(
+            select(PersonProject).where(PersonProject.person_id == person_id, PersonProject.project_id == project_id, PersonProject.can_view == True)
+        ).first() is not None
 
 
 def can_user_create_card(bot_user_id: int, project_id: int) -> bool:
-    """檢查用戶能否在指定專案建卡（含跨平台）"""
-    user_ids = _get_person_user_ids(bot_user_id)
+    """檢查用戶能否在指定專案建卡"""
+    from app.models.core import PersonProject
+    person_id = _resolve_person_id(bot_user_id)
+    if not person_id:
+        return False
     with Session(engine) as session:
-        stmt = select(BotUserProject).where(
-            BotUserProject.bot_user_id.in_(user_ids),
-            BotUserProject.project_id == project_id,
-            BotUserProject.can_create_card == True,
-        )
-        return session.exec(stmt).first() is not None
+        return session.exec(
+            select(PersonProject).where(PersonProject.person_id == person_id, PersonProject.project_id == project_id, PersonProject.can_create_card == True)
+        ).first() is not None
 
 
 def can_user_run_task(bot_user_id: int, project_id: int) -> bool:
-    """檢查用戶能否在指定專案執行任務（含跨平台）"""
-    user_ids = _get_person_user_ids(bot_user_id)
+    """檢查用戶能否在指定專案執行任務"""
+    from app.models.core import PersonProject
+    person_id = _resolve_person_id(bot_user_id)
+    if not person_id:
+        return False
     with Session(engine) as session:
-        stmt = select(BotUserProject).where(
-            BotUserProject.bot_user_id.in_(user_ids),
-            BotUserProject.project_id == project_id,
-            BotUserProject.can_run_task == True,
-        )
-        return session.exec(stmt).first() is not None
+        return session.exec(
+            select(PersonProject).where(PersonProject.person_id == person_id, PersonProject.project_id == project_id, PersonProject.can_run_task == True)
+        ).first() is not None
 
 
 def grant_project_access(
@@ -784,48 +782,42 @@ def grant_project_access(
 # ==========================================
 
 def get_user_extra(bot_user_id: int) -> dict:
-    """取得用戶的 extra_json（含跨平台 fallback：自己沒有就找同 person 的）"""
+    """取得用戶的 extra_json（從 Person 表讀取，跨平台共用）"""
+    from app.models.core import Person
     with Session(engine) as session:
         user = session.get(BotUser, bot_user_id)
         if not user:
             return {}
-        try:
-            own = json.loads(user.extra_json or "{}")
-        except (json.JSONDecodeError, TypeError):
-            own = {}
-
-        # 如果自己有 AD 帳密，直接用
-        if own.get("ad_user") and own.get("ad_pass"):
-            return own
-
-        # fallback: 找同 person 中有 AD 帳密的
-        if user.person_id and user.person_id != 0:
-            siblings = session.exec(
-                select(BotUser).where(
-                    BotUser.person_id == user.person_id,
-                    BotUser.id != user.id,
-                )
-            ).all()
-            for sibling in siblings:
+        # 優先從 Person 讀取
+        if user.person_id:
+            person = session.get(Person, user.person_id)
+            if person:
                 try:
-                    s_extra = json.loads(sibling.extra_json or "{}")
-                    if s_extra.get("ad_user") and s_extra.get("ad_pass"):
-                        # 合併：sibling 的 AD 帳密 + 自己的其他欄位
-                        merged = {**s_extra, **own}
-                        return merged
+                    return json.loads(person.extra_json or "{}")
                 except (json.JSONDecodeError, TypeError):
-                    continue
-
-        return own
+                    pass
+        # fallback: 從 BotUser 自己讀（舊資料）
+        try:
+            return json.loads(user.extra_json or "{}")
+        except (json.JSONDecodeError, TypeError):
+            return {}
 
 
 def set_user_extra(bot_user_id: int, data: dict) -> bool:
-    """整筆覆寫 extra_json"""
+    """整筆覆寫 extra_json（寫入 Person 表）"""
+    from app.models.core import Person
     with Session(engine) as session:
         user = session.get(BotUser, bot_user_id)
         if not user:
             return False
-        user.extra_json = json.dumps(data, ensure_ascii=False)
+        data_str = json.dumps(data, ensure_ascii=False)
+        # 寫入 Person
+        if user.person_id:
+            person = session.get(Person, user.person_id)
+            if person:
+                person.extra_json = data_str
+        # 同時寫 BotUser（過渡期相容）
+        user.extra_json = data_str
         session.commit()
         return True
 

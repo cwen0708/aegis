@@ -171,22 +171,24 @@ def read_projects(request: Request, session: Session = Depends(get_session)):
     if visible_project_ids is not None:
         projects = [p for p in projects if p.id in visible_project_ids]
 
-    # 2. User token 過濾（基於用戶授權的專案）
+    # 2. User token 過濾（透過 Person → PersonProject）
     from app.core.auth import decode_session_token
     auth_header = request.headers.get("authorization", "")
     token = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else ""
     if token:
         payload = decode_session_token(token)
         if payload and payload.get("type") == "user":
-            from app.models.core import BotUserProject
-            user_projects = session.exec(
-                select(BotUserProject.project_id).where(
-                    BotUserProject.bot_user_id == payload["uid"],
-                    BotUserProject.can_view == True,
-                )
-            ).all()
-            user_project_ids = set(user_projects)
-            projects = [p for p in projects if p.id in user_project_ids]
+            from app.models.core import BotUser, PersonProject
+            user = session.get(BotUser, payload["uid"])
+            if user and user.person_id:
+                user_projects = session.exec(
+                    select(PersonProject.project_id).where(
+                        PersonProject.person_id == user.person_id,
+                        PersonProject.can_view == True,
+                    )
+                ).all()
+                user_project_ids = set(user_projects)
+                projects = [p for p in projects if p.id in user_project_ids]
 
     return projects
 
