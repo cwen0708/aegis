@@ -44,7 +44,41 @@ def _seed_member_profiles():
         "## 職責\n"
         "- 回答用戶問題\n"
         "- 協助任務管理\n"
-        "- 提供系統狀態資訊\n",
+        "- 提供系統狀態資訊\n"
+        "- 執行系統智慧更新（合併上游新版本）\n",
+        encoding="utf-8",
+    )
+    (aegis_dir / "skills" / "smart-update.md").write_text(
+        "---\n"
+        "name: smart-update\n"
+        'description: "智慧更新。當本地有進化 commit 且上游有新版本時，合併兩者並部署。"\n'
+        "---\n\n"
+        "# 智慧更新\n\n"
+        "上游開源 repo 有新版本，且本地有自我進化的 commit。\n"
+        "你負責合併兩者並部署到運行環境。\n\n"
+        "## 流程\n\n"
+        "1. `cd ~/projects/Aegis && git fetch origin`\n"
+        "2. 查看上游和本地差異：`git log HEAD..origin/main --oneline`\n"
+        "3. `git merge origin/main`\n"
+        "4. 無衝突 → 驗證（import check、vue-tsc）→ 部署\n"
+        "5. 簡單衝突 → 手動解決 → 驗證 → 部署\n"
+        "6. 複雜衝突 → `git merge --abort`，標記 [blocked]\n\n"
+        "## 部署\n\n"
+        "```bash\n"
+        "DEVDIR=~/projects/Aegis\n"
+        "RUNTIME=~/.local/aegis\n"
+        "cp -r $DEVDIR/backend/app/ $RUNTIME/backend/app/\n"
+        "cp $DEVDIR/backend/worker.py $RUNTIME/backend/worker.py\n"
+        "cp $DEVDIR/backend/runner.py $RUNTIME/backend/runner.py\n"
+        "cd $RUNTIME/backend && ./venv/bin/pip install -r requirements.txt -q\n"
+        "sudo systemctl restart aegis-worker && sleep 1\n"
+        "sudo systemctl restart aegis && sleep 3\n"
+        "systemctl status aegis --no-pager | head -3\n"
+        "```\n\n"
+        "## 限制\n\n"
+        "- 不要 git push\n"
+        "- 複雜衝突不要硬解，標記 [blocked]\n"
+        "- 部署後異常立即 `git checkout -- backend/` 還原\n",
         encoding="utf-8",
     )
 
