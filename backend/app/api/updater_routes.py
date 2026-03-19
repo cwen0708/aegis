@@ -136,25 +136,58 @@ async def check_for_updates(payload: CheckUpdatePayload = None, session: Session
 
 @router.get("/update/versions")
 async def list_versions():
-    """列出可用版本"""
-    if not updater.is_deployed_environment():
-        return {"versions": [], "current": updater.get_current_version()}
+    """列出版本歷史（優先從 git tags，fallback releases 目錄）"""
+    current = updater.get_current_version()
 
-    paths = updater.get_deployment_paths()
-    releases_dir = paths["releases"]
-
+    # 方法 1：從 git tags 取（適用 git 架構）
     versions = []
-    if releases_dir and releases_dir.exists():
-        versions = sorted(
-            [d.name for d in releases_dir.iterdir() if d.is_dir()],
-            key=updater.parse_version,
-            reverse=True
+    try:
+        import subprocess
+        install_root = Path(__file__).parent.parent.parent.parent
+        result = subprocess.run(
+            ["git", "tag", "-l", "v*", "--sort=-v:refname"],
+            cwd=str(install_root),
+            capture_output=True, text=True, timeout=5
         )
+        if result.returncode == 0:
+            for tag in result.stdout.strip().split("\n"):
+                tag = tag.strip()
+                if tag:
+                    # 取 tag 的日期和 commit message
+                    info = subprocess.run(
+                        ["git", "log", "-1", "--format=%ai|%s", tag],
+                        cwd=str(install_root),
+                        capture_output=True, text=True, timeout=5
+                    )
+                    date_str, title = "", tag
+                    if info.returncode == 0 and "|" in info.stdout:
+                        parts = info.stdout.strip().split("|", 1)
+                        date_str = parts[0].strip()
+                        title = parts[1].strip() if len(parts) > 1 else tag
 
-    return {
-        "versions": versions,
-        "current": updater.get_current_version(),
-    }
+                    versions.append({
+                        "tag": tag.lstrip("v"),
+                        "title": title,
+                        "date": date_str,
+                    })
+            if versions:
+                return {"versions": versions[:30], "current": current}
+    except Exception:
+        pass
+
+    # 方法 2：從 releases 目錄取（適用 symlink 架構）
+    if updater.is_deployed_environment():
+        paths = updater.get_deployment_paths()
+        releases_dir = paths["releases"]
+        if releases_dir and releases_dir.exists():
+            dir_versions = sorted(
+                [d.name for d in releases_dir.iterdir() if d.is_dir()],
+                key=updater.parse_version,
+                reverse=True
+            )
+            versions = [{"tag": v, "title": v, "date": ""} for v in dir_versions]
+
+    return {"versions": versions[:30], "current": current}
 
 
 @router.post("/update/download")
