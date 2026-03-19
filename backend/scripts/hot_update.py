@@ -71,19 +71,96 @@ def run_command(cmd: list, cwd: str = None) -> tuple:
     return proc.returncode, proc.stdout, proc.stderr
 
 
+def trigger_smart_update(local_commits: int):
+    """本地有進化 commit，建立智慧更新卡片給愛吉絲"""
+    import json
+    import urllib.request
+
+    API = "http://127.0.0.1:8899/api/v1"
+
+    # 取得上游和本地的 commit 列表
+    _, upstream_log, _ = run_command(
+        ["git", "log", "HEAD..origin/main", "--oneline"], cwd=str(PROJECT_ROOT)
+    )
+    _, local_log, _ = run_command(
+        ["git", "log", "origin/main..HEAD", "--oneline"], cwd=str(PROJECT_ROOT)
+    )
+
+    # 動態查愛吉絲的收件匣 list_id
+    try:
+        resp = urllib.request.urlopen(f"{API}/projects/1/board", timeout=10)
+        board = json.loads(resp.read())
+        aegis_list = None
+        for stage in board:
+            if "愛吉絲" in stage.get("name", ""):
+                aegis_list = stage["id"]
+                break
+        if not aegis_list:
+            print("找不到愛吉絲收件匣，跳過智慧更新")
+            return
+    except Exception as e:
+        print(f"查詢看板失敗: {e}")
+        return
+
+    card = {
+        "title": "智慧更新: 合併上游新版本",
+        "list_id": aegis_list,
+        "project_id": 1,
+        "description": (
+            f"## 上游有新版本\n\n"
+            f"### 上游新 commit\n```\n{upstream_log.strip()}\n```\n\n"
+            f"### 本地進化 commit（{local_commits} 個）\n```\n{local_log.strip()}\n```\n\n"
+            f"請執行 smart-update skill 合併上游變更並部署。"
+        ),
+    }
+
+    try:
+        data = json.dumps(card).encode("utf-8")
+        req = urllib.request.Request(
+            f"{API}/cards/", data=data,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        resp = urllib.request.urlopen(req, timeout=10)
+        result = json.loads(resp.read())
+        card_id = result.get("id")
+
+        # 觸發卡片
+        urllib.request.urlopen(urllib.request.Request(
+            f"{API}/cards/{card_id}/trigger", method="POST",
+        ), timeout=10)
+        print(f"智慧更新卡片已建立: #{card_id}")
+    except Exception as e:
+        print(f"建立智慧更新卡片失敗: {e}")
+
+
 def main():
     try:
         update_status("downloading", 0, "正在拉取最新代碼...")
 
-        # Reset VERSION file to avoid conflict (it gets overwritten by this script each update)
-        run_command(["git", "checkout", "--", "backend/VERSION"], cwd=str(PROJECT_ROOT))
-
-        # Git pull
-        # 先拉 tags（版本號依賴 git describe --tags）
+        # 先 fetch（不改本地檔案）
         run_command(["git", "fetch", "--tags", "--force", "origin"], cwd=str(PROJECT_ROOT))
-        ret, out, err = run_command(["git", "pull", "--ff-only", "origin", "main"], cwd=str(PROJECT_ROOT))
+
+        # 偵測本地有沒有進化 commit（dev dir 的自我開發產物）
+        ret, ahead_count, _ = run_command(
+            ["git", "rev-list", "origin/main..HEAD", "--count"], cwd=str(PROJECT_ROOT)
+        )
+        local_commits = int(ahead_count.strip()) if ret == 0 and ahead_count.strip().isdigit() else 0
+
+        if local_commits > 0:
+            # 有本地進化 → 交給愛吉絲智慧更新
+            update_status("done", 100,
+                          f"偵測到 {local_commits} 個本地進化 commit，已建立智慧更新卡片")
+            trigger_smart_update(local_commits)
+            resume_worker()
+            return 0
+
+        # 沒有本地進化 → 直接自動更新（git reset --hard，確保乾淨）
+        run_command(["git", "checkout", "--", "backend/VERSION"], cwd=str(PROJECT_ROOT))
+        ret, out, err = run_command(
+            ["git", "reset", "--hard", "origin/main"], cwd=str(PROJECT_ROOT)
+        )
         if ret != 0:
-            update_status("failed", 0, "git pull 失敗", err)
+            update_status("failed", 0, "git reset 失敗", err)
             resume_worker()
             return 1
 
