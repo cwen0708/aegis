@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Any
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from app.database import get_session
-from app.models.core import Project, Card, StageList, SystemSetting, Account, Member, MemberAccount, CardIndex
+from app.models.core import Project, Card, StageList, SystemSetting, Account, Member, MemberAccount, CardIndex, Person, PersonProject
 from app.core.card_index import sync_card_to_index, remove_card_from_index, query_board, rebuild_index
 from app.api.deps import get_domain_filter, get_card_lock, get_member_primary_provider, get_project_for_list
 from pathlib import Path
@@ -365,6 +365,45 @@ def read_project_board(project_id: int, request: Request, session: Session = Dep
             on_fail_action=l.on_fail_action,
         ))
     return result
+
+# ==========================================
+# Project Persons (reverse lookup)
+# ==========================================
+@router.get("/projects/{project_id}/persons")
+def list_project_persons(project_id: int, session: Session = Depends(get_session)):
+    """回傳可存取此專案的 Person 列表"""
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    pps = session.exec(
+        select(PersonProject).where(PersonProject.project_id == project_id)
+    ).all()
+
+    person_ids = [pp.person_id for pp in pps]
+    if not person_ids:
+        return []
+
+    persons = session.exec(select(Person).where(Person.id.in_(person_ids))).all()
+    persons_map = {p.id: p for p in persons}
+
+    result = []
+    for pp in pps:
+        p = persons_map.get(pp.person_id)
+        if not p:
+            continue
+        result.append({
+            "person_id": p.id,
+            "display_name": pp.display_name or p.display_name,
+            "level": p.level,
+            "can_view": pp.can_view,
+            "can_create_card": pp.can_create_card,
+            "can_run_task": pp.can_run_task,
+            "can_comment": pp.can_comment,
+            "can_access_sensitive": pp.can_access_sensitive,
+        })
+    return result
+
 
 # ==========================================
 # StageList Routes

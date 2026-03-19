@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, FolderOpen, Loader2, Trash2, FolderInput, Plus, Edit3, Eye, EyeOff, KeyRound, Save, Smartphone, Square, ExternalLink, Copy, Check, TerminalSquare } from 'lucide-vue-next'
+import { ArrowLeft, FolderOpen, Loader2, Trash2, FolderInput, Plus, Edit3, Eye, EyeOff, KeyRound, Save, Smartphone, Square, ExternalLink, Copy, Check, TerminalSquare, UserCheck, X } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 import ConfirmDialog from '../../components/ConfirmDialog.vue'
 import { config } from '../../config'
@@ -264,6 +264,88 @@ function toggleReveal(varId: number) {
   }
 }
 
+// ── Project Persons ──
+interface ProjectPerson {
+  person_id: number
+  display_name: string
+  level: number
+  can_view: boolean
+  can_create_card: boolean
+  can_run_task: boolean
+  can_comment: boolean
+  can_access_sensitive: boolean
+}
+
+interface PersonOption {
+  id: number
+  display_name: string
+  level: number
+}
+
+const projectPersons = ref<ProjectPerson[]>([])
+const allPersons = ref<PersonOption[]>([])
+const personsLoading = ref(false)
+const showAddPerson = ref(false)
+const addPersonId = ref<number | null>(null)
+
+const availablePersons = computed(() => {
+  const existingIds = new Set(projectPersons.value.map(p => p.person_id))
+  return allPersons.value.filter(p => !existingIds.has(p.id))
+})
+
+async function fetchProjectPersons() {
+  personsLoading.value = true
+  try {
+    const res = await fetch(`${API}/api/v1/projects/${projectId}/persons`, { headers: authHeaders() })
+    if (res.ok) projectPersons.value = await res.json()
+  } catch {
+    store.addToast('載入用戶失敗', 'error')
+  }
+  personsLoading.value = false
+}
+
+async function fetchAllPersons() {
+  try {
+    const res = await fetch(`${API}/api/v1/persons`, { headers: authHeaders() })
+    if (res.ok) allPersons.value = await res.json()
+  } catch {}
+}
+
+async function addPersonToProject() {
+  if (!addPersonId.value) return
+  try {
+    const res = await fetch(`${API}/api/v1/persons/${addPersonId.value}/projects`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ project_id: projectId }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: '新增失敗' }))
+      throw new Error(err.detail)
+    }
+    store.addToast('用戶已新增', 'success')
+    showAddPerson.value = false
+    addPersonId.value = null
+    await fetchProjectPersons()
+  } catch (e: any) {
+    store.addToast(e.message || '新增失敗', 'error')
+  }
+}
+
+async function removePersonFromProject(personId: number) {
+  try {
+    const res = await fetch(`${API}/api/v1/persons/${personId}/projects/${projectId}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    })
+    if (!res.ok) throw new Error('移除失敗')
+    store.addToast('用戶已移除', 'success')
+    await fetchProjectPersons()
+  } catch {
+    store.addToast('移除失敗', 'error')
+  }
+}
+
 // ── Remote Control ──
 const rcStatus = ref<'stopped' | 'running' | 'starting'>('stopped')
 const rcError = ref('')
@@ -359,7 +441,7 @@ function formatUptime(sec: number): string {
 }
 
 onMounted(async () => {
-  await Promise.all([fetchProject(), fetchMembers(), fetchEnvVars(), fetchRcStatus()])
+  await Promise.all([fetchProject(), fetchMembers(), fetchEnvVars(), fetchRcStatus(), fetchProjectPersons(), fetchAllPersons()])
   loading.value = false
   // 如果 RC 正在運行，開始輪詢
   if (rcStatus.value === 'running') startRcPolling()
@@ -619,7 +701,90 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- ═══ Section 3: Remote Control ═══ -->
+      <!-- ═══ Section 3: 可存取用戶 ═══ -->
+      <div class="bg-slate-800/50 rounded-2xl border border-slate-700 p-6 space-y-4">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <UserCheck class="w-4 h-4 text-sky-400" />
+            <h3 class="text-sm font-bold text-slate-300 uppercase tracking-wider">可存取用戶</h3>
+          </div>
+          <button
+            @click="showAddPerson = !showAddPerson"
+            class="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-xs font-medium transition-colors"
+          >
+            <Plus class="w-3.5 h-3.5" />
+            新增用戶
+          </button>
+        </div>
+        <p class="text-xs text-slate-500">
+          透過 PersonProject 關聯控制哪些用戶可以存取此專案。
+        </p>
+
+        <!-- Add Person Panel -->
+        <div v-if="showAddPerson" class="bg-slate-900/80 rounded-lg border border-slate-600 p-3 space-y-2">
+          <label class="block text-sm text-slate-400">選擇用戶</label>
+          <div class="flex items-center gap-2">
+            <select
+              v-model="addPersonId"
+              class="flex-1 px-3 py-2 bg-slate-950 text-slate-200 border border-slate-600 rounded-lg focus:outline-none focus:border-emerald-500 text-sm"
+            >
+              <option :value="null" disabled>-- 請選擇 --</option>
+              <option v-for="p in availablePersons" :key="p.id" :value="p.id">
+                {{ p.display_name || `Person #${p.id}` }} (Lv.{{ p.level }})
+              </option>
+            </select>
+            <button
+              @click="addPersonToProject"
+              :disabled="!addPersonId"
+              class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-lg text-sm transition"
+            >
+              新增
+            </button>
+            <button @click="showAddPerson = false" class="p-2 text-slate-400 hover:text-slate-200">
+              <X class="w-4 h-4" />
+            </button>
+          </div>
+          <div v-if="availablePersons.length === 0" class="text-xs text-slate-500">沒有可新增的用戶</div>
+        </div>
+
+        <!-- Loading -->
+        <div v-if="personsLoading" class="flex justify-center py-6">
+          <Loader2 class="w-6 h-6 animate-spin text-slate-400" />
+        </div>
+
+        <!-- Person List -->
+        <div v-else-if="projectPersons.length === 0" class="text-center py-6 text-slate-500 text-sm">
+          尚無可存取用戶
+        </div>
+
+        <div v-else class="space-y-2">
+          <div
+            v-for="pp in projectPersons"
+            :key="pp.person_id"
+            class="flex items-center gap-3 px-4 py-3 bg-slate-900/50 rounded-xl border border-slate-700/50"
+          >
+            <span class="text-sm text-slate-200 flex-1 min-w-0 truncate">
+              {{ pp.display_name || `Person #${pp.person_id}` }}
+            </span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded border bg-slate-700/50 text-slate-400 border-slate-600">
+              Lv.{{ pp.level }}
+            </span>
+            <span v-if="pp.can_view" class="text-[10px] px-1.5 py-0.5 rounded border bg-sky-500/10 text-sky-400 border-sky-500/20">查看</span>
+            <span v-if="pp.can_create_card" class="text-[10px] px-1.5 py-0.5 rounded border bg-emerald-500/10 text-emerald-400 border-emerald-500/20">建卡</span>
+            <span v-if="pp.can_run_task" class="text-[10px] px-1.5 py-0.5 rounded border bg-amber-500/10 text-amber-400 border-amber-500/20">執行</span>
+            <span v-if="pp.can_access_sensitive" class="text-[10px] px-1.5 py-0.5 rounded border bg-red-500/10 text-red-400 border-red-500/20">敏感</span>
+            <button
+              @click="removePersonFromProject(pp.person_id)"
+              class="p-1 text-slate-500 hover:text-red-400 transition"
+              title="移除"
+            >
+              <Trash2 class="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ Section 4: Remote Control ═══ -->
       <div class="bg-slate-800/50 rounded-2xl border border-slate-700 p-6 space-y-4">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">

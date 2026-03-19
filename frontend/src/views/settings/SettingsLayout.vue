@@ -35,7 +35,7 @@ const menuGroups = [
       { path: '/settings/rooms', label: '空間管理', icon: Building2 },
       { path: '/settings/raw-messages', label: '訊息收整', icon: Inbox },
       { path: '/settings/projects', label: '專案管理', icon: FolderKanban },
-      { path: '/settings/team', label: '團隊管理', icon: Users },
+      { path: '/settings/team', label: '成員管理', icon: Users },
       { path: '/settings/agents', label: '代理設定', icon: Bot },
       { path: '/settings/terminal', label: '網頁終端', icon: TerminalSquare },
     ],

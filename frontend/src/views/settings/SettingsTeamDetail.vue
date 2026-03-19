@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowLeft, Save, Loader2, Trash2, Upload, Sparkles,
-  Plus, Edit3, BookOpen, ChevronDown, ChevronUp, Plug, AlertTriangle,
+  Plus, Edit3, BookOpen, ChevronDown, ChevronUp, Plug, AlertTriangle, Copy,
 } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 import ConfirmDialog from '../../components/ConfirmDialog.vue'
@@ -135,6 +135,54 @@ const skillEditContent = ref('')
 const savingSkill = ref(false)
 const showNewSkillDialog = ref(false)
 const newSkillForm = ref({ name: '', content: '' })
+
+// ── Skill Copy ──
+interface OtherMember {
+  id: number
+  name: string
+  avatar: string
+}
+const allMembers = ref<OtherMember[]>([])
+const showCopySkillMenu = ref<string | null>(null)
+const copyingSkill = ref(false)
+
+async function fetchAllMembers() {
+  try {
+    const res = await fetch(`${API}/api/v1/members?all=true`, { headers: authHeaders() })
+    if (res.ok) allMembers.value = await res.json()
+  } catch {}
+}
+
+function toggleCopyMenu(skillName: string) {
+  showCopySkillMenu.value = showCopySkillMenu.value === skillName ? null : skillName
+}
+
+async function copySkillToMember(skillName: string, targetMemberId: number) {
+  copyingSkill.value = true
+  showCopySkillMenu.value = null
+  try {
+    // First fetch the skill content
+    const contentRes = await fetch(`${API}/api/v1/members/${memberId}/skills/${skillName}`)
+    if (!contentRes.ok) throw new Error('讀取技能失敗')
+    const data = await contentRes.json()
+
+    // Then create on target member
+    const res = await fetch(`${API}/api/v1/members/${targetMemberId}/skills`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ name: skillName, content: data.content }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: '複製失敗' }))
+      throw new Error(err.detail)
+    }
+    const target = allMembers.value.find(m => m.id === targetMemberId)
+    store.addToast(`技能已複製到 ${target?.name || '目標成員'}`, 'success')
+  } catch (e: any) {
+    store.addToast(e.message || '複製失敗', 'error')
+  }
+  copyingSkill.value = false
+}
 
 // ── MCP ──
 const mcpContent = ref('')
@@ -533,9 +581,16 @@ async function doDelete() {
 // Init
 // ═══════════════════════════════════════
 
+function closeCopyMenu() { showCopySkillMenu.value = null }
+
 onMounted(async () => {
-  await Promise.all([fetchMember(), fetchAccounts(), fetchSkills(), fetchMcp()])
+  await Promise.all([fetchMember(), fetchAccounts(), fetchSkills(), fetchMcp(), fetchAllMembers()])
   loading.value = false
+  document.addEventListener('click', closeCopyMenu)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', closeCopyMenu)
 })
 </script>
 
@@ -798,6 +853,37 @@ onMounted(async () => {
                   </button>
                   <div class="flex gap-2">
                     <template v-if="!editingSkill">
+                      <!-- Copy skill button -->
+                      <div class="relative">
+                        <button
+                          @click.stop="toggleCopyMenu(skill.name)"
+                          :disabled="copyingSkill"
+                          class="flex items-center gap-1 px-3 py-1.5 bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 rounded-lg text-xs font-medium transition-colors"
+                          title="複製到其他成員"
+                        >
+                          <Copy class="w-3.5 h-3.5" />
+                          複製
+                        </button>
+                        <!-- Dropdown -->
+                        <div
+                          v-if="showCopySkillMenu === skill.name"
+                          class="absolute right-0 bottom-full mb-1 w-48 bg-slate-800 rounded-lg border border-slate-700 shadow-xl z-10 max-h-48 overflow-y-auto py-1"
+                        >
+                          <div class="px-3 py-1.5 text-[10px] text-slate-500 uppercase tracking-wider">複製到</div>
+                          <button
+                            v-for="m in allMembers.filter(m => m.id !== memberId)"
+                            :key="m.id"
+                            @click="copySkillToMember(skill.name, m.id)"
+                            class="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:bg-slate-700 transition-colors text-left"
+                          >
+                            <span>{{ m.avatar }}</span>
+                            <span class="truncate">{{ m.name }}</span>
+                          </button>
+                          <div v-if="allMembers.filter(m => m.id !== memberId).length === 0" class="px-3 py-2 text-xs text-slate-500">
+                            沒有其他成員
+                          </div>
+                        </div>
+                      </div>
                       <button
                         @click="startEditSkill"
                         class="flex items-center gap-1 px-3 py-1.5 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 rounded-lg text-xs font-medium transition-colors"
