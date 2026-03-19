@@ -125,46 +125,54 @@
           </div>
         </div>
 
-        <!-- 版本圖形 -->
-        <div class="rounded-xl border border-slate-700/30 bg-slate-800/30 px-4 py-3">
+        <!-- 版本圖形 (SVG 時間線) -->
+        <div v-if="timeline.length > 0" class="rounded-xl border border-slate-700/30 bg-slate-800/30 p-4 overflow-x-auto">
           <div class="flex items-center gap-2 mb-3">
-            <span class="text-[10px] text-slate-600 uppercase tracking-wider font-bold">Commit Graph</span>
+            <span class="text-[10px] text-slate-600 uppercase tracking-wider font-bold">Commit Timeline</span>
             <span v-if="overview.all_synced" class="text-[10px] text-emerald-400 ml-auto">✓ 同步</span>
           </div>
-          <!-- 時間線 -->
-          <div class="relative pl-6">
-            <!-- 垂直線 -->
-            <div class="absolute left-[9px] top-1 bottom-1 w-px bg-slate-700" />
-
-            <!-- 每個 commit node -->
-            <div v-for="(node, i) in graphNodes" :key="i" class="relative flex items-start gap-3 pb-3 last:pb-0">
-              <!-- 圓點 -->
-              <div class="absolute -left-6 mt-1 flex items-center justify-center">
-                <div
-                  class="w-[18px] h-[18px] rounded-full border-2 flex items-center justify-center z-10"
-                  :class="node.dotClass"
+          <div class="relative" :style="{ minWidth: timeline.length * 56 + 40 + 'px' }">
+            <svg :width="timeline.length * 56 + 40" height="100" class="block">
+              <!-- 主線 -->
+              <line x1="20" :y1="50" :x2="timeline.length * 56 + 20" :y2="50" stroke="#334155" stroke-width="2" />
+              <!-- Commit 節點 -->
+              <g v-for="(node, i) in timeline" :key="node.sha_full">
+                <!-- 連線到標籤 -->
+                <line
+                  v-for="env in node.envs" :key="env"
+                  :x1="20 + i * 56" :y1="env === 'runtime' ? 50 : (env === 'origin' ? 50 : 50)"
+                  :x2="20 + i * 56" :y2="env === 'runtime' ? 18 : (env === 'origin' ? 82 : 18)"
+                  :stroke="env === 'runtime' ? '#34d399' : env === 'dev' ? '#c084fc' : '#60a5fa'"
+                  stroke-width="1.5"
+                  stroke-dasharray="3,2"
+                />
+                <!-- 圓點 -->
+                <circle
+                  :cx="20 + i * 56" cy="50" :r="node.envs.length > 0 ? 7 : 4"
+                  :fill="node.envs.length > 0
+                    ? (node.envs.includes('dev') ? '#c084fc' : node.envs.includes('runtime') ? '#34d399' : '#60a5fa')
+                    : '#475569'"
+                  :stroke="node.envs.length > 1 ? '#f0fdf4' : 'none'"
+                  :stroke-width="node.envs.length > 1 ? 2 : 0"
+                  class="cursor-pointer"
                 >
-                  <div v-if="node.envs.length > 1" class="w-2 h-2 rounded-full" :class="node.innerClass" />
-                </div>
-              </div>
-              <!-- 內容 -->
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2">
-                  <span class="text-xs font-mono text-slate-400">{{ node.sha }}</span>
-                  <div class="flex gap-1">
-                    <span
-                      v-for="env in node.envs"
-                      :key="env.key"
-                      class="text-[9px] px-1.5 py-0 rounded-full font-bold uppercase"
-                      :class="env.key === 'runtime' ? 'bg-emerald-500/20 text-emerald-400' :
-                              env.key === 'dev' ? 'bg-purple-500/20 text-purple-400' :
-                              'bg-blue-500/20 text-blue-400'"
-                    >{{ env.label }}</span>
-                  </div>
-                </div>
-                <p class="text-xs text-slate-400 truncate mt-0.5">{{ node.message }}</p>
-              </div>
-            </div>
+                  <title>{{ node.sha }} {{ node.message }}</title>
+                </circle>
+                <!-- 環境標籤（上方或下方） -->
+                <template v-for="env in node.envs" :key="env + i">
+                  <text
+                    :x="20 + i * 56" :y="env === 'origin' ? 96 : 12"
+                    text-anchor="middle"
+                    :fill="env === 'runtime' ? '#34d399' : env === 'dev' ? '#c084fc' : '#60a5fa'"
+                    font-size="9" font-weight="bold"
+                  >{{ env === 'runtime' ? '運行' : env === 'dev' ? '開發' : '遠端' }}</text>
+                </template>
+                <!-- SHA (hover 時顯示，這裡用 title) -->
+              </g>
+              <!-- 箭頭（新→舊） -->
+              <text :x="timeline.length * 56 + 30" y="54" fill="#475569" font-size="10">←新</text>
+              <text x="2" y="54" fill="#475569" font-size="10">舊→</text>
+            </svg>
           </div>
         </div>
 
@@ -280,7 +288,13 @@ const deploying = ref(false)
 const pushing = ref(false)
 
 // 按鈕狀態（始終可見，disabled 時灰色）
-// Graph nodes — 根據 sha 合併相同 commit 的環境標記
+// Timeline — 後端回傳的 commit 列表（新→舊，反轉為舊→新顯示）
+const timeline = computed(() => {
+  const tl = overview.value?.timeline || []
+  return [...tl].reverse()
+})
+
+// Graph nodes — 根據 sha 合併相同 commit 的環境標記（保留供 fallback）
 const graphNodes = computed(() => {
   if (!overview.value) return []
 
