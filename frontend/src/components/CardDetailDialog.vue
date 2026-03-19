@@ -141,25 +141,15 @@ const canEdit = () => props.card.status !== 'running' && props.card.status !== '
       <!-- Body -->
       <div class="flex-1 overflow-hidden">
         <!-- Tab 1: 任務描述 -->
-        <div v-if="cardDetailTab === 'description'" class="h-full p-6 overflow-y-auto custom-scrollbar flex flex-col">
-          <div v-if="isEditing" class="flex-1 flex flex-col">
-            <textarea v-model="card.description" class="flex-1 w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-slate-200 text-sm font-mono focus:ring-2 focus:ring-emerald-500 outline-none custom-scrollbar resize-none" placeholder="輸入任務描述..."></textarea>
-          </div>
-          <div v-else class="flex-1 bg-slate-900/50 border border-slate-700/50 rounded-xl p-5 overflow-y-auto custom-scrollbar prose prose-invert prose-sm max-w-none">
-            <pre class="whitespace-pre-wrap font-mono text-slate-300 text-xs">{{ card.description || '尚未提供任務描述。' }}</pre>
-          </div>
+        <div v-if="cardDetailTab === 'description'" class="h-full overflow-y-auto custom-scrollbar">
+          <textarea v-if="isEditing" v-model="card.description" class="w-full h-full bg-transparent border-0 p-5 text-slate-200 text-sm font-mono focus:ring-0 outline-none resize-none" placeholder="輸入任務描述..."></textarea>
+          <pre v-else class="p-5 whitespace-pre-wrap font-mono text-slate-300 text-xs">{{ card.description || '尚未提供任務描述。' }}</pre>
         </div>
 
         <!-- Tab 2: 提示詞 -->
-        <div v-else-if="cardDetailTab === 'prompt'" class="h-full p-6 overflow-y-auto custom-scrollbar flex flex-col">
-          <div v-if="isEditing" class="flex-1 flex flex-col gap-3">
-            <div class="flex-1 flex flex-col">
-              <textarea v-model="card.content" class="flex-1 w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-slate-200 text-sm font-mono focus:ring-2 focus:ring-emerald-500 outline-none custom-scrollbar resize-none" placeholder="輸入提示詞內容..."></textarea>
-            </div>
-          </div>
-          <div v-else class="flex-1 bg-slate-900/50 border border-slate-700/50 rounded-xl p-5 overflow-y-auto custom-scrollbar prose prose-invert prose-sm max-w-none">
-            <pre class="whitespace-pre-wrap font-mono text-slate-300 text-xs">{{ card.content || '尚未提供提示詞內容。' }}</pre>
-          </div>
+        <div v-else-if="cardDetailTab === 'prompt'" class="h-full overflow-y-auto custom-scrollbar">
+          <textarea v-if="isEditing" v-model="card.content" class="w-full h-full bg-transparent border-0 p-5 text-slate-200 text-sm font-mono focus:ring-0 outline-none resize-none" placeholder="輸入提示詞內容..."></textarea>
+          <pre v-else class="p-5 whitespace-pre-wrap font-mono text-slate-300 text-xs">{{ card.content || '尚未提供提示詞內容。' }}</pre>
         </div>
 
         <!-- Tab 3: 執行結果 -->
