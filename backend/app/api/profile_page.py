@@ -184,6 +184,13 @@ button[type=submit]:disabled { background: #334155; cursor: not-allowed; }
   <div class="user-info" id="userInfo">載入中...</div>
 
   <form id="profileForm">
+    <div class="field-group">
+      <label>暱稱</label>
+      <input type="text" id="displayName" placeholder="你希望 AI 怎麼稱呼你">
+      <p class="desc">AI 會用這個名字稱呼你</p>
+    </div>
+
+    <div class="divider"></div>
     <div id="definedFields"></div>
 
     <div class="divider"></div>
@@ -225,6 +232,9 @@ async function load() {
       '<strong>' + esc(data.display_name || '使用者') + '</strong>' +
       ' — ' + esc(data.platform || '') +
       (data.username ? ' (@' + esc(data.username) + ')' : '');
+
+    // 顯示暱稱欄位（直接改 BotUser.username）
+    document.getElementById('displayName').value = data.display_name || '';
 
     // 渲染定義欄位
     fieldDefs = data.fields || [];
@@ -298,10 +308,12 @@ document.getElementById('profileForm').onsubmit = async (e) => {
       if (k) extra[k] = v;
     });
 
+    const displayName = document.getElementById('displayName').value.trim();
+
     const res = await fetch(API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, extra })
+      body: JSON.stringify({ token, extra, display_name: displayName || null })
     });
 
     if (!res.ok) throw new Error((await res.json()).detail || '儲存失敗');
@@ -329,6 +341,7 @@ if (token) load();
 class ProfileSaveRequest(BaseModel):
     token: str
     extra: dict
+    display_name: Optional[str] = None
 
 
 @router.get("/u/profile", response_class=HTMLResponse)
@@ -392,6 +405,10 @@ async def save_profile(req: ProfileSaveRequest):
                 existing = json.loads(user.extra_json)
             except (json.JSONDecodeError, TypeError):
                 pass
+
+        # 更新暱稱
+        if req.display_name is not None:
+            user.username = req.display_name
 
         # 合併：__KEEP__ 表示保留原值（密碼欄位留空時）
         new_extra = {}
