@@ -33,7 +33,7 @@ Thumbs.db
 
 # Dev script outputs
 frontend/scripts/*.png
-frontend/pnpm-lock.yaml
+# frontend/pnpm-lock.yaml  # CI 需要 lock file
 
 # User data (portraits, uploads, .aegis runtime data)
 .aegis/
