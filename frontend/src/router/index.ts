@@ -20,6 +20,7 @@ import SettingsUpdate from '../views/settings/SettingsUpdate.vue'
 import SettingsOneStack from '../views/settings/SettingsOneStack.vue'
 import SettingsProjectDetail from '../views/settings/SettingsProjectDetail.vue'
 import SettingsTeamDetail from '../views/settings/SettingsTeamDetail.vue'
+import SettingsUserDetail from '../views/settings/SettingsUserDetail.vue'
 import SettingsTerminal from '../views/settings/SettingsTerminal.vue'
 import FileBrowser from '../views/FileBrowser.vue'
 import GitManager from '../views/GitManager.vue'
@@ -64,6 +65,7 @@ const router = createRouter({
         { path: 'domains', component: () => import('../views/settings/SettingsDomains.vue') },
         { path: 'domains/:id', component: () => import('../views/settings/SettingsDomainDetail.vue') },
         { path: 'users', component: SettingsUsers },
+        { path: 'users/:id', component: SettingsUserDetail },
         { path: 'invitations', redirect: '/settings/users' },
         { path: 'archive', component: SettingsArchive },
         { path: 'team', component: Team },

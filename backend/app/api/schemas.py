@@ -86,3 +86,29 @@ class BotUserUpdate(BaseModel):
 class TTSRequest(BaseModel):
     text: str
     voice: Optional[str] = "Kore"
+
+
+# ==========================================
+# Persons
+# ==========================================
+class PersonCreate(BaseModel):
+    """建立 Person + 自動生成邀請碼"""
+    display_name: str = ""
+    description: str = ""
+    target_level: int = 1
+    target_member_id: Optional[int] = None
+    allowed_projects: Optional[List[int]] = None
+    default_can_view: bool = True
+    default_can_create_card: bool = False
+    default_can_run_task: bool = False
+    default_can_access_sensitive: bool = False
+    expires_days: Optional[int] = None
+    note: str = ""
+
+
+class PersonUpdate(BaseModel):
+    """更新 Person"""
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    level: Optional[int] = None
+    access_expires_at: Optional[str] = None  # ISO format or empty string to clear
