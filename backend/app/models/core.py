@@ -370,6 +370,49 @@ class BotUserMember(SQLModel, table=True):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class PersonProject(SQLModel, table=True):
+    """Person 與專案的多對多關聯（權限控制，取代 BotUserProject）"""
+    __tablename__ = "person_project"
+    __table_args__ = (
+        UniqueConstraint("person_id", "project_id", name="uq_personproject"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    person_id: int = Field(index=True)
+    project_id: int = Field(foreign_key="project.id", index=True)
+
+    # 身份描述（給 AI 讀的）
+    display_name: str = Field(default="")
+    description: str = Field(default="")
+
+    # 硬性權限
+    can_view: bool = Field(default=True)
+    can_create_card: bool = Field(default=False)
+    can_run_task: bool = Field(default=False)
+    can_comment: bool = Field(default=True)
+    can_access_sensitive: bool = Field(default=False)
+
+    is_default: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_by: Optional[int] = Field(default=None)
+
+
+class PersonMember(SQLModel, table=True):
+    """Person 與 Member 的多對多關聯（取代 BotUserMember）"""
+    __tablename__ = "person_member"
+    __table_args__ = (
+        UniqueConstraint("person_id", "member_id", name="uq_personmember"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    person_id: int = Field(index=True)
+    member_id: int = Field(foreign_key="member.id", index=True)
+
+    is_default: bool = Field(default=False)
+    can_switch: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class InviteCode(SQLModel, table=True):
     """邀請碼"""
     id: Optional[int] = Field(default=None, primary_key=True)

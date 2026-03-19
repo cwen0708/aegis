@@ -195,6 +195,69 @@ def _migrate_db():
                 ) WHERE owner_person_id IS NULL AND used_count > 0
             """)
 
+        # PersonProject 表：從 BotUserProject 遷移（以 person_id 去重）
+        if "person_project" not in tables:
+            cur.execute("""
+                CREATE TABLE person_project (
+                    id INTEGER PRIMARY KEY,
+                    person_id INTEGER NOT NULL,
+                    project_id INTEGER NOT NULL,
+                    display_name VARCHAR DEFAULT '',
+                    description VARCHAR DEFAULT '',
+                    can_view BOOLEAN DEFAULT 1,
+                    can_create_card BOOLEAN DEFAULT 0,
+                    can_run_task BOOLEAN DEFAULT 0,
+                    can_comment BOOLEAN DEFAULT 1,
+                    can_access_sensitive BOOLEAN DEFAULT 0,
+                    is_default BOOLEAN DEFAULT 0,
+                    created_at DATETIME,
+                    created_by INTEGER,
+                    UNIQUE(person_id, project_id)
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS ix_pp_person ON person_project(person_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS ix_pp_project ON person_project(project_id)")
+            # 從 BotUserProject 遷移，按 person_id+project_id 去重
+            cur.execute("""
+                INSERT OR IGNORE INTO person_project
+                    (person_id, project_id, display_name, description,
+                     can_view, can_create_card, can_run_task, can_comment, can_access_sensitive,
+                     is_default, created_at, created_by)
+                SELECT
+                    bu.person_id, bup.project_id, bup.display_name, bup.description,
+                    bup.can_view, bup.can_create_card, bup.can_run_task, bup.can_comment, bup.can_access_sensitive,
+                    bup.is_default, bup.created_at, bup.created_by
+                FROM bot_user_project bup
+                JOIN botuser bu ON bup.bot_user_id = bu.id
+                WHERE bu.person_id > 0
+            """)
+            pp_count = cur.execute("SELECT COUNT(*) FROM person_project").fetchone()[0]
+            logger.info(f"[Migration] Created 'person_project' with {pp_count} records")
+
+        # PersonMember 表：從 BotUserMember 遷移
+        if "person_member" not in tables:
+            cur.execute("""
+                CREATE TABLE person_member (
+                    id INTEGER PRIMARY KEY,
+                    person_id INTEGER NOT NULL,
+                    member_id INTEGER NOT NULL,
+                    is_default BOOLEAN DEFAULT 0,
+                    can_switch BOOLEAN DEFAULT 1,
+                    created_at DATETIME,
+                    UNIQUE(person_id, member_id)
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS ix_pm_person ON person_member(person_id)")
+            cur.execute("""
+                INSERT OR IGNORE INTO person_member (person_id, member_id, is_default, can_switch, created_at)
+                SELECT bu.person_id, bum.member_id, bum.is_default, bum.can_switch, bum.created_at
+                FROM botusermember bum
+                JOIN botuser bu ON bum.bot_user_id = bu.id
+                WHERE bu.person_id > 0
+            """)
+            pm_count = cur.execute("SELECT COUNT(*) FROM person_member").fetchone()[0]
+            logger.info(f"[Migration] Created 'person_member' with {pm_count} records")
+
         # Room: 首次建立時 seed 預設房間（重用上方的 tables 變數）
         if "room" in tables:
             room_count = cur.execute("SELECT COUNT(*) FROM room").fetchone()[0]

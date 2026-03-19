@@ -209,16 +209,23 @@ def register_with_invite(req: RegisterWithInviteRequest, session: Session = Depe
         user.person_id = person.id
         invite.owner_person_id = person.id
 
-    # 建立 BotUserMember
+    # 建立 BotUserMember + PersonMember（雙寫）
     if invite.target_member_id:
+        from app.models.core import PersonMember
         session.add(BotUserMember(
             bot_user_id=user.id,
             member_id=invite.target_member_id,
             is_default=True,
         ))
+        existing_pm = session.exec(
+            select(PersonMember).where(PersonMember.person_id == user.person_id, PersonMember.member_id == invite.target_member_id)
+        ).first()
+        if not existing_pm:
+            session.add(PersonMember(person_id=user.person_id, member_id=invite.target_member_id, is_default=True))
 
-    # 建立專案權限
+    # 建立專案權限（雙寫：BotUserProject + PersonProject）
     if invite.allowed_projects:
+        from app.models.core import PersonProject
         try:
             project_ids = json_module.loads(invite.allowed_projects)
             for idx, pid in enumerate(project_ids):
@@ -233,6 +240,17 @@ def register_with_invite(req: RegisterWithInviteRequest, session: Session = Depe
                     can_access_sensitive=invite.default_can_access_sensitive,
                     is_default=(idx == 0),
                 ))
+                existing_pp = session.exec(
+                    select(PersonProject).where(PersonProject.person_id == user.person_id, PersonProject.project_id == pid)
+                ).first()
+                if not existing_pp:
+                    session.add(PersonProject(
+                        person_id=user.person_id, project_id=pid,
+                        display_name=invite.user_display_name, description=invite.user_description,
+                        can_view=invite.default_can_view, can_create_card=invite.default_can_create_card,
+                        can_run_task=invite.default_can_run_task, can_access_sensitive=invite.default_can_access_sensitive,
+                        is_default=(idx == 0),
+                    ))
         except (json_module.JSONDecodeError, TypeError):
             pass
 

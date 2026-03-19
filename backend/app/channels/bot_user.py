@@ -259,9 +259,24 @@ def verify_invite_code(bot_user: BotUser, code: str) -> tuple[bool, str]:
                         is_default=True
                     )
                     session.add(bum)
+                    # 雙寫 PersonMember
+                    from app.models.core import PersonMember
+                    existing_pm = session.exec(
+                        select(PersonMember).where(
+                            PersonMember.person_id == db_user.person_id,
+                            PersonMember.member_id == invite.target_member_id,
+                        )
+                    ).first()
+                    if not existing_pm:
+                        session.add(PersonMember(
+                            person_id=db_user.person_id,
+                            member_id=invite.target_member_id,
+                            is_default=True,
+                        ))
 
-            # 建立專案權限（使用新的 BotUserProject）
+            # 建立專案權限（雙寫：BotUserProject + PersonProject）
             if invite.allowed_projects:
+                from app.models.core import PersonProject, PersonMember
                 try:
                     project_ids = json.loads(invite.allowed_projects)
                     for idx, pid in enumerate(project_ids):
@@ -274,9 +289,28 @@ def verify_invite_code(bot_user: BotUser, code: str) -> tuple[bool, str]:
                             can_create_card=invite.default_can_create_card,
                             can_run_task=invite.default_can_run_task,
                             can_access_sensitive=invite.default_can_access_sensitive,
-                            is_default=(idx == 0),  # 第一個專案設為預設
+                            is_default=(idx == 0),
                         )
                         session.add(bup)
+                        # 雙寫 PersonProject（如果不存在）
+                        existing_pp = session.exec(
+                            select(PersonProject).where(
+                                PersonProject.person_id == db_user.person_id,
+                                PersonProject.project_id == pid,
+                            )
+                        ).first()
+                        if not existing_pp:
+                            session.add(PersonProject(
+                                person_id=db_user.person_id,
+                                project_id=pid,
+                                display_name=invite.user_display_name,
+                                description=invite.user_description,
+                                can_view=invite.default_can_view,
+                                can_create_card=invite.default_can_create_card,
+                                can_run_task=invite.default_can_run_task,
+                                can_access_sensitive=invite.default_can_access_sensitive,
+                                is_default=(idx == 0),
+                            ))
                 except json.JSONDecodeError:
                     pass
 
@@ -705,6 +739,38 @@ def grant_project_access(
             )
             for other in session.exec(stmt).all():
                 other.is_default = False
+
+        # 雙寫 PersonProject
+        from app.models.core import PersonProject
+        user = session.get(BotUser, bot_user_id)
+        if user and user.person_id:
+            pp = session.exec(
+                select(PersonProject).where(
+                    PersonProject.person_id == user.person_id,
+                    PersonProject.project_id == project_id,
+                )
+            ).first()
+            if pp:
+                pp.display_name = display_name
+                pp.description = description
+                pp.can_view = can_view
+                pp.can_create_card = can_create_card
+                pp.can_run_task = can_run_task
+                pp.can_access_sensitive = can_access_sensitive
+                pp.is_default = is_default
+            else:
+                session.add(PersonProject(
+                    person_id=user.person_id,
+                    project_id=project_id,
+                    display_name=display_name,
+                    description=description,
+                    can_view=can_view,
+                    can_create_card=can_create_card,
+                    can_run_task=can_run_task,
+                    can_access_sensitive=can_access_sensitive,
+                    is_default=is_default,
+                    created_by=created_by,
+                ))
 
         session.commit()
         session.refresh(bup)
