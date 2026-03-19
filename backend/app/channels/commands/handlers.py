@@ -71,6 +71,7 @@ async def handle_command(cmd: ParsedCommand, msg: InboundMessage, bot_user: Opti
         # 系統操作
         CommandType.STATUS: _handle_status,
         CommandType.HELP: _handle_help,
+        CommandType.START: _handle_start,
     }
 
     handler = handler_map.get(cmd.cmd_type)
@@ -333,8 +334,30 @@ async def _handle_status(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotU
     )
 
 
+async def _handle_start(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
+    """歡迎訊息"""
+    name = bot_user.username or "你"
+    if bot_user.level >= 1:
+        return (
+            f"👋 嗨 {name}，歡迎回來！\n\n"
+            "直接輸入訊息就能跟 AI 對話。\n\n"
+            "常用指令：\n"
+            "/profile — 設定個人資料\n"
+            "/switch — 切換 AI 角色\n"
+            "/help — 查看所有指令"
+        )
+    return (
+        "🛡️ *歡迎使用 Aegis*\n\n"
+        "Aegis 是你的 AI 助理平台。\n\n"
+        "首次使用請先驗證身份：\n"
+        "`/verify 你的邀請碼`\n\n"
+        "沒有邀請碼？請聯繫管理員取得。\n"
+        "已有帳號？直接輸入邀請碼驗證即可。"
+    )
+
+
 async def _handle_help(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
-    """顯示說明"""
+    """顯示指令列表"""
     return get_help_text(bot_user.level)
 
 

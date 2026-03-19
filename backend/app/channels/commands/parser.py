@@ -45,6 +45,7 @@ class CommandType(str, Enum):
     # 系統操作
     STATUS = "status"
     HELP = "help"
+    START = "start"
 
 
 @dataclass
@@ -106,7 +107,8 @@ COMMAND_PATTERNS: list[tuple[str, CommandType]] = [
 
     # 系統命令
     (r"^/status$", CommandType.STATUS),
-    (r"^/(help|start)$", CommandType.HELP),
+    (r"^/start$", CommandType.START),
+    (r"^/help$", CommandType.HELP),
 ]
 
 
