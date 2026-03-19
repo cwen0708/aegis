@@ -18,7 +18,7 @@
         <button
           @click="toggleLayout"
           class="text-[10px] px-2 py-1 rounded-md border text-slate-400 border-slate-600 hover:text-slate-200 hover:border-slate-500 transition-colors"
-        >{{ layoutName === 'breadthfirst' ? '樹狀' : layoutName === 'cose' ? '力導向' : '圓形' }}</button>
+        >{{ layoutName === 'breadthfirst' ? '分層' : layoutName === 'cose' ? '力導向' : '圓形' }}</button>
       </div>
     </PageHeader>
 
@@ -385,11 +385,21 @@ function applyLayout() {
   }
 
   if (layoutName.value === 'breadthfirst') {
+    // 按類型分層：專案(內) → 空間 → 成員 → 用戶(外)
     cy.layout({
-      name: 'breadthfirst',
-      directed: true,
-      roots: centerKey ? [centerKey] : undefined,
-      spacingFactor: 1.2,
+      name: 'concentric',
+      concentric: (node: any) => {
+        const type = node.data('nodeType')
+        // 數字越大越靠中心
+        const levels: Record<string, number> = {
+          project: 5, room: 4, domain: 4, member: 3, account: 2, user: 1,
+        }
+        const base = levels[type] || 1
+        // 選中的節點放最中心
+        return node.id() === centerKey ? 10 : base
+      },
+      levelWidth: () => 1,
+      minNodeSpacing: 60,
       avoidOverlap: true,
       ...opts,
     } as any).run()
