@@ -125,94 +125,87 @@
           </div>
         </div>
 
-        <!-- 版本圖形 (SVG 時間線 + 分支) -->
-        <div v-if="mainLine.length > 0" class="rounded-xl border border-slate-700/30 bg-slate-800/30 p-4 overflow-x-auto">
+        <!-- 版本圖形 (三條線) -->
+        <div v-if="graph" class="rounded-xl border border-slate-700/30 bg-slate-800/30 p-4 overflow-x-auto">
           <div class="flex items-center gap-2 mb-3">
             <span class="text-[10px] text-slate-600 uppercase tracking-wider font-bold">Commit Graph</span>
             <span v-if="overview.all_synced" class="text-[10px] text-emerald-400 ml-auto">✓ 同步</span>
           </div>
           <div class="relative" :style="{ minWidth: svgWidth + 'px' }">
-            <svg :width="svgWidth" :height="hasBranch ? 120 : 80" class="block">
-              <!-- 主線（origin 歷史） -->
-              <line x1="20" :y1="mainY" :x2="mainLine.length * 56 + 20" :y2="mainY" stroke="#334155" stroke-width="2" />
+            <svg :width="svgWidth" height="110" class="block">
+              <!-- 標籤列 -->
+              <text x="8" y="24" fill="#c084fc" font-size="9" font-weight="bold" text-anchor="end">開發</text>
+              <text x="8" y="54" fill="#60a5fa" font-size="9" font-weight="bold" text-anchor="end">遠端</text>
+              <text x="8" y="84" fill="#34d399" font-size="9" font-weight="bold" text-anchor="end">運行</text>
 
-              <!-- 分支線（dev 獨有 commits） -->
-              <template v-if="hasBranch">
-                <!-- 分叉點到分支 -->
-                <line
-                  :x1="branchStartX" :y1="mainY"
-                  :x2="branchStartX + 20" :y2="branchY"
-                  stroke="#7c3aed" stroke-width="2" opacity="0.5"
-                />
-                <!-- 分支水平線 -->
-                <line
-                  :x1="branchStartX + 20" :y1="branchY"
-                  :x2="branchStartX + 20 + devBranch.length * 56" :y2="branchY"
-                  stroke="#7c3aed" stroke-width="2" opacity="0.5"
-                />
-              </template>
+              <!-- 三條平行線 -->
+              <line :x1="lineStart" y1="20" :x2="lineEnd" y2="20" stroke="#7c3aed" stroke-width="1.5" opacity="0.3" />
+              <line :x1="lineStart" y1="50" :x2="lineEnd" y2="50" stroke="#3b82f6" stroke-width="1.5" opacity="0.3" />
+              <line v-if="hasRuntime" :x1="lineStart" y1="80" :x2="lineEnd" y2="80" stroke="#10b981" stroke-width="1.5" opacity="0.3" />
 
-              <!-- 主線 commit 節點 -->
-              <g v-for="(node, i) in mainLine" :key="'m' + node.sha_full">
-                <line
-                  v-for="env in node.envs.filter((e: string) => e !== 'dev' || !hasBranch)" :key="env"
-                  :x1="20 + i * 56" :y1="mainY"
-                  :x2="20 + i * 56" :y2="env === 'runtime' ? mainY - 22 : mainY + 22"
-                  :stroke="env === 'runtime' ? '#34d399' : env === 'origin' ? '#60a5fa' : '#c084fc'"
-                  stroke-width="1.5" stroke-dasharray="3,2"
-                />
+              <!-- Commit 節點和連線 -->
+              <g v-for="(c, i) in graph.commits" :key="c.sha_full">
+                <!-- 節點在 dev 線上（所有 commit 都在 dev 歷史） -->
                 <circle
-                  :cx="20 + i * 56" :cy="mainY"
-                  :r="node.envs.length > 0 ? 6 : 3.5"
-                  :fill="node.envs.length > 0
-                    ? (node.envs.includes('runtime') ? '#34d399' : node.envs.includes('origin') ? '#60a5fa' : '#475569')
-                    : '#475569'"
-                  :stroke="node.envs.length > 1 ? '#fff' : 'none'" :stroke-width="node.envs.length > 1 ? 1.5 : 0"
+                  :cx="nodeX(i)" cy="20" r="4"
+                  :fill="i === graph.dev_idx ? '#c084fc' : '#334155'"
+                  :stroke="i === graph.dev_idx ? '#c084fc' : 'none'" stroke-width="2"
                   class="cursor-pointer"
-                ><title>{{ node.sha }} {{ node.message }}</title></circle>
-                <template v-for="env in node.envs.filter((e: string) => e !== 'dev' || !hasBranch)" :key="env + 'm' + i">
-                  <text
-                    :x="20 + i * 56"
-                    :y="env === 'runtime' ? mainY - 26 : mainY + 32"
-                    text-anchor="middle"
-                    :fill="env === 'runtime' ? '#34d399' : env === 'origin' ? '#60a5fa' : '#c084fc'"
-                    font-size="9" font-weight="bold"
-                  >{{ env === 'runtime' ? '運行' : env === 'dev' ? '開發' : '遠端' }}</text>
+                ><title>{{ c.sha }} {{ c.message }}</title></circle>
+
+                <!-- 同步連線：如果這個 commit 也是 origin HEAD -->
+                <line v-if="i === graph.origin_idx"
+                  :x1="nodeX(i)" y1="20" :x2="nodeX(i)" y2="50"
+                  stroke="#60a5fa" stroke-width="1.5"
+                />
+                <!-- origin HEAD 節點 -->
+                <circle v-if="i === graph.origin_idx"
+                  :cx="nodeX(i)" cy="50" r="5"
+                  fill="#3b82f6" stroke="#3b82f6" stroke-width="2"
+                />
+
+                <!-- 同步連線：如果這個 commit 也是 runtime HEAD -->
+                <template v-if="hasRuntime && i === graph.runtime_idx">
+                  <line
+                    :x1="nodeX(i)" :y1="i === graph.origin_idx ? 50 : 20"
+                    :x2="nodeX(i)" y2="80"
+                    stroke="#34d399" stroke-width="1.5"
+                  />
+                  <circle :cx="nodeX(i)" cy="80" r="5" fill="#10b981" stroke="#10b981" stroke-width="2" />
                 </template>
+
+                <!-- origin 線上的普通節點（在 origin HEAD 之前的） -->
+                <circle v-if="graph.origin_idx >= 0 && i <= graph.origin_idx && i !== graph.origin_idx"
+                  :cx="nodeX(i)" cy="50" r="3"
+                  fill="#334155"
+                />
+
+                <!-- runtime 線上的普通節點（在 runtime HEAD 之前的） -->
+                <circle v-if="hasRuntime && graph.runtime_idx >= 0 && i <= graph.runtime_idx && i !== graph.runtime_idx"
+                  :cx="nodeX(i)" cy="80" r="3"
+                  fill="#334155"
+                />
               </g>
 
-              <!-- 分支 commit 節點 (dev 獨有) -->
-              <g v-for="(node, i) in devBranch" :key="'b' + node.sha_full">
-                <line
-                  v-if="node.envs.includes('dev')"
-                  :x1="branchStartX + 20 + i * 56" :y1="branchY"
-                  :x2="branchStartX + 20 + i * 56" :y2="branchY - 22"
-                  stroke="#c084fc" stroke-width="1.5" stroke-dasharray="3,2"
-                />
-                <line
-                  v-if="node.envs.includes('runtime')"
-                  :x1="branchStartX + 20 + i * 56" :y1="branchY"
-                  :x2="branchStartX + 20 + i * 56" :y2="branchY + 22"
-                  stroke="#34d399" stroke-width="1.5" stroke-dasharray="3,2"
-                />
-                <circle
-                  :cx="branchStartX + 20 + i * 56" :cy="branchY"
-                  :r="6"
-                  fill="#c084fc"
-                  :stroke="node.envs.length > 1 ? '#fff' : 'none'" :stroke-width="node.envs.length > 1 ? 1.5 : 0"
-                  class="cursor-pointer"
-                ><title>{{ node.sha }} {{ node.message }}</title></circle>
-                <text
-                  v-if="node.envs.includes('dev')"
-                  :x="branchStartX + 20 + i * 56" :y="branchY - 26"
-                  text-anchor="middle" fill="#c084fc" font-size="9" font-weight="bold"
-                >開發</text>
-                <text
-                  v-if="node.envs.includes('runtime')"
-                  :x="branchStartX + 20 + i * 56" :y="branchY + 32"
-                  text-anchor="middle" fill="#34d399" font-size="9" font-weight="bold"
-                >運行</text>
-              </g>
+              <!-- dev HEAD 大圓 -->
+              <circle v-if="graph.dev_idx >= 0"
+                :cx="nodeX(graph.dev_idx)" cy="20" r="6"
+                fill="#c084fc" stroke="#e9d5ff" stroke-width="2"
+              />
+
+              <!-- SHA 標籤 -->
+              <text v-if="graph.dev_idx >= 0"
+                :x="nodeX(graph.dev_idx)" y="106"
+                text-anchor="middle" fill="#94a3b8" font-size="8" font-family="monospace"
+              >{{ graph.commits[graph.dev_idx]?.sha }}</text>
+              <text v-if="graph.origin_idx >= 0 && graph.origin_idx !== graph.dev_idx"
+                :x="nodeX(graph.origin_idx)" y="106"
+                text-anchor="middle" fill="#94a3b8" font-size="8" font-family="monospace"
+              >{{ graph.commits[graph.origin_idx]?.sha }}</text>
+              <text v-if="hasRuntime && graph.runtime_idx >= 0 && graph.runtime_idx !== graph.origin_idx && graph.runtime_idx !== graph.dev_idx"
+                :x="nodeX(graph.runtime_idx)" y="106"
+                text-anchor="middle" fill="#94a3b8" font-size="8" font-family="monospace"
+              >{{ graph.commits[graph.runtime_idx]?.sha }}</text>
             </svg>
           </div>
         </div>
@@ -329,25 +322,15 @@ const deploying = ref(false)
 const pushing = ref(false)
 
 // 按鈕狀態（始終可見，disabled 時灰色）
-// 主線（origin 歷史，舊→新）
-const mainLine = computed(() => {
-  const tl = overview.value?.timeline || []
-  return [...tl].reverse()
-})
+// Graph data
+const graph = computed(() => overview.value?.graph || null)
+const hasRuntime = computed(() => overview.value?.runtime?.exists)
 
-// 分支（dev 獨有 commits，舊→新）
-const devBranch = computed(() => overview.value?.dev_branch || [])
-const hasBranch = computed(() => devBranch.value.length > 0)
-
-// SVG 尺寸
-const mainY = computed(() => hasBranch.value ? 70 : 40)
-const branchY = computed(() => 28)
-const branchStartX = computed(() => mainLine.value.length * 56 + 20)
-const svgWidth = computed(() => {
-  const mainW = mainLine.value.length * 56 + 40
-  const branchW = hasBranch.value ? devBranch.value.length * 56 + 40 : 0
-  return mainW + branchW
-})
+const lineStart = 16
+const nodeSpacing = 48
+const nodeX = (i: number) => lineStart + i * nodeSpacing
+const lineEnd = computed(() => graph.value ? lineStart + (graph.value.commits.length - 1) * nodeSpacing : 100)
+const svgWidth = computed(() => graph.value ? lineStart + graph.value.commits.length * nodeSpacing + 20 : 120)
 
 const canDeploy = computed(() => overview.value?.runtime?.exists && overview.value?.dev_ahead_of_runtime > 0)
 const canPush = computed(() => overview.value?.dev_ahead_of_origin > 0)

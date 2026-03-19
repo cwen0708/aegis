@@ -532,50 +532,47 @@ def git_overview(
     # 同步狀態
     all_synced = (dev.get("sha_full") == runtime.get("sha_full") == origin.get("sha_full"))
 
-    # 5. 取得時間線：共同歷史 + 分支
-    timeline = []
-    dev_branch = []  # dev 獨有的 commits（未 push）
+    # 5. 三條線的 commit 歷史
+    # 取 dev 的最近 15 筆 commit（涵蓋所有環境的 HEAD）
+    graph_commits = []
     if _is_git_repo(dev_path):
-        # 共同歷史（origin/main 的 log）
         ok, log_out = _run_git(dev_path, [
-            "log", "--format=%H|%h|%s|%ci", "-15", "origin/main"
+            "log", "--format=%H|%h|%s|%ci", "-15", "HEAD"
         ])
         if ok:
             for line in log_out.splitlines():
                 parts = line.split("|", 3)
                 if len(parts) == 4:
-                    envs = ["origin"]
-                    if parts[0] == dev.get("sha_full"):
-                        envs.append("dev")
-                    if parts[0] == runtime.get("sha_full"):
-                        envs.append("runtime")
-                    timeline.append({
+                    graph_commits.append({
                         "sha_full": parts[0], "sha": parts[1],
-                        "message": parts[2], "date": parts[3], "envs": envs,
+                        "message": parts[2], "date": parts[3],
                     })
 
-        # dev 獨有的 commits（領先 origin 的部分）
-        if dev_vs_origin > 0:
-            ok2, dev_log = _run_git(dev_path, [
-                "log", "--format=%H|%h|%s|%ci", f"-{dev_vs_origin}", "origin/main..HEAD"
-            ])
-            if ok2:
-                for line in dev_log.splitlines():
-                    parts = line.split("|", 3)
-                    if len(parts) == 4:
-                        envs = ["dev"]
-                        if parts[0] == runtime.get("sha_full"):
-                            envs.append("runtime")
-                        dev_branch.append({
-                            "sha_full": parts[0], "sha": parts[1],
-                            "message": parts[2], "date": parts[3], "envs": envs,
-                        })
+    # 標記每個 commit 屬於哪些環境
+    dev_sha = dev.get("sha_full", "")
+    runtime_sha = runtime.get("sha_full", "")
+    origin_sha = origin.get("sha_full", "")
 
-        # 標記 runtime 在 timeline 中的位置（如果不在 dev_branch 裡）
-        if runtime.get("sha_full"):
-            for node in timeline:
-                if node["sha_full"] == runtime.get("sha_full") and "runtime" not in node["envs"]:
-                    node["envs"].append("runtime")
+    # 找出每個環境的 HEAD 在 graph_commits 中的 index
+    dev_idx = -1
+    runtime_idx = -1
+    origin_idx = -1
+    for i, c in enumerate(graph_commits):
+        if c["sha_full"] == dev_sha:
+            dev_idx = i
+        if c["sha_full"] == runtime_sha:
+            runtime_idx = i
+        if c["sha_full"] == origin_sha:
+            origin_idx = i
+
+    # 如果 runtime 或 origin 不在 dev 歷史中（真正分叉），嘗試補充
+    if runtime_idx == -1 and runtime_sha and is_separated and _is_git_repo(runtime_path):
+        ok_r, r_log = _run_git(runtime_path, ["log", "--format=%H|%h|%s|%ci", "-1", "HEAD"])
+        if ok_r:
+            parts = r_log.split("|", 3)
+            if len(parts) == 4:
+                runtime_idx = len(graph_commits)
+                graph_commits.append({"sha_full": parts[0], "sha": parts[1], "message": parts[2], "date": parts[3]})
 
     return {
         "dev": dev,
@@ -585,8 +582,12 @@ def git_overview(
         "dev_ahead_of_origin": dev_vs_origin,
         "runtime_ahead_of_origin": runtime_vs_origin,
         "all_synced": all_synced,
-        "timeline": timeline[:12],
-        "dev_branch": list(reversed(dev_branch)),
+        "graph": {
+            "commits": list(reversed(graph_commits)),  # 舊→新
+            "dev_idx": len(graph_commits) - 1 - dev_idx if dev_idx >= 0 else -1,
+            "runtime_idx": len(graph_commits) - 1 - runtime_idx if runtime_idx >= 0 else -1,
+            "origin_idx": len(graph_commits) - 1 - origin_idx if origin_idx >= 0 else -1,
+        },
     }
 
 
