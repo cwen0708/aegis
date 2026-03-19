@@ -7,6 +7,7 @@ from app.models.core import InviteCode, BotUser, Person, PersonProject, PersonMe
 from app.api.schemas import (
     InvitationCreate, InvitationUpdate, BotUserUpdate, TTSRequest,
     PersonCreate, PersonUpdate, PersonProjectCreate, PersonProjectUpdate,
+    PersonMemberCreate, PersonMemberUpdate,
 )
 import json as json_module
 
@@ -300,6 +301,22 @@ def _person_to_response(person: Person, session: Session) -> dict:
         for pp in person_projects
     ]
 
+    # 關聯的 PersonMember
+    person_members = session.exec(
+        select(PersonMember).where(PersonMember.person_id == person.id)
+    ).all()
+    members_data = []
+    for pm in person_members:
+        member = session.get(Member, pm.member_id)
+        members_data.append({
+            "id": pm.id,
+            "member_id": pm.member_id,
+            "member_name": member.name if member else f"#{pm.member_id}",
+            "member_avatar": member.avatar if member else "",
+            "is_default": pm.is_default,
+            "can_switch": pm.can_switch,
+        })
+
     # status
     status = "active" if len(bot_users) > 0 else "pending"
 
@@ -316,6 +333,7 @@ def _person_to_response(person: Person, session: Session) -> dict:
         "bot_users": bot_users_data,
         "invite_codes": invite_codes_data,
         "projects": projects_data,
+        "members": members_data,
     }
 
 
@@ -558,6 +576,90 @@ def remove_person_project(person_id: int, project_id: int, session: Session = De
     if not pp:
         raise HTTPException(status_code=404, detail="PersonProject 不存在")
     session.delete(pp)
+    session.commit()
+    return {"ok": True}
+
+
+# ==========================================
+# PersonMember CRUD
+# ==========================================
+
+@router.post("/persons/{person_id}/members")
+def add_person_member(person_id: int, data: PersonMemberCreate, session: Session = Depends(get_session)):
+    """新增 Person 成員綁定"""
+    person = session.get(Person, person_id)
+    if not person:
+        raise HTTPException(status_code=404, detail="Person 不存在")
+    member = session.get(Member, data.member_id)
+    if not member:
+        raise HTTPException(status_code=404, detail="成員不存在")
+    existing = session.exec(
+        select(PersonMember).where(
+            PersonMember.person_id == person_id,
+            PersonMember.member_id == data.member_id,
+        )
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="此成員已綁定")
+    pm = PersonMember(
+        person_id=person_id,
+        member_id=data.member_id,
+        is_default=data.is_default,
+        can_switch=data.can_switch,
+    )
+    session.add(pm)
+    session.commit()
+    session.refresh(pm)
+    return {
+        "id": pm.id,
+        "member_id": pm.member_id,
+        "member_name": member.name,
+        "member_avatar": member.avatar,
+        "is_default": pm.is_default,
+        "can_switch": pm.can_switch,
+    }
+
+
+@router.patch("/persons/{person_id}/members/{member_id}")
+def update_person_member(person_id: int, member_id: int, data: PersonMemberUpdate, session: Session = Depends(get_session)):
+    """更新 Person 成員綁定"""
+    pm = session.exec(
+        select(PersonMember).where(
+            PersonMember.person_id == person_id,
+            PersonMember.member_id == member_id,
+        )
+    ).first()
+    if not pm:
+        raise HTTPException(status_code=404, detail="PersonMember 不存在")
+    if data.is_default is not None:
+        pm.is_default = data.is_default
+    if data.can_switch is not None:
+        pm.can_switch = data.can_switch
+    session.commit()
+    session.refresh(pm)
+    member = session.get(Member, pm.member_id)
+    return {
+        "id": pm.id,
+        "member_id": pm.member_id,
+        "member_name": member.name if member else f"#{pm.member_id}",
+        "member_avatar": member.avatar if member else "",
+        "is_default": pm.is_default,
+        "can_switch": pm.can_switch,
+    }
+
+
+@router.delete("/persons/{person_id}/members/{member_id}")
+def remove_person_member(person_id: int, member_id: int, session: Session = Depends(get_session)):
+    """移除 Person 成員綁定"""
+    pm = session.exec(
+        select(PersonMember).where(
+            PersonMember.person_id == person_id,
+            PersonMember.member_id == member_id,
+        )
+    ).first()
+    if not pm:
+        raise HTTPException(status_code=404, detail="PersonMember 不存在")
+    session.delete(pm)
     session.commit()
     return {"ok": True}
 

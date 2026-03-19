@@ -134,3 +134,19 @@ class PersonProjectUpdate(BaseModel):
     can_run_task: Optional[bool] = None
     can_access_sensitive: Optional[bool] = None
     is_default: Optional[bool] = None
+
+
+# ==========================================
+# PersonMember
+# ==========================================
+class PersonMemberCreate(BaseModel):
+    """新增 Person 成員綁定"""
+    member_id: int
+    is_default: bool = False
+    can_switch: bool = True
+
+
+class PersonMemberUpdate(BaseModel):
+    """更新 Person 成員綁定"""
+    is_default: Optional[bool] = None
+    can_switch: Optional[bool] = None

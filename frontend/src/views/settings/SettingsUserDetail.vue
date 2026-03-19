@@ -38,6 +38,15 @@ interface InviteCodeInfo {
   max_uses: number
 }
 
+interface PersonMemberInfo {
+  id: number
+  member_id: number
+  member_name: string
+  member_avatar: string
+  is_default: boolean
+  can_switch: boolean
+}
+
 interface PersonProjectInfo {
   id: number
   project_id: number
@@ -63,6 +72,7 @@ interface PersonDetail {
   bot_users: BotUserInfo[]
   invite_codes: InviteCodeInfo[]
   projects: PersonProjectInfo[]
+  members: PersonMemberInfo[]
 }
 
 // ── Form ──
@@ -239,9 +249,80 @@ async function togglePermission(pp: PersonProjectInfo, field: string, value: boo
   }
 }
 
+// ── PersonMember management ──
+interface MemberOption { id: number; name: string; avatar: string }
+const allMembers = ref<MemberOption[]>([])
+const showAddMember = ref(false)
+const addingMemberId = ref<number | null>(null)
+
+async function fetchMembers() {
+  try {
+    const res = await fetch(`${API}/api/v1/members`, { headers: authHeaders() })
+    if (res.ok) {
+      const data = await res.json()
+      allMembers.value = data.map((m: any) => ({ id: m.id, name: m.name, avatar: m.avatar || '' }))
+    }
+  } catch {}
+}
+
+function availableMembers(): MemberOption[] {
+  if (!person.value) return []
+  const existingIds = new Set(person.value.members.map(m => m.member_id))
+  return allMembers.value.filter(m => !existingIds.has(m.id))
+}
+
+async function addMember() {
+  if (!addingMemberId.value) return
+  try {
+    const res = await fetch(`${API}/api/v1/persons/${personId}/members`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ member_id: addingMemberId.value }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: '新增失敗' }))
+      throw new Error(err.detail)
+    }
+    store.addToast('成員已新增', 'success')
+    showAddMember.value = false
+    addingMemberId.value = null
+    await fetchPerson()
+  } catch (e: any) {
+    store.addToast(e.message || '新增失敗', 'error')
+  }
+}
+
+async function removeMember(memberId: number) {
+  try {
+    const res = await fetch(`${API}/api/v1/persons/${personId}/members/${memberId}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    })
+    if (!res.ok) throw new Error('移除失敗')
+    store.addToast('成員已移除', 'success')
+    await fetchPerson()
+  } catch (e: any) {
+    store.addToast(e.message || '移除失敗', 'error')
+  }
+}
+
+async function toggleMemberField(pm: PersonMemberInfo, field: string, value: boolean) {
+  try {
+    const res = await fetch(`${API}/api/v1/persons/${personId}/members/${pm.member_id}`, {
+      method: 'PATCH',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ [field]: value }),
+    })
+    if (!res.ok) throw new Error('更新失敗')
+    ;(pm as any)[field] = value
+  } catch (e: any) {
+    store.addToast(e.message || '更新失敗', 'error')
+  }
+}
+
 // ── Init ──
 onMounted(async () => {
-  await Promise.all([fetchPerson(), fetchProjects()])
+  await Promise.all([fetchPerson(), fetchProjects(), fetchMembers()])
   loading.value = false
 })
 </script>
@@ -405,7 +486,92 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- Section 4: 專案權限 -->
+      <!-- Section 4: AI 成員 -->
+      <div class="bg-slate-800/50 rounded-2xl border border-slate-700 p-6 space-y-4">
+        <div class="flex items-center gap-2">
+          <h3 class="text-sm font-bold text-slate-300 uppercase tracking-wider">AI 成員</h3>
+          <span class="text-xs text-slate-500 ml-auto">{{ person.members.length }} / {{ allMembers.length }}</span>
+          <button
+            @click="showAddMember = !showAddMember"
+            class="flex items-center gap-1 px-2 py-1 text-xs text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 border border-emerald-500/30 rounded-lg transition"
+          >
+            <Plus class="w-3.5 h-3.5" />
+            新增成員
+          </button>
+        </div>
+
+        <!-- Add member dropdown -->
+        <div v-if="showAddMember" class="flex items-center gap-2 p-3 bg-slate-900/80 rounded-xl border border-slate-600">
+          <select
+            v-model.number="addingMemberId"
+            class="flex-1 px-3 py-1.5 bg-slate-800 text-slate-200 border border-slate-600 rounded-lg text-sm [color-scheme:dark]"
+          >
+            <option :value="null" disabled>選擇成員...</option>
+            <option v-for="m in availableMembers()" :key="m.id" :value="m.id">{{ m.avatar }} {{ m.name }}</option>
+          </select>
+          <button
+            @click="addMember"
+            :disabled="!addingMemberId"
+            class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-xs rounded-lg transition-colors"
+          >
+            加入
+          </button>
+          <button
+            @click="showAddMember = false; addingMemberId = null"
+            class="p-1.5 text-slate-400 hover:text-slate-200 transition"
+          >
+            <X class="w-4 h-4" />
+          </button>
+        </div>
+
+        <div v-if="person.members.length === 0 && !showAddMember" class="text-center py-6 text-slate-500 text-sm">
+          尚無 AI 成員綁定
+        </div>
+
+        <div v-else class="space-y-2">
+          <div
+            v-for="pm in person.members"
+            :key="pm.id"
+            class="flex items-center gap-3 px-4 py-3 bg-slate-900/50 rounded-xl border border-slate-700/50"
+          >
+            <span v-if="pm.member_avatar" class="text-lg">{{ pm.member_avatar }}</span>
+            <span class="text-sm text-slate-200 font-medium">{{ pm.member_name }}</span>
+            <span
+              v-if="pm.is_default"
+              class="px-1.5 py-0.5 text-[10px] font-bold rounded bg-amber-500/20 text-amber-400 border border-amber-500/30"
+            >預設</span>
+            <div class="flex items-center gap-3 ml-auto">
+              <label class="flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  :checked="pm.is_default"
+                  @change="toggleMemberField(pm, 'is_default', !pm.is_default)"
+                  class="rounded bg-slate-700 border-slate-600 text-amber-500 focus:ring-amber-500 w-3.5 h-3.5"
+                />
+                <span class="text-xs text-slate-400">預設</span>
+              </label>
+              <label class="flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  :checked="pm.can_switch"
+                  @change="toggleMemberField(pm, 'can_switch', !pm.can_switch)"
+                  class="rounded bg-slate-700 border-slate-600 text-emerald-500 focus:ring-emerald-500 w-3.5 h-3.5"
+                />
+                <span class="text-xs text-slate-400">可切換</span>
+              </label>
+              <button
+                @click="removeMember(pm.member_id)"
+                class="p-1 text-slate-500 hover:text-red-400 transition"
+                title="移除成員"
+              >
+                <X class="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 5: 專案權限 -->
       <div class="bg-slate-800/50 rounded-2xl border border-slate-700 p-6 space-y-4">
         <div class="flex items-center gap-2">
           <h3 class="text-sm font-bold text-slate-300 uppercase tracking-wider">專案權限</h3>
@@ -514,7 +680,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- Section 5: 危險區域 -->
+      <!-- Section 6: 危險區域 -->
       <div class="bg-slate-800/50 rounded-2xl border border-red-500/20 p-6 space-y-4">
         <div class="flex items-center gap-2">
           <AlertTriangle class="w-4 h-4 text-red-400" />
