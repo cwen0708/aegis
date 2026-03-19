@@ -18,7 +18,7 @@
         <button
           @click="toggleLayout"
           class="text-[10px] px-2 py-1 rounded-md border text-slate-400 border-slate-600 hover:text-slate-200 hover:border-slate-500 transition-colors"
-        >{{ layoutName === 'breadthfirst' ? '分層' : layoutName === 'cose' ? '力導向' : '圓形' }}</button>
+        >{{ layoutName === 'breadthfirst' ? '分層' : layoutName === 'cose' ? '力導向' : layoutName === 'tree' ? '樹狀' : '圓形' }}</button>
       </div>
     </PageHeader>
 
@@ -57,7 +57,7 @@ const centerId = ref<number>(0)
 const cyContainer = ref<HTMLElement | null>(null)
 let cy: Core | null = null
 let allElements: ElementDefinition[] = []
-const layoutName = ref<'breadthfirst' | 'cose' | 'circle'>('cose')
+const layoutName = ref<'breadthfirst' | 'cose' | 'circle' | 'tree'>('cose')
 
 // ── 從 API 資料中提取各類型列表（給下拉選單用）──
 const entityLists = ref<Record<string, { id: number; label: string }[]>>({})
@@ -403,6 +403,16 @@ function applyLayout() {
       avoidOverlap: true,
       ...opts,
     } as any).run()
+  } else if (layoutName.value === 'tree') {
+    // 樹狀圖：上往下展開，專案在頂部
+    cy.layout({
+      name: 'breadthfirst',
+      directed: true,
+      spacingFactor: 1.2,
+      avoidOverlap: true,
+      roots: cy.nodes().filter((n: any) => n.data('nodeType') === 'project').map((n: any) => n.id()),
+      ...opts,
+    } as any).run()
   } else if (layoutName.value === 'cose') {
     cy.layout({
       name: 'cose',
@@ -421,7 +431,8 @@ function applyLayout() {
 
 function toggleLayout() {
   if (layoutName.value === 'cose') layoutName.value = 'breadthfirst'
-  else if (layoutName.value === 'breadthfirst') layoutName.value = 'circle'
+  else if (layoutName.value === 'breadthfirst') layoutName.value = 'tree'
+  else if (layoutName.value === 'tree') layoutName.value = 'circle'
   else layoutName.value = 'cose'
   applyLayout()
 }
