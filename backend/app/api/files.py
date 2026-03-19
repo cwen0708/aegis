@@ -477,13 +477,19 @@ def git_overview(
     dev_path = project.path
     runtime_path = str(_INSTALL_ROOT)
 
+    # 判斷 dev dir 和 runtime 是否不同（只有 AEGIS 等分離架構才有運行版）
+    is_separated = os.path.realpath(dev_path) != os.path.realpath(runtime_path)
+
     # 1. 開發版（dev dir = project.path）
     dev = _git_commit_info(dev_path)
     dev["label"] = "開發版"
 
-    # 2. 運行版（.local/aegis）
-    runtime = _git_commit_info(runtime_path)
-    runtime["label"] = "運行版"
+    # 2. 運行版（.local/aegis）— 只在分離架構時顯示
+    if is_separated:
+        runtime = _git_commit_info(runtime_path)
+        runtime["label"] = "運行版"
+    else:
+        runtime = {"exists": False, "label": "運行版"}
 
     # 3. 遠端（origin/main）
     origin: dict = {"exists": False, "label": "遠端"}

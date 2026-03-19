@@ -216,11 +216,14 @@ const pulling = ref(false)
 
 const envList = computed(() => {
   if (!overview.value) return []
-  return [
+  const list = [
     { key: 'dev', data: overview.value.dev },
-    { key: 'runtime', data: overview.value.runtime },
-    { key: 'origin', data: overview.value.origin },
   ]
+  if (overview.value.runtime?.exists) {
+    list.push({ key: 'runtime', data: overview.value.runtime })
+  }
+  list.push({ key: 'origin', data: overview.value.origin })
+  return list
 })
 
 const changedCount = computed(() => {
