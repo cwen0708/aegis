@@ -241,7 +241,7 @@ async function loadEntities() {
 async function loadGraph() {
   if (!centerId.value) return
   try {
-    const res = await fetch(`${API}/api/v1/graph/relations?center_type=${centerType.value}&center_id=${centerId.value}`)
+    const res = await fetch(`${API}/api/v1/graph/relations?center_type=${centerType.value}&center_id=${centerId.value}&depth=2`)
     if (res.ok) {
       const data = await res.json()
       renderGraph(data)
