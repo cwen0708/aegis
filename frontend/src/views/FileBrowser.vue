@@ -9,26 +9,6 @@
           <span class="text-slate-400">{{ part }}</span>
         </template>
       </div>
-
-      <!-- View toggle -->
-      <div class="flex items-center gap-1">
-        <button
-          class="p-1.5 rounded transition-colors"
-          :class="viewMode === 'files' ? 'bg-slate-700 text-emerald-400' : 'text-slate-500 hover:text-slate-300'"
-          @click="viewMode = 'files'"
-          title="檔案"
-        >
-          <FolderOpen class="w-4 h-4" />
-        </button>
-        <button
-          class="p-1.5 rounded transition-colors"
-          :class="viewMode === 'git' ? 'bg-slate-700 text-emerald-400' : 'text-slate-500 hover:text-slate-300'"
-          @click="viewMode = 'git'"
-          title="Git"
-        >
-          <GitBranch class="w-4 h-4" />
-        </button>
-      </div>
     </PageHeader>
 
     <!-- Empty state -->
@@ -42,7 +22,6 @@
     <!-- Content -->
     <div v-else class="flex-1 flex overflow-hidden">
       <div
-        v-if="viewMode === 'files'"
         class="w-64 border-r border-slate-700/50 overflow-y-auto custom-scrollbar shrink-0 bg-slate-900/50"
       >
         <FileTree
@@ -54,13 +33,8 @@
 
       <div class="flex-1 overflow-hidden">
         <FileViewer
-          v-if="viewMode === 'files'"
           :project-id="selectedProjectId"
           :path="selectedFile"
-        />
-        <GitPanel
-          v-else
-          :project-id="selectedProjectId"
         />
       </div>
     </div>
@@ -69,18 +43,16 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { FolderOpen, ChevronRight, GitBranch } from 'lucide-vue-next'
+import { FolderOpen, ChevronRight } from 'lucide-vue-next'
 import PageHeader from '../components/PageHeader.vue'
 import FileTree from '../components/files/FileTree.vue'
 import FileViewer from '../components/files/FileViewer.vue'
-import GitPanel from '../components/files/GitPanel.vue'
 import { useProjectSelector } from '../composables/useProjectSelector'
 import type { FileEntry } from '../components/files/FileTree.vue'
 
 const { selectedProjectId } = useProjectSelector()
 
 const selectedFile = ref('')
-const viewMode = ref<'files' | 'git'>('files')
 
 const breadcrumbs = computed(() => {
   if (!selectedFile.value) return []

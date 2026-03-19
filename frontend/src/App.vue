@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Shield, ListTodo, Settings, Clock, FolderOpen, Wifi, WifiOff, Sun, Moon, Zap, Building2, Home, PanelLeftClose, PanelLeftOpen, Rocket } from 'lucide-vue-next'
+import { Shield, ListTodo, Settings, Clock, FolderOpen, GitBranch, Wifi, WifiOff, Sun, Moon, Zap, Building2, Home, PanelLeftClose, PanelLeftOpen, Rocket } from 'lucide-vue-next'
 import { useWebSocket } from './composables/useWebSocket'
 import { useResponsive } from './composables/useResponsive'
 import { useAegisStore } from './stores/aegis'
@@ -154,6 +154,10 @@ function mobileNavClass(path: string) {
           <router-link to="/files" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/files')">
             <FolderOpen class="w-5 h-5 shrink-0" />
             <span v-if="!sidebarCollapsed">檔案瀏覽</span>
+          </router-link>
+          <router-link to="/git" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/git')">
+            <GitBranch class="w-5 h-5 shrink-0" />
+            <span v-if="!sidebarCollapsed">版本控制</span>
           </router-link>
         </div>
 

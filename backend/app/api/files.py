@@ -543,6 +543,63 @@ def git_overview(
     }
 
 
+@router.post("/projects/{project_id}/git/push")
+def git_push(
+    project_id: int,
+    session: Session = Depends(get_session),
+):
+    """推送本地 commit 到遠端（需要 push 權限）"""
+    project = _get_project(project_id, session)
+
+    if not _is_git_repo(project.path):
+        raise HTTPException(status_code=400, detail="Not a git repository")
+
+    ok, output = _run_git(project.path, ["push", "origin", "main"], timeout=30)
+    if not ok:
+        return {"ok": False, "error": output}
+
+    return {"ok": True, "message": output or "Push successful"}
+
+
+@router.post("/projects/{project_id}/git/pull")
+def git_pull(
+    project_id: int,
+    session: Session = Depends(get_session),
+):
+    """從遠端拉取最新 commit（fast-forward only）"""
+    project = _get_project(project_id, session)
+
+    if not _is_git_repo(project.path):
+        raise HTTPException(status_code=400, detail="Not a git repository")
+
+    # fetch first
+    _run_git(project.path, ["fetch", "origin"], timeout=30)
+
+    # try merge (ff-only to be safe)
+    ok, output = _run_git(project.path, ["merge", "--ff-only", "origin/main"], timeout=30)
+    if not ok:
+        return {"ok": False, "error": f"Fast-forward 失敗（可能有本地 commit 衝突）: {output}"}
+
+    return {"ok": True, "message": output or "Pull successful"}
+
+
+@router.post("/projects/{project_id}/git/reset")
+def git_reset(
+    project_id: int,
+    session: Session = Depends(get_session),
+):
+    """放棄所有未 commit 的改動"""
+    project = _get_project(project_id, session)
+
+    if not _is_git_repo(project.path):
+        raise HTTPException(status_code=400, detail="Not a git repository")
+
+    _run_git(project.path, ["checkout", "--", "."])
+    _run_git(project.path, ["clean", "-fd"])
+
+    return {"ok": True, "message": "已放棄所有未 commit 的改動"}
+
+
 @router.post("/projects/{project_id}/git/deploy-to-runtime")
 def git_deploy_to_runtime(
     project_id: int,

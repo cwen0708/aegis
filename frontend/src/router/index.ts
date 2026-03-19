@@ -22,6 +22,7 @@ import SettingsProjectDetail from '../views/settings/SettingsProjectDetail.vue'
 import SettingsTeamDetail from '../views/settings/SettingsTeamDetail.vue'
 import SettingsTerminal from '../views/settings/SettingsTerminal.vue'
 import FileBrowser from '../views/FileBrowser.vue'
+import GitManager from '../views/GitManager.vue'
 import { useAuthStore } from '../stores/auth'
 
 const router = createRouter({
@@ -37,6 +38,7 @@ const router = createRouter({
     { path: '/tasks', component: Tasks, meta: { requiresAuth: true } },
     { path: '/files', component: FileBrowser, meta: { requiresAuth: true } },
     { path: '/files/:projectId', component: FileBrowser, meta: { requiresAuth: true } },
+    { path: '/git', component: GitManager, meta: { requiresAuth: true } },
     {
       path: '/settings',
       component: SettingsLayout,

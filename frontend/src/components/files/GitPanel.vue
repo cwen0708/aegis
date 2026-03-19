@@ -46,23 +46,36 @@
               <span class="text-xs text-slate-300 truncate flex-1">{{ env.data.message }}</span>
               <span class="text-[10px] text-slate-600 shrink-0">{{ env.data.date ? formatDate(env.data.date) : '' }}</span>
               <span v-if="env.key === 'origin' && fetching" class="text-[10px] text-slate-600 shrink-0">⟳</span>
-              <!-- 部署到運行環境按鈕 -->
-              <button
-                v-if="env.key === 'dev' && overview?.runtime?.exists && overview.dev_ahead_of_runtime > 0"
-                class="text-[10px] px-2 py-0.5 rounded border transition-colors shrink-0 bg-purple-500/10 text-purple-400 border-purple-500/30 hover:bg-purple-500/20"
-                :disabled="deploying"
-                @click="deployToRuntime('dev')"
-              >
-                {{ deploying ? '...' : '→ 部署到運行環境' }}
-              </button>
-              <button
-                v-if="env.key === 'origin' && overview?.runtime?.exists && overview.runtime_ahead_of_origin < 0"
-                class="text-[10px] px-2 py-0.5 rounded border transition-colors shrink-0 bg-blue-500/10 text-blue-400 border-blue-500/30 hover:bg-blue-500/20"
-                :disabled="deploying"
-                @click="deployToRuntime('origin')"
-              >
-                {{ deploying ? '...' : '→ 更新運行環境' }}
-              </button>
+              <!-- 開發版按鈕群 -->
+              <div v-if="env.key === 'dev'" class="flex gap-1 shrink-0">
+                <button
+                  v-if="overview?.runtime?.exists && overview.dev_ahead_of_runtime > 0"
+                  class="text-[10px] px-2 py-0.5 rounded border transition-colors bg-purple-500/10 text-purple-400 border-purple-500/30 hover:bg-purple-500/20"
+                  :disabled="deploying"
+                  @click="deployToRuntime('dev')"
+                >
+                  {{ deploying ? '...' : '→ 部署' }}
+                </button>
+                <button
+                  v-if="overview.dev_ahead_of_origin > 0"
+                  class="text-[10px] px-2 py-0.5 rounded border transition-colors bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20"
+                  :disabled="pushing"
+                  @click="doPush"
+                >
+                  {{ pushing ? '...' : '↑ Push' }}
+                </button>
+              </div>
+              <!-- 遠端按鈕群 -->
+              <div v-if="env.key === 'origin'" class="flex gap-1 shrink-0">
+                <button
+                  v-if="overview?.runtime?.exists && overview.runtime_ahead_of_origin < 0"
+                  class="text-[10px] px-2 py-0.5 rounded border transition-colors bg-blue-500/10 text-blue-400 border-blue-500/30 hover:bg-blue-500/20"
+                  :disabled="deploying"
+                  @click="deployToRuntime('origin')"
+                >
+                  {{ deploying ? '...' : '→ 部署' }}
+                </button>
+              </div>
             </template>
             <span v-else class="text-xs text-slate-600">不可用</span>
           </div>
@@ -133,9 +146,9 @@
               ? 'bg-slate-700 text-slate-500 cursor-wait'
               : 'bg-amber-500 text-slate-900 hover:bg-amber-400'"
             :disabled="pulling"
-            @click="doPullTask"
+            @click="doPull"
           >
-            {{ pulling ? '建立中...' : '↓ AI Pull' }}
+            {{ pulling ? '拉取中...' : '↓ Pull' }}
           </button>
         </div>
 
@@ -233,6 +246,7 @@ const diffLoading = ref(false)
 const fetching = ref(false)
 const pulling = ref(false)
 const deploying = ref(false)
+const pushing = ref(false)
 
 const envList = computed(() => {
   if (!overview.value) return []
@@ -299,19 +313,42 @@ async function doFetch() {
   }
 }
 
-async function doPullTask() {
+async function doPull() {
   pulling.value = true
   try {
-    const res = await fetch(`${API}/api/v1/projects/${props.projectId}/git/pull-task`, { method: 'POST', headers: authHeaders() })
+    const res = await fetch(`${API}/api/v1/projects/${props.projectId}/git/pull`, { method: 'POST', headers: authHeaders() })
     if (res.ok) {
       const data = await res.json()
       if (data.ok) {
-        emit('pull-triggered', data.card_id)
-        alert(`已建立拉取任務 #${data.card_id}\nAI 將自動執行 git pull`)
+        alert('拉取成功')
+        await loadStatus()
+        await loadOverview()
+        loadLog()
+      } else {
+        alert(`拉取失敗: ${data.error}`)
       }
     }
   } finally {
     pulling.value = false
+  }
+}
+
+async function doPush() {
+  if (!confirm('確定要推送到遠端倉庫？')) return
+  pushing.value = true
+  try {
+    const res = await fetch(`${API}/api/v1/projects/${props.projectId}/git/push`, { method: 'POST', headers: authHeaders() })
+    if (res.ok) {
+      const data = await res.json()
+      if (data.ok) {
+        alert('推送成功')
+        await loadOverview()
+      } else {
+        alert(`推送失敗: ${data.error}`)
+      }
+    }
+  } finally {
+    pushing.value = false
   }
 }
 
