@@ -5,7 +5,7 @@ from app.database import get_session
 from app.models.core import (
     Project, Member, MemberAccount, Account,
     Domain, Room, RoomProject, RoomMember,
-    BotUser, BotUserProject, StageList,
+    BotUser, BotUserProject, StageList, CronJob,
 )
 import json as json_module
 
@@ -110,5 +110,18 @@ def get_all_relations(session: Session = Depends(get_session)):
         # 用戶 ↔ 成員（對話對象）
         if bu.default_member_id:
             add_edge("user", bu.id, "member", bu.default_member_id, "對話")
+
+    # ── 排程（專案 → 成員，跨專案關聯）──
+    cron_jobs = session.exec(select(CronJob).where(CronJob.is_enabled == True, CronJob.target_list_id.is_not(None))).all()
+    for cj in cron_jobs:
+        # 排程的 target_list → 找到執行成員
+        target_list = session.get(StageList, cj.target_list_id)
+        if target_list and target_list.member_id:
+            # 排程所屬專案 → 執行成員（如果跨專案才有意義）
+            if target_list.project_id != cj.project_id:
+                add_edge("project", cj.project_id, "member", target_list.member_id, "排程")
+            else:
+                # 同專案內的排程也加上，讓關聯更完整
+                add_edge("project", cj.project_id, "member", target_list.member_id, "排程")
 
     return {"nodes": nodes, "edges": edges}
