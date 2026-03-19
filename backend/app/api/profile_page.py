@@ -1,12 +1,12 @@
 """
-獨立的個人資料設定頁面 — 讓 Bot 使用者透過網頁設定 AD 帳密等敏感資料
+獨立的個人資料設定頁面 — 讓 Bot 使用者透過網頁設定敏感資料
 不經過 chatmessage，避免密碼被記錄在對話表中。
 
-流程：
-1. 使用者在 Telegram 輸入 /profile
-2. Bot 回覆一個帶 token 的連結：https://{domain}/u/profile?token=xxx
-3. 使用者開啟網頁，看到表單，填寫 AD 帳密
-4. 直接寫入 BotUser.extra_json
+欄位定義存在 SystemSetting("profile_fields")，格式：
+[
+  {"key": "ad_user", "title": "NAS / AD 帳號", "type": "text", "description": "..."},
+  {"key": "ad_pass", "title": "NAS / AD 密碼", "type": "password", "description": "..."},
+]
 """
 import json
 import time
@@ -22,6 +22,45 @@ from pydantic import BaseModel
 from app.core.auth import _get_signing_secret
 
 router = APIRouter()
+
+# ==========================================
+# 預設欄位定義（SystemSetting 沒有設時的 fallback）
+# ==========================================
+DEFAULT_PROFILE_FIELDS = [
+    {
+        "key": "ad_user",
+        "title": "NAS / AD 帳號",
+        "type": "text",
+        "description": "公司 Active Directory 帳號，格式 DOMAIN\\username",
+        "placeholder": "例如：GS-AD\\john.doe",
+    },
+    {
+        "key": "ad_pass",
+        "title": "NAS / AD 密碼",
+        "type": "password",
+        "description": "密碼不會顯示在聊天記錄中",
+        "placeholder": "",
+    },
+]
+
+
+def get_profile_fields() -> list:
+    """從 SystemSetting 取得 profile 欄位定義"""
+    try:
+        from sqlmodel import Session
+        from app.database import engine
+        from app.models.core import SystemSetting
+
+        with Session(engine) as session:
+            setting = session.get(SystemSetting, "profile_fields")
+            if setting and setting.value:
+                fields = json.loads(setting.value)
+                if isinstance(fields, list) and fields:
+                    return fields
+    except Exception:
+        pass
+    return DEFAULT_PROFILE_FIELDS
+
 
 # ==========================================
 # Profile Token（帶 bot_user_id 的短效 token）
@@ -61,29 +100,22 @@ def get_profile_url(bot_user_id: int, domain: str) -> str:
 
 
 def resolve_domain_for_user(bot_user_id: int) -> str:
-    """從 BotUser 反查對應的 Domain hostname
-
-    查詢鏈路：BotUser → BotUserProject → Project → RoomProject → Room → Domain
-    找不到就用預設 Domain 或 fallback localhost
-    """
+    """從 BotUser 反查對應的 Domain hostname"""
     from sqlmodel import Session, select
     from app.database import engine
     from app.models.core import BotUserProject, RoomProject, Domain
 
     with Session(engine) as session:
-        # 1. 找使用者綁定的專案
         bup = session.exec(
             select(BotUserProject).where(BotUserProject.bot_user_id == bot_user_id)
         ).first()
 
         if bup:
-            # 2. 找專案所屬的 Room
             rp = session.exec(
                 select(RoomProject).where(RoomProject.project_id == bup.project_id)
             ).first()
 
             if rp:
-                # 3. 找 Room 對應的 Domain
                 domains = session.exec(select(Domain).where(Domain.is_active == True)).all()
                 for d in domains:
                     try:
@@ -93,7 +125,6 @@ def resolve_domain_for_user(bot_user_id: int) -> str:
                     except (json.JSONDecodeError, TypeError):
                         continue
 
-        # Fallback: 預設 Domain
         default_domain = session.exec(
             select(Domain).where(Domain.is_default == True, Domain.is_active == True)
         ).first()
@@ -104,7 +135,7 @@ def resolve_domain_for_user(bot_user_id: int) -> str:
 
 
 # ==========================================
-# HTML 頁面
+# HTML 頁面（動態欄位）
 # ==========================================
 
 PROFILE_HTML = """<!DOCTYPE html>
@@ -115,54 +146,52 @@ PROFILE_HTML = """<!DOCTYPE html>
 <title>個人資料設定 — Aegis</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-.card { background: #1e293b; border: 1px solid #334155; border-radius: 16px; padding: 32px; max-width: 420px; width: 100%; margin: 16px; box-shadow: 0 25px 50px rgba(0,0,0,0.5); }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.card { background: #1e293b; border: 1px solid #334155; border-radius: 16px; padding: 32px; max-width: 480px; width: 100%; box-shadow: 0 25px 50px rgba(0,0,0,0.5); }
 h1 { font-size: 20px; margin-bottom: 4px; color: #f8fafc; }
 .subtitle { font-size: 13px; color: #94a3b8; margin-bottom: 24px; }
 .user-info { background: #0f172a; border-radius: 8px; padding: 12px; margin-bottom: 24px; font-size: 13px; color: #94a3b8; }
 .user-info strong { color: #e2e8f0; }
-label { display: block; font-size: 13px; font-weight: 600; color: #94a3b8; margin-bottom: 6px; margin-top: 16px; }
-input { width: 100%; padding: 10px 12px; background: #0f172a; border: 1px solid #334155; border-radius: 8px; color: #e2e8f0; font-size: 14px; outline: none; transition: border-color 0.2s; }
-input:focus { border-color: #10b981; }
-input::placeholder { color: #475569; }
-.help { font-size: 11px; color: #64748b; margin-top: 4px; }
-button { width: 100%; margin-top: 24px; padding: 12px; background: #10b981; color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
-button:hover { background: #059669; }
-button:disabled { background: #334155; cursor: not-allowed; }
+.field-group { margin-bottom: 16px; }
+.field-group label { display: block; font-size: 13px; font-weight: 600; color: #94a3b8; margin-bottom: 6px; }
+.field-group input { width: 100%; padding: 10px 12px; background: #0f172a; border: 1px solid #334155; border-radius: 8px; color: #e2e8f0; font-size: 14px; outline: none; transition: border-color 0.2s; }
+.field-group input:focus { border-color: #10b981; }
+.field-group input::placeholder { color: #475569; }
+.field-group .desc { font-size: 11px; color: #64748b; margin-top: 4px; }
+.divider { border-top: 1px solid #334155; margin: 20px 0; }
+.extra-section label { font-size: 13px; font-weight: 600; color: #94a3b8; margin-bottom: 8px; display: block; }
+.field-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.field-row input { flex: 1; padding: 8px 10px; background: #0f172a; border: 1px solid #334155; border-radius: 6px; color: #e2e8f0; font-size: 13px; outline: none; }
+.field-row input:focus { border-color: #10b981; }
+.field-row .key-input { max-width: 120px; }
+.remove-btn { background: #334155; color: #94a3b8; border: none; border-radius: 6px; padding: 8px 12px; cursor: pointer; font-size: 14px; flex-shrink: 0; }
+.remove-btn:hover { background: #ef4444; color: white; }
+.add-btn { background: none; border: 1px dashed #334155; color: #64748b; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 12px; width: auto; margin-top: 4px; }
+.add-btn:hover { border-color: #10b981; color: #10b981; }
+button[type=submit] { width: 100%; margin-top: 24px; padding: 12px; background: #10b981; color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+button[type=submit]:hover { background: #059669; }
+button[type=submit]:disabled { background: #334155; cursor: not-allowed; }
 .msg { margin-top: 16px; padding: 12px; border-radius: 8px; font-size: 13px; display: none; }
 .msg.success { display: block; background: #064e3b; border: 1px solid #10b981; color: #6ee7b7; }
 .msg.error { display: block; background: #450a0a; border: 1px solid #ef4444; color: #fca5a5; }
-.fields { margin-top: 8px; }
-.field-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
-.field-row input { flex: 1; }
-.field-row .key-input { max-width: 120px; }
-.remove-btn { background: #334155; color: #94a3b8; border: none; border-radius: 6px; padding: 8px 12px; cursor: pointer; font-size: 14px; }
-.remove-btn:hover { background: #ef4444; color: white; }
-.add-btn { margin-top: 8px; background: none; border: 1px dashed #334155; color: #64748b; padding: 8px; border-radius: 8px; cursor: pointer; font-size: 12px; width: auto; }
-.add-btn:hover { border-color: #10b981; color: #10b981; }
-.divider { border-top: 1px solid #334155; margin: 20px 0; }
 </style>
 </head>
 <body>
 <div class="card">
   <h1>🛡️ 個人資料設定</h1>
-  <p class="subtitle">設定後即可透過 AI 存取 NAS 檔案等外部系統</p>
+  <p class="subtitle">設定後即可透過 AI 存取 NAS 等外部系統</p>
 
   <div class="user-info" id="userInfo">載入中...</div>
 
   <form id="profileForm">
-    <label>NAS / AD 帳號</label>
-    <input type="text" id="adUser" placeholder="例如：GS-AD\\john.doe" autocomplete="username">
-    <p class="help">公司 Active Directory 帳號，格式 DOMAIN\\username</p>
-
-    <label>NAS / AD 密碼</label>
-    <input type="password" id="adPass" placeholder="••••••••" autocomplete="current-password">
-    <p class="help">密碼不會顯示在聊天記錄中</p>
+    <div id="definedFields"></div>
 
     <div class="divider"></div>
-    <label>其他欄位</label>
-    <div class="fields" id="extraFields"></div>
-    <button type="button" class="add-btn" onclick="addField()">+ 新增欄位</button>
+    <div class="extra-section">
+      <label>自訂欄位</label>
+      <div id="extraFields"></div>
+      <button type="button" class="add-btn" onclick="addExtraField()">+ 新增欄位</button>
+    </div>
 
     <button type="submit" id="saveBtn">儲存</button>
   </form>
@@ -176,6 +205,8 @@ if (!token) {
 }
 
 const API = '/api/v1/u/profile';
+let fieldDefs = [];   // 欄位定義
+let definedKeys = []; // 已定義的 key（不顯示在自訂欄位）
 
 async function load() {
   try {
@@ -189,21 +220,37 @@ async function load() {
     }
     const data = await res.json();
 
-    // 顯示使用者資訊
+    // 使用者資訊
     document.getElementById('userInfo').innerHTML =
-      '<strong>' + (data.display_name || '使用者') + '</strong>' +
-      ' — ' + (data.platform || '') +
-      (data.username ? ' (@' + data.username + ')' : '');
+      '<strong>' + esc(data.display_name || '使用者') + '</strong>' +
+      ' — ' + esc(data.platform || '') +
+      (data.username ? ' (@' + esc(data.username) + ')' : '');
 
-    // 填入現有資料
+    // 渲染定義欄位
+    fieldDefs = data.fields || [];
+    definedKeys = fieldDefs.map(f => f.key);
     const extra = data.extra || {};
-    document.getElementById('adUser').value = extra.ad_user || '';
-    document.getElementById('adPass').value = extra.ad_pass || '';
+    const container = document.getElementById('definedFields');
 
-    // 其他欄位
+    fieldDefs.forEach(f => {
+      const val = extra[f.key] || '';
+      // 密碼欄位如果有值，顯示 placeholder 提示
+      const placeholder = f.type === 'password' && val ? '（已設定，留空不變）' : (f.placeholder || '');
+      container.innerHTML += `
+        <div class="field-group">
+          <label>${esc(f.title)}</label>
+          <input type="${f.type || 'text'}" data-key="${esc(f.key)}"
+                 value="${f.type === 'password' ? '' : esc(val)}"
+                 placeholder="${esc(placeholder)}"
+                 autocomplete="${f.type === 'password' ? 'current-password' : 'off'}">
+          ${f.description ? '<p class="desc">' + esc(f.description) + '</p>' : ''}
+        </div>`;
+    });
+
+    // 自訂欄位（不在 fieldDefs 中的 key）
     for (const [k, v] of Object.entries(extra)) {
-      if (k !== 'ad_user' && k !== 'ad_pass') {
-        addField(k, v);
+      if (!definedKeys.includes(k)) {
+        addExtraField(k, v);
       }
     }
   } catch (e) {
@@ -211,11 +258,12 @@ async function load() {
   }
 }
 
-function addField(key, value) {
+function addExtraField(key, value) {
   const div = document.createElement('div');
   div.className = 'field-row';
-  div.innerHTML = '<input class="key-input" placeholder="key" value="' + (key || '') + '">' +
-    '<input placeholder="value" value="' + (value || '') + '">' +
+  div.innerHTML =
+    '<input class="key-input" placeholder="欄位名" value="' + esc(key || '') + '">' +
+    '<input placeholder="值" value="' + esc(value || '') + '">' +
     '<button type="button" class="remove-btn" onclick="this.parentElement.remove()">✕</button>';
   document.getElementById('extraFields').appendChild(div);
 }
@@ -228,12 +276,21 @@ document.getElementById('profileForm').onsubmit = async (e) => {
 
   try {
     const extra = {};
-    const adUser = document.getElementById('adUser').value.trim();
-    const adPass = document.getElementById('adPass').value.trim();
-    if (adUser) extra.ad_user = adUser;
-    if (adPass) extra.ad_pass = adPass;
 
-    // 其他欄位
+    // 定義欄位
+    document.querySelectorAll('#definedFields input[data-key]').forEach(input => {
+      const key = input.dataset.key;
+      const val = input.value.trim();
+      const fieldDef = fieldDefs.find(f => f.key === key);
+      if (fieldDef && fieldDef.type === 'password' && !val) {
+        // 密碼欄位留空 = 不修改（用 _keep 標記）
+        extra[key] = '__KEEP__';
+      } else if (val) {
+        extra[key] = val;
+      }
+    });
+
+    // 自訂欄位
     document.querySelectorAll('#extraFields .field-row').forEach(row => {
       const inputs = row.querySelectorAll('input');
       const k = inputs[0].value.trim();
@@ -257,12 +314,8 @@ document.getElementById('profileForm').onsubmit = async (e) => {
   }
 };
 
-function showMsg(type, text) {
-  const el = document.getElementById('msg');
-  el.className = 'msg ' + type;
-  el.textContent = text;
-}
-
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function showMsg(type, text) { const el = document.getElementById('msg'); el.className = 'msg ' + type; el.textContent = text; }
 if (token) load();
 </script>
 </body>
@@ -286,7 +339,7 @@ async def profile_page():
 
 @router.get("/api/v1/u/profile")
 async def get_profile(token: str):
-    """取得使用者的 profile 資料"""
+    """取得使用者的 profile 資料 + 欄位定義"""
     bot_user_id = verify_profile_token(token)
     if not bot_user_id:
         raise HTTPException(status_code=401, detail="Token 無效或已過期")
@@ -312,12 +365,13 @@ async def get_profile(token: str):
             "platform": user.platform,
             "username": user.username,
             "extra": extra,
+            "fields": get_profile_fields(),
         }
 
 
 @router.post("/api/v1/u/profile")
 async def save_profile(req: ProfileSaveRequest):
-    """儲存使用者的 profile 資料（直接寫入 extra_json，不經過 chatmessage）"""
+    """儲存使用者的 profile 資料"""
     bot_user_id = verify_profile_token(req.token)
     if not bot_user_id:
         raise HTTPException(status_code=401, detail="Token 無效或已過期")
@@ -331,7 +385,24 @@ async def save_profile(req: ProfileSaveRequest):
         if not user:
             raise HTTPException(status_code=404, detail="使用者不存在")
 
-        user.extra_json = json.dumps(req.extra, ensure_ascii=False)
+        # 讀取現有資料
+        existing = {}
+        if user.extra_json:
+            try:
+                existing = json.loads(user.extra_json)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # 合併：__KEEP__ 表示保留原值（密碼欄位留空時）
+        new_extra = {}
+        for k, v in req.extra.items():
+            if v == "__KEEP__":
+                if k in existing:
+                    new_extra[k] = existing[k]
+            else:
+                new_extra[k] = v
+
+        user.extra_json = json.dumps(new_extra, ensure_ascii=False)
         session.add(user)
         session.commit()
 
