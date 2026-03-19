@@ -131,6 +131,114 @@ def user_login(req: UserLoginRequest, session: Session = Depends(get_session)):
     }
 
 
+class RegisterWithInviteRequest(BaseModel):
+    invite_code: str
+    username: str
+    password: str
+
+
+@router.post("/auth/register-with-invite")
+def register_with_invite(req: RegisterWithInviteRequest, session: Session = Depends(get_session)):
+    """用邀請碼註冊網頁帳號：驗證邀請碼 → 建 BotUser(web) → 設密碼 → 登入"""
+    from app.core.auth import hash_password, generate_session_token
+    from app.models.core import BotUser, InviteCode, BotUserProject, BotUserMember
+    from datetime import datetime, timezone, timedelta
+    import json as json_module
+
+    # 驗證輸入
+    username = req.username.strip()
+    if not username or len(username) < 2:
+        raise HTTPException(status_code=400, detail="帳號至少 2 個字元")
+    if len(req.password) < 6:
+        raise HTTPException(status_code=400, detail="密碼至少 6 個字元")
+
+    # 檢查帳號是否已存在
+    existing = session.exec(
+        select(BotUser).where(BotUser.platform == "web", BotUser.platform_user_id == username)
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="此帳號已被使用")
+
+    # 驗證邀請碼
+    invite = session.exec(
+        select(InviteCode).where(InviteCode.code == req.invite_code)
+    ).first()
+    if not invite:
+        raise HTTPException(status_code=400, detail="無效的邀請碼")
+    if invite.expires_at:
+        exp = invite.expires_at if invite.expires_at.tzinfo else invite.expires_at.replace(tzinfo=timezone.utc)
+        if exp < datetime.now(timezone.utc):
+            raise HTTPException(status_code=400, detail="邀請碼已過期")
+    if invite.used_count >= invite.max_uses:
+        raise HTTPException(status_code=400, detail="邀請碼已達使用上限")
+
+    # 建立 BotUser
+    now = datetime.now(timezone.utc)
+    user = BotUser(
+        platform="web",
+        platform_user_id=username,
+        username=invite.user_display_name or username,
+        level=invite.target_level,
+        is_active=True,
+        password_hash=hash_password(req.password),
+        created_at=now,
+        last_active_at=now,
+    )
+    if invite.target_member_id:
+        user.default_member_id = invite.target_member_id
+    if invite.access_valid_days:
+        user.access_expires_at = now + timedelta(days=invite.access_valid_days)
+
+    session.add(user)
+    session.flush()  # 取得 user.id
+
+    # 建立 BotUserMember
+    if invite.target_member_id:
+        session.add(BotUserMember(
+            bot_user_id=user.id,
+            member_id=invite.target_member_id,
+            is_default=True,
+        ))
+
+    # 建立專案權限
+    if invite.allowed_projects:
+        try:
+            project_ids = json_module.loads(invite.allowed_projects)
+            for idx, pid in enumerate(project_ids):
+                session.add(BotUserProject(
+                    bot_user_id=user.id,
+                    project_id=pid,
+                    display_name=invite.user_display_name,
+                    description=invite.user_description,
+                    can_view=invite.default_can_view,
+                    can_create_card=invite.default_can_create_card,
+                    can_run_task=invite.default_can_run_task,
+                    can_access_sensitive=invite.default_can_access_sensitive,
+                    is_default=(idx == 0),
+                ))
+        except (json_module.JSONDecodeError, TypeError):
+            pass
+
+    # 更新邀請碼使用次數
+    invite.used_count += 1
+    session.commit()
+
+    # 直接登入
+    token = generate_session_token(ttl_hours=8, user_type="user", user_id=user.id)
+    return {
+        "success": True,
+        "token": token,
+        "expires_in": 28800,
+        "user": {
+            "id": user.id,
+            "username": user.platform_user_id,
+            "display_name": user.username or user.platform_user_id,
+            "level": user.level,
+        },
+        "message": f"註冊成功！身份：{'管理員' if user.level >= 3 else '成員' if user.level >= 2 else '訪客'}",
+    }
+
+
 @router.get("/auth/me")
 def get_current_user(request_obj=Depends(lambda request: request), session: Session = Depends(get_session)):
     """根據 token 取得當前用戶資訊"""
