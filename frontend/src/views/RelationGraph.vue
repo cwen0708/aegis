@@ -2,7 +2,6 @@
   <div class="h-full flex flex-col">
     <PageHeader :icon="Share2">
       <div class="flex items-center gap-2">
-        <!-- 類型選擇 -->
         <select v-model="centerType" class="bg-slate-700 text-slate-200 text-xs rounded-lg px-2 py-1 border border-slate-600 outline-none">
           <option value="project">專案</option>
           <option value="member">成員</option>
@@ -10,7 +9,6 @@
           <option value="room">空間</option>
           <option value="user">用戶</option>
         </select>
-        <!-- 對象選擇 -->
         <select v-model="centerId" class="bg-slate-700 text-slate-200 text-xs rounded-lg px-2 py-1 border border-slate-600 outline-none max-w-[200px]">
           <option v-for="e in currentEntities" :key="e.id" :value="e.id">{{ e.label }}</option>
         </select>
@@ -18,77 +16,28 @@
     </PageHeader>
 
     <div class="flex-1 relative overflow-hidden bg-slate-900/50">
-      <svg ref="svgEl" class="w-full h-full" @click.self="deselectNode">
-        <!-- Edges -->
-        <line
-          v-for="(e, i) in edges"
-          :key="'e' + i"
-          :x1="getNodePos(e.source)?.x || 0" :y1="getNodePos(e.source)?.y || 0"
-          :x2="getNodePos(e.target)?.x || 0" :y2="getNodePos(e.target)?.y || 0"
-          :stroke="edgeColor(e)" stroke-width="1.5" opacity="0.3"
-        />
-        <!-- Edge labels -->
-        <text
-          v-for="(e, i) in edges"
-          :key="'el' + i"
-          :x="((getNodePos(e.source)?.x || 0) + (getNodePos(e.target)?.x || 0)) / 2"
-          :y="((getNodePos(e.source)?.y || 0) + (getNodePos(e.target)?.y || 0)) / 2 - 6"
-          text-anchor="middle" fill="#64748b" font-size="9"
-        >{{ e.relation }}</text>
-
-        <!-- Nodes -->
-        <g
-          v-for="n in positionedNodes"
-          :key="n.key"
-          class="cursor-pointer"
-          @click.stop="onNodeClick(n)"
-        >
-          <!-- Circle -->
-          <circle
-            :cx="n.x" :cy="n.y"
-            :r="n.key === centerKey ? 28 : 20"
-            :fill="nodeColor(n.type)" :opacity="n.key === centerKey ? 0.2 : 0.1"
-            :stroke="nodeColor(n.type)" stroke-width="2"
-          />
-          <!-- Icon text -->
-          <text
-            :x="n.x" :y="n.y + 1"
-            text-anchor="middle" dominant-baseline="central"
-            :fill="nodeColor(n.type)" font-size="14"
-          >{{ nodeIcon(n.type) }}</text>
-          <!-- Label -->
-          <text
-            :x="n.x" :y="n.y + (n.key === centerKey ? 38 : 30)"
-            text-anchor="middle" :fill="nodeColor(n.type)" font-size="11" font-weight="bold"
-          >{{ n.label.length > 12 ? n.label.slice(0, 12) + '…' : n.label }}</text>
-          <!-- Sub label -->
-          <text
-            v-if="n.sub"
-            :x="n.x" :y="n.y + (n.key === centerKey ? 50 : 42)"
-            text-anchor="middle" fill="#64748b" font-size="9"
-          >{{ n.sub }}</text>
-          <!-- Hover tooltip -->
-          <title>{{ n.label }}{{ n.sub ? ' · ' + n.sub : '' }}</title>
-        </g>
-      </svg>
+      <div ref="cyContainer" class="w-full h-full" />
 
       <!-- Legend -->
-      <div class="absolute bottom-3 left-3 flex gap-3 text-[10px]">
-        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-purple-400"></span> 專案</span>
-        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-400"></span> 成員</span>
-        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-blue-400"></span> 網域</span>
-        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-400"></span> 用戶</span>
-        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-orange-400"></span> 空間</span>
+      <div class="absolute bottom-3 left-3 flex gap-3 text-[10px] text-slate-400 bg-slate-800/80 px-3 py-1.5 rounded-lg">
+        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-purple-500"></span> 專案</span>
+        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> 成員</span>
+        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-blue-500"></span> 網域</span>
+        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span> 用戶</span>
+        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-orange-500"></span> 空間</span>
+        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-pink-500"></span> 帳號</span>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { Share2 } from 'lucide-vue-next'
 import PageHeader from '../components/PageHeader.vue'
 import { config } from '../config'
+import cytoscape from 'cytoscape'
+import type { Core } from 'cytoscape'
 
 const API = config.apiUrl
 
@@ -96,101 +45,175 @@ const API = config.apiUrl
 const centerType = ref('project')
 const centerId = ref<number>(0)
 const entities = ref<Record<string, { id: number; label: string }[]>>({})
-const nodes = ref<any[]>([])
-const edges = ref<any[]>([])
-const svgEl = ref<SVGElement | null>(null)
+const cyContainer = ref<HTMLElement | null>(null)
+let cy: Core | null = null
 
-// 節點位置（force simulation 結果）
-const nodePositions = ref<Record<string, { x: number; y: number }>>({})
-
-const centerKey = computed(() => `${centerType.value}:${centerId.value}`)
 const currentEntities = computed(() => entities.value[centerType.value] || [])
 
 // ── 顏色 ──
-function nodeColor(type: string): string {
-  const colors: Record<string, string> = {
-    project: '#c084fc', member: '#34d399', domain: '#60a5fa',
-    user: '#fbbf24', room: '#fb923c', account: '#f472b6', info: '#94a3b8',
-  }
-  return colors[type] || '#64748b'
+const nodeColors: Record<string, { bg: string; border: string; text: string }> = {
+  project: { bg: '#7c3aed', border: '#a78bfa', text: '#e9d5ff' },
+  member: { bg: '#059669', border: '#34d399', text: '#d1fae5' },
+  domain: { bg: '#2563eb', border: '#60a5fa', text: '#dbeafe' },
+  user: { bg: '#d97706', border: '#fbbf24', text: '#fef3c7' },
+  room: { bg: '#ea580c', border: '#fb923c', text: '#ffedd5' },
+  account: { bg: '#db2777', border: '#f472b6', text: '#fce7f3' },
+  info: { bg: '#475569', border: '#94a3b8', text: '#e2e8f0' },
 }
 
-function edgeColor(e: any): string {
-  const sourceType = e.source.split(':')[0]
-  return nodeColor(sourceType)
+function getColor(type: string) {
+  return nodeColors[type] || nodeColors.info!
 }
 
-function nodeIcon(type: string): string {
-  const icons: Record<string, string> = {
-    project: '📁', member: '🤖', domain: '🌐',
-    user: '👤', room: '🏠', account: '🔑', info: 'ℹ️',
-  }
-  return icons[type] || '●'
-}
+// ── Cytoscape 初始化 ──
+function initCytoscape() {
+  if (!cyContainer.value) return
 
-// ── 節點位置計算（簡單圓形佈局） ──
-interface PositionedNode {
-  key: string; type: string; id: number; label: string; sub?: string;
-  x: number; y: number;
-}
+  cy = cytoscape({
+    container: cyContainer.value,
+    style: [
+      {
+        selector: 'node',
+        style: {
+          'label': 'data(label)',
+          'text-valign': 'bottom',
+          'text-halign': 'center',
+          'font-size': '11px',
+          'color': '#e2e8f0',
+          'text-margin-y': 6,
+          'width': 40,
+          'height': 40,
+          'background-color': 'data(bgColor)',
+          'border-color': 'data(borderColor)',
+          'border-width': 2,
+          'text-wrap': 'ellipsis',
+          'text-max-width': '80px',
+        },
+      },
+      {
+        selector: 'node[?isCenter]',
+        style: {
+          'width': 56,
+          'height': 56,
+          'border-width': 3,
+          'font-size': '13px',
+          'font-weight': 'bold',
+        },
+      },
+      {
+        selector: 'node[sub]',
+        style: {
+          'label': 'data(fullLabel)',
+          'text-wrap': 'wrap',
+          'text-max-width': '100px',
+          'font-size': '10px',
+          'line-height': 1.3,
+        },
+      },
+      {
+        selector: 'edge',
+        style: {
+          'width': 1.5,
+          'line-color': '#334155',
+          'target-arrow-color': '#334155',
+          'target-arrow-shape': 'triangle',
+          'curve-style': 'bezier',
+          'arrow-scale': 0.8,
+          'label': 'data(relation)',
+          'font-size': '9px',
+          'color': '#64748b',
+          'text-rotation': 'autorotate',
+          'text-margin-y': -8,
+        },
+      },
+      {
+        selector: 'edge:selected',
+        style: {
+          'width': 2.5,
+          'line-color': '#60a5fa',
+        },
+      },
+    ],
+    layout: { name: 'preset' },
+    minZoom: 0.3,
+    maxZoom: 3,
+    wheelSensitivity: 0.3,
+  })
 
-const positionedNodes = computed<PositionedNode[]>(() => {
-  if (!svgEl.value || nodes.value.length === 0) return []
-  const rect = svgEl.value.getBoundingClientRect()
-  const cx = rect.width / 2
-  const cy = rect.height / 2
-  const radius = Math.min(cx, cy) * 0.6
-
-  const result: PositionedNode[] = []
-  const others = nodes.value.filter(n => `${n.type}:${n.id}` !== centerKey.value)
-  const center = nodes.value.find(n => `${n.type}:${n.id}` === centerKey.value)
-
-  // 中心節點
-  if (center) {
-    const key = `${center.type}:${center.id}`
-    result.push({
-      key, type: center.type, id: center.id,
-      label: center.label, sub: subLabel(center),
-      x: cx, y: cy,
-    })
-    nodePositions.value[key] = { x: cx, y: cy }
-  }
-
-  // 周圍節點（按類型分群）
-  const grouped: Record<string, any[]> = {}
-  for (const n of others) {
-    (grouped[n.type] ||= []).push(n)
-  }
-
-  const types = Object.keys(grouped)
-  let idx = 0
-  const total = others.length
-
-  for (let ti = 0; ti < types.length; ti++) {
-    const group = grouped[types[ti]!]!
-    for (let gi = 0; gi < group.length; gi++) {
-      const n = group[gi]
-      const angle = (idx / total) * Math.PI * 2 - Math.PI / 2
-      const r = radius + (group.length > 5 ? (gi % 2) * 40 : 0)
-      const x = cx + Math.cos(angle) * r
-      const y = cy + Math.sin(angle) * r
-      const key = `${n.type}:${n.id}`
-      result.push({
-        key, type: n.type, id: n.id,
-        label: n.label, sub: subLabel(n),
-        x, y,
-      })
-      nodePositions.value[key] = { x, y }
-      idx++
+  // 點擊節點 → 重新展開
+  cy.on('tap', 'node', (evt) => {
+    const node = evt.target
+    const type = node.data('nodeType')
+    const id = node.data('nodeId')
+    if (type && id && type !== 'info') {
+      centerType.value = type
+      centerId.value = id
     }
+  })
+}
+
+// ── 渲染圖形 ──
+function renderGraph(data: { center: string; nodes: any[]; edges: any[] }) {
+  if (!cy) return
+
+  const elements: cytoscape.ElementDefinition[] = []
+  const centerKey = data.center
+
+  // 節點
+  for (const n of data.nodes) {
+    const key = `${n.type}:${n.id}`
+    const color = getColor(n.type)
+    const isCenter = key === centerKey
+    const sub = subLabel(n)
+
+    elements.push({
+      data: {
+        id: key,
+        label: n.label,
+        fullLabel: sub ? `${n.label}\n${sub}` : n.label,
+        sub: sub || undefined,
+        nodeType: n.type,
+        nodeId: n.id,
+        isCenter,
+        bgColor: color.bg,
+        borderColor: color.border,
+      },
+    })
   }
 
-  return result
-})
+  // 邊
+  for (const e of data.edges) {
+    elements.push({
+      data: {
+        id: `${e.source}-${e.target}`,
+        source: e.source,
+        target: e.target,
+        relation: e.relation,
+      },
+    })
+  }
+
+  cy.elements().remove()
+  cy.add(elements)
+
+  // 階梯式佈局（從左到右）
+  cy.layout({
+    name: 'breadthfirst',
+    directed: true,
+    roots: centerKey ? [centerKey] : undefined,
+    spacingFactor: 1.5,
+    avoidOverlap: true,
+    // @ts-ignore - cytoscape 的 breadthfirst 支援但類型沒宣告
+    orientation: 'horizontal',
+  } as any).run()
+
+  // 動畫 fit
+  cy.animate({ fit: { eles: cy.elements(), padding: 40 } } as any, { duration: 300 })
+}
 
 function subLabel(n: any): string {
   if (n.type === 'user') {
-    const parts = []
+    const parts: string[] = []
     if (n.platform) parts.push(n.platform)
     if (n.level !== undefined) parts.push(`Lv${n.level}`)
     if (n.has_ad) parts.push('AD✓')
@@ -202,17 +225,12 @@ function subLabel(n: any): string {
   return ''
 }
 
-function getNodePos(key: string) {
-  return nodePositions.value[key]
-}
-
-// ── 載入 ──
+// ── 資料載入 ──
 async function loadEntities() {
   try {
     const res = await fetch(`${API}/api/v1/graph/entities`)
     if (res.ok) {
       entities.value = await res.json()
-      // 預設選第一個
       if (!centerId.value && currentEntities.value.length) {
         centerId.value = currentEntities.value[0]!.id
       }
@@ -226,20 +244,9 @@ async function loadGraph() {
     const res = await fetch(`${API}/api/v1/graph/relations?center_type=${centerType.value}&center_id=${centerId.value}`)
     if (res.ok) {
       const data = await res.json()
-      nodes.value = data.nodes || []
-      edges.value = data.edges || []
+      renderGraph(data)
     }
   } catch { /* silent */ }
-}
-
-function onNodeClick(n: PositionedNode) {
-  if (n.type === 'info') return // info 節點不可點擊
-  centerType.value = n.type
-  centerId.value = n.id
-}
-
-function deselectNode() {
-  // 點空白處不做事
 }
 
 // ── Watch ──
@@ -256,6 +263,14 @@ watch(centerId, () => {
 onMounted(async () => {
   await loadEntities()
   await nextTick()
+  initCytoscape()
   if (centerId.value) loadGraph()
+})
+
+onUnmounted(() => {
+  if (cy) {
+    cy.destroy()
+    cy = null
+  }
 })
 </script>
