@@ -45,6 +45,17 @@
               <span class="text-xs font-mono text-slate-400">{{ env.data.sha }}</span>
               <span class="text-xs text-slate-300 truncate flex-1">{{ env.data.message }}</span>
               <span class="text-[10px] text-slate-600 shrink-0">{{ env.data.date ? formatDate(env.data.date) : '' }}</span>
+              <button
+                v-if="env.key === 'origin'"
+                class="text-[10px] px-1.5 py-0.5 rounded border transition-colors shrink-0"
+                :class="fetching
+                  ? 'text-slate-600 border-slate-700 cursor-wait'
+                  : 'text-blue-400 border-blue-500/30 hover:text-blue-300 hover:border-blue-400/50'"
+                :disabled="fetching"
+                @click="doFetch"
+              >
+                {{ fetching ? '...' : '⟳' }}
+              </button>
             </template>
             <span v-else class="text-xs text-slate-600">不可用</span>
           </div>
