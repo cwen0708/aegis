@@ -126,7 +126,16 @@ async function fetchVersionHistory() {
   try {
     const res = await fetch(`${API}/api/v1/update/versions`)
     if (res.ok) {
-      versionHistory.value = await res.json()
+      const data = await res.json()
+      const current = data.current || ''
+      const versions = data.versions || []
+      versionHistory.value = versions.map((v: any) => ({
+        tag: v.tag || v,
+        channel: (v.tag || v || '').includes('dev') ? 'dev' : 'stable',
+        message: v.title || '',
+        date: v.date || '',
+        is_current: (v.tag || v) === current,
+      }))
     }
   } catch (e) {
     console.error('Failed to fetch version history:', e)
