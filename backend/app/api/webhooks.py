@@ -67,8 +67,21 @@ async def wecom_verify(
 
     配置回調時會發送此請求驗證 URL
     """
-    # 企業微信會發送 echostr 要求原樣返回
-    # TODO: 實作簽名驗證
+    from app.channels.adapters.wecom import WeComChannel
+
+    wecom_channel = None
+    for ch in channel_manager._channels:
+        if isinstance(ch, WeComChannel):
+            wecom_channel = ch
+            break
+
+    if not wecom_channel:
+        raise HTTPException(status_code=503, detail="WeCom channel not configured")
+
+    if not WeComChannel.verify_signature(wecom_channel.token, timestamp, nonce, msg_signature):
+        logger.warning("[Webhook] WeCom signature verification failed")
+        raise HTTPException(status_code=403, detail="Invalid signature")
+
     return PlainTextResponse(content=echostr)
 
 

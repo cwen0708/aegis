@@ -30,7 +30,8 @@ export function useWebSocket() {
 
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
     const host = window.location.host
-    const wsUrl = `${protocol}://${host}/ws`
+    const token = sessionStorage.getItem('aegis-token') || ''
+    const wsUrl = `${protocol}://${host}/ws?token=${token}`
 
     ws = new WebSocket(wsUrl)
 
