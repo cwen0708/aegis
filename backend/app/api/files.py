@@ -477,8 +477,8 @@ def git_overview(
     dev_path = project.path
     runtime_path = str(_INSTALL_ROOT)
 
-    # 判斷 dev dir 和 runtime 是否不同（只有 AEGIS 等分離架構才有運行版）
-    is_separated = os.path.realpath(dev_path) != os.path.realpath(runtime_path)
+    # 只有 AEGIS 系統專案且 dev/runtime 路徑不同時才顯示運行版
+    is_separated = project.is_system and os.path.realpath(dev_path) != os.path.realpath(runtime_path)
 
     # 1. 開發版（dev dir = project.path）
     dev = _git_commit_info(dev_path)
