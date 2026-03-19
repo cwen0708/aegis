@@ -1,6 +1,7 @@
 import { ref, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { config } from '../config'
+import { authHeaders } from '../utils/authFetch'
 
 const API = config.apiUrl
 
@@ -18,7 +19,7 @@ const selectedProjectId = ref<number | null>(null)
 const loaded = ref(false)
 
 async function fetchProjects() {
-  const res = await fetch(`${API}/api/v1/projects/`)
+  const res = await fetch(`${API}/api/v1/projects/`, { headers: authHeaders() })
   if (res.ok) {
     const data = await res.json()
     let filtered = data.filter((p: any) => p.is_active)
