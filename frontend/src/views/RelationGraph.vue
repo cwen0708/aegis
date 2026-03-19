@@ -25,14 +25,17 @@
     <div class="flex-1 relative overflow-hidden bg-slate-900/50">
       <div ref="cyContainer" class="w-full h-full" />
 
-      <!-- Legend -->
-      <div class="absolute bottom-3 left-3 flex gap-3 text-[10px] text-slate-400 bg-slate-800/80 px-3 py-1.5 rounded-lg">
-        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-purple-500"></span> 專案</span>
-        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> 成員</span>
-        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-blue-500"></span> 網域</span>
-        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span> 用戶</span>
-        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-orange-500"></span> 空間</span>
-        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-pink-500"></span> 帳號</span>
+      <!-- Legend（可切換顯示/隱藏） -->
+      <div class="absolute bottom-3 left-3 flex gap-1 text-[10px] bg-slate-800/80 px-2 py-1.5 rounded-lg">
+        <button
+          v-for="t in legendTypes" :key="t.type"
+          @click="toggleType(t.type)"
+          class="flex items-center gap-1 px-1.5 py-0.5 rounded transition-colors"
+          :class="hiddenTypes.has(t.type) ? 'opacity-30 line-through' : 'hover:bg-slate-700'"
+        >
+          <span class="w-2.5 h-2.5 rounded-full shrink-0" :style="{ backgroundColor: t.color }"></span>
+          <span :class="hiddenTypes.has(t.type) ? 'text-slate-600' : 'text-slate-400'">{{ t.label }}</span>
+        </button>
       </div>
     </div>
   </div>
@@ -86,6 +89,50 @@ function subLabel(n: any): string {
   if (n.type === 'account' && n.provider) return n.provider
   if (n.type === 'project' && n.is_system) return '系統'
   return ''
+}
+
+// ── 圖例類型 ──
+const legendTypes = [
+  { type: 'domain', label: '網域', color: '#3b82f6' },
+  { type: 'room', label: '空間', color: '#ea580c' },
+  { type: 'project', label: '專案', color: '#7c3aed' },
+  { type: 'member', label: '成員', color: '#059669' },
+  { type: 'user', label: '用戶', color: '#d97706' },
+  { type: 'account', label: '帳號', color: '#db2777' },
+]
+const hiddenTypes = ref(new Set<string>())
+
+function toggleType(type: string) {
+  if (hiddenTypes.value.has(type)) {
+    hiddenTypes.value.delete(type)
+  } else {
+    hiddenTypes.value.add(type)
+  }
+  // 切換 Cytoscape 節點的顯示/隱藏
+  if (cy) {
+    cy.nodes().forEach((n) => {
+      if (hiddenTypes.value.has(n.data('nodeType'))) {
+        n.style('display', 'none')
+      } else {
+        n.style('display', 'element')
+      }
+    })
+    // 邊：兩端有一端隱藏就隱藏
+    cy.edges().forEach((e) => {
+      const st = e.source().data('nodeType')
+      const tt = e.target().data('nodeType')
+      if (hiddenTypes.value.has(st) || hiddenTypes.value.has(tt)) {
+        e.style('display', 'none')
+      } else {
+        e.style('display', 'element')
+      }
+    })
+  }
+}
+
+// ── 層級定義（breadthfirst 排列用）──
+const tierMap: Record<string, number> = {
+  domain: 1, room: 2, project: 3, member: 4, user: 5, account: 5,
 }
 
 // ── Cytoscape 初始化 ──
@@ -187,6 +234,55 @@ function initCytoscape() {
     }
   })
 
+  // 拖拽時子節點跟著走
+  let dragDescendants: cytoscape.NodeCollection | null = null
+  let dragStartPositions: Map<string, { x: number; y: number }> = new Map()
+
+  cy.on('grab', 'node', (evt) => {
+    const node = evt.target
+    // BFS 找所有下游節點（outgoing edges 的 target）
+    const descendants = cy!.collection()
+    const queue = [node]
+    const visited = new Set([node.id()])
+    while (queue.length) {
+      const current = queue.shift()!
+      current.outgoers('node').forEach((child: cytoscape.NodeSingular) => {
+        if (!visited.has(child.id())) {
+          visited.add(child.id())
+          descendants.merge(child)
+          queue.push(child)
+        }
+      })
+    }
+    dragDescendants = descendants
+    // 記錄所有下游節點的起始位置
+    dragStartPositions.clear()
+    dragStartPositions.set(node.id(), { ...node.position() })
+    descendants.forEach((n: cytoscape.NodeSingular) => {
+      dragStartPositions.set(n.id(), { ...n.position() })
+    })
+  })
+
+  cy.on('drag', 'node', (evt) => {
+    if (!dragDescendants || !dragDescendants.length) return
+    const node = evt.target
+    const startPos = dragStartPositions.get(node.id())
+    if (!startPos) return
+    const dx = node.position('x') - startPos.x
+    const dy = node.position('y') - startPos.y
+    dragDescendants.forEach((n: cytoscape.NodeSingular) => {
+      const sp = dragStartPositions.get(n.id())
+      if (sp) {
+        n.position({ x: sp.x + dx, y: sp.y + dy })
+      }
+    })
+  })
+
+  cy.on('free', 'node', () => {
+    dragDescendants = null
+    dragStartPositions.clear()
+  })
+
   // Hover highlight
   cy.on('mouseover', 'node', (evt) => {
     const node = evt.target
@@ -229,6 +325,7 @@ async function loadAll() {
           displayLabel: sub ? `${n.label}\n${sub}` : n.label,
           nodeType: n.type,
           nodeId: n.id,
+          tier: tierMap[n.type] || 5,
           bgColor: color.bg,
           borderColor: color.border,
         },
