@@ -23,109 +23,7 @@
       <div v-if="!overview" class="text-slate-600 text-sm">載入中...</div>
       <template v-else>
 
-        <!-- 運行版卡片 -->
-        <div v-if="overview.runtime?.exists" class="rounded-xl border border-emerald-500/20 bg-emerald-500/5 overflow-hidden">
-          <div class="px-4 py-3 flex items-center gap-3">
-            <div class="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
-            <span class="text-xs font-bold text-emerald-400 uppercase tracking-wider">運行版</span>
-            <span class="text-xs font-mono text-slate-400 ml-auto">{{ overview.runtime.sha }}</span>
-          </div>
-          <div class="px-4 pb-3">
-            <p class="text-sm text-slate-300 truncate">{{ overview.runtime.message }}</p>
-            <p class="text-[10px] text-slate-600 mt-1">{{ overview.runtime.date ? formatDate(overview.runtime.date) : '' }}</p>
-          </div>
-        </div>
-
-        <!-- 開發版卡片 -->
-        <div class="rounded-xl border border-purple-500/20 bg-purple-500/5 overflow-hidden">
-          <div class="px-4 py-3 flex items-center gap-3">
-            <div class="w-2 h-2 rounded-full bg-purple-400 shrink-0" />
-            <span class="text-xs font-bold text-purple-400 uppercase tracking-wider">開發版</span>
-            <span v-if="overview.dev?.exists" class="text-xs font-mono text-slate-400 ml-auto">{{ overview.dev.sha }}</span>
-          </div>
-          <div v-if="overview.dev?.exists" class="px-4 pb-3">
-            <p class="text-sm text-slate-300 truncate">{{ overview.dev.message }}</p>
-            <p class="text-[10px] text-slate-600 mt-1">{{ overview.dev.date ? formatDate(overview.dev.date) : '' }}</p>
-          </div>
-          <!-- 按鈕列 -->
-          <div class="px-4 py-2.5 border-t border-purple-500/10 flex gap-2 flex-wrap">
-            <button
-              class="text-[10px] px-3 py-1 rounded-md border font-medium transition-colors"
-              :class="canDeploy
-                ? 'bg-purple-500/10 text-purple-400 border-purple-500/30 hover:bg-purple-500/20'
-                : 'bg-slate-800/50 text-slate-600 border-slate-700 cursor-not-allowed'"
-              :disabled="!canDeploy || deploying"
-              @click="deployToRuntime('dev')"
-            >
-              {{ deploying ? '...' : '→ 部署到運行環境' }}
-            </button>
-            <button
-              class="text-[10px] px-3 py-1 rounded-md border font-medium transition-colors"
-              :class="canPush
-                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
-                : 'bg-slate-800/50 text-slate-600 border-slate-700 cursor-not-allowed'"
-              :disabled="!canPush || pushing"
-              @click="doPush"
-            >
-              {{ pushing ? '...' : '↑ Push' }}
-            </button>
-            <button
-              class="text-[10px] px-3 py-1 rounded-md border font-medium transition-colors"
-              :class="canPull
-                ? 'bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20'
-                : 'bg-slate-800/50 text-slate-600 border-slate-700 cursor-not-allowed'"
-              :disabled="!canPull || pulling"
-              @click="doPull"
-            >
-              {{ pulling ? '...' : '↓ Pull' }}
-            </button>
-          </div>
-        </div>
-
-        <!-- 遠端卡片 -->
-        <div class="rounded-xl border border-blue-500/20 bg-blue-500/5 overflow-hidden">
-          <div class="px-4 py-3 flex items-center gap-3">
-            <div class="w-2 h-2 rounded-full shrink-0" :class="fetching ? 'bg-blue-400 animate-pulse' : 'bg-blue-400'" />
-            <span class="text-xs font-bold text-blue-400 uppercase tracking-wider">遠端</span>
-            <span v-if="overview.origin?.exists" class="text-xs font-mono text-slate-400 ml-auto">{{ overview.origin.sha }}</span>
-          </div>
-          <div v-if="overview.origin?.exists" class="px-4 pb-3">
-            <p class="text-sm text-slate-300 truncate">{{ overview.origin.message }}</p>
-            <p class="text-[10px] text-slate-600 mt-1">{{ overview.origin.date ? formatDate(overview.origin.date) : '' }}</p>
-            <p v-if="overview.origin.url" class="text-[10px] text-slate-600 mt-1 truncate">{{ overview.origin.url }}</p>
-          </div>
-          <!-- 按鈕列 -->
-          <div class="px-4 py-2.5 border-t border-blue-500/10 flex gap-2 flex-wrap">
-            <button
-              class="text-[10px] px-3 py-1 rounded-md border font-medium transition-colors"
-              :class="canDeployOrigin
-                ? 'bg-blue-500/10 text-blue-400 border-blue-500/30 hover:bg-blue-500/20'
-                : 'bg-slate-800/50 text-slate-600 border-slate-700 cursor-not-allowed'"
-              :disabled="!canDeployOrigin || deploying"
-              @click="deployToRuntime('origin')"
-            >
-              {{ deploying ? '...' : '→ 更新運行環境' }}
-            </button>
-            <a
-              v-if="repoUrl"
-              :href="`${repoUrl}/issues/new`"
-              target="_blank"
-              class="text-[10px] px-3 py-1 rounded-md border font-medium transition-colors bg-slate-800/50 text-slate-400 border-slate-600 hover:text-slate-200 hover:border-slate-500"
-            >
-              💡 提出建議
-            </a>
-            <a
-              v-if="repoUrl"
-              :href="`${repoUrl}/compare/main...main?expand=1`"
-              target="_blank"
-              class="text-[10px] px-3 py-1 rounded-md border font-medium transition-colors bg-slate-800/50 text-slate-400 border-slate-600 hover:text-slate-200 hover:border-slate-500"
-            >
-              🔀 貢獻代碼
-            </a>
-          </div>
-        </div>
-
-        <!-- 版本圖形 (三條線) -->
+        <!-- 版本圖形 (三條線) — 最上方 -->
         <div v-if="graph" class="rounded-xl border border-slate-700/30 bg-slate-800/30 p-4 overflow-x-auto">
           <div class="flex items-center gap-2 mb-3">
             <span class="text-[10px] text-slate-600 uppercase tracking-wider font-bold">Commit Graph</span>
@@ -133,54 +31,64 @@
           </div>
           <div class="relative" :style="{ minWidth: svgWidth + 'px' }">
             <svg :width="svgWidth" height="110" class="block">
-              <!-- 標籤列：開發(上) 運行(中) 遠端(下) -->
-              <text x="8" y="24" fill="#c084fc" font-size="9" font-weight="bold" text-anchor="end">開發</text>
-              <text v-if="hasRuntime" x="8" y="54" fill="#34d399" font-size="9" font-weight="bold" text-anchor="end">運行</text>
-              <text x="8" :y="hasRuntime ? 84 : 54" fill="#60a5fa" font-size="9" font-weight="bold" text-anchor="end">遠端</text>
+              <!-- 左側標籤 -->
+              <text x="24" y="24" fill="#c084fc" font-size="10" font-weight="bold" text-anchor="end">開發</text>
+              <text v-if="hasRuntime" x="24" y="54" fill="#34d399" font-size="10" font-weight="bold" text-anchor="end">運行</text>
+              <text x="24" :y="hasRuntime ? 84 : 54" fill="#60a5fa" font-size="10" font-weight="bold" text-anchor="end">遠端</text>
 
-              <!-- 三條平行線：開發(20) 運行(50) 遠端(80) -->
+              <!-- 三條平行線 -->
               <line :x1="lineStart" y1="20" :x2="lineEnd" y2="20" stroke="#7c3aed" stroke-width="1.5" opacity="0.3" />
               <line v-if="hasRuntime" :x1="lineStart" y1="50" :x2="lineEnd" y2="50" stroke="#10b981" stroke-width="1.5" opacity="0.3" />
               <line :x1="lineStart" :y1="hasRuntime ? 80 : 50" :x2="lineEnd" :y2="hasRuntime ? 80 : 50" stroke="#3b82f6" stroke-width="1.5" opacity="0.3" />
 
               <!-- Commit 節點和連線 -->
               <g v-for="(c, i) in graph.commits" :key="c.sha_full">
-                <!-- dev 線(y=20)：所有 commit 都在 dev 歷史 -->
+                <!-- dev 線(y=20) -->
                 <circle
                   :cx="nodeX(i)" cy="20" r="4"
-                  :fill="i === graph.dev_idx ? '#c084fc' : '#334155'"
+                  :fill="Number(i) === graph.dev_idx ? '#c084fc' : '#334155'"
                   class="cursor-pointer"
-                ><title>{{ c.sha }} {{ c.message }}</title></circle>
+                >
+                  <title>{{ c.sha }} · {{ c.message }}{{ c.date ? ' · ' + formatDate(c.date) : '' }}</title>
+                </circle>
 
-                <!-- runtime 線(y=50)：同步連線從 dev 到 runtime -->
-                <template v-if="hasRuntime && i === graph.runtime_idx">
-                  <line :x1="nodeX(i)" y1="20" :x2="nodeX(i)" y2="50" stroke="#34d399" stroke-width="1.5" />
-                  <circle :cx="nodeX(i)" cy="50" r="5" fill="#10b981" stroke="#10b981" stroke-width="2" />
+                <!-- runtime 線(y=50) -->
+                <template v-if="hasRuntime && Number(i) === graph.runtime_idx">
+                  <line :x1="nodeX(i)" y1="20" :x2="nodeX(i)" y2="50" stroke="#34d399" stroke-width="1.5" opacity="0.5" />
+                  <circle :cx="nodeX(i)" cy="50" r="5" fill="#10b981" stroke="#10b981" stroke-width="2" class="cursor-pointer">
+                    <title>運行版 · {{ c.sha }} · {{ c.message }}</title>
+                  </circle>
                 </template>
-                <!-- runtime 線普通節點 -->
-                <circle v-else-if="hasRuntime && graph.runtime_idx >= 0 && i <= graph.runtime_idx"
-                  :cx="nodeX(i)" cy="50" r="3" fill="#334155"
-                />
+                <circle v-else-if="hasRuntime && graph.runtime_idx >= 0 && Number(i) <= graph.runtime_idx"
+                  :cx="nodeX(i)" cy="50" r="3" fill="#334155" class="cursor-pointer"
+                >
+                  <title>{{ c.sha }} · {{ c.message }}</title>
+                </circle>
 
-                <!-- origin 線(y=80 or 50)：同步連線 -->
-                <template v-if="i === graph.origin_idx">
-                  <line :x1="nodeX(i)" :y1="hasRuntime && i === graph.runtime_idx ? 50 : 20"
+                <!-- origin 線 -->
+                <template v-if="Number(i) === graph.origin_idx">
+                  <line :x1="nodeX(i)" :y1="hasRuntime && Number(i) === graph.runtime_idx ? 50 : 20"
                     :x2="nodeX(i)" :y2="hasRuntime ? 80 : 50"
-                    stroke="#3b82f6" stroke-width="1.5"
+                    stroke="#3b82f6" stroke-width="1.5" opacity="0.5"
                   />
-                  <circle :cx="nodeX(i)" :cy="hasRuntime ? 80 : 50" r="5" fill="#3b82f6" stroke="#3b82f6" stroke-width="2" />
+                  <circle :cx="nodeX(i)" :cy="hasRuntime ? 80 : 50" r="5" fill="#3b82f6" stroke="#3b82f6" stroke-width="2" class="cursor-pointer">
+                    <title>遠端 · {{ c.sha }} · {{ c.message }}</title>
+                  </circle>
                 </template>
-                <!-- origin 線普通節點 -->
-                <circle v-else-if="graph.origin_idx >= 0 && i <= graph.origin_idx"
-                  :cx="nodeX(i)" :cy="hasRuntime ? 80 : 50" r="3" fill="#334155"
-                />
+                <circle v-else-if="graph.origin_idx >= 0 && Number(i) <= graph.origin_idx"
+                  :cx="nodeX(i)" :cy="hasRuntime ? 80 : 50" r="3" fill="#334155" class="cursor-pointer"
+                >
+                  <title>{{ c.sha }} · {{ c.message }}</title>
+                </circle>
               </g>
 
               <!-- dev HEAD 大圓 -->
               <circle v-if="graph.dev_idx >= 0"
                 :cx="nodeX(graph.dev_idx)" cy="20" r="6"
-                fill="#c084fc" stroke="#e9d5ff" stroke-width="2"
-              />
+                fill="#c084fc" stroke="#e9d5ff" stroke-width="2" class="cursor-pointer"
+              >
+                <title>開發版 HEAD · {{ graph.commits[graph.dev_idx]?.sha }} · {{ graph.commits[graph.dev_idx]?.message }}</title>
+              </circle>
 
               <!-- SHA 標籤 -->
               <text v-if="graph.dev_idx >= 0"
@@ -196,6 +104,80 @@
                 text-anchor="middle" fill="#34d399" font-size="8" font-family="monospace" opacity="0.7"
               >{{ graph.commits[graph.runtime_idx]?.sha }}</text>
             </svg>
+          </div>
+        </div>
+
+        <!-- 開發版卡片 -->
+        <div class="rounded-xl border border-purple-500/20 bg-purple-500/5 overflow-hidden">
+          <div class="px-4 py-3 flex items-center gap-3">
+            <div class="w-2 h-2 rounded-full bg-purple-400 shrink-0" />
+            <span class="text-xs font-bold text-purple-400 uppercase tracking-wider">開發版</span>
+            <span v-if="overview.dev?.exists" class="text-xs font-mono text-slate-400 ml-auto">{{ overview.dev.sha }}</span>
+          </div>
+          <div v-if="overview.dev?.exists" class="px-4 pb-3">
+            <p class="text-sm text-slate-300 truncate">{{ overview.dev.message }}</p>
+            <p class="text-[10px] text-slate-600 mt-1">{{ overview.dev.date ? formatDate(overview.dev.date) : '' }}</p>
+          </div>
+          <div class="px-4 py-2.5 border-t border-purple-500/10 flex gap-2 flex-wrap">
+            <button
+              class="text-[10px] px-3 py-1 rounded-md border font-medium transition-colors"
+              :class="canDeploy ? 'bg-purple-500/10 text-purple-400 border-purple-500/30 hover:bg-purple-500/20' : 'bg-slate-800/50 text-slate-600 border-slate-700 cursor-not-allowed'"
+              :disabled="!canDeploy || deploying"
+              @click="deployToRuntime('dev')"
+            >{{ deploying ? '...' : '→ 部署到運行環境' }}</button>
+            <button
+              class="text-[10px] px-3 py-1 rounded-md border font-medium transition-colors"
+              :class="canPush ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20' : 'bg-slate-800/50 text-slate-600 border-slate-700 cursor-not-allowed'"
+              :disabled="!canPush || pushing"
+              @click="doPush"
+            >{{ pushing ? '...' : '↑ Push' }}</button>
+            <button
+              class="text-[10px] px-3 py-1 rounded-md border font-medium transition-colors"
+              :class="canPull ? 'bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20' : 'bg-slate-800/50 text-slate-600 border-slate-700 cursor-not-allowed'"
+              :disabled="!canPull || pulling"
+              @click="doPull"
+            >{{ pulling ? '...' : '↓ Pull' }}</button>
+          </div>
+        </div>
+
+        <!-- 運行版卡片 -->
+        <div v-if="overview.runtime?.exists" class="rounded-xl border border-emerald-500/20 bg-emerald-500/5 overflow-hidden">
+          <div class="px-4 py-3 flex items-center gap-3">
+            <div class="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+            <span class="text-xs font-bold text-emerald-400 uppercase tracking-wider">運行版</span>
+            <span class="text-xs font-mono text-slate-400 ml-auto">{{ overview.runtime.sha }}</span>
+          </div>
+          <div class="px-4 pb-3">
+            <p class="text-sm text-slate-300 truncate">{{ overview.runtime.message }}</p>
+            <p class="text-[10px] text-slate-600 mt-1">{{ overview.runtime.date ? formatDate(overview.runtime.date) : '' }}</p>
+          </div>
+        </div>
+
+        <!-- 遠端卡片 -->
+        <div class="rounded-xl border border-blue-500/20 bg-blue-500/5 overflow-hidden">
+          <div class="px-4 py-3 flex items-center gap-3">
+            <div class="w-2 h-2 rounded-full shrink-0" :class="fetching ? 'bg-blue-400 animate-pulse' : 'bg-blue-400'" />
+            <span class="text-xs font-bold text-blue-400 uppercase tracking-wider">遠端</span>
+            <span v-if="overview.origin?.exists" class="text-xs font-mono text-slate-400 ml-auto">{{ overview.origin.sha }}</span>
+          </div>
+          <div v-if="overview.origin?.exists" class="px-4 pb-3">
+            <p class="text-sm text-slate-300 truncate">{{ overview.origin.message }}</p>
+            <p class="text-[10px] text-slate-600 mt-1">{{ overview.origin.date ? formatDate(overview.origin.date) : '' }}</p>
+            <p v-if="overview.origin.url" class="text-[10px] text-slate-600 mt-1 truncate">{{ overview.origin.url }}</p>
+          </div>
+          <div class="px-4 py-2.5 border-t border-blue-500/10 flex gap-2 flex-wrap">
+            <button
+              class="text-[10px] px-3 py-1 rounded-md border font-medium transition-colors"
+              :class="canDeployOrigin ? 'bg-blue-500/10 text-blue-400 border-blue-500/30 hover:bg-blue-500/20' : 'bg-slate-800/50 text-slate-600 border-slate-700 cursor-not-allowed'"
+              :disabled="!canDeployOrigin || deploying"
+              @click="deployToRuntime('origin')"
+            >{{ deploying ? '...' : '→ 更新運行環境' }}</button>
+            <a v-if="repoUrl" :href="`${repoUrl}/issues/new`" target="_blank"
+              class="text-[10px] px-3 py-1 rounded-md border font-medium transition-colors bg-slate-800/50 text-slate-400 border-slate-600 hover:text-slate-200 hover:border-slate-500"
+            >💡 提出建議</a>
+            <a v-if="repoUrl" :href="`${repoUrl}/compare/main...main?expand=1`" target="_blank"
+              class="text-[10px] px-3 py-1 rounded-md border font-medium transition-colors bg-slate-800/50 text-slate-400 border-slate-600 hover:text-slate-200 hover:border-slate-500"
+            >🔀 貢獻代碼</a>
           </div>
         </div>
 
@@ -315,7 +297,7 @@ const pushing = ref(false)
 const graph = computed(() => overview.value?.graph || null)
 const hasRuntime = computed(() => overview.value?.runtime?.exists)
 
-const lineStart = 16
+const lineStart = 36
 const nodeSpacing = 48
 const nodeX = (i: number | string) => lineStart + Number(i) * nodeSpacing
 const lineEnd = computed(() => graph.value ? lineStart + (graph.value.commits.length - 1) * nodeSpacing : 100)
