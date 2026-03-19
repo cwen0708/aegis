@@ -283,13 +283,18 @@ function initCytoscape() {
     dragStartPositions.clear()
   })
 
-  // Hover highlight
+  // Hover highlight（2 層 BFS）
   cy.on('mouseover', 'node', (evt) => {
     const node = evt.target
-    const neighborhood = node.closedNeighborhood()
+    // BFS 收集 2 層鄰居
+    let current = node.closedNeighborhood()
+    const layer2 = current.closedNeighborhood()
     cy!.elements().addClass('dimmed')
-    neighborhood.removeClass('dimmed')
-    neighborhood.edges().addClass('highlighted')
+    layer2.removeClass('dimmed')
+    // 第 1 層邊高亮
+    current.edges().addClass('highlighted')
+    // 第 2 層邊也高亮（但用較淡的樣式）
+    layer2.edges().removeClass('dimmed')
   })
 
   cy.on('mouseout', 'node', () => {
