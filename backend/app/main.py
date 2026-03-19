@@ -11,6 +11,12 @@ import logging
 from pathlib import Path
 from app.database import init_db
 from app.api import routes, webhooks, files
+from app.api import channels as channels_routes, invitations as invitations_routes
+from app.api import auth as auth_routes, runner as runner_routes, messaging as messaging_routes
+from app.api import github as github_routes, system as system_routes
+from app.api import onestack as onestack_routes, updater_routes
+from app.api import projects as projects_routes, cards as cards_routes
+from app.api import cron_jobs as cron_jobs_routes, members as members_routes
 from app.core.telemetry import get_system_metrics
 from app.core.cron_poller import start_cron_poller
 from app.core.usage_poller import start_usage_poller
@@ -467,6 +473,19 @@ app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 
 # 註冊 API 路由
 app.include_router(routes.router, prefix="/api/v1")
+app.include_router(projects_routes.router, prefix="/api/v1")
+app.include_router(cards_routes.router, prefix="/api/v1")
+app.include_router(cron_jobs_routes.router, prefix="/api/v1")
+app.include_router(members_routes.router, prefix="/api/v1")
+app.include_router(channels_routes.router, prefix="/api/v1")
+app.include_router(invitations_routes.router, prefix="/api/v1")
+app.include_router(auth_routes.router, prefix="/api/v1")
+app.include_router(runner_routes.router, prefix="/api/v1")
+app.include_router(messaging_routes.router, prefix="/api/v1")
+app.include_router(github_routes.router, prefix="/api/v1")
+app.include_router(system_routes.router, prefix="/api/v1")
+app.include_router(onestack_routes.router, prefix="/api/v1")
+app.include_router(updater_routes.router, prefix="/api/v1")
 app.include_router(webhooks.router, prefix="/api/v1")
 app.include_router(files.router, prefix="/api/v1")
 

@@ -689,7 +689,7 @@ async def _handle_onestack_task(task: Dict[str, Any]):
     try:
         from sqlmodel import Session as _Ses
         from app.database import engine as _eng
-        from app.api.routes import create_card_from_onestack_task
+        from app.api.onestack import create_card_from_onestack_task
 
         with _Ses(_eng) as session:
             result = create_card_from_onestack_task(
