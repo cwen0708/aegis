@@ -423,11 +423,11 @@ class InviteCode(SQLModel, table=True):
     target_member_id: Optional[int] = Field(default=None, foreign_key="member.id")
     allowed_projects: Optional[str] = None      # JSON: [1, 2, 3]
 
-    # 用戶身份描述（驗證時自動填入 BotUserProject）
+    # 用戶身份描述（驗證時自動填入 PersonProject）
     user_display_name: str = Field(default="")  # "王小華"
     user_description: str = Field(default="")   # "案場業主，可查看發電資料..."
 
-    # 預設權限（驗證時自動填入 BotUserProject）
+    # 預設權限（驗證時自動填入 PersonProject）
     default_can_view: bool = Field(default=True)
     default_can_create_card: bool = Field(default=False)
     default_can_run_task: bool = Field(default=False)

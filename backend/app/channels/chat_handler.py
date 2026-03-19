@@ -10,7 +10,7 @@ from sqlmodel import Session, select
 from app.database import engine
 from app.models.core import (
     BotUser, Member, MemberAccount, Account,
-    ChatSession, ChatMessage, BotUserProject, Project, StageList
+    ChatSession, ChatMessage, PersonProject, Project, StageList
 )
 from app.core.card_file import CardData, write_card, card_file_path
 from app.core.card_index import sync_card_to_index, next_card_id
@@ -298,7 +298,7 @@ def _build_chat_prompt(
     member: Member,
     history: List[ChatMessage],
     user_message: str,
-    user_context: Optional[BotUserProject] = None,
+    user_context: Optional[PersonProject] = None,
     accessible_projects: Optional[List[Project]] = None,
     user_level: int = 0,
     chat_id: str = "",

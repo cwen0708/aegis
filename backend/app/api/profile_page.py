@@ -103,16 +103,19 @@ def resolve_domain_for_user(bot_user_id: int) -> str:
     """從 BotUser 反查對應的 Domain hostname"""
     from sqlmodel import Session, select
     from app.database import engine
-    from app.models.core import BotUserProject, RoomProject, Domain
+    from app.models.core import PersonProject, RoomProject, Domain, BotUser
 
     with Session(engine) as session:
-        bup = session.exec(
-            select(BotUserProject).where(BotUserProject.bot_user_id == bot_user_id)
-        ).first()
+        user = session.get(BotUser, bot_user_id)
+        pp = None
+        if user and user.person_id:
+            pp = session.exec(
+                select(PersonProject).where(PersonProject.person_id == user.person_id)
+            ).first()
 
-        if bup:
+        if pp:
             rp = session.exec(
-                select(RoomProject).where(RoomProject.project_id == bup.project_id)
+                select(RoomProject).where(RoomProject.project_id == pp.project_id)
             ).first()
 
             if rp:

@@ -5,7 +5,7 @@ from app.database import get_session
 from app.models.core import (
     Project, Member, MemberAccount, Account,
     Domain, Room, RoomProject, RoomMember,
-    BotUser, BotUserProject, StageList, CronJob,
+    BotUser, PersonProject, StageList, CronJob,
 )
 import json as json_module
 
@@ -102,10 +102,11 @@ def get_all_relations(session: Session = Depends(get_session)):
             "platform": bu.platform, "level": bu.level, "has_ad": has_ad,
         })
 
-        # 用戶 ↔ 專案
-        bups = session.exec(select(BotUserProject).where(BotUserProject.bot_user_id == bu.id)).all()
-        for bup in bups:
-            add_edge("user", bu.id, "project", bup.project_id, "專案")
+        # 用戶 ↔ 專案（透過 Person）
+        if bu.person_id:
+            pps = session.exec(select(PersonProject).where(PersonProject.person_id == bu.person_id)).all()
+            for pp in pps:
+                add_edge("user", bu.id, "project", pp.project_id, "專案")
 
         # 用戶 ↔ 成員（對話對象）
         if bu.default_member_id:

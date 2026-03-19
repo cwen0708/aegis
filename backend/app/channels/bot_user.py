@@ -10,8 +10,9 @@ from sqlmodel import Session, select
 
 from app.database import engine
 from app.models.core import (
-    BotUser, BotUserPermission, BotUserProject, BotUserMember, InviteCode,
-    ChatSession, ChatMessage, Member, Project, SystemSetting
+    BotUser, BotUserPermission, InviteCode,
+    ChatSession, ChatMessage, Member, Project, SystemSetting,
+    PersonProject, PersonMember,
 )
 
 logger = logging.getLogger(__name__)
@@ -90,15 +91,33 @@ def _setup_admin_members(session: Session, bot_user: BotUser):
     # 設定第一個 Member 為預設
     bot_user.default_member_id = members[0].id
 
-    # 建立所有 Member 關聯
-    for idx, member in enumerate(members):
-        bum = BotUserMember(
-            bot_user_id=bot_user.id,
-            member_id=member.id,
-            is_default=(idx == 0),
-            can_switch=True
+    # 確保 Person 存在
+    if not bot_user.person_id:
+        from app.models.core import Person
+        person = Person(
+            display_name=bot_user.username or "",
+            level=bot_user.level,
+            default_member_id=members[0].id,
         )
-        session.add(bum)
+        session.add(person)
+        session.flush()
+        bot_user.person_id = person.id
+
+    # 建立所有 PersonMember 關聯
+    for idx, member in enumerate(members):
+        existing = session.exec(
+            select(PersonMember).where(
+                PersonMember.person_id == bot_user.person_id,
+                PersonMember.member_id == member.id,
+            )
+        ).first()
+        if not existing:
+            session.add(PersonMember(
+                person_id=bot_user.person_id,
+                member_id=member.id,
+                is_default=(idx == 0),
+                can_switch=True,
+            ))
 
     session.commit()
     logger.info(f"[BotUser] Admin {bot_user.id} linked to {len(members)} members")
@@ -245,54 +264,25 @@ def verify_invite_code(bot_user: BotUser, code: str) -> tuple[bool, str]:
             if invite.target_member_id:
                 db_user.default_member_id = invite.target_member_id
 
-                # 建立 BotUserMember 關聯
-                existing = session.exec(
-                    select(BotUserMember).where(
-                        BotUserMember.bot_user_id == db_user.id,
-                        BotUserMember.member_id == invite.target_member_id
+                # 建立 PersonMember 關聯
+                existing_pm = session.exec(
+                    select(PersonMember).where(
+                        PersonMember.person_id == db_user.person_id,
+                        PersonMember.member_id == invite.target_member_id,
                     )
                 ).first()
-                if not existing:
-                    bum = BotUserMember(
-                        bot_user_id=db_user.id,
+                if not existing_pm:
+                    session.add(PersonMember(
+                        person_id=db_user.person_id,
                         member_id=invite.target_member_id,
-                        is_default=True
-                    )
-                    session.add(bum)
-                    # 雙寫 PersonMember
-                    from app.models.core import PersonMember
-                    existing_pm = session.exec(
-                        select(PersonMember).where(
-                            PersonMember.person_id == db_user.person_id,
-                            PersonMember.member_id == invite.target_member_id,
-                        )
-                    ).first()
-                    if not existing_pm:
-                        session.add(PersonMember(
-                            person_id=db_user.person_id,
-                            member_id=invite.target_member_id,
-                            is_default=True,
-                        ))
+                        is_default=True,
+                    ))
 
-            # 建立專案權限（雙寫：BotUserProject + PersonProject）
+            # 建立專案權限（PersonProject）
             if invite.allowed_projects:
-                from app.models.core import PersonProject, PersonMember
                 try:
                     project_ids = json.loads(invite.allowed_projects)
                     for idx, pid in enumerate(project_ids):
-                        bup = BotUserProject(
-                            bot_user_id=db_user.id,
-                            project_id=pid,
-                            display_name=invite.user_display_name,
-                            description=invite.user_description,
-                            can_view=invite.default_can_view,
-                            can_create_card=invite.default_can_create_card,
-                            can_run_task=invite.default_can_run_task,
-                            can_access_sensitive=invite.default_can_access_sensitive,
-                            is_default=(idx == 0),
-                        )
-                        session.add(bup)
-                        # 雙寫 PersonProject（如果不存在）
                         existing_pp = session.exec(
                             select(PersonProject).where(
                                 PersonProject.person_id == db_user.person_id,
@@ -413,9 +403,10 @@ def get_user_info(bot_user: BotUser) -> dict:
     level_names = {0: "未驗證", 1: "訪客", 2: "成員", 3: "管理員"}
 
     with Session(engine) as session:
-        # 取得關聯的 Members
-        stmt = select(BotUserMember).where(BotUserMember.bot_user_id == bot_user.id)
-        user_members = session.exec(stmt).all()
+        # 取得關聯的 Members（透過 Person）
+        person_id = _resolve_person_id(bot_user.id) if not bot_user.person_id else bot_user.person_id
+        stmt = select(PersonMember).where(PersonMember.person_id == person_id) if person_id else None
+        user_members = session.exec(stmt).all() if stmt is not None else []
 
         members = []
         for um in user_members:
@@ -489,34 +480,38 @@ def assign_member(user_id: int, member_id: int, is_default: bool = True) -> bool
         if not user or not member:
             return False
 
+        person_id = user.person_id
+        if not person_id:
+            return False
+
         # 檢查是否已存在
         existing = session.exec(
-            select(BotUserMember).where(
-                BotUserMember.bot_user_id == user_id,
-                BotUserMember.member_id == member_id
+            select(PersonMember).where(
+                PersonMember.person_id == person_id,
+                PersonMember.member_id == member_id
             )
         ).first()
 
         if existing:
             existing.is_default = is_default
         else:
-            bum = BotUserMember(
-                bot_user_id=user_id,
+            pm = PersonMember(
+                person_id=person_id,
                 member_id=member_id,
                 is_default=is_default
             )
-            session.add(bum)
+            session.add(pm)
 
         # 如果設為預設，更新 BotUser.default_member_id
         if is_default:
             user.default_member_id = member_id
             # 清除其他 Member 的 is_default
-            stmt = select(BotUserMember).where(
-                BotUserMember.bot_user_id == user_id,
-                BotUserMember.member_id != member_id
+            stmt = select(PersonMember).where(
+                PersonMember.person_id == person_id,
+                PersonMember.member_id != member_id
             )
-            for bum in session.exec(stmt).all():
-                bum.is_default = False
+            for pm in session.exec(stmt).all():
+                pm.is_default = False
 
         session.commit()
         logger.info(f"[BotUser] Assigned member: user={user_id}, member={member_id}")
@@ -526,15 +521,19 @@ def assign_member(user_id: int, member_id: int, is_default: bool = True) -> bool
 def switch_member(bot_user: BotUser, member_id: int) -> tuple[bool, str]:
     """切換用戶的當前 Member"""
     with Session(engine) as session:
-        # 檢查用戶是否有此 Member 的權限
-        stmt = select(BotUserMember).where(
-            BotUserMember.bot_user_id == bot_user.id,
-            BotUserMember.member_id == member_id,
-            BotUserMember.can_switch == True
-        )
-        bum = session.exec(stmt).first()
+        person_id = _resolve_person_id(bot_user.id)
+        if not person_id:
+            return False, "用戶尚未綁定身份"
 
-        if not bum:
+        # 檢查用戶是否有此 Member 的權限
+        stmt = select(PersonMember).where(
+            PersonMember.person_id == person_id,
+            PersonMember.member_id == member_id,
+            PersonMember.can_switch == True
+        )
+        pm = session.exec(stmt).first()
+
+        if not pm:
             return False, "您沒有切換到此角色的權限"
 
         member = session.get(Member, member_id)
@@ -555,9 +554,12 @@ def switch_member(bot_user: BotUser, member_id: int) -> tuple[bool, str]:
 def get_available_members(bot_user: BotUser) -> List[dict]:
     """取得用戶可用的 Members"""
     with Session(engine) as session:
-        stmt = select(BotUserMember).where(
-            BotUserMember.bot_user_id == bot_user.id,
-            BotUserMember.can_switch == True
+        person_id = _resolve_person_id(bot_user.id)
+        if not person_id:
+            return []
+        stmt = select(PersonMember).where(
+            PersonMember.person_id == person_id,
+            PersonMember.can_switch == True
         )
         user_members = session.exec(stmt).all()
 
@@ -677,9 +679,9 @@ def grant_project_access(
     can_access_sensitive: bool = False,
     is_default: bool = False,
     created_by: Optional[int] = None,
-) -> BotUserProject:
+) -> Optional[PersonProject]:
     """
-    授予用戶專案存取權限
+    授予用戶專案存取權限（透過 Person → PersonProject）
 
     Args:
         bot_user_id: BotUser ID
@@ -691,90 +693,61 @@ def grant_project_access(
         created_by: 授權者 BotUser ID
 
     Returns:
-        BotUserProject 實例
+        PersonProject 實例
     """
     with Session(engine) as session:
+        person_id = _resolve_person_id(bot_user_id)
+        if not person_id:
+            logger.warning(f"[PersonProject] Cannot grant: user={bot_user_id} has no person_id")
+            return None
+
         # 檢查是否已存在
-        stmt = select(BotUserProject).where(
-            BotUserProject.bot_user_id == bot_user_id,
-            BotUserProject.project_id == project_id,
-        )
-        existing = session.exec(stmt).first()
+        pp = session.exec(
+            select(PersonProject).where(
+                PersonProject.person_id == person_id,
+                PersonProject.project_id == project_id,
+            )
+        ).first()
 
-        if existing:
+        if pp:
             # 更新現有記錄
-            existing.display_name = display_name
-            existing.description = description
-            existing.can_view = can_view
-            existing.can_create_card = can_create_card
-            existing.can_run_task = can_run_task
-            existing.can_access_sensitive = can_access_sensitive
-            existing.is_default = is_default
-            session.commit()
-            session.refresh(existing)
-            return existing
-
-        # 建立新記錄
-        bup = BotUserProject(
-            bot_user_id=bot_user_id,
-            project_id=project_id,
-            display_name=display_name,
-            description=description,
-            can_view=can_view,
-            can_create_card=can_create_card,
-            can_run_task=can_run_task,
-            can_access_sensitive=can_access_sensitive,
-            is_default=is_default,
-            created_by=created_by,
-        )
-        session.add(bup)
+            pp.display_name = display_name
+            pp.description = description
+            pp.can_view = can_view
+            pp.can_create_card = can_create_card
+            pp.can_run_task = can_run_task
+            pp.can_access_sensitive = can_access_sensitive
+            pp.is_default = is_default
+        else:
+            # 建立新記錄
+            pp = PersonProject(
+                person_id=person_id,
+                project_id=project_id,
+                display_name=display_name,
+                description=description,
+                can_view=can_view,
+                can_create_card=can_create_card,
+                can_run_task=can_run_task,
+                can_access_sensitive=can_access_sensitive,
+                is_default=is_default,
+                created_by=created_by,
+            )
+            session.add(pp)
 
         # 如果設為預設，清除其他專案的 is_default
         if is_default:
-            stmt = select(BotUserProject).where(
-                BotUserProject.bot_user_id == bot_user_id,
-                BotUserProject.project_id != project_id,
+            stmt = select(PersonProject).where(
+                PersonProject.person_id == person_id,
+                PersonProject.project_id != project_id,
             )
             for other in session.exec(stmt).all():
                 other.is_default = False
 
-        # 雙寫 PersonProject
-        from app.models.core import PersonProject
-        user = session.get(BotUser, bot_user_id)
-        if user and user.person_id:
-            pp = session.exec(
-                select(PersonProject).where(
-                    PersonProject.person_id == user.person_id,
-                    PersonProject.project_id == project_id,
-                )
-            ).first()
-            if pp:
-                pp.display_name = display_name
-                pp.description = description
-                pp.can_view = can_view
-                pp.can_create_card = can_create_card
-                pp.can_run_task = can_run_task
-                pp.can_access_sensitive = can_access_sensitive
-                pp.is_default = is_default
-            else:
-                session.add(PersonProject(
-                    person_id=user.person_id,
-                    project_id=project_id,
-                    display_name=display_name,
-                    description=description,
-                    can_view=can_view,
-                    can_create_card=can_create_card,
-                    can_run_task=can_run_task,
-                    can_access_sensitive=can_access_sensitive,
-                    is_default=is_default,
-                    created_by=created_by,
-                ))
-
         session.commit()
-        session.refresh(bup)
+        session.refresh(pp)
 
-        logger.info(f"[BotUserProject] Granted: user={bot_user_id}, project={project_id}")
-        return bup
+        logger.info(f"[PersonProject] Granted: user={bot_user_id}, person={person_id}, project={project_id}")
+        return pp
 
 
 # ==========================================

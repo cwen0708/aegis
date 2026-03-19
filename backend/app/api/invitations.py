@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 from datetime import datetime, timezone
 from app.database import get_session
-from app.models.core import InviteCode, BotUser, BotUserProject, Member
+from app.models.core import InviteCode, BotUser, PersonProject, PersonMember, Member
 from app.api.schemas import InvitationCreate, InvitationUpdate, BotUserUpdate, TTSRequest
 import json as json_module
 
@@ -176,8 +176,8 @@ def list_bot_users(session: Session = Depends(get_session)):
     result = []
     for u in users:
         projects = session.exec(
-            select(BotUserProject).where(BotUserProject.bot_user_id == u.id)
-        ).all()
+            select(PersonProject).where(PersonProject.person_id == u.person_id)
+        ).all() if u.person_id else []
         member = session.get(Member, u.default_member_id) if u.default_member_id else None
         result.append({
             "id": u.id,
@@ -224,11 +224,13 @@ def delete_bot_user(user_id: int, session: Session = Depends(get_session)):
     user = session.get(BotUser, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    from app.models.core import BotUserProject as BUP, BotUserMember as BUM, ChatSession as CS, ChatMessage as CM
-    for bup in session.exec(select(BUP).where(BUP.bot_user_id == user_id)).all():
-        session.delete(bup)
-    for bum in session.exec(select(BUM).where(BUM.bot_user_id == user_id)).all():
-        session.delete(bum)
+    from app.models.core import ChatSession as CS, ChatMessage as CM
+    # 清理 Person 相關資料
+    if user.person_id:
+        for pp in session.exec(select(PersonProject).where(PersonProject.person_id == user.person_id)).all():
+            session.delete(pp)
+        for pm in session.exec(select(PersonMember).where(PersonMember.person_id == user.person_id)).all():
+            session.delete(pm)
     for cs in session.exec(select(CS).where(CS.bot_user_id == user_id)).all():
         for cm in session.exec(select(CM).where(CM.session_id == cs.id)).all():
             session.delete(cm)
