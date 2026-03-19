@@ -65,9 +65,16 @@ def _get_signing_secret() -> bytes:
     return _signing_secret
 
 
-def generate_session_token(ttl_hours: int = 8) -> str:
-    """產生 HMAC 簽名的 session token"""
-    payload = json.dumps({"exp": int(time.time()) + ttl_hours * 3600})
+def generate_session_token(ttl_hours: int = 8, user_type: str = "admin", user_id: int = 0) -> str:
+    """產生 HMAC 簽名的 session token。
+    user_type: "admin"（管理員）或 "user"（BotUser 用戶）
+    user_id: BotUser.id（user_type="user" 時必填）
+    """
+    payload = json.dumps({
+        "exp": int(time.time()) + ttl_hours * 3600,
+        "type": user_type,
+        "uid": user_id,
+    })
     payload_b64 = base64.urlsafe_b64encode(payload.encode()).decode()
     sig = hmac.new(_get_signing_secret(), payload_b64.encode(), hashlib.sha256).hexdigest()
     return f"{payload_b64}.{sig}"
@@ -76,17 +83,34 @@ def generate_session_token(ttl_hours: int = 8) -> str:
 def verify_session_token(token: str) -> bool:
     """驗證 session token 簽名與過期時間"""
     try:
+        payload = decode_session_token(token)
+        return payload is not None
+    except Exception:
+        return False
+
+
+def decode_session_token(token: str) -> dict | None:
+    """解碼 session token，回傳 payload dict 或 None。
+    payload 包含：exp, type("admin"/"user"), uid(BotUser.id)
+    """
+    try:
         parts = token.split(".", 1)
         if len(parts) != 2:
-            return False
+            return None
         payload_b64, sig = parts
         expected_sig = hmac.new(_get_signing_secret(), payload_b64.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(sig, expected_sig):
-            return False
+            return None
         payload = json.loads(base64.urlsafe_b64decode(payload_b64))
-        return payload.get("exp", 0) > time.time()
+        if payload.get("exp", 0) <= time.time():
+            return None
+        # 向後相容：舊 token 沒有 type 欄位，視為 admin
+        if "type" not in payload:
+            payload["type"] = "admin"
+            payload["uid"] = 0
+        return payload
     except Exception:
-        return False
+        return None
 
 
 # ==========================================

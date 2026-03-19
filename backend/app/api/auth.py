@@ -78,6 +78,101 @@ def change_admin_password(req: AuthChangePasswordRequest, session: Session = Dep
     return {"success": True, "message": "密碼已更新"}
 
 
+# ==========================================
+# User Auth (BotUser 用戶登入)
+# ==========================================
+class UserLoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@router.post("/auth/user-login")
+def user_login(req: UserLoginRequest, session: Session = Depends(get_session)):
+    """用戶登入（BotUser platform=web），回傳含 user_id 的 session token"""
+    from app.core.auth import check_password, generate_session_token
+    from app.models.core import BotUser
+    from datetime import datetime, timezone
+
+    user = session.exec(
+        select(BotUser).where(
+            BotUser.platform == "web",
+            BotUser.platform_user_id == req.username,
+            BotUser.is_active == True,
+        )
+    ).first()
+
+    if not user or not user.password_hash:
+        raise HTTPException(status_code=401, detail="帳號或密碼錯誤")
+
+    if not check_password(req.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="帳號或密碼錯誤")
+
+    # 檢查鎖定
+    if user.locked_until and user.locked_until > datetime.now(timezone.utc):
+        raise HTTPException(status_code=423, detail="帳號已鎖定，請稍後再試")
+
+    # 更新最後活躍時間
+    user.last_active_at = datetime.now(timezone.utc)
+    user.failed_verify_count = 0
+    session.add(user)
+    session.commit()
+
+    token = generate_session_token(ttl_hours=8, user_type="user", user_id=user.id)
+    return {
+        "success": True,
+        "token": token,
+        "expires_in": 28800,
+        "user": {
+            "id": user.id,
+            "username": user.platform_user_id,
+            "display_name": user.username or user.platform_user_id,
+            "level": user.level,
+        },
+    }
+
+
+@router.get("/auth/me")
+def get_current_user(request_obj=Depends(lambda request: request), session: Session = Depends(get_session)):
+    """根據 token 取得當前用戶資訊"""
+    from app.core.auth import decode_session_token
+    from app.models.core import BotUser, BotUserProject, Project
+
+    auth_header = request_obj.headers.get("authorization", "")
+    token = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else ""
+    payload = decode_session_token(token) if token else None
+
+    if not payload:
+        return {"authenticated": False}
+
+    if payload["type"] == "admin":
+        return {"authenticated": True, "type": "admin", "projects": None}
+
+    # user token → 查 BotUser 和授權專案
+    user = session.get(BotUser, payload["uid"])
+    if not user:
+        return {"authenticated": False}
+
+    projects = session.exec(
+        select(BotUserProject).where(
+            BotUserProject.bot_user_id == user.id,
+            BotUserProject.can_view == True,
+        )
+    ).all()
+    project_ids = [p.project_id for p in projects]
+
+    return {
+        "authenticated": True,
+        "type": "user",
+        "user": {
+            "id": user.id,
+            "username": user.platform_user_id,
+            "display_name": user.username or user.platform_user_id,
+            "level": user.level,
+        },
+        "project_ids": project_ids,
+    }
+
+
 @router.get("/auth/password-status")
 def get_password_status(session: Session = Depends(get_session)):
     """檢查密碼是否仍為預設值"""

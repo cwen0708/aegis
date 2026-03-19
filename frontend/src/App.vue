@@ -44,6 +44,13 @@ const settingsReady = ref(false)
 onMounted(async () => {
   await store.fetchSettings()
 
+  // 恢復用戶登入狀態（如果有 token）
+  const { useAuthStore } = await import('./stores/auth')
+  const authStore = useAuthStore()
+  if (authStore.token) {
+    await authStore.fetchMe()
+  }
+
   // 解析當前網域 → 決定可見的專案和成員
   const { useDomainStore } = await import('./stores/domain')
   const domainStore = useDomainStore()

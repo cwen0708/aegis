@@ -279,6 +279,9 @@ class BotUser(SQLModel, table=True):
     # 額外資料（JSON，供 MCP/Skill 讀取，如 AD 帳密、自訂欄位等）
     extra_json: str = Field(default="{}")
 
+    # 網頁登入（platform="web" 時使用）
+    password_hash: Optional[str] = None              # scrypt 雜湊密碼
+
     # 安全性
     failed_verify_count: int = Field(default=0)      # 驗證失敗次數
     last_failed_at: Optional[datetime] = None        # 最後失敗時間

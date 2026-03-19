@@ -165,9 +165,29 @@ def _ensure_member_inboxes(session: Session, project_id: int):
 @router.get("/projects/", response_model=List[Project])
 def read_projects(request: Request, session: Session = Depends(get_session)):
     projects = session.exec(select(Project)).all()
+
+    # 1. Domain 過濾（基於網域）
     visible_project_ids, _ = get_domain_filter(request, session)
     if visible_project_ids is not None:
         projects = [p for p in projects if p.id in visible_project_ids]
+
+    # 2. User token 過濾（基於用戶授權的專案）
+    from app.core.auth import decode_session_token
+    auth_header = request.headers.get("authorization", "")
+    token = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else ""
+    if token:
+        payload = decode_session_token(token)
+        if payload and payload.get("type") == "user":
+            from app.models.core import BotUserProject
+            user_projects = session.exec(
+                select(BotUserProject.project_id).where(
+                    BotUserProject.bot_user_id == payload["uid"],
+                    BotUserProject.can_view == True,
+                )
+            ).all()
+            user_project_ids = set(user_projects)
+            projects = [p for p in projects if p.id in user_project_ids]
+
     return projects
 
 @router.post("/projects/", response_model=Project)

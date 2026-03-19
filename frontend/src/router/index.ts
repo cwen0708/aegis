@@ -114,7 +114,7 @@ router.beforeEach(async (to) => {
       : auth.requireLoginToView
 
     if (requireLogin && !auth.isAuthenticated) {
-      return { path: '/settings', query: { redirect: to.fullPath } }
+      return { path: '/login', query: { redirect: to.fullPath } }
     }
   }
 })
