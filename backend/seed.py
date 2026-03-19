@@ -138,25 +138,56 @@ def _seed_member_profiles():
         'description: "自我升級。審查小茵的開發成果，通過後部署到運行環境。"\n'
         "---\n\n"
         "# 自我升級（Code Review + 部署）\n\n"
-        "小茵開發完成後會建立審查卡片交給你。\n\n"
-        "## 流程\n\n"
-        "1. 到開發目錄檢查 git diff\n"
-        "2. 後端：python import 檢查\n"
-        "3. 前端：vue-tsc + pnpm build\n"
-        "4. 通過 → 複製到運行環境 + 重啟服務\n"
-        "5. 不通過 → 退回給小茵（標記 [retry:1]）\n\n"
-        "## 退回限制\n\n"
-        "- 最多退回 1 次（開發 + 修正 = 2 輪）\n"
-        "- 已有 [retry:1] 仍不通過 → 標記 [blocked]，等人工介入\n\n"
-        "## 部署步驟\n\n"
-        "- 後端：cp -r backend/app/ → 運行環境/backend/app/\n"
-        "- 前端：cp -r dist/ → 運行環境/frontend/dist/\n"
-        "- 重啟：sudo systemctl restart aegis / aegis-worker\n"
-        "- 驗證：systemctl status + curl API\n\n"
+        "小茵完成開發後建立審查卡片交給你。你必須：審查 → 部署 → 驗證。\n\n"
+        "## Step 1: 查看改動\n\n"
+        "```bash\n"
+        "cd ~/projects/Aegis\n"
+        "git log --oneline -3\n"
+        "git show HEAD --stat\n"
+        "git show HEAD\n"
+        "```\n\n"
+        "## Step 2: 品質檢查\n\n"
+        "```bash\n"
+        "cd ~/projects/Aegis/backend\n"
+        'python3 -c "from app.main import app; print(\'Import OK\')"\n'
+        "```\n\n"
+        "## Step 3: 判斷\n\n"
+        "- 通過 → Step 4\n"
+        "- 不通過且無 [retry:1] → 退回小茵，標 [retry:1]\n"
+        "- 不通過且有 [retry:1] → 標 [blocked]，結束\n\n"
+        "## Step 4: 部署（必須執行，不可跳過）\n\n"
+        "```bash\n"
+        "cd ~/projects/Aegis\n"
+        "CHANGED_FILES=$(git show HEAD --name-only --format='')\n"
+        "DEVDIR=~/projects/Aegis\n"
+        "RUNTIME=~/.local/aegis\n\n"
+        'if echo "$CHANGED_FILES" | grep -q "backend/app/"; then\n'
+        "  cp -r $DEVDIR/backend/app/ $RUNTIME/backend/app/\n"
+        "fi\n"
+        'if echo "$CHANGED_FILES" | grep -q "backend/worker.py"; then\n'
+        "  cp $DEVDIR/backend/worker.py $RUNTIME/backend/worker.py\n"
+        "fi\n"
+        'if echo "$CHANGED_FILES" | grep -q "backend/runner.py"; then\n'
+        "  cp $DEVDIR/backend/runner.py $RUNTIME/backend/runner.py\n"
+        "fi\n"
+        'if echo "$CHANGED_FILES" | grep -q "frontend/"; then\n'
+        "  cp -r $DEVDIR/frontend/dist/ $RUNTIME/frontend/dist/\n"
+        "fi\n"
+        "```\n\n"
+        "## Step 5: 重啟（必須執行）\n\n"
+        "```bash\n"
+        "sudo systemctl restart aegis\n"
+        "sudo systemctl restart aegis-worker\n"
+        "sleep 3\n"
+        "systemctl status aegis --no-pager | head -3\n"
+        "curl -s http://127.0.0.1:8899/api/v1/runner/status | head -1\n"
+        "```\n\n"
         "## 限制\n\n"
-        "- 不要 git push（推送權在管理者）\n"
+        "- Step 4、5 是必須執行的，不是參考\n"
+        "- 不要 git push\n"
         "- 不要改 .env 或 DB\n"
-        "- 部署後異常立即 git checkout 還原\n",
+        "- 退回上限 1 次\n"
+        "- 部署後異常：`cd ~/.local/aegis && git checkout -- backend/ && sudo systemctl restart aegis`\n",
         encoding="utf-8",
     )
 
@@ -271,6 +302,49 @@ def _seed_shared_skills():
             "- 不要求助自己能解決的事情\n"
             "- 一個求助卡片只處理一個問題\n"
             "- 協作完成後，系統會自動通知請求者（寫入對方的短期記憶）\n",
+            encoding="utf-8",
+        )
+
+    api_file = shared_dir / "aegis-api.md"
+    if not api_file.exists():
+        api_file.write_text(
+            "---\n"
+            "name: aegis-api\n"
+            'description: "Aegis 內部 API 工具。127.0.0.1 呼叫不需認證，用於查詢看板、建立卡片、觸發任務。"\n'
+            "---\n\n"
+            "# Aegis 內部 API 工具\n\n"
+            "透過 `http://127.0.0.1:8899/api/v1` 呼叫，127.0.0.1 來源不需認證。\n\n"
+            "## 查詢成員收件匣 list_id（不要寫死）\n\n"
+            "```bash\n"
+            'curl -s "http://127.0.0.1:8899/api/v1/projects/{project_id}/board" | \\\n'
+            "  python3 -c \"\n"
+            "import sys, json\n"
+            "board = json.loads(sys.stdin.read())\n"
+            "for stage in board:\n"
+            "    if '成員名字' in stage.get('name', ''):\n"
+            "        print(stage['id'])\n"
+            '"\n'
+            "```\n\n"
+            "## 建立卡片\n\n"
+            "```bash\n"
+            'curl -s -X POST "http://127.0.0.1:8899/api/v1/cards/" \\\n'
+            '  -H "Content-Type: application/json" \\\n'
+            "  -d '{\"title\": \"...\", \"list_id\": N, \"project_id\": 1, \"description\": \"...\"}'\n"
+            "```\n\n"
+            "## 觸發卡片\n\n"
+            "```bash\n"
+            'curl -s -X POST "http://127.0.0.1:8899/api/v1/cards/{card_id}/trigger"\n'
+            "```\n\n"
+            "## 更新卡片\n\n"
+            "```bash\n"
+            'curl -s -X PATCH "http://127.0.0.1:8899/api/v1/cards/{card_id}" \\\n'
+            '  -H "Content-Type: application/json" \\\n'
+            "  -d '{\"title\": \"...\", \"description\": \"...\"}'\n"
+            "```\n\n"
+            "## 注意\n\n"
+            "- list_id 要動態查詢，不要寫死\n"
+            "- 建立的卡片要 trigger 才會執行\n"
+            "- 不要自己觸發自己的卡片\n",
             encoding="utf-8",
         )
 
