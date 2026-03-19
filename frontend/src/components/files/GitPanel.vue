@@ -125,53 +125,94 @@
           </div>
         </div>
 
-        <!-- 版本圖形 (SVG 時間線) -->
-        <div v-if="timeline.length > 0" class="rounded-xl border border-slate-700/30 bg-slate-800/30 p-4 overflow-x-auto">
+        <!-- 版本圖形 (SVG 時間線 + 分支) -->
+        <div v-if="mainLine.length > 0" class="rounded-xl border border-slate-700/30 bg-slate-800/30 p-4 overflow-x-auto">
           <div class="flex items-center gap-2 mb-3">
-            <span class="text-[10px] text-slate-600 uppercase tracking-wider font-bold">Commit Timeline</span>
+            <span class="text-[10px] text-slate-600 uppercase tracking-wider font-bold">Commit Graph</span>
             <span v-if="overview.all_synced" class="text-[10px] text-emerald-400 ml-auto">✓ 同步</span>
           </div>
-          <div class="relative" :style="{ minWidth: timeline.length * 56 + 40 + 'px' }">
-            <svg :width="timeline.length * 56 + 40" height="100" class="block">
-              <!-- 主線 -->
-              <line x1="20" :y1="50" :x2="timeline.length * 56 + 20" :y2="50" stroke="#334155" stroke-width="2" />
-              <!-- Commit 節點 -->
-              <g v-for="(node, i) in timeline" :key="node.sha_full">
-                <!-- 連線到標籤 -->
+          <div class="relative" :style="{ minWidth: svgWidth + 'px' }">
+            <svg :width="svgWidth" :height="hasBranch ? 120 : 80" class="block">
+              <!-- 主線（origin 歷史） -->
+              <line x1="20" :y1="mainY" :x2="mainLine.length * 56 + 20" :y2="mainY" stroke="#334155" stroke-width="2" />
+
+              <!-- 分支線（dev 獨有 commits） -->
+              <template v-if="hasBranch">
+                <!-- 分叉點到分支 -->
                 <line
-                  v-for="env in node.envs" :key="env"
-                  :x1="20 + i * 56" :y1="env === 'runtime' ? 50 : (env === 'origin' ? 50 : 50)"
-                  :x2="20 + i * 56" :y2="env === 'runtime' ? 18 : (env === 'origin' ? 82 : 18)"
-                  :stroke="env === 'runtime' ? '#34d399' : env === 'dev' ? '#c084fc' : '#60a5fa'"
-                  stroke-width="1.5"
-                  stroke-dasharray="3,2"
+                  :x1="branchStartX" :y1="mainY"
+                  :x2="branchStartX + 20" :y2="branchY"
+                  stroke="#7c3aed" stroke-width="2" opacity="0.5"
                 />
-                <!-- 圓點 -->
+                <!-- 分支水平線 -->
+                <line
+                  :x1="branchStartX + 20" :y1="branchY"
+                  :x2="branchStartX + 20 + devBranch.length * 56" :y2="branchY"
+                  stroke="#7c3aed" stroke-width="2" opacity="0.5"
+                />
+              </template>
+
+              <!-- 主線 commit 節點 -->
+              <g v-for="(node, i) in mainLine" :key="'m' + node.sha_full">
+                <line
+                  v-for="env in node.envs.filter((e: string) => e !== 'dev' || !hasBranch)" :key="env"
+                  :x1="20 + i * 56" :y1="mainY"
+                  :x2="20 + i * 56" :y2="env === 'runtime' ? mainY - 22 : mainY + 22"
+                  :stroke="env === 'runtime' ? '#34d399' : env === 'origin' ? '#60a5fa' : '#c084fc'"
+                  stroke-width="1.5" stroke-dasharray="3,2"
+                />
                 <circle
-                  :cx="20 + i * 56" cy="50" :r="node.envs.length > 0 ? 7 : 4"
+                  :cx="20 + i * 56" :cy="mainY"
+                  :r="node.envs.length > 0 ? 6 : 3.5"
                   :fill="node.envs.length > 0
-                    ? (node.envs.includes('dev') ? '#c084fc' : node.envs.includes('runtime') ? '#34d399' : '#60a5fa')
+                    ? (node.envs.includes('runtime') ? '#34d399' : node.envs.includes('origin') ? '#60a5fa' : '#475569')
                     : '#475569'"
-                  :stroke="node.envs.length > 1 ? '#f0fdf4' : 'none'"
-                  :stroke-width="node.envs.length > 1 ? 2 : 0"
+                  :stroke="node.envs.length > 1 ? '#fff' : 'none'" :stroke-width="node.envs.length > 1 ? 1.5 : 0"
                   class="cursor-pointer"
-                >
-                  <title>{{ node.sha }} {{ node.message }}</title>
-                </circle>
-                <!-- 環境標籤（上方或下方） -->
-                <template v-for="env in node.envs" :key="env + i">
+                ><title>{{ node.sha }} {{ node.message }}</title></circle>
+                <template v-for="env in node.envs.filter((e: string) => e !== 'dev' || !hasBranch)" :key="env + 'm' + i">
                   <text
-                    :x="20 + i * 56" :y="env === 'origin' ? 96 : 12"
+                    :x="20 + i * 56"
+                    :y="env === 'runtime' ? mainY - 26 : mainY + 32"
                     text-anchor="middle"
-                    :fill="env === 'runtime' ? '#34d399' : env === 'dev' ? '#c084fc' : '#60a5fa'"
+                    :fill="env === 'runtime' ? '#34d399' : env === 'origin' ? '#60a5fa' : '#c084fc'"
                     font-size="9" font-weight="bold"
                   >{{ env === 'runtime' ? '運行' : env === 'dev' ? '開發' : '遠端' }}</text>
                 </template>
-                <!-- SHA (hover 時顯示，這裡用 title) -->
               </g>
-              <!-- 箭頭（新→舊） -->
-              <text :x="timeline.length * 56 + 30" y="54" fill="#475569" font-size="10">←新</text>
-              <text x="2" y="54" fill="#475569" font-size="10">舊→</text>
+
+              <!-- 分支 commit 節點 (dev 獨有) -->
+              <g v-for="(node, i) in devBranch" :key="'b' + node.sha_full">
+                <line
+                  v-if="node.envs.includes('dev')"
+                  :x1="branchStartX + 20 + i * 56" :y1="branchY"
+                  :x2="branchStartX + 20 + i * 56" :y2="branchY - 22"
+                  stroke="#c084fc" stroke-width="1.5" stroke-dasharray="3,2"
+                />
+                <line
+                  v-if="node.envs.includes('runtime')"
+                  :x1="branchStartX + 20 + i * 56" :y1="branchY"
+                  :x2="branchStartX + 20 + i * 56" :y2="branchY + 22"
+                  stroke="#34d399" stroke-width="1.5" stroke-dasharray="3,2"
+                />
+                <circle
+                  :cx="branchStartX + 20 + i * 56" :cy="branchY"
+                  :r="6"
+                  fill="#c084fc"
+                  :stroke="node.envs.length > 1 ? '#fff' : 'none'" :stroke-width="node.envs.length > 1 ? 1.5 : 0"
+                  class="cursor-pointer"
+                ><title>{{ node.sha }} {{ node.message }}</title></circle>
+                <text
+                  v-if="node.envs.includes('dev')"
+                  :x="branchStartX + 20 + i * 56" :y="branchY - 26"
+                  text-anchor="middle" fill="#c084fc" font-size="9" font-weight="bold"
+                >開發</text>
+                <text
+                  v-if="node.envs.includes('runtime')"
+                  :x="branchStartX + 20 + i * 56" :y="branchY + 32"
+                  text-anchor="middle" fill="#34d399" font-size="9" font-weight="bold"
+                >運行</text>
+              </g>
             </svg>
           </div>
         </div>
@@ -288,57 +329,24 @@ const deploying = ref(false)
 const pushing = ref(false)
 
 // 按鈕狀態（始終可見，disabled 時灰色）
-// Timeline — 後端回傳的 commit 列表（新→舊，反轉為舊→新顯示）
-const timeline = computed(() => {
+// 主線（origin 歷史，舊→新）
+const mainLine = computed(() => {
   const tl = overview.value?.timeline || []
   return [...tl].reverse()
 })
 
-// Graph nodes — 根據 sha 合併相同 commit 的環境標記（保留供 fallback）
-const graphNodes = computed(() => {
-  if (!overview.value) return []
+// 分支（dev 獨有 commits，舊→新）
+const devBranch = computed(() => overview.value?.dev_branch || [])
+const hasBranch = computed(() => devBranch.value.length > 0)
 
-  const envs = [
-    overview.value.dev?.exists ? { key: 'dev', label: '開發', ...overview.value.dev } : null,
-    overview.value.runtime?.exists ? { key: 'runtime', label: '運行', ...overview.value.runtime } : null,
-    overview.value.origin?.exists ? { key: 'origin', label: '遠端', ...overview.value.origin } : null,
-  ].filter(Boolean) as any[]
-
-  // 按 sha 分組
-  const shaMap = new Map<string, { sha: string, message: string, date: string, envs: any[] }>()
-  for (const env of envs) {
-    const sha = env.sha_full || env.sha
-    if (!sha) continue
-    if (!shaMap.has(sha)) {
-      shaMap.set(sha, { sha: env.sha, message: env.message, date: env.date, envs: [] })
-    }
-    shaMap.get(sha)!.envs.push({ key: env.key, label: env.label })
-  }
-
-  // 排序：dev 最新在上
-  const nodes = Array.from(shaMap.values())
-  nodes.sort((a, b) => {
-    const aHasDev = a.envs.some((e: any) => e.key === 'dev')
-    const bHasDev = b.envs.some((e: any) => e.key === 'dev')
-    if (aHasDev && !bHasDev) return -1
-    if (!aHasDev && bHasDev) return 1
-    return new Date(b.date).getTime() - new Date(a.date).getTime()
-  })
-
-  // 加上樣式
-  return nodes.map(n => {
-    const hasMultiple = n.envs.length > 1
-    const primary = n.envs[0].key
-    return {
-      ...n,
-      dotClass: hasMultiple
-        ? 'border-emerald-400 bg-slate-900'
-        : primary === 'dev' ? 'border-purple-400 bg-purple-400/20'
-        : primary === 'runtime' ? 'border-emerald-400 bg-emerald-400/20'
-        : 'border-blue-400 bg-blue-400/20',
-      innerClass: hasMultiple ? 'bg-emerald-400' : '',
-    }
-  })
+// SVG 尺寸
+const mainY = computed(() => hasBranch.value ? 70 : 40)
+const branchY = computed(() => 28)
+const branchStartX = computed(() => mainLine.value.length * 56 + 20)
+const svgWidth = computed(() => {
+  const mainW = mainLine.value.length * 56 + 40
+  const branchW = hasBranch.value ? devBranch.value.length * 56 + 40 : 0
+  return mainW + branchW
 })
 
 const canDeploy = computed(() => overview.value?.runtime?.exists && overview.value?.dev_ahead_of_runtime > 0)
