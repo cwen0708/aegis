@@ -5,7 +5,7 @@ from app.database import get_session
 from app.models.core import (
     Project, Member, MemberAccount, Account,
     Domain, Room, RoomProject, RoomMember,
-    BotUser, PersonProject, StageList, CronJob,
+    BotUser, Person, PersonProject, PersonMember, StageList, CronJob,
 )
 import json as json_module
 
@@ -91,26 +91,30 @@ def get_all_relations(session: Session = Depends(get_session)):
     for rm in room_members:
         add_edge("room", rm.room_id, "member", rm.member_id, "成員")
 
-    # ── 用戶 ──
-    bot_users = session.exec(select(BotUser).where(BotUser.is_active == True)).all()
-    for bu in bot_users:
-        extra = json_module.loads(bu.extra_json) if bu.extra_json else {}
+    # ── 用戶（以 Person 為單位，同一人只出現一次）──
+    persons = session.exec(select(Person)).all()
+    for p in persons:
+        extra = json_module.loads(p.extra_json) if p.extra_json else {}
         has_ad = bool(extra.get("ad_user") and extra.get("ad_pass"))
+        # 找此 Person 的所有平台帳號
+        bus = session.exec(select(BotUser).where(BotUser.person_id == p.id, BotUser.is_active == True)).all()
+        platforms = [bu.platform for bu in bus]
         nodes.append({
-            "type": "user", "id": bu.id,
-            "label": bu.username or str(bu.platform_user_id),
-            "platform": bu.platform, "level": bu.level, "has_ad": has_ad,
+            "type": "user", "id": p.id,
+            "label": p.display_name or (bus[0].username if bus else f"Person#{p.id}"),
+            "platforms": platforms, "level": p.level, "has_ad": has_ad,
         })
 
-        # 用戶 ↔ 專案（透過 Person）
-        if bu.person_id:
-            pps = session.exec(select(PersonProject).where(PersonProject.person_id == bu.person_id)).all()
-            for pp in pps:
-                add_edge("user", bu.id, "project", pp.project_id, "專案")
+        # 用戶 ↔ 專案（PersonProject）
+        pps = session.exec(select(PersonProject).where(PersonProject.person_id == p.id)).all()
+        for pp in pps:
+            add_edge("user", p.id, "project", pp.project_id, "專案")
 
-        # 用戶 ↔ 成員（對話對象）
-        if bu.default_member_id:
-            add_edge("user", bu.id, "member", bu.default_member_id, "對話")
+        # 用戶 ↔ 成員（PersonMember）
+        pms = session.exec(select(PersonMember).where(PersonMember.person_id == p.id)).all()
+        for pm in pms:
+            rel = "對話（預設）" if pm.is_default else "可切換"
+            add_edge("user", p.id, "member", pm.member_id, rel)
 
     # ── 排程（專案 → 成員，跨專案關聯）──
     cron_jobs = session.exec(select(CronJob).where(CronJob.is_enabled == True, CronJob.target_list_id.is_not(None))).all()
