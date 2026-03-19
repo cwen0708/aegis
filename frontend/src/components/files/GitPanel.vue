@@ -317,7 +317,7 @@ const hasRuntime = computed(() => overview.value?.runtime?.exists)
 
 const lineStart = 16
 const nodeSpacing = 48
-const nodeX = (i: number) => lineStart + i * nodeSpacing
+const nodeX = (i: number | string) => lineStart + Number(i) * nodeSpacing
 const lineEnd = computed(() => graph.value ? lineStart + (graph.value.commits.length - 1) * nodeSpacing : 100)
 const svgWidth = computed(() => graph.value ? lineStart + graph.value.commits.length * nodeSpacing + 20 : 120)
 

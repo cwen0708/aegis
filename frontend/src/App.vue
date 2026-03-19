@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Shield, ListTodo, Settings, Clock, FolderOpen, GitBranch, Wifi, WifiOff, Sun, Moon, Zap, Building2, Home, PanelLeftClose, PanelLeftOpen, Rocket } from 'lucide-vue-next'
+import { Shield, ListTodo, Settings, Clock, FolderOpen, Wifi, WifiOff, Sun, Moon, Zap, Building2, Home, PanelLeftClose, PanelLeftOpen, Rocket } from 'lucide-vue-next'
 import { useWebSocket } from './composables/useWebSocket'
 import { useResponsive } from './composables/useResponsive'
 import { useAegisStore } from './stores/aegis'
