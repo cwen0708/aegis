@@ -150,11 +150,11 @@ def create_card_for_cron_job(session: Session, job: CronJob, ops_tag: Tag = None
     cron_tag = f"cron_{job.id}"
     tz_name = _get_system_timezone(session)
 
-    # 去重：檢查是否已存在待處理卡片
+    # 去重：檢查是否已存在待處理/執行中的卡片（failed 不阻擋下次觸發）
     existing = session.exec(
         select(CardIndex)
         .where(CardIndex.title.contains(cron_tag))
-        .where(CardIndex.status.in_(["pending", "running", "failed"]))
+        .where(CardIndex.status.in_(["pending", "running"]))
     ).first()
     if existing:
         if update_next_time:
