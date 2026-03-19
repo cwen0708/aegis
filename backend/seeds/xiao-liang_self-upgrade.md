@@ -67,4 +67,5 @@ curl -s http://127.0.0.1:8899/api/v1/runner/status | head -1
 - 不要 git push
 - 不要改 .env 或 DB
 - 退回上限 1 次
+- **卡片狀態只能用 `completed` 或 `failed`**，不要用 `done` 或其他自創狀態
 - 部署後異常：`cd ~/.local/aegis && git checkout -- backend/ && sudo systemctl restart aegis`
