@@ -55,7 +55,7 @@ const canEdit = () => props.card.status !== 'running' && props.card.status !== '
       <div class="px-6 pt-5 pb-2 flex items-start justify-between gap-4">
         <div class="flex-1 min-w-0">
           <input v-if="isEditing" v-model="card.title" type="text" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-1.5 text-lg font-bold text-slate-100 focus:ring-2 focus:ring-emerald-500 outline-none">
-          <h2 v-else class="text-lg font-bold text-slate-100 leading-snug truncate">{{ card.title }}</h2>
+          <h2 v-else class="px-3 py-1.5 text-lg font-bold text-slate-100 leading-snug truncate">{{ card.title }}</h2>
         </div>
         <button @click="emit('close')" class="text-slate-400 hover:text-slate-200 transition-colors p-1 rounded-lg hover:bg-slate-700 shrink-0">
           <X class="w-5 h-5" />
