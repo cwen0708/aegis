@@ -9,6 +9,7 @@ from app.api.schemas import (
     PersonCreate, PersonUpdate, PersonProjectCreate, PersonProjectUpdate,
     PersonMemberCreate, PersonMemberUpdate,
 )
+from app.core.auth import require_admin_token
 import json as json_module
 
 router = APIRouter(tags=["invitations"])
@@ -63,7 +64,7 @@ def _invitation_to_response(inv: InviteCode) -> dict:
 # Invitation CRUD
 # ==========================================
 
-@router.get("/invitations")
+@router.get("/invitations", dependencies=[Depends(require_admin_token)])
 def list_invitations(session: Session = Depends(get_session)):
     """列出所有邀請碼"""
     invitations = session.exec(
@@ -72,7 +73,7 @@ def list_invitations(session: Session = Depends(get_session)):
     return [_invitation_to_response(inv) for inv in invitations]
 
 
-@router.post("/invitations")
+@router.post("/invitations", dependencies=[Depends(require_admin_token)])
 def create_invitation(data: InvitationCreate, session: Session = Depends(get_session)):
     """建立邀請碼"""
     from datetime import timedelta
@@ -114,7 +115,7 @@ def create_invitation(data: InvitationCreate, session: Session = Depends(get_ses
     return _invitation_to_response(invitation)
 
 
-@router.get("/invitations/{invitation_id}")
+@router.get("/invitations/{invitation_id}", dependencies=[Depends(require_admin_token)])
 def get_invitation(invitation_id: int, session: Session = Depends(get_session)):
     """取得單一邀請碼"""
     invitation = session.get(InviteCode, invitation_id)
@@ -123,7 +124,7 @@ def get_invitation(invitation_id: int, session: Session = Depends(get_session)):
     return _invitation_to_response(invitation)
 
 
-@router.patch("/invitations/{invitation_id}")
+@router.patch("/invitations/{invitation_id}", dependencies=[Depends(require_admin_token)])
 def update_invitation(invitation_id: int, data: InvitationUpdate, session: Session = Depends(get_session)):
     """更新邀請碼"""
     from datetime import timedelta
@@ -158,7 +159,7 @@ def update_invitation(invitation_id: int, data: InvitationUpdate, session: Sessi
     return _invitation_to_response(invitation)
 
 
-@router.delete("/invitations/{invitation_id}")
+@router.delete("/invitations/{invitation_id}", dependencies=[Depends(require_admin_token)])
 def delete_invitation(invitation_id: int, session: Session = Depends(get_session)):
     """刪除邀請碼"""
     invitation = session.get(InviteCode, invitation_id)
@@ -173,7 +174,7 @@ def delete_invitation(invitation_id: int, session: Session = Depends(get_session
 # Bot User CRUD
 # ==========================================
 
-@router.get("/bot-users")
+@router.get("/bot-users", dependencies=[Depends(require_admin_token)])
 def list_bot_users(session: Session = Depends(get_session)):
     """列出所有 Bot User"""
     users = session.exec(select(BotUser).order_by(BotUser.created_at.desc())).all()
@@ -200,7 +201,7 @@ def list_bot_users(session: Session = Depends(get_session)):
     return result
 
 
-@router.patch("/bot-users/{user_id}")
+@router.patch("/bot-users/{user_id}", dependencies=[Depends(require_admin_token)])
 def update_bot_user(user_id: int, data: BotUserUpdate, session: Session = Depends(get_session)):
     """更新 Bot User"""
     user = session.get(BotUser, user_id)
@@ -222,7 +223,7 @@ def update_bot_user(user_id: int, data: BotUserUpdate, session: Session = Depend
     return {"ok": True}
 
 
-@router.delete("/bot-users/{user_id}")
+@router.delete("/bot-users/{user_id}", dependencies=[Depends(require_admin_token)])
 def delete_bot_user(user_id: int, session: Session = Depends(get_session)):
     """刪除 Bot User 及其關聯資料"""
     user = session.get(BotUser, user_id)
@@ -337,7 +338,7 @@ def _person_to_response(person: Person, session: Session) -> dict:
     }
 
 
-@router.get("/persons")
+@router.get("/persons", dependencies=[Depends(require_admin_token)])
 def list_persons(session: Session = Depends(get_session)):
     """列出所有 Person"""
     persons = session.exec(
@@ -346,7 +347,7 @@ def list_persons(session: Session = Depends(get_session)):
     return [_person_to_response(p, session) for p in persons]
 
 
-@router.get("/persons/{person_id}")
+@router.get("/persons/{person_id}", dependencies=[Depends(require_admin_token)])
 def get_person(person_id: int, session: Session = Depends(get_session)):
     """取得 Person 詳情"""
     person = session.get(Person, person_id)
@@ -355,7 +356,7 @@ def get_person(person_id: int, session: Session = Depends(get_session)):
     return _person_to_response(person, session)
 
 
-@router.post("/persons")
+@router.post("/persons", dependencies=[Depends(require_admin_token)])
 def create_person(data: PersonCreate, session: Session = Depends(get_session)):
     """建立 Person + 自動生成邀請碼 + 建 PersonProject"""
     from datetime import timedelta
@@ -424,7 +425,7 @@ def create_person(data: PersonCreate, session: Session = Depends(get_session)):
     return _person_to_response(person, session)
 
 
-@router.patch("/persons/{person_id}")
+@router.patch("/persons/{person_id}", dependencies=[Depends(require_admin_token)])
 def update_person(person_id: int, data: PersonUpdate, session: Session = Depends(get_session)):
     """更新 Person"""
     person = session.get(Person, person_id)
@@ -450,7 +451,7 @@ def update_person(person_id: int, data: PersonUpdate, session: Session = Depends
     return _person_to_response(person, session)
 
 
-@router.delete("/persons/{person_id}")
+@router.delete("/persons/{person_id}", dependencies=[Depends(require_admin_token)])
 def delete_person(person_id: int, session: Session = Depends(get_session)):
     """刪除 Person + 關聯資料（PersonProject, PersonMember, InviteCode, BotUser）"""
     person = session.get(Person, person_id)
@@ -483,7 +484,7 @@ def delete_person(person_id: int, session: Session = Depends(get_session)):
 # PersonProject CRUD
 # ==========================================
 
-@router.post("/persons/{person_id}/projects")
+@router.post("/persons/{person_id}/projects", dependencies=[Depends(require_admin_token)])
 def add_person_project(person_id: int, data: PersonProjectCreate, session: Session = Depends(get_session)):
     """新增 Person 專案權限"""
     from app.models.core import Project
@@ -528,7 +529,7 @@ def add_person_project(person_id: int, data: PersonProjectCreate, session: Sessi
     }
 
 
-@router.patch("/persons/{person_id}/projects/{project_id}")
+@router.patch("/persons/{person_id}/projects/{project_id}", dependencies=[Depends(require_admin_token)])
 def update_person_project(person_id: int, project_id: int, data: PersonProjectUpdate, session: Session = Depends(get_session)):
     """更新 Person 專案權限"""
     pp = session.exec(
@@ -564,7 +565,7 @@ def update_person_project(person_id: int, project_id: int, data: PersonProjectUp
     }
 
 
-@router.delete("/persons/{person_id}/projects/{project_id}")
+@router.delete("/persons/{person_id}/projects/{project_id}", dependencies=[Depends(require_admin_token)])
 def remove_person_project(person_id: int, project_id: int, session: Session = Depends(get_session)):
     """移除 Person 專案權限"""
     pp = session.exec(
@@ -584,7 +585,7 @@ def remove_person_project(person_id: int, project_id: int, session: Session = De
 # PersonMember CRUD
 # ==========================================
 
-@router.post("/persons/{person_id}/members")
+@router.post("/persons/{person_id}/members", dependencies=[Depends(require_admin_token)])
 def add_person_member(person_id: int, data: PersonMemberCreate, session: Session = Depends(get_session)):
     """新增 Person 成員綁定"""
     person = session.get(Person, person_id)
@@ -620,7 +621,7 @@ def add_person_member(person_id: int, data: PersonMemberCreate, session: Session
     }
 
 
-@router.patch("/persons/{person_id}/members/{member_id}")
+@router.patch("/persons/{person_id}/members/{member_id}", dependencies=[Depends(require_admin_token)])
 def update_person_member(person_id: int, member_id: int, data: PersonMemberUpdate, session: Session = Depends(get_session)):
     """更新 Person 成員綁定"""
     pm = session.exec(
@@ -648,7 +649,7 @@ def update_person_member(person_id: int, member_id: int, data: PersonMemberUpdat
     }
 
 
-@router.delete("/persons/{person_id}/members/{member_id}")
+@router.delete("/persons/{person_id}/members/{member_id}", dependencies=[Depends(require_admin_token)])
 def remove_person_member(person_id: int, member_id: int, session: Session = Depends(get_session)):
     """移除 Person 成員綁定"""
     pm = session.exec(

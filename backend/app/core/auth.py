@@ -13,7 +13,7 @@ import base64
 import time
 import logging
 from typing import Optional
-from fastapi import Depends, HTTPException, Header, status
+from fastapi import Depends, HTTPException, Header, Request, status
 from sqlmodel import Session
 
 logger = logging.getLogger(__name__)
@@ -290,3 +290,39 @@ async def verify_api_key(
 def require_api_key(valid: bool = Depends(verify_api_key)) -> bool:
     """要求 API Key 的依賴注入"""
     return valid
+
+
+# ==========================================
+# Admin Token 驗證（用於管理端點）
+# ==========================================
+
+async def require_admin_token(request: Request):
+    """驗證 admin token，localhost 放行（worker 內部呼叫）。
+    非 localhost 請求必須帶有效 Bearer token 且 type == "admin"。
+    """
+    # localhost 放行（worker / 內部呼叫）
+    client_host = request.client.host if request.client else ""
+    if client_host in ("127.0.0.1", "::1", "localhost"):
+        return
+
+    # 取得 Authorization header
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization header required",
+        )
+
+    token = auth_header[7:]
+    payload = decode_session_token(token)
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
+
+    if payload.get("type") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required",
+        )
