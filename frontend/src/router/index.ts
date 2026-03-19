@@ -22,6 +22,7 @@ import SettingsProjectDetail from '../views/settings/SettingsProjectDetail.vue'
 import SettingsTeamDetail from '../views/settings/SettingsTeamDetail.vue'
 import SettingsUserDetail from '../views/settings/SettingsUserDetail.vue'
 import SettingsTerminal from '../views/settings/SettingsTerminal.vue'
+import SettingsRoomDetail from '../views/settings/SettingsRoomDetail.vue'
 import FileBrowser from '../views/FileBrowser.vue'
 import GitManager from '../views/GitManager.vue'
 import RelationGraph from '../views/RelationGraph.vue'
@@ -62,6 +63,7 @@ const router = createRouter({
         { path: 'projects', component: SettingsProjects },
         { path: 'projects/:id', component: SettingsProjectDetail },
         { path: 'rooms', component: () => import('../views/settings/SettingsRooms.vue') },
+        { path: 'rooms/:id', component: SettingsRoomDetail },
         { path: 'domains', component: () => import('../views/settings/SettingsDomains.vue') },
         { path: 'domains/:id', component: () => import('../views/settings/SettingsDomainDetail.vue') },
         { path: 'users', component: SettingsUsers },
