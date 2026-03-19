@@ -137,6 +137,64 @@ def _migrate_db():
                 cur.execute("ALTER TABLE invitecode ADD COLUMN owner_person_id INTEGER")
                 logger.info("[Migration] Added 'owner_person_id' to invitecode")
 
+        # Person 表：從 BotUser 遷移真人身份
+        tables = [row[0] for row in cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+        if "person" not in tables:
+            cur.execute("""
+                CREATE TABLE person (
+                    id INTEGER PRIMARY KEY,
+                    display_name VARCHAR DEFAULT '',
+                    description VARCHAR DEFAULT '',
+                    level INTEGER DEFAULT 0,
+                    default_member_id INTEGER,
+                    access_expires_at DATETIME,
+                    extra_json TEXT DEFAULT '{}',
+                    created_at DATETIME
+                )
+            """)
+            # 按 person_id 分組，每組建一個 Person
+            cur.execute("""
+                INSERT INTO person (id, display_name, level, default_member_id, access_expires_at, extra_json, created_at)
+                SELECT
+                    person_id,
+                    COALESCE(username, ''),
+                    MAX(level),
+                    MAX(default_member_id),
+                    MAX(access_expires_at),
+                    MAX(CASE WHEN extra_json != '{}' AND extra_json IS NOT NULL THEN extra_json ELSE '{}' END),
+                    MIN(created_at)
+                FROM botuser
+                WHERE person_id > 0
+                GROUP BY person_id
+            """)
+            person_count = cur.execute("SELECT COUNT(*) FROM person").fetchone()[0]
+            logger.info(f"[Migration] Created 'person' table with {person_count} records from botuser")
+
+            # 用 BotUserProject 的 display_name/description 回填到 Person
+            cur.execute("""
+                UPDATE person SET
+                    display_name = COALESCE((
+                        SELECT bup.display_name FROM bot_user_project bup
+                        JOIN botuser bu ON bup.bot_user_id = bu.id
+                        WHERE bu.person_id = person.id AND bup.display_name != ''
+                        LIMIT 1
+                    ), person.display_name),
+                    description = COALESCE((
+                        SELECT bup.description FROM bot_user_project bup
+                        JOIN botuser bu ON bup.bot_user_id = bu.id
+                        WHERE bu.person_id = person.id AND bup.description != ''
+                        LIMIT 1
+                    ), person.description)
+            """)
+            logger.info("[Migration] Backfilled Person display_name/description from BotUserProject")
+
+            # InviteCode 的 owner_person_id 也回填
+            cur.execute("""
+                UPDATE invitecode SET owner_person_id = (
+                    SELECT person_id FROM botuser WHERE person_id > 0 LIMIT 1
+                ) WHERE owner_person_id IS NULL AND used_count > 0
+            """)
+
         # Room: 首次建立時 seed 預設房間（重用上方的 tables 變數）
         if "room" in tables:
             room_count = cur.execute("SELECT COUNT(*) FROM room").fetchone()[0]

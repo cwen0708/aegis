@@ -247,10 +247,30 @@ class ChannelBinding(SQLModel, table=True):
 
 
 # ==========================================
-# P2: Bot 用戶與權限系統
+# P2: 用戶身份與權限系統
 # ==========================================
+class Person(SQLModel, table=True):
+    """真人身份（跨平台共用）— 一個人可有多個 BotUser（不同平台的登入帳號）"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    # 身份資訊
+    display_name: str = Field(default="")       # 顯示名稱（如「王蕙宇」）
+    description: str = Field(default="")        # 身份描述（如「財務人員，可查看報表」）
+
+    # 權限（Person 層級）
+    level: int = Field(default=0)               # 0=未驗證, 1=訪客, 2=成員, 3=管理員
+    default_member_id: Optional[int] = Field(default=None, foreign_key="member.id")
+    access_expires_at: Optional[datetime] = None
+
+    # 額外資料（JSON，如 AD 帳密、自訂欄位）— 跨平台共用
+    extra_json: str = Field(default="{}")
+
+    # 時間
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class BotUser(SQLModel, table=True):
-    """Bot 用戶（真人）"""
+    """Bot 用戶（平台登入帳號，指向 Person）"""
     __table_args__ = (
         UniqueConstraint("platform", "platform_user_id", name="uq_botuser_platform_user"),
     )

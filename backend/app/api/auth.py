@@ -192,12 +192,22 @@ def register_with_invite(req: RegisterWithInviteRequest, session: Session = Depe
     session.add(user)
     session.flush()  # 取得 user.id
 
-    # 跨平台綁定：如果邀請碼已有 owner_person_id，綁定到同一個 person
+    # 綁定到 Person（邀請碼建立時已建好 Person）
     if invite.owner_person_id:
         user.person_id = invite.owner_person_id
     else:
-        user.person_id = user.id
-        invite.owner_person_id = user.person_id
+        # fallback：舊邀請碼沒有 Person，建一個
+        from app.models.core import Person
+        person = Person(
+            display_name=invite.user_display_name or username,
+            description=invite.user_description,
+            level=invite.target_level,
+            default_member_id=invite.target_member_id,
+        )
+        session.add(person)
+        session.flush()
+        user.person_id = person.id
+        invite.owner_person_id = person.id
 
     # 建立 BotUserMember
     if invite.target_member_id:

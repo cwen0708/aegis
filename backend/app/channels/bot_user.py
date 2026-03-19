@@ -219,14 +219,22 @@ def verify_invite_code(bot_user: BotUser, code: str) -> tuple[bool, str]:
             db_user.failed_verify_count = 0
             db_user.locked_until = None
 
-            # 跨平台綁定：如果邀請碼已有 owner_person_id，綁定到同一個 person
+            # 綁定到 Person（邀請碼建立時已建好 Person）
             if invite.owner_person_id:
                 db_user.person_id = invite.owner_person_id
             else:
-                # 第一個使用者，設定 person_id 為自己的 id
-                if not db_user.person_id or db_user.person_id == 0:
-                    db_user.person_id = db_user.id
-                invite.owner_person_id = db_user.person_id
+                # fallback：舊邀請碼沒有 Person，建一個
+                from app.models.core import Person
+                person = Person(
+                    display_name=invite.user_display_name or db_user.username or "",
+                    description=invite.user_description,
+                    level=invite.target_level,
+                    default_member_id=invite.target_member_id,
+                )
+                session.add(person)
+                session.flush()
+                db_user.person_id = person.id
+                invite.owner_person_id = person.id
 
             # 設定存取期限
             if invite.access_valid_days:
@@ -329,6 +337,17 @@ def create_invite_code(
     code = secrets.token_urlsafe(8).upper()[:12]  # 12 字元
 
     with Session(engine) as session:
+        # 建立 Person（邀請碼 = 一個人的身份）
+        from app.models.core import Person
+        person = Person(
+            display_name=user_display_name,
+            description=user_description,
+            level=target_level,
+            default_member_id=target_member_id,
+        )
+        session.add(person)
+        session.flush()  # 取得 person.id
+
         invite = InviteCode(
             code=code,
             target_level=target_level,
@@ -338,6 +357,7 @@ def create_invite_code(
             expires_at=datetime.now(timezone.utc) + timedelta(days=expires_days),
             created_by=created_by,
             note=note,
+            owner_person_id=person.id,
             # P2: 用戶身份描述
             user_display_name=user_display_name,
             user_description=user_description,
@@ -350,7 +370,7 @@ def create_invite_code(
         session.add(invite)
         session.commit()
 
-    logger.info(f"[InviteCode] Created: {code} (level={target_level}, projects={allowed_projects})")
+    logger.info(f"[InviteCode] Created: {code} (level={target_level}, projects={allowed_projects}, person={person.id})")
     return code
 
 
