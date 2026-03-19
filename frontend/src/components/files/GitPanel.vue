@@ -187,6 +187,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { GitBranch } from 'lucide-vue-next'
 import { config } from '../../config'
+import { authHeaders } from '../../utils/authFetch'
 
 const props = defineProps<{
   projectId: number
@@ -265,7 +266,7 @@ async function loadStatus() {
 async function doFetch() {
   fetching.value = true
   try {
-    const res = await fetch(`${API}/api/v1/projects/${props.projectId}/git/fetch`, { method: 'POST' })
+    const res = await fetch(`${API}/api/v1/projects/${props.projectId}/git/fetch`, { method: 'POST', headers: authHeaders() })
     if (res.ok) {
       const data = await res.json()
       if (data.ok && status.value) {
@@ -283,7 +284,7 @@ async function doFetch() {
 async function doPullTask() {
   pulling.value = true
   try {
-    const res = await fetch(`${API}/api/v1/projects/${props.projectId}/git/pull-task`, { method: 'POST' })
+    const res = await fetch(`${API}/api/v1/projects/${props.projectId}/git/pull-task`, { method: 'POST', headers: authHeaders() })
     if (res.ok) {
       const data = await res.json()
       if (data.ok) {
