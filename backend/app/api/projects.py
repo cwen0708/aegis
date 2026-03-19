@@ -253,7 +253,7 @@ def update_project(project_id: int, update_data: ProjectUpdate, session: Session
 
 
 @router.get("/projects/{project_id}/board", response_model=List[StageListResponse])
-def read_project_board(project_id: int, session: Session = Depends(get_session)):
+def read_project_board(project_id: int, request: Request, session: Session = Depends(get_session)):
     """一次抓取整個看板所需的資料：列表與其中的卡片（MD-driven via CardIndex）"""
     project = session.get(Project, project_id)
     if not project:
@@ -266,6 +266,11 @@ def read_project_board(project_id: int, session: Session = Depends(get_session))
     lists = session.exec(
         select(StageList).where(StageList.project_id == project_id).order_by(StageList.position)
     ).all()
+
+    # 未登入時根據 Domain 過濾成員收件匣
+    _, visible_member_ids = get_domain_filter(request, session)
+    if visible_member_ids is not None:
+        lists = [l for l in lists if not l.is_member_bound or l.member_id in visible_member_ids]
 
     # Query all cards for this project from the index
     card_indices = query_board(session, project_id)
