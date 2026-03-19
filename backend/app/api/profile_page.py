@@ -194,6 +194,23 @@ button[type=submit]:disabled { background: #334155; cursor: not-allowed; }
     </div>
 
     <div class="divider"></div>
+
+    <div id="webAccountSection" style="display:none">
+      <label style="font-size:13px;font-weight:600;color:#94a3b8;display:block;margin-bottom:12px">🌐 網頁登入帳號</label>
+      <div class="field-group">
+        <label>帳號</label>
+        <input type="text" id="webUsername" placeholder="設定網頁登入帳號" autocomplete="username">
+        <p class="desc">用於網頁版登入（與 Telegram 帳號獨立）</p>
+      </div>
+      <div class="field-group">
+        <label>密碼</label>
+        <input type="password" id="webPassword" placeholder="設定網頁登入密碼（至少 6 字元）" autocomplete="new-password">
+        <p class="desc">留空表示不修改</p>
+      </div>
+      <div id="webAccountStatus" style="font-size:12px;color:#64748b;margin-bottom:8px"></div>
+      <div class="divider"></div>
+    </div>
+
     <div id="definedFields"></div>
 
     <div class="divider"></div>
@@ -236,8 +253,18 @@ async function load() {
       ' — ' + esc(data.platform || '') +
       (data.username ? ' (@' + esc(data.username) + ')' : '');
 
-    // 顯示暱稱欄位（直接改 BotUser.username）
+    // 暱稱
     document.getElementById('displayName').value = data.display_name || '';
+
+    // 網頁帳密區塊
+    const webSection = document.getElementById('webAccountSection');
+    webSection.style.display = 'block';
+    if (data.web_username) {
+      document.getElementById('webUsername').value = data.web_username;
+      document.getElementById('webAccountStatus').textContent = '✅ 已設定網頁帳號：' + data.web_username;
+    } else {
+      document.getElementById('webAccountStatus').textContent = '尚未設定網頁登入帳號';
+    }
 
     // 渲染定義欄位
     fieldDefs = data.fields || [];
@@ -312,11 +339,18 @@ document.getElementById('profileForm').onsubmit = async (e) => {
     });
 
     const displayName = document.getElementById('displayName').value.trim();
+    const webUsername = document.getElementById('webUsername').value.trim();
+    const webPassword = document.getElementById('webPassword').value;
 
     const res = await fetch(API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, extra, display_name: displayName || null })
+      body: JSON.stringify({
+        token, extra,
+        display_name: displayName || null,
+        web_username: webUsername || null,
+        web_password: webPassword || null,
+      })
     });
 
     if (!res.ok) throw new Error((await res.json()).detail || '儲存失敗');
@@ -345,6 +379,8 @@ class ProfileSaveRequest(BaseModel):
     token: str
     extra: dict
     display_name: Optional[str] = None
+    web_username: Optional[str] = None
+    web_password: Optional[str] = None
 
 
 @router.get("/u/profile", response_class=HTMLResponse)
@@ -376,12 +412,23 @@ async def get_profile(token: str):
             except (json.JSONDecodeError, TypeError):
                 pass
 
+        # 查詢同 person 的 web 帳號
+        web_username = None
+        if user.person_id:
+            from sqlmodel import select
+            web_user = session.exec(
+                select(BotUser).where(BotUser.person_id == user.person_id, BotUser.platform == "web")
+            ).first()
+            if web_user:
+                web_username = web_user.platform_user_id
+
         return {
             "display_name": user.username or user.platform_user_id,
             "platform": user.platform,
             "username": user.username,
             "extra": extra,
             "fields": get_profile_fields(),
+            "web_username": web_username,
         }
 
 
@@ -423,6 +470,67 @@ async def save_profile(req: ProfileSaveRequest):
                 new_extra[k] = v
 
         user.extra_json = json.dumps(new_extra, ensure_ascii=False)
+
+        # 同步寫入 Person.extra_json
+        if user.person_id:
+            from app.models.core import Person
+            person = session.get(Person, user.person_id)
+            if person:
+                person.extra_json = user.extra_json
+                if req.display_name is not None:
+                    person.display_name = req.display_name
+
+        # 處理網頁帳密
+        if req.web_username:
+            from sqlmodel import select
+            from app.core.auth import hash_password
+
+            if not user.person_id:
+                raise HTTPException(status_code=400, detail="請先完成邀請碼驗證")
+
+            # 查找或建立 web BotUser
+            web_user = session.exec(
+                select(BotUser).where(BotUser.person_id == user.person_id, BotUser.platform == "web")
+            ).first()
+
+            if web_user:
+                # 更新帳號名
+                if req.web_username != web_user.platform_user_id:
+                    # 檢查帳號是否已被佔用
+                    conflict = session.exec(
+                        select(BotUser).where(
+                            BotUser.platform == "web",
+                            BotUser.platform_user_id == req.web_username,
+                            BotUser.id != web_user.id,
+                        )
+                    ).first()
+                    if conflict:
+                        raise HTTPException(status_code=409, detail="此帳號已被使用")
+                    web_user.platform_user_id = req.web_username
+                # 更新密碼（有填才改）
+                if req.web_password and len(req.web_password) >= 6:
+                    web_user.password_hash = hash_password(req.web_password)
+            else:
+                # 新建 web BotUser
+                if not req.web_password or len(req.web_password) < 6:
+                    raise HTTPException(status_code=400, detail="首次設定網頁帳號需要密碼（至少 6 字元）")
+                # 檢查帳號佔用
+                conflict = session.exec(
+                    select(BotUser).where(BotUser.platform == "web", BotUser.platform_user_id == req.web_username)
+                ).first()
+                if conflict:
+                    raise HTTPException(status_code=409, detail="此帳號已被使用")
+                web_user = BotUser(
+                    platform="web",
+                    platform_user_id=req.web_username,
+                    username=user.username,
+                    level=user.level,
+                    person_id=user.person_id,
+                    password_hash=hash_password(req.web_password),
+                    is_active=True,
+                )
+                session.add(web_user)
+
         session.add(user)
         session.commit()
 

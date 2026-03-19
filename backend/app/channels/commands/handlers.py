@@ -758,54 +758,18 @@ async def _handle_switch(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotU
 # ===== 個人資料命令 =====
 
 async def _handle_profile(cmd: ParsedCommand, msg: InboundMessage, bot_user: BotUser) -> str:
-    """管理用戶額外資料 — 回覆獨立設定頁面連結，避免密碼經過聊天記錄"""
-    import json
+    """回覆個人資料設定頁面連結"""
     from app.api.profile_page import resolve_domain_for_user, get_profile_url
 
-    if not cmd.args:
-        # /profile — 產生設定頁面連結
-        domain = resolve_domain_for_user(bot_user.id)
-        url = get_profile_url(bot_user.id, domain)
-
-        # 顯示目前狀態
-        data = get_user_extra(bot_user.id)
-        status_lines = []
-        if data:
-            for k, v in data.items():
-                display = "✅ 已設定" if "pass" in k.lower() or "secret" in k.lower() or "token" in k.lower() else str(v)
-                status_lines.append(f"  `{k}`: {display}")
-
-        return (
-            "📋 *個人資料設定*\n\n"
-            + ("目前狀態:\n" + "\n".join(status_lines) + "\n\n" if status_lines else "")
-            + f"👉 [點此設定個人資料]({url})\n\n"
-            + "連結 30 分鐘內有效，請在網頁上修改帳號密碼。\n"
-            + "⚠️ 請勿在聊天中直接輸入密碼。"
-        )
-
-    action = cmd.args[0].lower() if cmd.args else ""
-
-    if action == "clear":
-        # /profile clear
-        set_user_extra(bot_user.id, {})
-        return "🗑️ 已清空所有額外資料"
-
-    if action in ("set", "del"):
-        # 不再支援在聊天中設定，引導到網頁
-        domain = resolve_domain_for_user(bot_user.id)
-        url = get_profile_url(bot_user.id, domain)
-        return (
-            "⚠️ 為了安全，請改用網頁設定：\n\n"
-            f"👉 [點此設定個人資料]({url})\n\n"
-            "密碼等敏感資料不應在聊天中輸入。"
-        )
-
-    # 其他未知的子指令
     domain = resolve_domain_for_user(bot_user.id)
     url = get_profile_url(bot_user.id, domain)
+
     return (
-        "使用方式:\n"
-        "/profile — 開啟設定頁面\n"
-        "/profile clear — 清空所有資料\n\n"
-        f"👉 [設定頁面]({url})"
+        "📋 *個人資料設定*\n\n"
+        f"👉 [點此開啟設定頁面]({url})\n\n"
+        "可設定：\n"
+        "• NAS / AD 帳號密碼\n"
+        "• 網頁登入帳號密碼\n"
+        "• 暱稱及其他資料\n\n"
+        "連結 30 分鐘內有效。"
     )
