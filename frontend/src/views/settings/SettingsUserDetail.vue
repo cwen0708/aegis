@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  ArrowLeft, Save, Loader2, Trash2, Copy, AlertTriangle,
+  ArrowLeft, Save, Loader2, Trash2, Copy, AlertTriangle, Plus, X,
 } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 import ConfirmDialog from '../../components/ConfirmDialog.vue'
@@ -179,6 +179,66 @@ async function copyCode(code: string) {
   }
 }
 
+// ── PersonProject management ──
+const showAddProject = ref(false)
+const addingProjectId = ref<number | null>(null)
+
+function availableProjects(): ProjectOption[] {
+  if (!person.value) return []
+  const existingIds = new Set(person.value.projects.map(p => p.project_id))
+  return allProjects.value.filter(p => !existingIds.has(p.id))
+}
+
+async function addProject() {
+  if (!addingProjectId.value) return
+  try {
+    const res = await fetch(`${API}/api/v1/persons/${personId}/projects`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ project_id: addingProjectId.value }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: '新增失敗' }))
+      throw new Error(err.detail)
+    }
+    store.addToast('專案已新增', 'success')
+    showAddProject.value = false
+    addingProjectId.value = null
+    await fetchPerson()
+  } catch (e: any) {
+    store.addToast(e.message || '新增失敗', 'error')
+  }
+}
+
+async function removeProject(projectId: number) {
+  try {
+    const res = await fetch(`${API}/api/v1/persons/${personId}/projects/${projectId}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    })
+    if (!res.ok) throw new Error('移除失敗')
+    store.addToast('專案已移除', 'success')
+    await fetchPerson()
+  } catch (e: any) {
+    store.addToast(e.message || '移除失敗', 'error')
+  }
+}
+
+async function togglePermission(pp: PersonProjectInfo, field: string, value: boolean) {
+  try {
+    const res = await fetch(`${API}/api/v1/persons/${personId}/projects/${pp.project_id}`, {
+      method: 'PATCH',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ [field]: value }),
+    })
+    if (!res.ok) throw new Error('更新失敗')
+    // Update local state
+    ;(pp as any)[field] = value
+  } catch (e: any) {
+    store.addToast(e.message || '更新失敗', 'error')
+  }
+}
+
 // ── Init ──
 onMounted(async () => {
   await Promise.all([fetchPerson(), fetchProjects()])
@@ -347,9 +407,43 @@ onMounted(async () => {
 
       <!-- Section 4: 專案權限 -->
       <div class="bg-slate-800/50 rounded-2xl border border-slate-700 p-6 space-y-4">
-        <h3 class="text-sm font-bold text-slate-300 uppercase tracking-wider">專案權限</h3>
+        <div class="flex items-center gap-2">
+          <h3 class="text-sm font-bold text-slate-300 uppercase tracking-wider">專案權限</h3>
+          <span class="text-xs text-slate-500 ml-auto">{{ person.projects.length }} / {{ allProjects.length }}</span>
+          <button
+            @click="showAddProject = !showAddProject"
+            class="flex items-center gap-1 px-2 py-1 text-xs text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 border border-emerald-500/30 rounded-lg transition"
+          >
+            <Plus class="w-3.5 h-3.5" />
+            新增專案
+          </button>
+        </div>
 
-        <div v-if="person.projects.length === 0" class="text-center py-6 text-slate-500 text-sm">
+        <!-- Add project dropdown -->
+        <div v-if="showAddProject" class="flex items-center gap-2 p-3 bg-slate-900/80 rounded-xl border border-slate-600">
+          <select
+            v-model.number="addingProjectId"
+            class="flex-1 px-3 py-1.5 bg-slate-800 text-slate-200 border border-slate-600 rounded-lg text-sm [color-scheme:dark]"
+          >
+            <option :value="null" disabled>選擇專案...</option>
+            <option v-for="p in availableProjects()" :key="p.id" :value="p.id">{{ p.name }}</option>
+          </select>
+          <button
+            @click="addProject"
+            :disabled="!addingProjectId"
+            class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-xs rounded-lg transition-colors"
+          >
+            加入
+          </button>
+          <button
+            @click="showAddProject = false; addingProjectId = null"
+            class="p-1.5 text-slate-400 hover:text-slate-200 transition"
+          >
+            <X class="w-4 h-4" />
+          </button>
+        </div>
+
+        <div v-if="person.projects.length === 0 && !showAddProject" class="text-center py-6 text-slate-500 text-sm">
           無專案權限設定（可存取所有專案）
         </div>
 
@@ -359,15 +453,62 @@ onMounted(async () => {
             :key="pp.id"
             class="px-4 py-3 bg-slate-900/50 rounded-xl border border-slate-700/50"
           >
-            <div class="flex items-center gap-2 mb-1">
+            <div class="flex items-center gap-2 mb-2">
               <span class="text-sm text-slate-200 font-medium">{{ getProjectName(pp.project_id) }}</span>
-              <span v-if="pp.is_default" class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">預設</span>
+              <label class="flex items-center gap-1 ml-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  :checked="pp.is_default"
+                  @change="togglePermission(pp, 'is_default', !pp.is_default)"
+                  class="rounded bg-slate-700 border-slate-600 text-amber-500 focus:ring-amber-500 w-3 h-3"
+                />
+                <span class="text-[10px] text-amber-400">預設</span>
+              </label>
+              <button
+                @click="removeProject(pp.project_id)"
+                class="ml-auto p-1 text-slate-500 hover:text-red-400 transition"
+                title="移除專案"
+              >
+                <X class="w-4 h-4" />
+              </button>
             </div>
-            <div class="flex flex-wrap gap-2">
-              <span v-if="pp.can_view" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">查看</span>
-              <span v-if="pp.can_create_card" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">建卡</span>
-              <span v-if="pp.can_run_task" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">執行</span>
-              <span v-if="pp.can_access_sensitive" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">敏感</span>
+            <div class="flex flex-wrap gap-3">
+              <label class="flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  :checked="pp.can_view"
+                  @change="togglePermission(pp, 'can_view', !pp.can_view)"
+                  class="rounded bg-slate-700 border-slate-600 text-emerald-500 focus:ring-emerald-500 w-3.5 h-3.5"
+                />
+                <span class="text-xs text-slate-400">查看</span>
+              </label>
+              <label class="flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  :checked="pp.can_create_card"
+                  @change="togglePermission(pp, 'can_create_card', !pp.can_create_card)"
+                  class="rounded bg-slate-700 border-slate-600 text-emerald-500 focus:ring-emerald-500 w-3.5 h-3.5"
+                />
+                <span class="text-xs text-slate-400">建卡</span>
+              </label>
+              <label class="flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  :checked="pp.can_run_task"
+                  @change="togglePermission(pp, 'can_run_task', !pp.can_run_task)"
+                  class="rounded bg-slate-700 border-slate-600 text-emerald-500 focus:ring-emerald-500 w-3.5 h-3.5"
+                />
+                <span class="text-xs text-slate-400">執行</span>
+              </label>
+              <label class="flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  :checked="pp.can_access_sensitive"
+                  @change="togglePermission(pp, 'can_access_sensitive', !pp.can_access_sensitive)"
+                  class="rounded bg-slate-700 border-slate-600 text-emerald-500 focus:ring-emerald-500 w-3.5 h-3.5"
+                />
+                <span class="text-xs text-slate-400">敏感</span>
+              </label>
             </div>
           </div>
         </div>

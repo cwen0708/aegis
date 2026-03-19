@@ -112,3 +112,25 @@ class PersonUpdate(BaseModel):
     description: Optional[str] = None
     level: Optional[int] = None
     access_expires_at: Optional[str] = None  # ISO format or empty string to clear
+
+
+# ==========================================
+# PersonProject
+# ==========================================
+class PersonProjectCreate(BaseModel):
+    """新增 Person 專案權限"""
+    project_id: int
+    can_view: bool = True
+    can_create_card: bool = False
+    can_run_task: bool = False
+    can_access_sensitive: bool = False
+    is_default: bool = False
+
+
+class PersonProjectUpdate(BaseModel):
+    """更新 Person 專案權限"""
+    can_view: Optional[bool] = None
+    can_create_card: Optional[bool] = None
+    can_run_task: Optional[bool] = None
+    can_access_sensitive: Optional[bool] = None
+    is_default: Optional[bool] = None

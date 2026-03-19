@@ -6,7 +6,7 @@ from app.database import get_session
 from app.models.core import InviteCode, BotUser, Person, PersonProject, PersonMember, Member
 from app.api.schemas import (
     InvitationCreate, InvitationUpdate, BotUserUpdate, TTSRequest,
-    PersonCreate, PersonUpdate,
+    PersonCreate, PersonUpdate, PersonProjectCreate, PersonProjectUpdate,
 )
 import json as json_module
 
@@ -457,6 +457,107 @@ def delete_person(person_id: int, session: Session = Depends(get_session)):
         session.add(bu)
 
     session.delete(person)
+    session.commit()
+    return {"ok": True}
+
+
+# ==========================================
+# PersonProject CRUD
+# ==========================================
+
+@router.post("/persons/{person_id}/projects")
+def add_person_project(person_id: int, data: PersonProjectCreate, session: Session = Depends(get_session)):
+    """新增 Person 專案權限"""
+    from app.models.core import Project
+    person = session.get(Person, person_id)
+    if not person:
+        raise HTTPException(status_code=404, detail="Person 不存在")
+    project = session.get(Project, data.project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="專案不存在")
+    existing = session.exec(
+        select(PersonProject).where(
+            PersonProject.person_id == person_id,
+            PersonProject.project_id == data.project_id,
+        )
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="此專案權限已存在")
+    pp = PersonProject(
+        person_id=person_id,
+        project_id=data.project_id,
+        display_name=person.display_name or "",
+        description=person.description or "",
+        can_view=data.can_view,
+        can_create_card=data.can_create_card,
+        can_run_task=data.can_run_task,
+        can_access_sensitive=data.can_access_sensitive,
+        is_default=data.is_default,
+    )
+    session.add(pp)
+    session.commit()
+    session.refresh(pp)
+    return {
+        "id": pp.id,
+        "project_id": pp.project_id,
+        "display_name": pp.display_name,
+        "description": pp.description,
+        "can_view": pp.can_view,
+        "can_create_card": pp.can_create_card,
+        "can_run_task": pp.can_run_task,
+        "can_access_sensitive": pp.can_access_sensitive,
+        "is_default": pp.is_default,
+    }
+
+
+@router.patch("/persons/{person_id}/projects/{project_id}")
+def update_person_project(person_id: int, project_id: int, data: PersonProjectUpdate, session: Session = Depends(get_session)):
+    """更新 Person 專案權限"""
+    pp = session.exec(
+        select(PersonProject).where(
+            PersonProject.person_id == person_id,
+            PersonProject.project_id == project_id,
+        )
+    ).first()
+    if not pp:
+        raise HTTPException(status_code=404, detail="PersonProject 不存在")
+    if data.can_view is not None:
+        pp.can_view = data.can_view
+    if data.can_create_card is not None:
+        pp.can_create_card = data.can_create_card
+    if data.can_run_task is not None:
+        pp.can_run_task = data.can_run_task
+    if data.can_access_sensitive is not None:
+        pp.can_access_sensitive = data.can_access_sensitive
+    if data.is_default is not None:
+        pp.is_default = data.is_default
+    session.commit()
+    session.refresh(pp)
+    return {
+        "id": pp.id,
+        "project_id": pp.project_id,
+        "display_name": pp.display_name,
+        "description": pp.description,
+        "can_view": pp.can_view,
+        "can_create_card": pp.can_create_card,
+        "can_run_task": pp.can_run_task,
+        "can_access_sensitive": pp.can_access_sensitive,
+        "is_default": pp.is_default,
+    }
+
+
+@router.delete("/persons/{person_id}/projects/{project_id}")
+def remove_person_project(person_id: int, project_id: int, session: Session = Depends(get_session)):
+    """移除 Person 專案權限"""
+    pp = session.exec(
+        select(PersonProject).where(
+            PersonProject.person_id == person_id,
+            PersonProject.project_id == project_id,
+        )
+    ).first()
+    if not pp:
+        raise HTTPException(status_code=404, detail="PersonProject 不存在")
+    session.delete(pp)
     session.commit()
     return {"ok": True}
 
