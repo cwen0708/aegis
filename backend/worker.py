@@ -1178,7 +1178,7 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
     except Exception as e:
         logger.error(f"[Worker] Failed to read card {idx.card_id}: {e}")
         cron_job_id = _parse_cron_job_id(idx.title)
-        if cron_job_id is not None and list_name in ("Scheduled", "Inbound"):
+        if cron_job_id is not None:
             with Session(engine) as session:
                 from app.models.core import CronJob as CJ
                 cj = session.get(CJ, cron_job_id)
@@ -1255,9 +1255,9 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
 
     # result 一定有值（accounts_list 至少有 default）
 
-    # 判斷是否為排程卡片
+    # 判斷是否為排程卡片（標題含 [cron_N] 即為排程卡片，不限 list）
     cron_job_id = _parse_cron_job_id(idx.title)
-    is_cron_card = cron_job_id is not None and list_name in ("Scheduled", "Inbound")
+    is_cron_card = cron_job_id is not None
 
     new_status = "completed" if result["status"] == "success" else "failed"
     token_info = result.get("token_info", {})
