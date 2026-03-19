@@ -46,6 +46,23 @@
               <span class="text-xs text-slate-300 truncate flex-1">{{ env.data.message }}</span>
               <span class="text-[10px] text-slate-600 shrink-0">{{ env.data.date ? formatDate(env.data.date) : '' }}</span>
               <span v-if="env.key === 'origin' && fetching" class="text-[10px] text-slate-600 shrink-0">⟳</span>
+              <!-- 部署到運行環境按鈕 -->
+              <button
+                v-if="env.key === 'dev' && overview?.runtime?.exists && overview.dev_ahead_of_runtime > 0"
+                class="text-[10px] px-2 py-0.5 rounded border transition-colors shrink-0 bg-purple-500/10 text-purple-400 border-purple-500/30 hover:bg-purple-500/20"
+                :disabled="deploying"
+                @click="deployToRuntime('dev')"
+              >
+                {{ deploying ? '...' : '→ 部署到運行環境' }}
+              </button>
+              <button
+                v-if="env.key === 'origin' && overview?.runtime?.exists && overview.runtime_ahead_of_origin < 0"
+                class="text-[10px] px-2 py-0.5 rounded border transition-colors shrink-0 bg-blue-500/10 text-blue-400 border-blue-500/30 hover:bg-blue-500/20"
+                :disabled="deploying"
+                @click="deployToRuntime('origin')"
+              >
+                {{ deploying ? '...' : '→ 更新運行環境' }}
+              </button>
             </template>
             <span v-else class="text-xs text-slate-600">不可用</span>
           </div>
@@ -215,15 +232,15 @@ const diffContent = ref('')
 const diffLoading = ref(false)
 const fetching = ref(false)
 const pulling = ref(false)
+const deploying = ref(false)
 
 const envList = computed(() => {
   if (!overview.value) return []
-  const list = [
-    { key: 'dev', data: overview.value.dev },
-  ]
+  const list = []
   if (overview.value.runtime?.exists) {
     list.push({ key: 'runtime', data: overview.value.runtime })
   }
+  list.push({ key: 'dev', data: overview.value.dev })
   list.push({ key: 'origin', data: overview.value.origin })
   return list
 })
@@ -295,6 +312,28 @@ async function doPullTask() {
     }
   } finally {
     pulling.value = false
+  }
+}
+
+async function deployToRuntime(source: 'dev' | 'origin') {
+  deploying.value = true
+  try {
+    const res = await fetch(`${API}/api/v1/projects/${props.projectId}/git/deploy-to-runtime`, {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source }),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      if (data.ok) {
+        alert(`部署任務已建立 #${data.card_id}\nAI 將自動部署到運行環境`)
+        emit('pull-triggered', data.card_id)
+      } else {
+        alert(`部署失敗: ${data.error || '未知錯誤'}`)
+      }
+    }
+  } finally {
+    deploying.value = false
   }
 }
 

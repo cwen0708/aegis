@@ -543,6 +543,94 @@ def git_overview(
     }
 
 
+@router.post("/projects/{project_id}/git/deploy-to-runtime")
+def git_deploy_to_runtime(
+    project_id: int,
+    data: dict = None,
+    session: Session = Depends(get_session),
+):
+    """建立 AI 卡片，將開發版或遠端版部署到運行環境"""
+    from app.core.task_workspace import _INSTALL_ROOT
+    from app.models.core import StageList, Member
+    from app.core.card_file import CardData, card_file_path, write_card, next_card_id
+    from app.core.card_sync import sync_card_to_index
+    from sqlmodel import select
+
+    project = _get_project(project_id, session)
+    source = (data or {}).get("source", "dev")  # "dev" or "origin"
+    runtime_path = str(_INSTALL_ROOT)
+    dev_path = project.path
+
+    if os.path.realpath(dev_path) == os.path.realpath(runtime_path):
+        return {"ok": False, "error": "開發環境和運行環境相同，無需部署"}
+
+    # 找愛吉絲（系統管理員）的收件匣
+    aegis_member = session.exec(select(Member).where(Member.slug == "aegis")).first()
+    target_list = None
+    if aegis_member:
+        target_list = session.exec(
+            select(StageList).where(
+                StageList.project_id == project_id,
+                StageList.member_id == aegis_member.id,
+            )
+        ).first()
+
+    if not target_list:
+        # fallback: 第一個 AI stage
+        target_list = session.exec(
+            select(StageList).where(
+                StageList.project_id == project_id,
+                StageList.is_ai_stage == True,
+            ).order_by(StageList.position)
+        ).first()
+
+    if not target_list:
+        return {"ok": False, "error": "找不到可用的任務列表"}
+
+    if source == "dev":
+        prompt = (
+            f"請將開發目錄 ({dev_path}) 的最新程式碼部署到運行環境 ({runtime_path})。\n\n"
+            "執行步驟：\n"
+            f"1. cp -r {dev_path}/backend/app/ {runtime_path}/backend/app/\n"
+            f"2. cp {dev_path}/backend/worker.py {runtime_path}/backend/worker.py\n"
+            f"3. cd {dev_path}/frontend && pnpm build && cp -r dist/ {runtime_path}/frontend/dist/\n"
+            "4. sudo systemctl restart aegis && sudo systemctl restart aegis-worker\n"
+            "5. sleep 3 && curl -s http://127.0.0.1:8899/api/v1/runner/status\n"
+        )
+        title = "部署開發版到運行環境"
+    else:
+        prompt = (
+            f"請將運行環境 ({runtime_path}) 更新到遠端最新版本。\n\n"
+            "執行步驟：\n"
+            f"1. cd {runtime_path} && git fetch origin && git reset --hard origin/main\n"
+            f"2. cd backend && ./venv/bin/pip install -r requirements.txt -q\n"
+            "3. 下載最新前端 dist（從 GitHub Release）\n"
+            "4. sudo systemctl restart aegis && sudo systemctl restart aegis-worker\n"
+            "5. sleep 3 && curl -s http://127.0.0.1:8899/api/v1/runner/status\n"
+        )
+        title = "更新運行環境到最新遠端版本"
+
+    new_id = next_card_id(session)
+    card_data = CardData(
+        id=new_id,
+        title=title,
+        status="idle",
+        list_id=target_list.id,
+        content=prompt,
+    )
+
+    file_path = card_file_path(project.path, new_id)
+    write_card(file_path, card_data)
+    sync_card_to_index(session, card_data, project_id, str(file_path))
+    session.commit()
+
+    # 觸發
+    from app.core.card_index import update_card_status
+    update_card_status(new_id, "pending")
+
+    return {"ok": True, "card_id": new_id, "title": title}
+
+
 @router.post("/projects/{project_id}/git/pull-task")
 def git_pull_task(
     project_id: int,
