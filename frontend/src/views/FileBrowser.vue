@@ -9,6 +9,15 @@
           <span class="text-slate-400">{{ part }}</span>
         </template>
       </div>
+
+      <!-- Git 按鈕 -->
+      <router-link
+        to="/git"
+        class="p-1.5 rounded transition-colors text-slate-500 hover:text-slate-300 hover:bg-slate-700"
+        title="版本控制"
+      >
+        <GitBranch class="w-4 h-4" />
+      </router-link>
     </PageHeader>
 
     <!-- Empty state -->
@@ -43,7 +52,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { FolderOpen, ChevronRight } from 'lucide-vue-next'
+import { FolderOpen, ChevronRight, GitBranch } from 'lucide-vue-next'
 import PageHeader from '../components/PageHeader.vue'
 import FileTree from '../components/files/FileTree.vue'
 import FileViewer from '../components/files/FileViewer.vue'
