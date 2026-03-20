@@ -6,6 +6,7 @@ import { useWebSocket } from './composables/useWebSocket'
 import { useResponsive } from './composables/useResponsive'
 import { useAegisStore } from './stores/aegis'
 import { useDomainStore } from './stores/domain'
+import { config } from './config'
 import ToastNotification from './components/ToastNotification.vue'
 
 const router = useRouter()
@@ -18,6 +19,15 @@ useWebSocket()
 // 響應式檢測（使用共用 composable）
 const { isMobile } = useResponsive()
 
+
+// 空間列表（從 API 取，不再從 domain store）
+const rooms = ref<{id: number, name: string}[]>([])
+async function fetchRooms() {
+  try {
+    const res = await fetch(`${config.apiUrl}/api/v1/rooms`)
+    if (res.ok) rooms.value = await res.json()
+  } catch { /* ignore */ }
+}
 
 // 側邊欄收起
 const sidebarCollapsed = ref(localStorage.getItem('aegis-sidebar') === 'collapsed')
@@ -51,10 +61,13 @@ onMounted(async () => {
     await authStore.fetchMe()
   }
 
-  // 解析當前網域 → 決定可見的專案和成員
+  // 解析當前網域
   const { useDomainStore } = await import('./stores/domain')
-  const domainStore = useDomainStore()
-  await domainStore.resolve()
+  const ds = useDomainStore()
+  await ds.resolve()
+
+  // 載入空間列表
+  await fetchRooms()
 
   settingsReady.value = true
 
@@ -122,10 +135,10 @@ function mobileNavClass(path: string) {
               <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
             </span>
           </router-link>
-          <!-- Dynamic room entries (when domain has rooms) -->
-          <template v-if="domainStore.rooms.length > 0">
+          <!-- Dynamic room entries -->
+          <template v-if="rooms.length > 0">
             <router-link
-              v-for="(room, idx) in domainStore.rooms"
+              v-for="(room, idx) in rooms"
               :key="room.id"
               :to="`/office/${room.id}`"
               class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium"

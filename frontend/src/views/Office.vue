@@ -26,8 +26,8 @@ const store = useAegisStore()
 const currentRoomId = computed(() => {
   const id = route.params.roomId as string | undefined
   if (id) return id
-  // Fallback: if domain has rooms, use the first one
-  if (domainStore.rooms && domainStore.rooms.length > 0) return String(domainStore.rooms[0]!.id)
+  // Fallback: fetch first active room
+  // (rooms 從 API 取，不再從 domain store)
   return null
 })
 
@@ -123,14 +123,20 @@ async function fetchMembers() {
     const res = await fetch('/api/v1/members')
     if (res.ok) {
       let all = await res.json()
-      // 如果有指定房間，只顯示該房間的成員
+      // 如果有指定房間，從 Room API 取成員過濾
       const rid = currentRoomId.value
       if (rid) {
-        const room = domainStore.rooms.find(r => String(r.id) === String(rid))
-        if (room && room.member_ids && room.member_ids.length > 0) {
-          const allowed = new Set(room.member_ids)
-          all = all.filter((m: any) => allowed.has(m.id))
-        }
+        try {
+          const roomRes = await fetch(`/api/v1/rooms/${rid}`)
+          if (roomRes.ok) {
+            const roomData = await roomRes.json()
+            const memberIds = roomData.member_ids || []
+            if (memberIds.length > 0) {
+              const allowed = new Set(memberIds)
+              all = all.filter((m: any) => allowed.has(m.id))
+            }
+          }
+        } catch { /* use all members */ }
       }
       members.value = all
     }
