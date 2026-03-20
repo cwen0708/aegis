@@ -20,7 +20,9 @@ const loading = ref(false)
 const error = ref('')
 const success = ref('')
 
-function goAfterLogin() {
+async function goAfterLogin() {
+  // 重新載入權限相關資料（projects、rooms）
+  window.dispatchEvent(new Event('aegis-auth-changed'))
   const redirect = (route.query.redirect as string) || '/kanban'
   router.replace(redirect)
 }

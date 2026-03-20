@@ -17,3 +17,10 @@ export const config = {
     url: import.meta.env.VITE_ONESTACK_URL || '',
   },
 }
+
+/** Prefix a relative /api path with apiUrl for use in img src, etc. */
+export function assetUrl(path: string): string {
+  if (!path) return ''
+  if (path.startsWith('http')) return path
+  return `${config.apiUrl}${path}`
+}

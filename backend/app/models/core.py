@@ -30,7 +30,7 @@ class Project(SQLModel, table=True):
 class StageList(SQLModel, table=True):
     """卡片列表 (如 Backlog, Planning, Developing)"""
     id: Optional[int] = Field(default=None, primary_key=True)
-    project_id: int = Field(foreign_key="project.id")
+    project_id: int = Field(foreign_key="project.id", index=True)
     name: str
     description: Optional[str] = Field(default=None)  # 階段說明（如「審查階段」）
     position: int = Field(default=0) # 用於排序
@@ -59,7 +59,7 @@ class Tag(SQLModel, table=True):
 
 class Card(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    list_id: int = Field(foreign_key="stagelist.id")
+    list_id: int = Field(foreign_key="stagelist.id", index=True)
     title: str
     description: Optional[str] = None
     content: str = Field(default="") # 詳細的 Markdown 內容，傳給 AI 的 prompt

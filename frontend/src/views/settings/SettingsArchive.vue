@@ -2,11 +2,9 @@
 import { ref, onMounted, watch } from 'vue'
 import { Archive, RotateCcw, Trash2, Loader2 } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
-import { authHeaders } from '../../utils/authFetch'
-import { config } from '../../config'
+import { apiClient } from '../../services/api/client'
 
 const store = useAegisStore()
-const API = config.apiUrl
 
 interface ArchivedCard {
   id: number
@@ -31,9 +29,7 @@ const actionLoading = ref<number | null>(null)
 
 async function fetchProjects() {
   try {
-    const res = await fetch(`${API}/api/v1/projects/?all=true`, { headers: authHeaders() })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    projects.value = await res.json()
+    projects.value = await apiClient.get('/api/v1/projects/?all=true')
     if (projects.value.length > 0 && !selectedProjectId.value) {
       selectedProjectId.value = projects.value[0]?.id ?? null
     }
@@ -46,9 +42,7 @@ async function fetchArchivedCards() {
   if (!selectedProjectId.value) return
   loading.value = true
   try {
-    const res = await fetch(`/api/v1/projects/${selectedProjectId.value}/archived`)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    archivedCards.value = await res.json()
+    archivedCards.value = await apiClient.get(`/api/v1/projects/${selectedProjectId.value}/archived`)
   } catch (e: any) {
     store.addToast('載入封存卡片失敗', 'error')
   } finally {
@@ -59,8 +53,7 @@ async function fetchArchivedCards() {
 async function unarchiveCard(cardId: number) {
   actionLoading.value = cardId
   try {
-    const res = await fetch(`/api/v1/cards/${cardId}/unarchive`, { method: 'POST', headers: authHeaders() })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    await apiClient.post(`/api/v1/cards/${cardId}/unarchive`)
     store.addToast('卡片已恢復', 'success')
     await fetchArchivedCards()
   } catch (e: any) {
@@ -74,8 +67,7 @@ async function deleteCard(cardId: number) {
   if (!confirm('確定要永久刪除這張卡片？此操作無法復原。')) return
   actionLoading.value = cardId
   try {
-    const res = await fetch(`/api/v1/cards/${cardId}`, { method: 'DELETE', headers: authHeaders() })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    await apiClient.delete(`/api/v1/cards/${cardId}`)
     store.addToast('卡片已刪除', 'success')
     await fetchArchivedCards()
   } catch (e: any) {

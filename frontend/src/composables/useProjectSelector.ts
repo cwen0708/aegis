@@ -1,4 +1,4 @@
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { config } from '../config'
 import { authHeaders } from '../utils/authFetch'
@@ -77,6 +77,15 @@ export function useProjectSelector() {
     restoreSelection()
   })
 
+  // 登入後重新載入專案列表
+  const onAuthChanged = async () => {
+    await fetchProjects()
+    loaded.value = true
+    restoreSelection()
+  }
+  onMounted(() => window.addEventListener('aegis-auth-changed', onAuthChanged))
+  onUnmounted(() => window.removeEventListener('aegis-auth-changed', onAuthChanged))
+
   // URL query 變化時同步
   watch(() => route.query.project, (val) => {
     if (val) {
@@ -100,6 +109,7 @@ export function useProjectSelector() {
   return {
     projects,
     selectedProjectId,
+    loaded,
     currentProject,
     selectProject,
     selectAdjacentProject,

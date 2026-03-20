@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { X, CheckCircle, XCircle, Clock, Loader2, ListTodo, BookOpen, ChevronLeft, ChevronRight, Volume2, VolumeX } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 import { config } from '../config'
+import { apiClient } from '../services/api/client'
 
 const store = useAegisStore()
 
@@ -239,13 +240,10 @@ function onDialogueEvent(e: Event) {
 // 載入對話
 async function fetchDialogues() {
   try {
-    const res = await fetch(`/api/v1/members/${props.memberId}/dialogues?limit=30`)
-    if (res.ok) {
-      dialogues.value = await res.json()
-      if (dialogues.value.length > 0 && !isWorking.value) {
-        currentIndex.value = dialogues.value.length - 1
-        startTypewriter(dialogues.value[currentIndex.value]?.text ?? '')
-      }
+    dialogues.value = await apiClient.get<DialogueLine[]>(`/api/v1/members/${props.memberId}/dialogues?limit=30`)
+    if (dialogues.value.length > 0 && !isWorking.value) {
+      currentIndex.value = dialogues.value.length - 1
+      startTypewriter(dialogues.value[currentIndex.value]?.text ?? '')
     }
   } catch (e) {
     console.error('Failed to fetch dialogues:', e)
@@ -279,8 +277,7 @@ const selectedSkill = ref<{ name: string; content: string } | null>(null)
 async function fetchSkills() {
   loadingSkills.value = true
   try {
-    const res = await fetch(`/api/v1/members/${props.memberId}/skills`)
-    if (res.ok) skills.value = await res.json()
+    skills.value = await apiClient.get<SkillInfo[]>(`/api/v1/members/${props.memberId}/skills`)
   } catch (e) {
     console.error('Failed to fetch skills:', e)
   }
@@ -289,11 +286,8 @@ async function fetchSkills() {
 
 async function viewSkill(skill: SkillInfo) {
   try {
-    const res = await fetch(`/api/v1/members/${props.memberId}/skills/${skill.name}`)
-    if (res.ok) {
-      const data = await res.json()
-      selectedSkill.value = { name: skill.title, content: data.content }
-    }
+    const data = await apiClient.get<{ content: string }>(`/api/v1/members/${props.memberId}/skills/${skill.name}`)
+    selectedSkill.value = { name: skill.title, content: data.content }
   } catch (e) {
     console.error('Failed to fetch skill:', e)
   }
@@ -302,8 +296,7 @@ async function viewSkill(skill: SkillInfo) {
 async function fetchHistory() {
   loading.value = true
   try {
-    const res = await fetch(`/api/v1/members/${props.memberId}/history?limit=8`)
-    if (res.ok) history.value = await res.json()
+    history.value = await apiClient.get<TaskLogItem[]>(`/api/v1/members/${props.memberId}/history?limit=8`)
   } catch (e) {
     console.error('Failed to fetch history:', e)
   }

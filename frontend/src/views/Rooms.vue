@@ -3,9 +3,10 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAegisStore } from '../stores/aegis'
 import { useAuthStore } from '../stores/auth'
-import { authHeaders } from '../utils/authFetch'
+import { apiClient } from '../services/api/client'
 // domain store 不再用於 rooms 過濾
 import { useResponsive } from '../composables/useResponsive'
+import { assetUrl } from '../config'
 
 const { isMobile } = useResponsive()
 const route = useRoute()
@@ -39,19 +40,16 @@ async function loadLayoutFromSettings() {
   if (currentRoomId.value) {
     // Load layout from single room API (includes layout_json)
     try {
-      const res = await fetch(`/api/v1/rooms/${currentRoomId.value}`)
-      if (res.ok) {
-        const room = await res.json()
-        if (room.layout_json) {
-          const layout = deserializeLayout(room.layout_json)
-          if (layout) {
-            if (!layout.slots || layout.slots.length === 0) {
-              const defaultLayout = buildDefaultLayout(totalDesks.value || 4)
-              layout.slots = defaultLayout.slots
-            }
-            currentLayout.value = layout
-            return
+      const room = await apiClient.get<any>(`/api/v1/rooms/${currentRoomId.value}`)
+      if (room.layout_json) {
+        const layout = deserializeLayout(room.layout_json)
+        if (layout) {
+          if (!layout.slots || layout.slots.length === 0) {
+            const defaultLayout = buildDefaultLayout(totalDesks.value || 4)
+            layout.slots = defaultLayout.slots
           }
+          currentLayout.value = layout
+          return
         }
       }
     } catch (e) {
@@ -82,11 +80,7 @@ async function handleSaveLayout(layout: OfficeLayout) {
   currentLayout.value = layout
   if (currentRoomId.value) {
     // Save to room
-    await fetch(`/api/v1/rooms/${currentRoomId.value}/layout`, {
-      method: 'PATCH',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ layout_json: serializeLayout(layout) }),
-    })
+    await apiClient.patch(`/api/v1/rooms/${currentRoomId.value}/layout`, { layout_json: serializeLayout(layout) })
   } else {
     // Save to system settings
     await store.updateSettings({ office_layout: serializeLayout(layout) })
@@ -120,26 +114,20 @@ let pollId: number
 
 async function fetchMembers() {
   try {
-    const res = await fetch('/api/v1/members')
-    if (res.ok) {
-      let all = await res.json()
-      // 如果有指定房間，從 Room API 取成員過濾
-      const rid = currentRoomId.value
-      if (rid) {
-        try {
-          const roomRes = await fetch(`/api/v1/rooms/${rid}`)
-          if (roomRes.ok) {
-            const roomData = await roomRes.json()
-            const memberIds = roomData.member_ids || []
-            if (memberIds.length > 0) {
-              const allowed = new Set(memberIds)
-              all = all.filter((m: any) => allowed.has(m.id))
-            }
-          }
-        } catch { /* use all members */ }
-      }
-      members.value = all
+    let all = await apiClient.get<any[]>('/api/v1/members')
+    // 如果有指定房間，從 Room API 取成員過濾
+    const rid = currentRoomId.value
+    if (rid) {
+      try {
+        const roomData = await apiClient.get<any>(`/api/v1/rooms/${rid}`)
+        const memberIds = roomData.member_ids || []
+        if (memberIds.length > 0) {
+          const allowed = new Set(memberIds)
+          all = all.filter((m: any) => allowed.has(m.id))
+        }
+      } catch { /* use all members */ }
     }
+    members.value = all
   } catch {}
 }
 
@@ -507,7 +495,7 @@ watch(
       :name="selectedCharacter.name"
       :provider="selectedCharacter.provider"
       :role="selectedCharacter.role"
-      :portrait="selectedCharacter.portrait"
+      :portrait="assetUrl(selectedCharacter.portrait || '')"
       @close="closeCharacterDialog"
     />
   </div>

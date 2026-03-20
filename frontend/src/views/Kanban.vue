@@ -4,7 +4,7 @@ import { Plus, Play, Pause, Square, Trash2, Zap, MoreVertical, ChevronLeft, Chev
 import draggable from 'vuedraggable'
 import { useAegisStore } from '../stores/aegis'
 import { useAuthStore } from '../stores/auth'
-import { authHeaders } from '../utils/authFetch'
+import { apiClient } from '../services/api/client'
 import { useEscapeKey } from '../composables/useEscapeKey'
 import { useResponsive } from '../composables/useResponsive'
 import { useProjectSelector } from '../composables/useProjectSelector'
@@ -52,20 +52,13 @@ function updateElapsedTimers() {
 // API
 const fetchBoard = async () => {
   if (!selectedProjectId.value) return
-  const res = await fetch(`/api/v1/projects/${selectedProjectId.value}/board`)
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  boardData.value = await res.json()
+  boardData.value = await apiClient.get(`/api/v1/projects/${selectedProjectId.value}/board`)
 }
 
 const createCard = async () => {
   if (!newTaskForm.value.title || boardData.value.length === 0) return
   const listId = newTaskForm.value.list_id || boardData.value[0].id
-  const res = await fetch('/api/v1/cards/', {
-    method: 'POST',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ list_id: listId, title: newTaskForm.value.title, description: newTaskForm.value.description })
-  })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  await apiClient.post('/api/v1/cards/', { list_id: listId, title: newTaskForm.value.title, description: newTaskForm.value.description })
   await fetchBoard()
   showNewTaskModal.value = false
   newTaskForm.value = { title: '', description: '', list_id: null }
@@ -76,25 +69,18 @@ const selectedCard = ref<any>(null)
 
 const openCardDetail = async (cardId: number) => {
   openMenuCardId.value = null
-  const res = await fetch(`/api/v1/cards/${cardId}`)
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  selectedCard.value = await res.json()
+  selectedCard.value = await apiClient.get(`/api/v1/cards/${cardId}`)
 }
 
 const closeCardDetail = () => { selectedCard.value = null }
 
 const saveCardDetail = async (card: any) => {
   if (!card) return
-  const res = await fetch(`/api/v1/cards/${card.id}`, {
-    method: 'PATCH',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({
-      title: card.title,
-      description: card.description,
-      content: card.content
-    })
+  await apiClient.patch(`/api/v1/cards/${card.id}`, {
+    title: card.title,
+    description: card.description,
+    content: card.content
   })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
   await fetchBoard()
 }
 
@@ -103,12 +89,7 @@ const onDragChange = async (event: any, targetListId: number) => {
   if (event.added) {
     const cardId = event.added.element.id
     try {
-      const res = await fetch(`/api/v1/cards/${cardId}`, {
-        method: 'PATCH',
-        headers: authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ list_id: targetListId })
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      await apiClient.patch(`/api/v1/cards/${cardId}`, { list_id: targetListId })
     } catch (e) {
       fetchBoard()
     }
@@ -149,8 +130,7 @@ function requestDeleteCard(cardId: number) {
 async function archiveCard(cardId: number) {
   openMenuCardId.value = null
   try {
-    const res = await fetch(`/api/v1/cards/${cardId}/archive`, { method: 'POST', headers: authHeaders() })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    await apiClient.post(`/api/v1/cards/${cardId}/archive`)
     store.addToast('卡片已封存', 'success')
     await fetchBoard()
   } catch (e: any) {
@@ -237,10 +217,7 @@ useEscapeKey(showAssignDialog, () => { showAssignDialog.value = false })
 
 async function fetchMembers() {
   try {
-    const res = await fetch('/api/v1/members')
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    let all = await res.json()
-    allMembers.value = all
+    allMembers.value = await apiClient.get('/api/v1/members')
   } catch {}
 }
 
@@ -254,12 +231,7 @@ function openAssignDialog(stage: any) {
 async function assignMember(memberId: number | null) {
   if (!assigningListId.value) return
   try {
-    const res = await fetch(`/api/v1/lists/${assigningListId.value}`, {
-      method: 'PATCH',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ member_id: memberId }),
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    await apiClient.patch(`/api/v1/lists/${assigningListId.value}`, { member_id: memberId })
     showAssignDialog.value = false
     await fetchBoard()
   } catch (e: any) {
@@ -379,12 +351,7 @@ function getActionOptions(excludeListId?: number) {
 async function saveStageConfig() {
   if (!configuringStage.value) return
   try {
-    const res = await fetch(`/api/v1/lists/${configuringStage.value.id}`, {
-      method: 'PATCH',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(stageConfigForm.value),
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    await apiClient.patch(`/api/v1/lists/${configuringStage.value.id}`, stageConfigForm.value)
     showStageConfigDialog.value = false
     await fetchBoard()
     store.addToast('階段配置已更新', 'success')
@@ -407,12 +374,7 @@ async function moveStage(direction: 'up' | 'down') {
   const order = stages.map(s => s.id)
 
   try {
-    const res = await fetch('/api/v1/lists/reorder', {
-      method: 'POST',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ order }),
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    await apiClient.post('/api/v1/lists/reorder', { order })
     await fetchBoard()
     store.addToast('順序已更新', 'success')
   } catch (e: any) {
@@ -438,9 +400,7 @@ async function fetchArchivedCards() {
   if (!selectedProjectId.value) return
   archiveLoading.value = true
   try {
-    const res = await fetch(`/api/v1/projects/${selectedProjectId.value}/archived`)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    archivedCards.value = await res.json()
+    archivedCards.value = await apiClient.get(`/api/v1/projects/${selectedProjectId.value}/archived`)
   } catch {
     archivedCards.value = []
   } finally {
@@ -456,8 +416,7 @@ function openArchivePanel() {
 async function unarchiveCard(cardId: number) {
   unarchiveLoading.value = cardId
   try {
-    const res = await fetch(`/api/v1/cards/${cardId}/unarchive`, { method: 'POST', headers: authHeaders() })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    await apiClient.post(`/api/v1/cards/${cardId}/unarchive`)
     store.addToast('卡片已恢復', 'success')
     await fetchArchivedCards()
     await fetchBoard()

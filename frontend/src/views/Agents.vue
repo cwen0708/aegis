@@ -4,11 +4,9 @@ import { Bot, User, RefreshCw, Sparkles, Plus, Edit3, Zap, Key, Terminal, Extern
 import { useAegisStore } from '../stores/aegis'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 
-import { config } from '../config'
-import { authHeaders } from '../utils/authFetch'
+import { apiClient } from '../services/api/client'
 
 const store = useAegisStore()
-const API = config.apiUrl
 
 // Tab 狀態
 const activeTab = ref<'claude' | 'gemini' | 'openai'>('claude')
@@ -33,9 +31,7 @@ const taskStats = ref<any>(null)
 
 async function fetchTaskStats() {
   try {
-    const res = await fetch(`${API}/api/v1/task-stats`)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    taskStats.value = await res.json()
+    taskStats.value = await apiClient.get('/api/v1/task-stats')
   } catch { /* silent */ }
 }
 
@@ -94,9 +90,7 @@ const accountsByProvider = computed(() => ({
 
 async function fetchAccounts() {
   try {
-    const res = await fetch(`${API}/api/v1/accounts`)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    accounts.value = await res.json()
+    accounts.value = await apiClient.get('/api/v1/accounts')
   } catch { /* silent */ }
 }
 
@@ -112,9 +106,7 @@ const gcloudSuccess = ref('')
 
 async function fetchGcloudStatus() {
   try {
-    const res = await fetch(`${API}/api/v1/gcloud/status`)
-    if (res.ok) gcloudStatus.value = await res.json()
-    else gcloudStatus.value = { installed: false, authenticated: false, account: null }
+    gcloudStatus.value = await apiClient.get('/api/v1/gcloud/status')
   } catch {
     gcloudStatus.value = { installed: false, authenticated: false, account: null }
   }
@@ -125,12 +117,7 @@ async function startGcloudAuth() {
   gcloudError.value = ''
   gcloudSuccess.value = ''
   try {
-    const res = await fetch(`${API}/api/v1/gcloud/auth/init`, { method: 'POST', headers: authHeaders() })
-    if (!res.ok) {
-      const err = await res.json()
-      throw new Error(err.detail || '啟動認證失敗')
-    }
-    gcloudAuthSession.value = await res.json()
+    gcloudAuthSession.value = await apiClient.post('/api/v1/gcloud/auth/init')
   } catch (e: any) {
     gcloudError.value = e.message
   } finally {
@@ -143,16 +130,10 @@ async function completeGcloudAuth() {
   gcloudLoading.value = true
   gcloudError.value = ''
   try {
-    const res = await fetch(`${API}/api/v1/gcloud/auth/complete`, {
-      method: 'POST',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({
-        session_id: gcloudAuthSession.value.session_id,
-        auth_code: gcloudAuthCode.value.trim(),
-      }),
+    const data = await apiClient.post('/api/v1/gcloud/auth/complete', {
+      session_id: gcloudAuthSession.value.session_id,
+      auth_code: gcloudAuthCode.value.trim(),
     })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.detail || '認證失敗')
     gcloudSuccess.value = data.message || '登入成功！'
     gcloudAuthSession.value = null
     gcloudAuthCode.value = ''
@@ -166,11 +147,7 @@ async function completeGcloudAuth() {
 
 function cancelGcloudAuth() {
   if (gcloudAuthSession.value) {
-    fetch(`${API}/api/v1/gcloud/auth/cancel`, {
-      method: 'POST',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ session_id: gcloudAuthSession.value.session_id }),
-    }).catch(() => {})
+    apiClient.post('/api/v1/gcloud/auth/cancel', { session_id: gcloudAuthSession.value.session_id }).catch(() => {})
   }
   gcloudAuthSession.value = null
   gcloudAuthCode.value = ''
@@ -223,15 +200,7 @@ async function createAccount() {
     if (accountForm.value.auth_type === 'api_key' && accountForm.value.api_key.trim()) {
       payload.api_key = accountForm.value.api_key.trim()
     }
-    const res = await fetch(`${API}/api/v1/accounts`, {
-      method: 'POST',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(payload),
-    })
-    if (!res.ok) {
-      const err = await res.json()
-      throw new Error(err.detail)
-    }
+    await apiClient.post('/api/v1/accounts', payload)
     store.addToast('帳號已新增', 'success')
     showAccountDialog.value = false
     await fetchAccounts()
@@ -254,12 +223,7 @@ function openEditAccountDialog(acc: AccountInfo) {
 async function saveEditAccount() {
   if (!editingAccount.value) return
   try {
-    const res = await fetch(`${API}/api/v1/accounts/${editingAccount.value.id}`, {
-      method: 'PATCH',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(editAccountForm.value),
-    })
-    if (!res.ok) throw new Error('儲存失敗')
+    await apiClient.patch(`/api/v1/accounts/${editingAccount.value.id}`, editAccountForm.value)
     store.addToast('帳號已更新', 'success')
     showEditAccountDialog.value = false
     await fetchAccounts()
@@ -278,8 +242,7 @@ function requestDeleteAccount() {
 async function doDeleteAccount() {
   if (!editingAccount.value) return
   try {
-    const res = await fetch(`${API}/api/v1/accounts/${editingAccount.value.id}`, { method: 'DELETE', headers: authHeaders() })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    await apiClient.delete(`/api/v1/accounts/${editingAccount.value.id}`)
     store.addToast('帳號已刪除', 'success')
     confirmDeleteAccount.value = false
     showEditAccountDialog.value = false
@@ -340,9 +303,7 @@ const loadingClaude = ref(false)
 const fetchClaudeUsage = async () => {
   loadingClaude.value = true
   try {
-    const res = await fetch('/api/v1/claude/usage')
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
+    const data = await apiClient.get('/api/v1/claude/usage')
     claudeAccounts.value = data.accounts || data
   } catch (e) {
     console.error('Failed to fetch claude usage', e)
@@ -358,9 +319,7 @@ const loadingGemini = ref(false)
 const fetchGeminiUsage = async () => {
   loadingGemini.value = true
   try {
-    const res = await fetch('/api/v1/gemini/usage')
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    geminiUsage.value = await res.json()
+    geminiUsage.value = await apiClient.get('/api/v1/gemini/usage')
   } catch (e) {
     console.error('Failed to fetch gemini usage', e)
   } finally {

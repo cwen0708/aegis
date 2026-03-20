@@ -85,11 +85,36 @@ def get_all_relations(session: Session = Depends(get_session)):
 
     # ── 用戶（以 Person 為單位，同一人只出現一次）──
     persons = session.exec(select(Person)).all()
+    person_ids = [p.id for p in persons]
+
+    bus_by_person: dict[int, list] = {pid: [] for pid in person_ids}
+    if person_ids:
+        for bu in session.exec(
+            select(BotUser).where(BotUser.person_id.in_(person_ids), BotUser.is_active == True)
+        ).all():
+            if bu.person_id in bus_by_person:
+                bus_by_person[bu.person_id].append(bu)
+
+    pps_by_person: dict[int, list] = {pid: [] for pid in person_ids}
+    if person_ids:
+        for pp in session.exec(
+            select(PersonProject).where(PersonProject.person_id.in_(person_ids))
+        ).all():
+            if pp.person_id in pps_by_person:
+                pps_by_person[pp.person_id].append(pp)
+
+    pms_by_person: dict[int, list] = {pid: [] for pid in person_ids}
+    if person_ids:
+        for pm in session.exec(
+            select(PersonMember).where(PersonMember.person_id.in_(person_ids))
+        ).all():
+            if pm.person_id in pms_by_person:
+                pms_by_person[pm.person_id].append(pm)
+
     for p in persons:
         extra = json_module.loads(p.extra_json) if p.extra_json else {}
         has_ad = bool(extra.get("ad_user") and extra.get("ad_pass"))
-        # 找此 Person 的所有平台帳號
-        bus = session.exec(select(BotUser).where(BotUser.person_id == p.id, BotUser.is_active == True)).all()
+        bus = bus_by_person[p.id]
         platforms = [bu.platform for bu in bus]
         nodes.append({
             "type": "user", "id": p.id,
@@ -97,14 +122,10 @@ def get_all_relations(session: Session = Depends(get_session)):
             "platforms": platforms, "level": p.level, "has_ad": has_ad,
         })
 
-        # 用戶 ↔ 專案（PersonProject）
-        pps = session.exec(select(PersonProject).where(PersonProject.person_id == p.id)).all()
-        for pp in pps:
+        for pp in pps_by_person[p.id]:
             add_edge("user", p.id, "project", pp.project_id, "專案")
 
-        # 用戶 ↔ 成員（PersonMember）
-        pms = session.exec(select(PersonMember).where(PersonMember.person_id == p.id)).all()
-        for pm in pms:
+        for pm in pms_by_person[p.id]:
             rel = "對話（預設）" if pm.is_default else "可切換"
             add_edge("user", p.id, "member", pm.member_id, rel)
 

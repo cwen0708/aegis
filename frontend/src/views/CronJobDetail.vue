@@ -5,7 +5,7 @@ import { ArrowLeft, Play, Pause, Check, AlertCircle, CheckCircle2, XCircle, Time
 import ParsedOutput from '../components/ParsedOutput.vue'
 import { useAegisStore } from '../stores/aegis'
 import { useAuthStore } from '../stores/auth'
-import { authHeaders } from '../utils/authFetch'
+import { apiClient } from '../services/api/client'
 
 const route = useRoute()
 const router = useRouter()
@@ -28,8 +28,7 @@ const editForm = ref<any>(null)
 const projectStageLists = ref<any[]>([])
 const fetchStageLists = async (projectId: number) => {
   try {
-    const res = await fetch(`/api/v1/projects/${projectId}/board`)
-    if (res.ok) projectStageLists.value = await res.json()
+    projectStageLists.value = await apiClient.get(`/api/v1/projects/${projectId}/board`)
   } catch { projectStageLists.value = [] }
 }
 
@@ -61,9 +60,7 @@ const formatCost = (usd: number) => {
 
 async function fetchJob() {
   try {
-    const res = await fetch(`/api/v1/cron-jobs/${jobId.value}`)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    job.value = await res.json()
+    job.value = await apiClient.get(`/api/v1/cron-jobs/${jobId.value}`)
   } catch (e) {
     console.error('Failed to fetch cron job', e)
     store.addToast('載入排程失敗', 'error')
@@ -73,9 +70,7 @@ async function fetchJob() {
 async function fetchLogs() {
   logsLoading.value = true
   try {
-    const res = await fetch(`/api/v1/cron-jobs/${jobId.value}/logs?limit=50`)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
+    const data = await apiClient.get(`/api/v1/cron-jobs/${jobId.value}/logs?limit=50`)
     logs.value = data.items
     logsTotal.value = data.total
   } catch (e) {
@@ -88,18 +83,10 @@ async function fetchLogs() {
 async function triggerJob() {
   if (!job.value) return
   try {
-    const res = await fetch(`/api/v1/cron-jobs/${job.value.id}/trigger`, {
-      method: 'POST',
-      headers: authHeaders(),
-    })
-    const data = await res.json()
-    if (!res.ok) {
-      store.addToast(data.detail || '觸發失敗', 'error')
-      return
-    }
+    await apiClient.post(`/api/v1/cron-jobs/${job.value.id}/trigger`)
     store.addToast(`已手動觸發「${job.value.name}」`, 'success')
-  } catch (e) {
-    store.addToast('觸發失敗', 'error')
+  } catch (e: any) {
+    store.addToast(e.message || '觸發失敗', 'error')
   }
 }
 
@@ -107,12 +94,7 @@ async function toggleEnabled() {
   if (!job.value) return
   const newStatus = !job.value.is_enabled
   try {
-    const res = await fetch(`/api/v1/cron-jobs/${job.value.id}`, {
-      method: 'PATCH',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ is_enabled: newStatus })
-    })
-    if (!res.ok) throw new Error('操作失敗')
+    await apiClient.patch(`/api/v1/cron-jobs/${job.value.id}`, { is_enabled: newStatus })
     job.value.is_enabled = newStatus
     store.addToast(newStatus ? '排程已啟用' : '排程已停用', 'info')
   } catch (e) {
@@ -183,12 +165,7 @@ function startEdit() {
 
 async function saveEdit() {
   try {
-    const res = await fetch(`/api/v1/cron-jobs/${job.value.id}`, {
-      method: 'PATCH',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(editForm.value)
-    })
-    if (!res.ok) throw new Error('更新失敗')
+    await apiClient.patch(`/api/v1/cron-jobs/${job.value.id}`, editForm.value)
     editing.value = false
     store.addToast('排程已更新', 'success')
     await fetchJob()

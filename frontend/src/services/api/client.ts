@@ -13,7 +13,7 @@ function handle401(res: Response) {
   if (res.status === 401) {
     sessionStorage.removeItem('aegis-token')
     sessionStorage.removeItem('aegis-admin-auth')
-    window.location.href = '/settings'
+    window.location.href = '/login'
   }
 }
 

@@ -1,5 +1,6 @@
 import { onMounted, onUnmounted } from 'vue'
 import { useAegisStore } from '../stores/aegis'
+import { config } from '../config'
 
 let ws: WebSocket | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -28,10 +29,8 @@ export function useWebSocket() {
       return
     }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const host = window.location.host
     const token = sessionStorage.getItem('aegis-token') || ''
-    const wsUrl = `${protocol}://${host}/ws?token=${token}`
+    const wsUrl = `${config.wsUrl}/ws?token=${token}`
 
     ws = new WebSocket(wsUrl)
 

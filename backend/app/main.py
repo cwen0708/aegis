@@ -388,6 +388,7 @@ def _build_cors_origins():
     try:
         from sqlmodel import Session as _S, select as _sel
         from app.models.core import Domain
+        from app.database import engine
         with _S(engine) as sess:
             domains = sess.exec(_sel(Domain).where(Domain.is_active == True)).all()
             for d in domains:

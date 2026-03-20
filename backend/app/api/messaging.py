@@ -285,18 +285,27 @@ def list_rooms(request: Request, session: Session = Depends(get_session)):
     if visible_room_ids is not None:
         rooms = [r for r in rooms if r.id in visible_room_ids]
 
+    room_ids = [r.id for r in rooms]
+    projects_by_room: dict[int, list[int]] = {r.id: [] for r in rooms}
+    if room_ids:
+        for p in session.exec(
+            select(Project).where(Project.room_id.in_(room_ids), Project.is_active == True)
+        ).all():
+            if p.room_id in projects_by_room:
+                projects_by_room[p.room_id].append(p.id)
+    members_by_room: dict[int, list[int]] = {r.id: [] for r in rooms}
+    if room_ids:
+        for rm in session.exec(
+            select(RoomMember).where(RoomMember.room_id.in_(room_ids))
+        ).all():
+            if rm.room_id in members_by_room:
+                members_by_room[rm.room_id].append(rm.member_id)
+
     result = []
     for room in rooms:
-        # 用 Project.room_id 反查（取代 RoomProject）
-        project_ids = [p.id for p in session.exec(
-            select(Project).where(Project.room_id == room.id, Project.is_active == True)
-        ).all()]
-        member_ids = [rm.member_id for rm in session.exec(
-            select(RoomMember).where(RoomMember.room_id == room.id)
-        ).all()]
         d = room.model_dump() if hasattr(room, 'model_dump') else dict(room)
-        d["project_ids"] = project_ids
-        d["member_ids"] = member_ids
+        d["project_ids"] = projects_by_room[room.id]
+        d["member_ids"] = members_by_room[room.id]
         d.pop("layout_json", None)
         result.append(d)
     return result

@@ -1,16 +1,26 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Shield, ListTodo, Settings, Clock, FolderOpen, Wifi, WifiOff, Sun, Moon, Zap, Building2, Home, PanelLeftClose, PanelLeftOpen, Rocket } from 'lucide-vue-next'
+import { Shield, ListTodo, Settings, Clock, FolderOpen, Wifi, WifiOff, Sun, Moon, Zap, Building2, Home, PanelLeftClose, PanelLeftOpen, Rocket, LogIn, LogOut } from 'lucide-vue-next'
 import { useWebSocket } from './composables/useWebSocket'
 import { useResponsive } from './composables/useResponsive'
 import { useAegisStore } from './stores/aegis'
+import { useAuthStore } from './stores/auth'
 import { config } from './config'
 import ToastNotification from './components/ToastNotification.vue'
 
 const router = useRouter()
 const route = useRoute()
 const store = useAegisStore()
+const auth = useAuthStore()
+
+const canAccessSettings = computed(() => auth.isAdmin || (auth.userInfo?.level ?? 0) >= 3)
+
+function handleLogout() {
+  auth.logout()
+  fetchRooms()
+  window.dispatchEvent(new Event('aegis-auth-changed'))
+}
 // domain store 在 onMounted 中動態 import 並 resolve
 // 初始化 WebSocket
 useWebSocket()
@@ -23,7 +33,10 @@ const { isMobile } = useResponsive()
 const rooms = ref<{id: number, name: string}[]>([])
 async function fetchRooms() {
   try {
-    const res = await fetch(`${config.apiUrl}/api/v1/rooms`)
+    const token = sessionStorage.getItem('aegis-token')
+    const headers: Record<string, string> = {}
+    if (token) headers['Authorization'] = `Bearer ${token}`
+    const res = await fetch(`${config.apiUrl}/api/v1/rooms`, { headers })
     if (res.ok) rooms.value = await res.json()
   } catch { /* ignore */ }
 }
@@ -68,6 +81,11 @@ onMounted(async () => {
   // 載入空間列表
   await fetchRooms()
 
+  // 登入後重新載入 rooms
+  const onAuthChanged = () => fetchRooms()
+  window.addEventListener('aegis-auth-changed', onAuthChanged)
+  onUnmounted(() => window.removeEventListener('aegis-auth-changed', onAuthChanged))
+
   settingsReady.value = true
 
   // 檢查 onboarding 狀態，未完成則導向
@@ -95,13 +113,20 @@ function navClass(path: string) {
 }
 
 // 手機版底部導航
-const mobileNavItems = [
-  { path: '/kanban', icon: ListTodo, label: '看板' },
-  { path: '/cron', icon: Clock, label: '排程' },
-  { path: '/rooms', icon: Shield, label: 'Aegis', isCenter: true },
-  { path: '/tasks', icon: Zap, label: '任務' },
-  { path: '/settings', icon: Settings, label: '設定' },
-]
+const mobileNavItems = computed(() => {
+  const items = [
+    { path: '/kanban', icon: ListTodo, label: '看板' },
+    { path: '/tasks', icon: Zap, label: '任務' },
+    { path: '/rooms', icon: Shield, label: 'Aegis', isCenter: true },
+    { path: '/cron', icon: Clock, label: '排程' },
+  ]
+  if (canAccessSettings.value) {
+    items.push({ path: '/settings', icon: Settings, label: '設定' })
+  } else if (!auth.isAuthenticated) {
+    items.push({ path: '/login', icon: LogIn, label: '登入' })
+  }
+  return items
+})
 
 function mobileNavClass(path: string) {
   const active = route.path === path || route.path.startsWith(path + '/')
@@ -162,13 +187,13 @@ function mobileNavClass(path: string) {
             <ListTodo class="w-5 h-5 shrink-0" />
             <span v-if="!sidebarCollapsed">專案看板</span>
           </router-link>
+          <router-link to="/tasks" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/tasks')">
+            <Zap class="w-5 h-5 shrink-0" />
+            <span v-if="!sidebarCollapsed">任務列表</span>
+          </router-link>
           <router-link to="/cron" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/cron')">
             <Clock class="w-5 h-5 shrink-0" />
             <span v-if="!sidebarCollapsed">排程管理</span>
-          </router-link>
-          <router-link to="/tasks" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/tasks')">
-            <Zap class="w-5 h-5 shrink-0" />
-            <span v-if="!sidebarCollapsed">運行中任務</span>
           </router-link>
           <router-link to="/files" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/files')">
             <FolderOpen class="w-5 h-5 shrink-0" />
@@ -180,10 +205,18 @@ function mobileNavClass(path: string) {
         <div class="border-t border-slate-700/40 my-2"></div>
         <div class="space-y-1">
           <p v-if="!sidebarCollapsed" class="px-3 text-[10px] font-semibold text-slate-600 tracking-widest uppercase mb-1">管理</p>
-          <router-link to="/settings" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/settings')">
+          <router-link v-if="canAccessSettings" to="/settings" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/settings')">
             <Settings class="w-5 h-5 shrink-0" />
             <span v-if="!sidebarCollapsed">系統設定</span>
           </router-link>
+          <router-link v-if="!auth.isAuthenticated" to="/login" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-700/50" :class="sidebarCollapsed ? 'justify-center px-2' : 'px-3'">
+            <LogIn class="w-5 h-5 shrink-0" />
+            <span v-if="!sidebarCollapsed">登入</span>
+          </router-link>
+          <button v-else @click="handleLogout" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium text-slate-400 hover:text-red-400 hover:bg-slate-700/50" :class="sidebarCollapsed ? 'justify-center px-2' : 'px-3'">
+            <LogOut class="w-5 h-5 shrink-0" />
+            <span v-if="!sidebarCollapsed">登出{{ auth.userInfo ? ` (${auth.userInfo.display_name || auth.userInfo.username})` : '' }}</span>
+          </button>
         </div>
       </nav>
 

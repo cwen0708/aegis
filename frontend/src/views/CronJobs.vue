@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Clock, Play, Pause, Trash2, AlertCircle, Plus, X, Pencil, Zap } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 import { useAuthStore } from '../stores/auth'
-import { authHeaders } from '../utils/authFetch'
+import { apiClient } from '../services/api/client'
 import { useEscapeKey } from '../composables/useEscapeKey'
 import { useResponsive } from '../composables/useResponsive'
 import { useProjectSelector } from '../composables/useProjectSelector'
@@ -38,8 +38,7 @@ const newJobForm = ref({
 const projectStageLists = ref<any[]>([])
 const fetchStageLists = async (projectId: number) => {
   try {
-    const res = await fetch(`/api/v1/projects/${projectId}/board`)
-    if (res.ok) projectStageLists.value = await res.json()
+    projectStageLists.value = await apiClient.get(`/api/v1/projects/${projectId}/board`)
   } catch { projectStageLists.value = [] }
 }
 
@@ -54,9 +53,7 @@ const deleteTargetId = ref<number | null>(null)
 const fetchCronJobs = async () => {
   loading.value = true
   try {
-    const res = await fetch('/api/v1/cron-jobs/')
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    cronJobs.value = await res.json()
+    cronJobs.value = await apiClient.get('/api/v1/cron-jobs/')
   } catch (e) {
     console.error('Failed to fetch cron jobs', e)
   } finally {
@@ -68,12 +65,7 @@ const createCronJob = async () => {
   const pid = newJobForm.value.project_id || selectedProjectId.value
   if (!newJobForm.value.name || !pid) return
   try {
-    const res = await fetch('/api/v1/cron-jobs/', {
-      method: 'POST',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ ...newJobForm.value, project_id: pid })
-    })
-    if (!res.ok) throw new Error('建立排程失敗')
+    await apiClient.post('/api/v1/cron-jobs/', { ...newJobForm.value, project_id: pid })
     showAddModal.value = false
     store.addToast('排程已建立', 'success')
     await fetchCronJobs()
@@ -86,12 +78,7 @@ const createCronJob = async () => {
 const toggleJob = async (job: any) => {
   const newStatus = !job.is_enabled
   try {
-    const res = await fetch(`/api/v1/cron-jobs/${job.id}`, {
-      method: 'PATCH',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ is_enabled: newStatus })
-    })
-    if (!res.ok) throw new Error('操作失敗')
+    await apiClient.patch(`/api/v1/cron-jobs/${job.id}`, { is_enabled: newStatus })
     job.is_enabled = newStatus
     store.addToast(newStatus ? '排程已啟用' : '排程已停用', 'info')
   } catch (e) {
@@ -101,18 +88,10 @@ const toggleJob = async (job: any) => {
 
 const triggerJob = async (job: any) => {
   try {
-    const res = await fetch(`/api/v1/cron-jobs/${job.id}/trigger`, {
-      method: 'POST',
-      headers: authHeaders(),
-    })
-    const data = await res.json()
-    if (!res.ok) {
-      store.addToast(data.detail || '觸發失敗', 'error')
-      return
-    }
+    await apiClient.post(`/api/v1/cron-jobs/${job.id}/trigger`)
     store.addToast(`已手動觸發「${job.name}」`, 'success')
-  } catch (e) {
-    store.addToast('觸發失敗', 'error')
+  } catch (e: any) {
+    store.addToast(e.message || '觸發失敗', 'error')
   }
 }
 
@@ -135,9 +114,7 @@ async function confirmDeleteJob() {
 
 const fetchCronPausedProjects = async () => {
   try {
-    const res = await fetch('/api/v1/system/services')
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
+    const data = await apiClient.get('/api/v1/system/services')
     cronPausedProjects.value = data?.engines?.cron_poller?.paused_projects ?? []
   } catch (e) {
     console.error('Failed to fetch cron paused projects', e)

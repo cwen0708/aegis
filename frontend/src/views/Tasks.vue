@@ -1,15 +1,17 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { Zap, History, CheckCircle, XCircle, Clock, Loader2 } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 import { useProjectSelector } from '../composables/useProjectSelector'
-import { config } from '../config'
+import { useAuthStore } from '../stores/auth'
+import { apiClient } from '../services/api/client'
 import PageHeader from '../components/PageHeader.vue'
 import RunningTaskCard from '../components/RunningTaskCard.vue'
 import TerminalViewer from '../components/TerminalViewer.vue'
 
 const store = useAegisStore()
-useProjectSelector()
+const auth = useAuthStore()
+const { selectedProjectId } = useProjectSelector()
 
 const expandedTaskId = ref<number | null>(null)
 
@@ -46,11 +48,10 @@ const logsLoading = ref(false)
 async function fetchTaskLogs() {
   logsLoading.value = true
   try {
-    const res = await fetch(`${config.apiUrl}/api/v1/task-logs/?limit=20`)
-    if (res.ok) {
-      const data = await res.json()
-      taskLogs.value = data.items || data
-    }
+    // 非 admin 只查當前專案
+    const projectFilter = auth.isAdmin ? '' : `&project_id=${selectedProjectId.value || ''}`
+    const data = await apiClient.get<any>(`/api/v1/task-logs/?limit=20${projectFilter}`)
+    taskLogs.value = data.items || data
   } catch {}
   logsLoading.value = false
 }
@@ -72,6 +73,11 @@ function formatTime(dateStr: string): string {
 
 onMounted(() => {
   fetchTaskLogs()
+})
+
+// 切換專案時重新載入 logs
+watch(selectedProjectId, () => {
+  if (!auth.isAdmin) fetchTaskLogs()
 })
 </script>
 
@@ -102,7 +108,10 @@ onMounted(() => {
               @click="toggleTaskLog"
             />
             <div v-if="expandedTaskId === task.task_id" class="mt-2 h-64 bg-slate-900 rounded-xl border border-slate-700 p-3">
-              <TerminalViewer :card-id="task.task_id" />
+              <TerminalViewer v-if="auth.isAuthenticated" :card-id="task.task_id" />
+              <div v-else class="flex items-center justify-center h-full text-sm text-slate-500">
+                請先登入以查看任務詳情
+              </div>
             </div>
           </div>
         </div>

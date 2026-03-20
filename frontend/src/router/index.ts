@@ -85,22 +85,36 @@ const router = createRouter({
 
 // Navigation guard: 依系統設定決定是否強制登入才能瀏覽 + 網域房間存取控制
 router.beforeEach(async (to) => {
-  // /settings 本身不擋（內建密碼閘門）
-  if (to.path.startsWith('/settings') || to.path === '/login' || to.path === '/onboarding') {
+  if (to.path === '/login' || to.path === '/onboarding') {
     return
   }
 
+  const auth = useAuthStore()
+
+  // /settings 永遠要登入（管理區域），且需要 admin 或 level >= 3
+  if (to.path.startsWith('/settings')) {
+    if (!auth.isAuthenticated) {
+      return { path: '/login', query: { redirect: to.fullPath } }
+    }
+    // 確保 userInfo 已載入（頁面重整時 token 在但 userInfo 還沒 fetch）
+    if (!auth.userInfo && auth.token) {
+      await auth.fetchMe()
+    }
+    if (!auth.isAdmin && (auth.userInfo?.level ?? 0) < 3) {
+      return { path: '/rooms' }
+    }
+    return
+  }
+
+  // 其他 requiresAuth 路由：依網域/全域設定決定
   if (to.meta.requiresAuth) {
-    const auth = useAuthStore()
     const { useDomainStore } = await import('../stores/domain')
     const domainStore = useDomainStore()
 
-    // 確保已載入設定
     if (!auth.policyLoaded) {
       await auth.fetchAuthPolicy()
     }
 
-    // 優先使用網域設定，fallback 到全域設定
     const requireLogin = domainStore.resolved && domainStore.domain
       ? domainStore.requireLogin
       : auth.requireLoginToView

@@ -59,3 +59,4 @@ backend/portraits/
 
 # Private / sensitive directories
 private/
+frontend/.firebase/
