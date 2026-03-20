@@ -4,7 +4,7 @@ from sqlmodel import Session, select
 from app.database import get_session
 from app.models.core import (
     Project, Member, MemberAccount, Account,
-    Domain, Room, RoomMember,
+    Room, RoomMember,
     BotUser, Person, PersonProject, PersonMember, StageList, CronJob,
 )
 import json as json_module
@@ -65,10 +65,7 @@ def get_all_relations(session: Session = Depends(get_session)):
         unique_nodes.append(n)
     nodes = unique_nodes
 
-    # ── 網域 ──
-    domains = session.exec(select(Domain).where(Domain.is_active == True)).all()
-    for d in domains:
-        nodes.append({"type": "domain", "id": d.id, "label": d.hostname})
+    # ── 網域（已解耦，不再顯示在圖上）──
 
     # ── 空間 ──
     rooms = session.exec(select(Room)).all()
