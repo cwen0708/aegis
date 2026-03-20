@@ -4,13 +4,13 @@ import { useRoute } from 'vue-router'
 import { useAegisStore } from '../stores/aegis'
 import { useAuthStore } from '../stores/auth'
 import { authHeaders } from '../utils/authFetch'
-import { useDomainStore } from '../stores/domain'
+// domain store 不再用於 rooms 過濾
 import { useResponsive } from '../composables/useResponsive'
 
 const { isMobile } = useResponsive()
 const route = useRoute()
 const auth = useAuthStore()
-const domainStore = useDomainStore()
+// rooms/members 直接從 API 取
 import { Settings } from 'lucide-vue-next'
 import { createOfficeGame, OfficeScene } from '../game/OfficeScene'
 import OfficeEditor from '../components/OfficeEditor.vue'

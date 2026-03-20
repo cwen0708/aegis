@@ -5,14 +5,13 @@ import { Shield, ListTodo, Settings, Clock, FolderOpen, Wifi, WifiOff, Sun, Moon
 import { useWebSocket } from './composables/useWebSocket'
 import { useResponsive } from './composables/useResponsive'
 import { useAegisStore } from './stores/aegis'
-import { useDomainStore } from './stores/domain'
 import { config } from './config'
 import ToastNotification from './components/ToastNotification.vue'
 
 const router = useRouter()
 const route = useRoute()
 const store = useAegisStore()
-const domainStore = useDomainStore()
+// domain store 在 onMounted 中動態 import 並 resolve
 // 初始化 WebSocket
 useWebSocket()
 

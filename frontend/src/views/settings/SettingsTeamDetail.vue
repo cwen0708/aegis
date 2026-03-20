@@ -9,7 +9,8 @@ import { useAegisStore } from '../../stores/aegis'
 import ConfirmDialog from '../../components/ConfirmDialog.vue'
 import { config } from '../../config'
 import * as membersApi from '../../services/api/members'
-import type { MemberAccount, MemberInfo, AccountInfo, SkillInfo } from '../../services/api/members'
+import type { MemberAccount, AccountInfo, SkillInfo } from '../../services/api/members'
+import { authHeaders } from '../../utils/authFetch'
 
 const route = useRoute()
 const router = useRouter()
