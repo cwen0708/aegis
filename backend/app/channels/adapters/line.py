@@ -164,6 +164,11 @@ class LineChannel(ChannelBase):
                 content = event.message.text
             elif content_type == "sticker":
                 content = f"sticker:{event.message.sticker_id}"
+            elif content_type in ("image", "video", "audio", "file"):
+                # 存 messageId，用於後續下載
+                msg_id = getattr(event.message, "id", "")
+                file_name = getattr(event.message, "file_name", "") if content_type == "file" else ""
+                content = f"msgId:{msg_id}" + (f"|{file_name}" if file_name else "")
         elif event_type == "postback" and hasattr(event, "postback"):
             content_type = "postback"
             content = event.postback.data
