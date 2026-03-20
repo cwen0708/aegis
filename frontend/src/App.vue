@@ -98,7 +98,7 @@ function navClass(path: string) {
 const mobileNavItems = [
   { path: '/kanban', icon: ListTodo, label: '看板' },
   { path: '/cron', icon: Clock, label: '排程' },
-  { path: '/office', icon: Shield, label: 'Aegis', isCenter: true },
+  { path: '/rooms', icon: Shield, label: 'Aegis', isCenter: true },
   { path: '/tasks', icon: Zap, label: '任務' },
   { path: '/settings', icon: Settings, label: '設定' },
 ]
@@ -139,16 +139,16 @@ function mobileNavClass(path: string) {
             <router-link
               v-for="(room, idx) in rooms"
               :key="room.id"
-              :to="`/office/${room.id}`"
+              :to="`/rooms/${room.id}`"
               class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium"
-              :class="navClass(`/office/${room.id}`)"
+              :class="navClass(`/rooms/${room.id}`)"
             >
               <component :is="idx === 0 ? Home : Building2" class="w-5 h-5 shrink-0" />
               <span v-if="!sidebarCollapsed">{{ room.name }}</span>
             </router-link>
           </template>
           <!-- Fallback: single office entry -->
-          <router-link v-else to="/office" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/office')">
+          <router-link v-else to="/rooms" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/rooms')">
             <Building2 class="w-5 h-5 shrink-0" />
             <span v-if="!sidebarCollapsed">{{ store.settings.office_name || '辦公室' }}</span>
           </router-link>

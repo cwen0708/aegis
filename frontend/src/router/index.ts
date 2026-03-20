@@ -6,7 +6,7 @@ import CronJobDetail from '../views/CronJobDetail.vue'
 import Agents from '../views/Agents.vue'
 import Tasks from '../views/Tasks.vue'
 import Team from '../views/Team.vue'
-import Office from '../views/Office.vue'
+import Rooms from '../views/Rooms.vue'
 import Onboarding from '../views/Onboarding.vue'
 import Login from '../views/Login.vue'
 import SettingsLayout from '../views/settings/SettingsLayout.vue'
@@ -31,10 +31,11 @@ import { useAuthStore } from '../stores/auth'
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', redirect: '/office' },
+    { path: '/', redirect: '/rooms' },
+    { path: '/office/:roomId?', redirect: to => `/rooms/${to.params.roomId || ''}` }, // 舊 URL 相容
     { path: '/login', component: Login },
     { path: '/onboarding', component: Onboarding },
-    { path: '/office/:roomId?', name: 'office', component: Office },
+    { path: '/rooms/:roomId?', name: 'rooms', component: Rooms },
     { path: '/kanban', component: Kanban, meta: { requiresAuth: true } },
     { path: '/cron', component: CronJobs, meta: { requiresAuth: true } },
     { path: '/cron/:id', component: CronJobDetail, meta: { requiresAuth: true } },
