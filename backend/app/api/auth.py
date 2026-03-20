@@ -1,5 +1,5 @@
 """Auth & CLI Management API — admin auth, Claude/Gcloud auth, CLI install"""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlmodel import Session, select
 from pydantic import BaseModel
 from app.database import get_session
@@ -257,7 +257,7 @@ def register_with_invite(req: RegisterWithInviteRequest, session: Session = Depe
 
 
 @router.get("/auth/me")
-def get_current_user(request_obj=Depends(lambda request: request), session: Session = Depends(get_session)):
+def get_current_user(request_obj: Request, session: Session = Depends(get_session)):
     """根據 token 取得當前用戶資訊"""
     from app.core.auth import decode_session_token
     from app.models.core import BotUser, PersonProject

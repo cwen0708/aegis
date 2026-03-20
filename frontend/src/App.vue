@@ -14,7 +14,13 @@ const route = useRoute()
 const store = useAegisStore()
 const auth = useAuthStore()
 
-const canAccessSettings = computed(() => auth.isAdmin || (auth.userInfo?.level ?? 0) >= 3)
+const canAccessSettings = computed(() => {
+  if (auth.isAdmin) return true
+  if ((auth.userInfo?.level ?? 0) >= 3) return true
+  // 重整時 fetchMe 尚未完成，先用 sessionStorage 判斷
+  if (auth.token && sessionStorage.getItem('aegis-admin-auth')) return true
+  return false
+})
 
 function handleLogout() {
   auth.logout()
