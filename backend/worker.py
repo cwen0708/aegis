@@ -1309,6 +1309,9 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
 
         update_card_status(idx.card_id, new_status, append_text)
 
+        # 一般卡片也執行 stage action（流水線流轉）
+        _apply_worker_stage_action(idx, new_status)
+
         # 解析 AI 輸出中的 json:create_cards 區塊（跨成員協作、審查卡片等）
         output_text = result.get("output", "")
         if "json:create_cards" in output_text:
