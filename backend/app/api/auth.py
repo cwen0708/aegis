@@ -4,6 +4,7 @@ from sqlmodel import Session, select
 from pydantic import BaseModel
 from app.database import get_session
 from app.models.core import SystemSetting, Account
+from app.core.auth import require_admin_token
 from app.core.account_manager import (
     check_claude_status, update_claude_credentials,
     start_claude_auth, complete_claude_auth, cancel_claude_auth,
@@ -615,19 +616,15 @@ def get_cli_status():
     return result
 
 
-@router.post("/cli/claude/install")
+@router.post("/cli/claude/install", dependencies=[Depends(require_admin_token)])
 def install_claude_cli():
-    """安裝 Claude CLI"""
-    import platform
+    """安裝 Claude CLI（需 admin 權限）"""
     try:
-        # Windows 不需要 sudo，Linux 需要
-        if platform.system() == "Windows":
-            cmd = "npm install -g @anthropic-ai/claude-code"
-        else:
-            cmd = "sudo -n npm install -g @anthropic-ai/claude-code"
+        # AEGIS 僅部署在 Linux
+        cmd = ["sudo", "-n", "npm", "install", "-g", "@anthropic-ai/claude-code"]
 
         result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=300
+            cmd, shell=False, capture_output=True, text=True, timeout=300
         )
         if result.returncode == 0:
             return {"ok": True, "message": "Claude CLI 安裝成功", "output": result.stdout}
@@ -639,19 +636,15 @@ def install_claude_cli():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/cli/gemini/install")
+@router.post("/cli/gemini/install", dependencies=[Depends(require_admin_token)])
 def install_gemini_cli():
-    """安裝 Gemini CLI"""
-    import platform
+    """安裝 Gemini CLI（需 admin 權限）"""
     try:
-        # Windows 不需要 sudo，Linux 需要
-        if platform.system() == "Windows":
-            cmd = "npm install -g @google/gemini-cli"
-        else:
-            cmd = "sudo -n npm install -g @google/gemini-cli"
+        # AEGIS 僅部署在 Linux
+        cmd = ["sudo", "-n", "npm", "install", "-g", "@google/gemini-cli"]
 
         result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=300
+            cmd, shell=False, capture_output=True, text=True, timeout=300
         )
         if result.returncode == 0:
             return {"ok": True, "message": "Gemini CLI 安裝成功", "output": result.stdout}
@@ -663,19 +656,15 @@ def install_gemini_cli():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/cli/codex/install")
+@router.post("/cli/codex/install", dependencies=[Depends(require_admin_token)])
 def install_codex_cli():
-    """安裝 Codex CLI (OpenAI)"""
-    import platform
+    """安裝 Codex CLI（需 admin 權限，OpenAI）"""
     try:
-        # Windows 不需要 sudo，Linux 需要
-        if platform.system() == "Windows":
-            cmd = "npm install -g @openai/codex"
-        else:
-            cmd = "sudo -n npm install -g @openai/codex"
+        # AEGIS 僅部署在 Linux
+        cmd = ["sudo", "-n", "npm", "install", "-g", "@openai/codex"]
 
         result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=300
+            cmd, shell=False, capture_output=True, text=True, timeout=300
         )
         if result.returncode == 0:
             return {"ok": True, "message": "Codex CLI 安裝成功", "output": result.stdout}
