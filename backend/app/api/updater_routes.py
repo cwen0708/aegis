@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlmodel import Session, select
 from typing import Optional
 from pydantic import BaseModel
@@ -228,9 +228,29 @@ async def build_update(version: str):
 
 
 @router.post("/update/apply")
-async def apply_update(payload: ApplyUpdatePayload, session: Session = Depends(get_session)):
-    """套用更新（背景執行，立即回應）"""
-    import asyncio
+async def apply_update(payload: ApplyUpdatePayload, request: Request, session: Session = Depends(get_session)):
+    """套用更新（背景執行，立即回應）。需要 admin token 或 AEGIS_DEPLOY_TOKEN。"""
+    import asyncio, os
+    from app.core.auth import verify_session_token, decode_session_token
+
+    # 認證：admin token 或 deploy token
+    auth_header = request.headers.get("authorization", "")
+    token = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else ""
+    deploy_token = os.getenv("AEGIS_DEPLOY_TOKEN", "")
+
+    is_admin = False
+    if token and verify_session_token(token):
+        payload_data = decode_session_token(token)
+        is_admin = payload_data and payload_data.get("type") == "admin"
+    is_deploy = deploy_token and token == deploy_token
+
+    # localhost 也放行（內部呼叫）
+    client_host = request.client.host if request.client else ""
+    real_ip = request.headers.get("x-real-ip", "")
+    is_local = client_host in ("127.0.0.1", "::1") and not real_ip
+
+    if not (is_admin or is_deploy or is_local):
+        raise HTTPException(status_code=403, detail="需要管理員權限或部署 Token")
 
     if not updater.is_deployed_environment():
         raise HTTPException(status_code=400, detail="本地開發環境不支援熱更新")

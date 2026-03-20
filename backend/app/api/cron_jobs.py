@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlmodel import Session, select
 from sqlalchemy import func as sa_func
 from typing import List, Optional
@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from app.database import get_session
-from app.models.core import Project, CronJob, CronLog, SystemSetting, TaskLog
+from app.models.core import Project, CronJob, CronLog, SystemSetting, TaskLog, CardIndex
 from croniter import croniter
 
 router = APIRouter(tags=["CronJobs"])
@@ -189,17 +189,33 @@ def list_cron_logs(job_id: int, limit: int = 50, offset: int = 0, session: Sessi
 # ==========================================
 @router.get("/task-logs/")
 def list_task_logs(
+    request: Request,
     member_id: Optional[int] = None,
+    project_id: Optional[int] = None,
     limit: int = 50,
     offset: int = 0,
     session: Session = Depends(get_session),
 ):
-    """取得任務執行記錄（可按成員篩選）"""
+    """取得任務執行記錄（可按成員/專案篩選，並套用可見性過濾）"""
+    from app.api.deps import get_visibility_filter
+    visible_project_ids, _ = get_visibility_filter(request, session)
+
     query = select(TaskLog)
     count_query = select(sa_func.count()).select_from(TaskLog)
+
     if member_id is not None:
         query = query.where(TaskLog.member_id == member_id)
         count_query = count_query.where(TaskLog.member_id == member_id)
+
+    # 按專案過濾（透過 CardIndex join）
+    if project_id is not None:
+        query = query.join(CardIndex, TaskLog.card_id == CardIndex.card_id).where(CardIndex.project_id == project_id)
+        count_query = count_query.join(CardIndex, TaskLog.card_id == CardIndex.card_id).where(CardIndex.project_id == project_id)
+    elif visible_project_ids is not None:
+        # 非 admin / 未登入 → 只看可見專案的 logs
+        query = query.join(CardIndex, TaskLog.card_id == CardIndex.card_id).where(CardIndex.project_id.in_(visible_project_ids))
+        count_query = count_query.join(CardIndex, TaskLog.card_id == CardIndex.card_id).where(CardIndex.project_id.in_(visible_project_ids))
+
     logs = session.exec(query.order_by(TaskLog.created_at.desc()).offset(offset).limit(limit)).all()
     total = session.exec(count_query).one()
     return {"items": logs, "total": total}

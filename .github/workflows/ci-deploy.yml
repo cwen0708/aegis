@@ -138,6 +138,7 @@ jobs:
         run: |
           RESPONSE=$(curl -s --max-time 15 -X POST https://aegis.yooliang.com/api/v1/update/apply \
             -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.AEGIS_DEPLOY_TOKEN }}" \
             -d "{\"version\":\"${{ steps.version.outputs.new_bare }}\"}")
           echo "$RESPONSE"
           echo "$RESPONSE" | grep -q '"ok":true' || (echo "Deploy trigger failed!" && exit 1)
