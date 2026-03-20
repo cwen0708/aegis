@@ -1,5 +1,5 @@
 """Messaging API — emails, domains, rooms, raw messages"""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlmodel import Session, select
 from sqlalchemy import func as sa_func
 from typing import Optional
@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from datetime import datetime, timezone
 from app.database import get_session
 from app.models.core import (
-    EmailMessage, Room, RoomProject, RoomMember,
+    EmailMessage, Project, Room, RoomProject, RoomMember,
     Domain, RawMessage, RawMessageUser, RawMessageGroup,
 )
 from app.api.deps import get_domain_filter
@@ -275,12 +275,21 @@ def delete_domain(domain_id: int, session: Session = Depends(get_session)):
 # ==========================================
 @router.get("/rooms")
 @router.get("/rooms/")
-def list_rooms(session: Session = Depends(get_session)):
-    rooms = session.exec(select(Room).order_by(Room.position)).all()
+def list_rooms(request: Request, session: Session = Depends(get_session)):
+    from app.api.deps import get_visibility_filter
+    _, visible_room_ids = get_visibility_filter(request, session)
+
+    rooms = session.exec(select(Room).where(Room.is_active == True).order_by(Room.position)).all()
+
+    # 過濾可見空間
+    if visible_room_ids is not None:
+        rooms = [r for r in rooms if r.id in visible_room_ids]
+
     result = []
     for room in rooms:
-        project_ids = [rp.project_id for rp in session.exec(
-            select(RoomProject).where(RoomProject.room_id == room.id)
+        # 用 Project.room_id 反查（取代 RoomProject）
+        project_ids = [p.id for p in session.exec(
+            select(Project).where(Project.room_id == room.id, Project.is_active == True)
         ).all()]
         member_ids = [rm.member_id for rm in session.exec(
             select(RoomMember).where(RoomMember.room_id == room.id)
@@ -288,7 +297,6 @@ def list_rooms(session: Session = Depends(get_session)):
         d = room.model_dump() if hasattr(room, 'model_dump') else dict(room)
         d["project_ids"] = project_ids
         d["member_ids"] = member_ids
-        # 不回傳 layout_json（太大），前端需要時另外 fetch
         d.pop("layout_json", None)
         result.append(d)
     return result
