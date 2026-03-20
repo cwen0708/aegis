@@ -40,8 +40,10 @@ def get_visibility_filter(request: Request, session: Session):
             return None, None
 
     # localhost → 不過濾（worker / 內部呼叫）
-    client_host = request.client.host if request.client else ""
-    if client_host in ("127.0.0.1", "::1", "localhost"):
+    # 注意：nginx proxy 時 client.host 是 127.0.0.1，需看 X-Real-IP
+    real_ip = request.headers.get("x-real-ip", "")
+    client_host = real_ip or (request.client.host if request.client else "")
+    if client_host in ("127.0.0.1", "::1", "localhost") and not real_ip:
         return None, None
 
     # 解析 token

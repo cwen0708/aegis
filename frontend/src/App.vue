@@ -67,10 +67,8 @@ onMounted(async () => {
   await store.fetchSettings()
 
   // 恢復用戶登入狀態（如果有 token）
-  const { useAuthStore } = await import('./stores/auth')
-  const authStore = useAuthStore()
-  if (authStore.token) {
-    await authStore.fetchMe()
+  if (auth.token) {
+    await auth.fetchMe()
   }
 
   // 解析當前網域
