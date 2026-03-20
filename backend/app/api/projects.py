@@ -66,6 +66,8 @@ class ProjectUpdate(BaseModel):
     is_active: Optional[bool] = None
     deploy_type: Optional[str] = None
     default_member_id: Optional[int] = None  # 專案預設成員
+    room_id: Optional[int] = None            # 所屬空間
+    allow_anonymous: Optional[bool] = None   # 允許未登入瀏覽
 
 
 # ==========================================
@@ -250,6 +252,10 @@ def update_project(project_id: int, update_data: ProjectUpdate, session: Session
         project.deploy_type = update_data.deploy_type
     if update_data.default_member_id is not None:
         project.default_member_id = update_data.default_member_id if update_data.default_member_id != 0 else None
+    if update_data.room_id is not None:
+        project.room_id = update_data.room_id if update_data.room_id != 0 else None
+    if update_data.allow_anonymous is not None:
+        project.allow_anonymous = update_data.allow_anonymous
     session.add(project)
     session.commit()
     session.refresh(project)

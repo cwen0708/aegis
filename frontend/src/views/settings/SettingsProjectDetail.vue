@@ -24,14 +24,19 @@ interface MemberOption {
   provider: string
 }
 
+interface RoomOption { id: number; name: string }
+
 const form = ref({
   name: '',
   path: '',
   default_member_id: null as number | null,
+  room_id: null as number | null,
+  allow_anonymous: false,
   is_system: false,
   is_active: true,
 })
 const members = ref<MemberOption[]>([])
+const rooms = ref<RoomOption[]>([])
 
 // Relocate
 const showRelocate = ref(false)
@@ -57,6 +62,8 @@ async function fetchProject() {
       name: p.name,
       path: p.path,
       default_member_id: p.default_member_id,
+      room_id: p.room_id ?? null,
+      allow_anonymous: p.allow_anonymous ?? false,
       is_system: p.is_system,
       is_active: p.is_active,
     }
@@ -72,6 +79,13 @@ async function fetchMembers() {
   } catch {}
 }
 
+async function fetchRooms() {
+  try {
+    const res = await fetch(`${API}/api/v1/rooms`, { headers: authHeaders() })
+    if (res.ok) rooms.value = (await res.json()).map((r: any) => ({ id: r.id, name: r.name }))
+  } catch {}
+}
+
 async function saveProject() {
   if (!form.value.name.trim()) return
   saving.value = true
@@ -82,6 +96,8 @@ async function saveProject() {
       body: JSON.stringify({
         name: form.value.name,
         default_member_id: form.value.default_member_id,
+        room_id: form.value.room_id,
+        allow_anonymous: form.value.allow_anonymous,
         is_active: form.value.is_active,
       }),
     })
@@ -441,7 +457,7 @@ function formatUptime(sec: number): string {
 }
 
 onMounted(async () => {
-  await Promise.all([fetchProject(), fetchMembers(), fetchEnvVars(), fetchRcStatus(), fetchProjectPersons(), fetchAllPersons()])
+  await Promise.all([fetchProject(), fetchMembers(), fetchRooms(), fetchEnvVars(), fetchRcStatus(), fetchProjectPersons(), fetchAllPersons()])
   loading.value = false
   // 如果 RC 正在運行，開始輪詢
   if (rcStatus.value === 'running') startRcPolling()
@@ -561,6 +577,33 @@ onUnmounted(() => {
             </option>
           </select>
           <p class="text-xs text-slate-500 mt-1">列表沒有指派成員時使用</p>
+        </div>
+
+        <!-- Room -->
+        <div>
+          <label class="block text-sm text-slate-400 mb-1">所屬空間</label>
+          <select
+            v-model="form.room_id"
+            class="w-full px-3 py-2 bg-slate-900 text-slate-200 border border-slate-600 rounded-lg focus:outline-none focus:border-emerald-500"
+          >
+            <option :value="null">無（不歸屬任何空間）</option>
+            <option v-for="r in rooms" :key="r.id" :value="r.id">{{ r.name }}</option>
+          </select>
+          <p class="text-xs text-slate-500 mt-1">登入後，用戶可透過所屬空間找到此專案</p>
+        </div>
+
+        <!-- Allow anonymous -->
+        <div class="flex items-center justify-between">
+          <div>
+            <span class="text-sm text-slate-300">允許未登入瀏覽</span>
+            <p class="text-xs text-slate-500 mt-0.5">開啟後，未登入的使用者也能看到此專案</p>
+          </div>
+          <button
+            @click="form.allow_anonymous = !form.allow_anonymous"
+            :class="['relative inline-flex h-6 w-11 items-center rounded-full transition-colors', form.allow_anonymous ? 'bg-emerald-600' : 'bg-slate-600']"
+          >
+            <span :class="['inline-block h-4 w-4 transform rounded-full bg-white transition-transform', form.allow_anonymous ? 'translate-x-6' : 'translate-x-1']" />
+          </button>
         </div>
 
         <!-- Active toggle -->
