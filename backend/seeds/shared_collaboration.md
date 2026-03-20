@@ -1,25 +1,36 @@
----
-name: collaboration
-description: "跨成員協作協議。當遇到超出自身專長的問題時，如何請求其他成員協助。"
----
-
 # 跨成員協作
 
 當你遇到超出自身專長的問題時，可以請求其他團隊成員協助。
 
 ## 如何請求協助
 
-在你的輸出中包含 `json:create_cards` 區塊，並指定 `target_member`：
+使用 aegis-api 工具中的函式，建立卡片到對方的收件匣：
 
-```json:create_cards
-[{"title": "協助: 簡述問題", "list_name": "待處置",
-  "content": "## 問題\n...\n## 需要協助\n...",
-  "target_member": "成員 slug"}]
+```bash
+# 1. 查出對方的收件匣
+TARGET_LIST=$(find_list_id 1 "對方名字")
+
+# 2. 建卡片
+RESP=$(create_card "協助: 簡述問題" $TARGET_LIST 1 "## 問題\n詳細描述\n\n## 已嘗試\n...\n\n## 需要協助\n...")
+
+# 3. 觸發
+CARD_ID=$(echo $RESP | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('id',''))")
+trigger_card $CARD_ID
+```
+
+## 跨專案協作
+
+如需建到其他專案，先查出目標專案的 board：
+
+```bash
+# 查出目標專案的 list_id
+TARGET_LIST=$(find_list_id <其他專案ID> "成員名字")
+create_card "協助: 問題描述" $TARGET_LIST <其他專案ID> "詳細描述"
 ```
 
 ## 注意事項
 
-- 問題描述要具體：包含錯誤訊息、相關檔案路徑、你已嘗試的方法
+- 問題描述要具體：包含錯誤訊息、檔案路徑、已嘗試的方法
 - 不要求助自己能解決的事情
 - 一個求助卡片只處理一個問題
-- 協作完成後，系統會自動通知請求者（寫入對方的短期記憶）
+- 不要自己觸發自己的卡片（防無限迴圈）

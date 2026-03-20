@@ -1,8 +1,3 @@
----
-name: fullstack-dev
-description: "全端開發規範。Vue 3 Composition API 前端、FastAPI + SQLModel 後端開發指引。"
----
-
 # 全端開發規範
 
 - 前端使用 Vue 3 Composition API + <script setup>
