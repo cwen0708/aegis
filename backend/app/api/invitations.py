@@ -321,12 +321,25 @@ def _person_to_response(person: Person, session: Session) -> dict:
     # status
     status = "active" if len(bot_users) > 0 else "pending"
 
+    # 過濾 extra_json 中的敏感欄位（ad_pass 明文密碼）
+    filtered_extra = None
+    has_ad = False
+    if person.extra_json:
+        try:
+            extra = json_module.loads(person.extra_json)
+            has_ad = bool(extra.get("ad_user") and extra.get("ad_pass"))
+            extra.pop("ad_pass", None)
+            filtered_extra = json_module.dumps(extra, ensure_ascii=False)
+        except (json_module.JSONDecodeError, TypeError):
+            filtered_extra = person.extra_json
+
     return {
         "id": person.id,
         "display_name": person.display_name,
         "description": person.description,
         "level": person.level,
-        "extra_json": person.extra_json,
+        "extra_json": filtered_extra,
+        "has_ad": has_ad,
         "access_expires_at": person.access_expires_at.isoformat() if person.access_expires_at else None,
         "default_member_id": person.default_member_id,
         "created_at": person.created_at.isoformat(),
