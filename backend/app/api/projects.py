@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from app.database import get_session
 from app.models.core import Project, Card, StageList, SystemSetting, Account, Member, MemberAccount, CardIndex, Person, PersonProject
 from app.core.card_index import sync_card_to_index, remove_card_from_index, query_board, rebuild_index
-from app.api.deps import get_domain_filter, get_card_lock, get_member_primary_provider, get_project_for_list
+from app.api.deps import get_domain_filter, get_visibility_filter, get_card_lock, get_member_primary_provider, get_project_for_list
 from pathlib import Path
 import subprocess
 import time as time_module
@@ -166,29 +166,11 @@ def _ensure_member_inboxes(session: Session, project_id: int):
 def read_projects(request: Request, session: Session = Depends(get_session)):
     projects = session.exec(select(Project)).all()
 
-    # 1. Domain 過濾（基於網域）
-    visible_project_ids, _ = get_domain_filter(request, session)
+    # 統一過濾：admin/localhost 不過濾，user token 查 PersonProject，未登入查 allow_anonymous
+    from app.api.deps import get_visibility_filter
+    visible_project_ids, _ = get_visibility_filter(request, session)
     if visible_project_ids is not None:
         projects = [p for p in projects if p.id in visible_project_ids]
-
-    # 2. User token 過濾（透過 Person → PersonProject）
-    from app.core.auth import decode_session_token
-    auth_header = request.headers.get("authorization", "")
-    token = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else ""
-    if token:
-        payload = decode_session_token(token)
-        if payload and payload.get("type") == "user":
-            from app.models.core import BotUser, PersonProject
-            user = session.get(BotUser, payload["uid"])
-            if user and user.person_id:
-                user_projects = session.exec(
-                    select(PersonProject.project_id).where(
-                        PersonProject.person_id == user.person_id,
-                        PersonProject.can_view == True,
-                    )
-                ).all()
-                user_project_ids = set(user_projects)
-                projects = [p for p in projects if p.id in user_project_ids]
 
     return projects
 
@@ -289,10 +271,18 @@ def read_project_board(project_id: int, request: Request, session: Session = Dep
         select(StageList).where(StageList.project_id == project_id).order_by(StageList.position)
     ).all()
 
-    # 未登入時根據 Domain 過濾成員收件匣
-    _, visible_member_ids = get_domain_filter(request, session)
-    if visible_member_ids is not None:
-        lists = [l for l in lists if not l.is_member_bound or l.member_id in visible_member_ids]
+    # 未登入時根據 Room 成員過濾收件匣
+    # 如果專案有 room_id，用 RoomMember 過濾可見成員
+    from app.api.deps import get_visibility_filter
+    visible_project_ids, _ = get_visibility_filter(request, session)
+    if visible_project_ids is not None and project.room_id:
+        from app.models.core import RoomMember
+        room_members = session.exec(
+            select(RoomMember.member_id).where(RoomMember.room_id == project.room_id)
+        ).all()
+        visible_member_ids = set(room_members)
+        if visible_member_ids:
+            lists = [l for l in lists if not l.is_member_bound or l.member_id in visible_member_ids]
 
     # Query all cards for this project from the index
     card_indices = query_board(session, project_id)

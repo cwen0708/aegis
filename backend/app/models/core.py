@@ -21,6 +21,8 @@ class Project(SQLModel, table=True):
     default_member_id: Optional[int] = Field(default=None, foreign_key="member.id")  # 專案預設成員
     is_active: bool = Field(default=True) # 用於完全隱藏
     is_system: bool = Field(default=False) # 系統專案（AEGIS），前端禁止刪除/改名
+    allow_anonymous: bool = Field(default=False)  # 允許未登入瀏覽
+    room_id: Optional[int] = Field(default=None, foreign_key="room.id")  # 所屬空間
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     lists: List["StageList"] = Relationship(back_populates="project")
@@ -594,18 +596,19 @@ class RawMessageGroup(SQLModel, table=True):
 # 房間 & 網域（多空間 + 網域綁定）
 # ==========================================
 class Room(SQLModel, table=True):
-    """虛擬辦公室房間 — 每個房間有自己的佈局、專案和成員"""
+    """虛擬辦公室房間 — 每個房間有自己的佈局和成員"""
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str                                    # "研發部", "維運中心"
     description: str = Field(default="")
     layout_json: str = Field(default="{}")       # Phaser 辦公室佈局
     position: int = Field(default=0)             # 顯示順序
     is_active: bool = Field(default=True)
+    allow_anonymous: bool = Field(default=False)  # 允許未登入瀏覽
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class RoomProject(SQLModel, table=True):
-    """房間可見專案（多對多）"""
+    """[deprecated] 房間可見專案 — 已改用 Project.room_id 直接關聯"""
     __table_args__ = (
         UniqueConstraint("room_id", "project_id", name="uq_roomproject"),
     )
@@ -626,11 +629,11 @@ class RoomMember(SQLModel, table=True):
 
 
 class Domain(SQLModel, table=True):
-    """網域綁定 — 每個 hostname 指定可見的房間"""
+    """網域綁定 — 控制該網域的登入和引導頁設定"""
     id: Optional[int] = Field(default=None, primary_key=True)
     hostname: str = Field(index=True, unique=True)  # "aegis.greenshepherd.com.tw"
     name: str = Field(default="")                    # 顯示名稱
-    room_ids_json: str = Field(default="[]")         # JSON: [1, 2]
+    room_ids_json: str = Field(default="[]")         # [deprecated] 舊版房間綁定，新版不使用
     is_default: bool = Field(default=False)          # 未匹配時的 fallback
     is_active: bool = Field(default=True)
     require_login: bool = Field(default=False)       # 此網域是否強制登入

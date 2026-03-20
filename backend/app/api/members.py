@@ -227,9 +227,7 @@ def list_members(request: Request, session: Session = Depends(get_session)):
             "provider": primary_provider,
             "accounts": accounts,
         })
-    _, visible_member_ids = get_domain_filter(request, session)
-    if visible_member_ids is not None:
-        result = [m for m in result if m["id"] in visible_member_ids]
+    # 成員可見性改由前端根據 Room 的 RoomMember 過濾（Office.vue）
     return result
 
 
