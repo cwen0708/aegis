@@ -601,7 +601,7 @@ onUnmounted(() => {
 
             <!-- Sprite Index -->
             <div>
-              <label class="block text-sm text-slate-400 mb-2">小人物（辦公室用）</label>
+              <label class="block text-sm text-slate-400 mb-2">小人物（空間用）</label>
               <div class="flex gap-2">
                 <button
                   v-for="i in 6"

@@ -471,7 +471,7 @@ watch(
       @cancel="handleExitEdit"
     />
 
-    <!-- Normal office view -->
+    <!-- Normal room view -->
     <template v-else>
       <div class="flex flex-col h-full">
         <!-- Canvas -->

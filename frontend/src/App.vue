@@ -147,10 +147,10 @@ function mobileNavClass(path: string) {
               <span v-if="!sidebarCollapsed">{{ room.name }}</span>
             </router-link>
           </template>
-          <!-- Fallback: single office entry -->
+          <!-- Fallback: single room entry -->
           <router-link v-else to="/rooms" class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium" :class="navClass('/rooms')">
             <Building2 class="w-5 h-5 shrink-0" />
-            <span v-if="!sidebarCollapsed">{{ store.settings.office_name || '辦公室' }}</span>
+            <span v-if="!sidebarCollapsed">{{ store.settings.office_name || '空間' }}</span>
           </router-link>
         </div>
 
@@ -273,7 +273,7 @@ function mobileNavClass(path: string) {
     <nav v-if="isMobile" class="fixed bottom-0 left-0 right-0 z-50 bg-slate-800/95 backdrop-blur-lg border-t border-slate-700/50 safe-area-bottom" role="navigation" aria-label="主要導覽">
       <div class="flex items-end justify-around px-2 pt-2 pb-2">
         <template v-for="item in mobileNavItems" :key="item.path">
-          <!-- 中央辦公室按鈕（突出） -->
+          <!-- 中央空間按鈕（突出） -->
           <router-link
             v-if="item.isCenter"
             :to="item.path"
