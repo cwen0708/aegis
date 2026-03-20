@@ -11,9 +11,6 @@
 ## ⚠️ 最重要的事
 
 **你必須在完成開發後執行 git commit。沒有 commit 的改動會被清除。**
-**你必須建立審查卡片給小良。沒有審查卡片的改動不會被部署。**
-
-這兩步如果不做，你的工作就白費了。
 
 ## 開發流程
 
@@ -51,8 +48,7 @@ cd <project_path>
 git diff --stat
 
 # 2. 逐一加入你改的檔案（不要 git add .）
-git add <你改的檔案1>
-git add <你改的檔案2>
+git add <你改的檔案>
 
 # 3. 也加入新建的檔案
 git add <新建的檔案>
@@ -70,46 +66,18 @@ git log --oneline -1
 - 前綴：`feat:` / `fix:` / `refactor:` / `perf:`
 - 繁體中文訊息
 - 不要 commit .env、*.db、node_modules
-- **禁止 git push** — commit 只留在本地分支，推送權在管理員
+- 不要 git push — commit 留在本地，推送權在管理員
 
-### Step 6: 建立審查卡片給小良（必須執行）
+## Commit 後
 
-用 aegis-api 工具建立卡片：
-
-```bash
-# 1. 查小良的收件匣 list_id
-LIANG_LIST=$(curl -s "http://127.0.0.1:8899/api/v1/projects/1/board" | python3 -c "
-import sys, json
-for s in json.loads(sys.stdin.read()):
-    if '小良' in s.get('name',''):
-        print(s['id']); break
-")
-
-# 2. 取得 commit 資訊
-COMMIT_HASH=$(cd <project_path> && git log --oneline -1 | cut -d' ' -f1)
-COMMIT_MSG=$(cd <project_path> && git log -1 --format=%s)
-
-# 3. 建卡片
-RESP=$(curl -s -X POST "http://127.0.0.1:8899/api/v1/cards/" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"title\": \"審查: $COMMIT_MSG\",
-    \"list_id\": $LIANG_LIST,
-    \"project_id\": 1,
-    \"description\": \"Commit: $COMMIT_HASH $COMMIT_MSG\"
-  }")
-
-# 4. 觸發卡片
-CARD_ID=$(echo $RESP | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('id',''))")
-curl -s -X POST "http://127.0.0.1:8899/api/v1/cards/$CARD_ID/trigger"
-echo "審查卡片 #$CARD_ID 已建立"
-```
+Commit 完成後，你的任務就結束了。系統會自動將卡片移到「審查中」列表，由小良進行 Code Review 和部署。**你不需要手動建審查卡片。**
 
 ## 重要限制
 
 1. **不要自己部署** — 交給小良
-2. **不要 git push**
+2. **不要 git push** — commit 留在本地，推送權在管理員
 3. **不要修改運行環境**（~/.local/aegis/）
 4. **每次只改一件事**
-5. **Step 5 和 Step 6 是必須的** — 沒有 commit = 白做，沒有審查卡片 = 不會部署
-6. **卡片狀態只能用 completed 或 failed** — 不要用 done 或其他自創狀態
+5. **驗證全部通過才 commit**
+6. **一定要 git commit** — 沒有 commit = 白做
+7. **卡片狀態只能用 completed 或 failed**
