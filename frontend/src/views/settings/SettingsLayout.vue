@@ -15,10 +15,10 @@ const menuGroups = [
   {
     label: '系統',
     items: [
-      { path: '/onboarding', label: '設定引導', icon: Rocket },
+      { path: '/settings/update', label: '系統更新', icon: Download },
       { path: '/settings/general', label: '一般設定', icon: Settings },
       { path: '/settings/status', label: '服務狀態', icon: Activity },
-      { path: '/settings/update', label: '系統更新', icon: Download },
+      { path: '/onboarding', label: '設定引導', icon: Rocket },
     ],
   },
   {

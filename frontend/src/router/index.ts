@@ -47,7 +47,7 @@ const router = createRouter({
     {
       path: '/settings',
       component: SettingsLayout,
-      redirect: '/settings/general',
+      redirect: '/settings/update',
       meta: { requiresAuth: true },
       children: [
         { path: 'general', component: SettingsGeneral },
