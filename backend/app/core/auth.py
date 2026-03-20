@@ -104,10 +104,9 @@ def decode_session_token(token: str) -> dict | None:
         payload = json.loads(base64.urlsafe_b64decode(payload_b64))
         if payload.get("exp", 0) <= time.time():
             return None
-        # 向後相容：舊 token 沒有 type 欄位，視為 admin
+        # 拒絕舊格式 token（無 type 欄位），強制重新登入
         if "type" not in payload:
-            payload["type"] = "admin"
-            payload["uid"] = 0
+            return None
         return payload
     except Exception:
         return None
