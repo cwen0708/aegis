@@ -1465,6 +1465,43 @@ def main():
     except Exception as e:
         logger.warning(f"[Worker] Failed to clear paused flag: {e}")
 
+    # 啟動時掃描 stale 的 running 卡片（上次重啟時中斷的任務）
+    try:
+        with Session(engine) as session:
+            stale_cards = session.exec(
+                select(CardIndex).where(CardIndex.status == "running")
+            ).all()
+            for stale in stale_cards:
+                stage_list = session.get(StageList, stale.list_id)
+                if not stage_list:
+                    continue
+                # 如果有 on_success_action（流水線），補做流轉
+                action = stage_list.on_success_action
+                if action and action.startswith("move_to:"):
+                    target_id = int(action.split(":")[1])
+                    target_list = session.get(StageList, target_id)
+                    final_status = "pending" if target_list and target_list.is_ai_stage else "completed"
+                    stale.status = final_status
+                    stale.list_id = target_id
+                    session.add(stale)
+                    # 也更新 Card 表
+                    orm_card = session.get(Card, stale.card_id)
+                    if orm_card:
+                        orm_card.status = final_status
+                        orm_card.list_id = target_id
+                        session.add(orm_card)
+                    logger.info(f"[Worker] Recovered stale card {stale.card_id}: moved to list {target_id} (status={final_status})")
+                else:
+                    # 無流轉動作，標記為 completed
+                    stale.status = "completed"
+                    session.add(stale)
+                    logger.info(f"[Worker] Recovered stale card {stale.card_id}: set to completed")
+            if stale_cards:
+                session.commit()
+                logger.info(f"[Worker] Recovered {len(stale_cards)} stale cards on startup")
+    except Exception as e:
+        logger.warning(f"[Worker] Failed to recover stale cards: {e}")
+
     last_cleanup = time.time()
     while not _shutdown_requested:
         try:
