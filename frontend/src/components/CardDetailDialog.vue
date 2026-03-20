@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue' 
 import { Zap, Square, Pencil, X, GitBranch } from 'lucide-vue-next'
 import TerminalViewer from './TerminalViewer.vue'
 import ExecutionFlowDiagram from './ExecutionFlowDiagram.vue'
@@ -66,6 +66,12 @@ function handleSave() {
 }
 
 const canEdit = () => props.card.status !== 'running' && props.card.status !== 'pending'
+
+watch(() => props.card.status, (newStatus) => {
+  if (isEditing.value && (newStatus === 'running' || newStatus === 'pending')) {
+    cancelEdit()
+  }
+})
 </script>
 
 <template>
