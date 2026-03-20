@@ -312,13 +312,21 @@ def list_rooms(request: Request, session: Session = Depends(get_session)):
 
 
 @router.get("/rooms/{room_id}")
-def get_room(room_id: int, session: Session = Depends(get_session)):
+def get_room(room_id: int, request: Request, session: Session = Depends(get_session)):
     """取得單一房間（含 layout_json）"""
+    from app.api.deps import get_visibility_filter
+    _, visible_room_ids = get_visibility_filter(request, session)
+
     room = session.get(Room, room_id)
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
-    project_ids = [rp.project_id for rp in session.exec(
-        select(RoomProject).where(RoomProject.room_id == room.id)
+
+    # 檢查可見性
+    if visible_room_ids is not None and room.id not in visible_room_ids:
+        raise HTTPException(status_code=403, detail="無權限查看此空間")
+
+    project_ids = [p.id for p in session.exec(
+        select(Project).where(Project.room_id == room.id, Project.is_active == True)
     ).all()]
     member_ids = [rm.member_id for rm in session.exec(
         select(RoomMember).where(RoomMember.room_id == room.id)
