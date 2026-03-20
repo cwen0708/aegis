@@ -580,7 +580,10 @@ def _apply_worker_stage_action(idx, new_status: str):
                 session.commit()
             elif action.startswith("move_to:"):
                 target_list_id = int(action.split(":")[1])
-                update_card_status(idx.card_id, new_status)
+                target_list = session.get(StageList, target_list_id)
+                # 如果目標列表是 AI 處理階段，status 改為 pending（讓下一個成員撿起來）
+                final_status = "pending" if target_list and target_list.is_ai_stage else new_status
+                update_card_status(idx.card_id, final_status)
                 # 移動
                 ci = session.get(CardIndex, idx.card_id)
                 if ci:
@@ -588,6 +591,7 @@ def _apply_worker_stage_action(idx, new_status: str):
                     try:
                         card_data = read_card(file_path)
                         card_data.list_id = target_list_id
+                        card_data.status = final_status
                         write_card(file_path, card_data)
                         sync_card_to_index(session, card_data, ci.project_id, str(file_path))
                     except Exception:
@@ -595,8 +599,10 @@ def _apply_worker_stage_action(idx, new_status: str):
                 orm_card = session.get(Card, idx.card_id)
                 if orm_card:
                     orm_card.list_id = target_list_id
+                    orm_card.status = final_status
                     session.add(orm_card)
                 session.commit()
+                logger.info(f"[Worker] Card {idx.card_id} moved to list {target_list_id} (status={final_status})")
             else:
                 # none: 只更新狀態，不刪不移
                 update_card_status(idx.card_id, new_status)
