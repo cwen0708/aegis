@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js'
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js'
 import type { Actor3D, MemberState } from './types'
 import { CHARACTER_MODELS } from './types'
 
@@ -71,19 +72,13 @@ export function createActorManager(scene: THREE.Scene) {
     const url = getModelUrl(memberId)
     const { scene: origScene, animations } = await loadGLTF(url)
 
-    // Clone the model so each actor gets its own instance
-    const model = origScene.clone()
+    // Clone with SkeletonUtils to properly handle SkinnedMesh + bones
+    const model = SkeletonUtils.clone(origScene) as THREE.Group
     model.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh
         mesh.castShadow = true
         mesh.receiveShadow = false
-        // Clone materials to avoid shared state
-        if (Array.isArray(mesh.material)) {
-          mesh.material = mesh.material.map(m => m.clone())
-        } else {
-          mesh.material = mesh.material.clone()
-        }
       }
     })
 

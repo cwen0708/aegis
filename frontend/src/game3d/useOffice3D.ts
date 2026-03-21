@@ -46,7 +46,7 @@ export function useOffice3D(
       desks = []
     }
 
-    const bounds = { minX: -5, maxX: 5, minZ: -4, maxZ: 4 }
+    const bounds = { minX: -6, maxX: 6, minZ: -5, maxZ: 5 }
     behaviorCtrl = createBehaviorController(actorMgr, desks, bounds)
 
     interactionHandler = createInteractionHandler(
