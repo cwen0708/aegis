@@ -92,7 +92,7 @@ def user_login(req: UserLoginRequest, session: Session = Depends(get_session)):
     """用戶登入（BotUser platform=web），回傳含 user_id 的 session token"""
     from app.core.auth import check_password, generate_session_token
     from app.models.core import BotUser
-    from datetime import datetime, timezone
+    from datetime import datetime, timezone, timedelta
 
     user = session.exec(
         select(BotUser).where(
@@ -105,16 +105,28 @@ def user_login(req: UserLoginRequest, session: Session = Depends(get_session)):
     if not user or not user.password_hash:
         raise HTTPException(status_code=401, detail="帳號或密碼錯誤")
 
+    # 鎖定檢查前置：先檢查是否被鎖定，再驗證密碼
+    now = datetime.now(timezone.utc)
+    if user.locked_until and user.locked_until > now:
+        remaining = user.locked_until - now
+        minutes = int(remaining.total_seconds() / 60) + 1
+        raise HTTPException(status_code=423, detail=f"登入失敗次數過多，請 {minutes} 分鐘後再試")
+
     if not check_password(req.password, user.password_hash):
+        # 遞增失敗計數
+        user.failed_verify_count = (user.failed_verify_count or 0) + 1
+        user.last_failed_at = now
+        # 達到 5 次失敗，鎖定 30 分鐘
+        if user.failed_verify_count >= 5:
+            user.locked_until = now + timedelta(minutes=30)
+        session.add(user)
+        session.commit()
         raise HTTPException(status_code=401, detail="帳號或密碼錯誤")
 
-    # 檢查鎖定
-    if user.locked_until and user.locked_until > datetime.now(timezone.utc):
-        raise HTTPException(status_code=423, detail="帳號已鎖定，請稍後再試")
-
-    # 更新最後活躍時間
-    user.last_active_at = datetime.now(timezone.utc)
+    # 登入成功，重置失敗計數
+    user.last_active_at = now
     user.failed_verify_count = 0
+    user.locked_until = None
     session.add(user)
     session.commit()
 
