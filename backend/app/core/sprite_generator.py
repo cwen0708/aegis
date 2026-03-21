@@ -62,11 +62,16 @@ ACTION_FRAMES = {
 }
 
 
-def _hero_prompt(desc: str) -> str:
+def _hero_prompt(desc: str, has_portrait: bool = False) -> str:
+    ref_note = """
+REFERENCE: A character portrait/illustration is attached.
+Use it as visual reference for the character's appearance (hair, outfit, colors).
+Convert the style to pixel art while preserving key visual features.""" if has_portrait else ""
     return f"""Generate a pixel art character sprite.
 
 CHARACTER: {desc}
 POSE: Standing idle, front-facing (south direction)
+{ref_note}
 
 {BASE_STYLE}
 
@@ -102,9 +107,11 @@ Single character on pure white background, 64x128 pixels."""
 
 # ===== Gemini 呼叫 =====
 
-def _gen_image(api_key: str, prompt: str, ref: Optional[bytes] = None) -> bytes:
+def _gen_image(api_key: str, prompt: str, ref: Optional[bytes] = None, portrait: Optional[bytes] = None) -> bytes:
     client = genai.Client(api_key=api_key)
     contents: list = [prompt]
+    if portrait:
+        contents.append(types.Part.from_bytes(data=portrait, mime_type="image/png"))
     if ref:
         contents.append(types.Part.from_bytes(data=ref, mime_type="image/png"))
 
@@ -160,9 +167,9 @@ def _save(member_id: int, name: str, data: bytes) -> str:
 
 # ===== 公開 API =====
 
-def generate_hero(member_id: int, desc: str, api_key: str) -> dict:
-    """Step 1: 主形像（正面）"""
-    data = _gen_image(api_key, _hero_prompt(desc))
+def generate_hero(member_id: int, desc: str, api_key: str, portrait: Optional[bytes] = None) -> dict:
+    """Step 1: 主形像（正面），可傳入立繪作為角色參考"""
+    data = _gen_image(api_key, _hero_prompt(desc, has_portrait=portrait is not None), portrait=portrait)
     path = _save(member_id, "hero_south", data)
     return {"status": "ok", "path": path, "step": "hero_south"}
 

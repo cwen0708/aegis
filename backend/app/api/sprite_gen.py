@@ -63,14 +63,28 @@ def sprite_frame(member_id: int, name: str):
 
 # ===== 生成步驟 =====
 
+def _load_portrait(member: Member) -> bytes | None:
+    """讀取成員的立繪圖片作為角色參考"""
+    if not member.portrait:
+        return None
+    # portrait 路徑類似 /api/v1/portraits/xxx.png
+    portrait_dir = Path(__file__).parent.parent.parent / "uploads" / "portraits"
+    filename = member.portrait.split("/")[-1]
+    portrait_path = portrait_dir / filename
+    if portrait_path.exists():
+        return portrait_path.read_bytes()
+    return None
+
+
 @router.post("/members/{member_id}/sprite/hero", dependencies=[Depends(require_admin_token)])
 def gen_hero(member_id: int, req: GenerateRequest, session: Session = Depends(get_session)):
     member = _get_member(member_id, session)
     api_key = _get_gemini_key(session)
     desc = req.description or f"A cute chibi {member.name}, pixel art game character"
+    portrait = _load_portrait(member)
 
     from app.core.sprite_generator import generate_hero
-    return generate_hero(member_id, desc, api_key)
+    return generate_hero(member_id, desc, api_key, portrait=portrait)
 
 
 @router.post("/members/{member_id}/sprite/direction/{direction}", dependencies=[Depends(require_admin_token)])
@@ -117,12 +131,13 @@ def gen_all(member_id: int, req: GenerateRequest, session: Session = Depends(get
         get_progress, DIRECTIONS, ACTIONS
     )
 
+    portrait = _load_portrait(member)
     progress = get_progress(member_id)
     results = []
 
     # Hero (south)
     if not progress["frames"].get("hero_south"):
-        results.append(generate_hero(member_id, desc, api_key))
+        results.append(generate_hero(member_id, desc, api_key, portrait=portrait))
 
     # Other directions
     for d in DIRECTIONS:
