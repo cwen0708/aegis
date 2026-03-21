@@ -236,10 +236,15 @@ def apply_sheet(member_id: int, sprite_index: int) -> Optional[str]:
         return None
 
     import shutil
-    base = Path(__file__).parent.parent.parent
+    # backend/ 的上一層是專案根目錄
+    project_root = Path(__file__).parent.parent.parent.parent
+    copied = False
     for subdir in ["frontend/public/assets/office/characters_4dir", "frontend/dist/assets/office/characters_4dir"]:
-        target = base / subdir / f"char_{sprite_index}.png"
+        target = project_root / subdir / f"char_{sprite_index}.png"
         if target.parent.exists():
             shutil.copy2(src, target)
+            copied = True
+    if not copied:
+        return None
 
     return f"char_{sprite_index}.png"
