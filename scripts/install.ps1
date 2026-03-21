@@ -535,7 +535,14 @@ function Ensure-Admin {
     Write-Host "  [*] 需要系統管理員權限，正在提權..." -ForegroundColor Yellow
     # Build a command that runs the script then pauses so the user can see results.
     # Using -Command instead of -File so we can append a pause.
-    $scriptCall = "& '$PSCommandPath'"
+    # When run via "irm | iex", $PSCommandPath is empty — download to temp first.
+    $scriptPath = $PSCommandPath
+    if (-not $scriptPath) {
+        $scriptPath = "$env:TEMP\aegis-install.ps1"
+        $dlUrl = "https://raw.githubusercontent.com/cwen0708/aegis/main/scripts/install.ps1"
+        Invoke-WebRequest -Uri $dlUrl -OutFile $scriptPath
+    }
+    $scriptCall = "& '$scriptPath'"
     if ($RootDir)    { $scriptCall += " -RootDir '$RootDir'" }
     if ($InstallDir) { $scriptCall += " -InstallDir '$InstallDir'" }
     if ($Force)      { $scriptCall += " -Force" }
