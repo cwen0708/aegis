@@ -97,12 +97,15 @@ export function useOffice3D(
       }
     }
 
-    // Process idle members (roaming)
-    for (const rest of data.resting) {
+    // Process idle members (roaming) — spread them in a circle to avoid overlap
+    for (let i = 0; i < data.resting.length; i++) {
+      const rest = data.resting[i]!
       newMemberIds.add(rest.memberId)
       const existing = actorMgr.actors.get(rest.memberId)
       if (!existing) {
-        const pos = new THREE.Vector3(Math.random() * 6 - 3, 0, Math.random() * 6 - 3)
+        const angle = (i / Math.max(data.resting.length, 1)) * Math.PI * 2
+        const radius = 2.5 + Math.random() * 2
+        const pos = new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius)
         try {
           await actorMgr.addActor(rest.memberId, rest.name, rest.provider, pos, 'idle')
           behaviorCtrl.assignIdle(rest.memberId)
