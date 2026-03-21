@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { Zap, Square, Pencil, X } from 'lucide-vue-next'
+import { Zap, Square, Pencil, X, GitBranch } from 'lucide-vue-next'
 import TerminalViewer from './TerminalViewer.vue'
+import ExecutionFlowDiagram from './ExecutionFlowDiagram.vue'
 import { useAegisStore } from '../stores/aegis'
 
 const store = useAegisStore()
@@ -19,7 +20,7 @@ const emit = defineEmits<{
 }>()
 
 const isEditing = ref(false)
-const cardDetailTab = ref<'description' | 'prompt' | 'result'>('description')
+const cardDetailTab = ref<'description' | 'prompt' | 'result' | 'flow'>('description')
 
 // 備份原始值，取消時還原
 let backupTitle = ''
@@ -136,6 +137,14 @@ const canEdit = () => props.card.status !== 'running' && props.card.status !== '
           結果
           <div v-if="cardDetailTab === 'result'" class="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400" />
         </button>
+        <button
+          @click="cardDetailTab = 'flow'"
+          class="flex-1 px-4 py-2 text-xs font-medium transition-colors relative"
+          :class="cardDetailTab === 'flow' ? 'text-emerald-400' : 'text-slate-400 hover:text-slate-200'"
+        >
+          <GitBranch class="w-3 h-3 inline mr-1" />流程
+          <div v-if="cardDetailTab === 'flow'" class="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400" />
+        </button>
       </div>
 
       <!-- Body -->
@@ -150,6 +159,11 @@ const canEdit = () => props.card.status !== 'running' && props.card.status !== '
         <div v-else-if="cardDetailTab === 'prompt'" class="h-full overflow-y-auto custom-scrollbar">
           <textarea v-if="isEditing" v-model="card.content" class="w-full h-full bg-transparent border-0 p-5 text-slate-200 text-sm font-mono focus:ring-0 outline-none resize-none" placeholder="輸入提示詞內容..."></textarea>
           <pre v-else class="p-5 whitespace-pre-wrap font-mono text-slate-300 text-xs">{{ card.content || '尚未提供提示詞內容。' }}</pre>
+        </div>
+
+        <!-- Tab 4: 執行流程圖 -->
+        <div v-else-if="cardDetailTab === 'flow'" class="h-full bg-slate-900/50">
+          <ExecutionFlowDiagram :card-id="card.id" />
         </div>
 
         <!-- Tab 3: 執行結果 -->
