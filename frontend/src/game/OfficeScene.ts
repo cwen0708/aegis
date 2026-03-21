@@ -366,6 +366,15 @@ export class OfficeScene extends Phaser.Scene {
     if (!this.layout) return
     const slots = this.layout.slots || []
 
+    // Try loading member-specific sprites for all current members
+    const allMembers = [
+      ...data.desks.filter(d => d).map(d => d!.member.id),
+      ...data.resting.map(m => m.id),
+    ]
+    for (const mid of allMembers) {
+      this.tryLoadMemberSprite(mid)
+    }
+
     // Build sets of current workers and resters
     const currentWorkerIds = new Set(data.desks.filter(d => d).map(d => d!.member.id))
     const currentResterIds = new Set(data.resting.map(m => m.id))
