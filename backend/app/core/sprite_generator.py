@@ -116,7 +116,7 @@ def _gen_image(api_key: str, prompt: str, ref: Optional[bytes] = None, portrait:
         contents.append(types.Part.from_bytes(data=ref, mime_type="image/png"))
 
     response = client.models.generate_content(
-        model="gemini-2.5-flash-image",
+        model="gemini-3.1-flash-image-preview",
         contents=contents,
         config=types.GenerateContentConfig(
             response_modalities=["image", "text"]
