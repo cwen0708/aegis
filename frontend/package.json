@@ -22,6 +22,7 @@
     "phaser": "^3.90.0",
     "pinia": "^3.0.4",
     "svg-pan-zoom": "^3.6.2",
+    "three": "^0.183.2",
     "vue": "^3.5.25",
     "vue-router": "^5.0.3"
   },
@@ -35,6 +36,7 @@
     "@tailwindcss/vite": "^4.2.1",
     "@types/cytoscape": "^3.31.0",
     "@types/node": "^24.10.1",
+    "@types/three": "^0.183.1",
     "@vitejs/plugin-vue": "^6.0.2",
     "@vue/tsconfig": "^0.8.1",
     "ase-parser": "^0.0.18",

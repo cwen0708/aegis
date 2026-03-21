@@ -36,6 +36,7 @@ const router = createRouter({
     { path: '/login', component: Login },
     { path: '/onboarding', component: Onboarding },
     { path: '/rooms/:roomId?', name: 'rooms', component: Rooms },
+    { path: '/room-3d/:roomId?', name: 'rooms3d', component: () => import('../views/Rooms3D.vue') },
     { path: '/kanban', component: Kanban, meta: { requiresAuth: true } },
     { path: '/cron', component: CronJobs, meta: { requiresAuth: true } },
     { path: '/cron/:id', component: CronJobDetail, meta: { requiresAuth: true } },
