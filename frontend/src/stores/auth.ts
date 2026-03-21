@@ -50,11 +50,22 @@ export const useAuthStore = defineStore('auth', () => {
           userInfo.value = data.user || null
           userProjectIds.value = data.project_ids || null
         } else {
-          // token 無效，清除
+          // token 無效，通知後登出
+          const { useAegisStore } = await import('./aegis')
+          useAegisStore().addToast('登入已過期，請重新登入', 'error')
           logout()
         }
+      } else if (res.status === 401) {
+        // 未授權，通知後登出
+        const { useAegisStore } = await import('./aegis')
+        useAegisStore().addToast('登入已過期，請重新登入', 'error')
+        logout()
       }
-    } catch { /* ignore */ }
+      // 其他伺服器錯誤（5xx 等）不登出，可能是暫時性問題
+    } catch (e) {
+      // 網路錯誤不登出，避免離線時意外清除 session
+      console.warn('[auth] fetchMe 網路錯誤，保留登入狀態', e)
+    }
   }
 
   function login(newToken: string, type: 'admin' | 'user' = 'admin', user?: UserInfo, projectIds?: number[]) {
