@@ -83,9 +83,10 @@ export function useOffice3D(
       if (!existing && !pendingAdds.has(desk.memberId)) {
         pendingAdds.add(desk.memberId)
         const deskPos = desks[desk.deskIndex]
+        // Spawn well outside the desk area, actor will walk to desk
         const spawnPos = deskPos
-          ? deskPos.position.clone().add(new THREE.Vector3(0, 0, 1))
-          : new THREE.Vector3(Math.random() * 6 - 3, 0, Math.random() * 6 - 3)
+          ? deskPos.position.clone().add(new THREE.Vector3(3, 0, 3))
+          : new THREE.Vector3(8 + Math.random() * 4, 0, 8 + Math.random() * 4)
         try {
           await actorMgr.addActor(desk.memberId, desk.name, desk.provider, spawnPos, 'busy')
           behaviorCtrl.assignBusy(desk.memberId, desk.deskIndex)

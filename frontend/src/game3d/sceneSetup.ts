@@ -12,18 +12,58 @@ export interface SceneContext {
   dispose: () => void
 }
 
+function createCheckerTexture(): THREE.CanvasTexture {
+  const size = 512
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')!
+
+  const tileSize = 64
+  const colorA = '#2d3048'
+  const colorB = '#262940'
+
+  for (let y = 0; y < size; y += tileSize) {
+    for (let x = 0; x < size; x += tileSize) {
+      const isEven = ((x / tileSize) + (y / tileSize)) % 2 === 0
+      ctx.fillStyle = isEven ? colorA : colorB
+      ctx.fillRect(x, y, tileSize, tileSize)
+    }
+  }
+
+  // Subtle border lines
+  ctx.strokeStyle = '#3a3d5a'
+  ctx.lineWidth = 1
+  for (let i = 0; i <= size; i += tileSize) {
+    ctx.beginPath()
+    ctx.moveTo(i, 0)
+    ctx.lineTo(i, size)
+    ctx.stroke()
+    ctx.beginPath()
+    ctx.moveTo(0, i)
+    ctx.lineTo(size, i)
+    ctx.stroke()
+  }
+
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.wrapS = THREE.RepeatWrapping
+  texture.wrapT = THREE.RepeatWrapping
+  texture.repeat.set(6, 6)
+  return texture
+}
+
 export function createScene(canvas: HTMLCanvasElement, labelContainer: HTMLDivElement): SceneContext {
   // Scene
   const scene = new THREE.Scene()
-  scene.background = new THREE.Color(0x1a1a2e)
-  scene.fog = new THREE.Fog(0x1a1a2e, 30, 55)
+  scene.background = new THREE.Color(0x141628)
+  scene.fog = new THREE.Fog(0x141628, 35, 60)
 
   // Camera
   const camera = new THREE.PerspectiveCamera(
     35,
     canvas.clientWidth / canvas.clientHeight,
     0.1,
-    50
+    80
   )
   camera.position.set(20, 20, 20)
   camera.lookAt(0, 0, 0)
@@ -57,47 +97,67 @@ export function createScene(canvas: HTMLCanvasElement, labelContainer: HTMLDivEl
   controls.update()
 
   // Lights
-  const ambient = new THREE.AmbientLight(0xfff5e6, 0.4)
+  const ambient = new THREE.AmbientLight(0xfff5e6, 0.5)
   scene.add(ambient)
 
-  const hemisphere = new THREE.HemisphereLight(0xc8e0ff, 0x8f7e6d, 0.3)
+  const hemisphere = new THREE.HemisphereLight(0xc8e0ff, 0x8f7e6d, 0.35)
   scene.add(hemisphere)
 
-  const sun = new THREE.DirectionalLight(0xffedc9, 1.8)
-  sun.position.set(5, 8, 4)
+  const sun = new THREE.DirectionalLight(0xffedc9, 1.6)
+  sun.position.set(8, 12, 6)
   sun.castShadow = true
-  sun.shadow.mapSize.set(1024, 1024)
+  sun.shadow.mapSize.set(2048, 2048)
   sun.shadow.camera.near = 0.5
   sun.shadow.camera.far = 60
   sun.shadow.camera.left = -24
   sun.shadow.camera.right = 24
   sun.shadow.camera.top = 24
   sun.shadow.camera.bottom = -24
-  sun.shadow.bias = -0.0003
+  sun.shadow.bias = -0.0002
   scene.add(sun)
 
-  const fill = new THREE.DirectionalLight(0xbfd8ff, 0.4)
-  fill.position.set(-3, 4, -2)
+  const fill = new THREE.DirectionalLight(0xbfd8ff, 0.35)
+  fill.position.set(-5, 6, -3)
   scene.add(fill)
 
-  // Ground plane
-  const groundGeo = new THREE.PlaneGeometry(48, 48)
-  const groundMat = new THREE.MeshStandardMaterial({
-    color: 0x2a2a4a,
-    roughness: 0.9,
+  // === Modern office floor ===
+  // Main floor (checker pattern)
+  const floorTexture = createCheckerTexture()
+  const floorGeo = new THREE.PlaneGeometry(48, 48)
+  const floorMat = new THREE.MeshStandardMaterial({
+    map: floorTexture,
+    roughness: 0.75,
     metalness: 0.05,
   })
-  const ground = new THREE.Mesh(groundGeo, groundMat)
-  ground.rotation.x = -Math.PI / 2
-  ground.receiveShadow = true
-  scene.add(ground)
+  const floor = new THREE.Mesh(floorGeo, floorMat)
+  floor.rotation.x = -Math.PI / 2
+  floor.receiveShadow = true
+  scene.add(floor)
 
-  // Grid helper (subtle)
-  const grid = new THREE.GridHelper(48, 48, 0x3a3a5a, 0x3a3a5a)
-  grid.position.y = 0.005
-  ;(grid.material as THREE.Material).opacity = 0.3
-  ;(grid.material as THREE.Material).transparent = true
-  scene.add(grid)
+  // Raised platform for desk area (subtle)
+  const platformGeo = new THREE.BoxGeometry(20, 0.06, 12)
+  const platformMat = new THREE.MeshStandardMaterial({
+    color: 0x343756,
+    roughness: 0.6,
+    metalness: 0.1,
+  })
+  const platform = new THREE.Mesh(platformGeo, platformMat)
+  platform.position.set(0, 0.03, 0)
+  platform.receiveShadow = true
+  scene.add(platform)
+
+  // Edge trim on platform
+  const trimGeo = new THREE.BoxGeometry(20.1, 0.02, 12.1)
+  const trimMat = new THREE.MeshStandardMaterial({
+    color: 0x10b981,
+    roughness: 0.3,
+    metalness: 0.4,
+    emissive: 0x10b981,
+    emissiveIntensity: 0.15,
+  })
+  const trim = new THREE.Mesh(trimGeo, trimMat)
+  trim.position.set(0, 0.065, 0)
+  scene.add(trim)
 
   const clock = new THREE.Clock()
 
@@ -117,8 +177,13 @@ export function createScene(canvas: HTMLCanvasElement, labelContainer: HTMLDivEl
     resizeObserver.disconnect()
     controls.dispose()
     renderer.dispose()
-    groundGeo.dispose()
-    groundMat.dispose()
+    floorGeo.dispose()
+    floorMat.dispose()
+    floorTexture.dispose()
+    platformGeo.dispose()
+    platformMat.dispose()
+    trimGeo.dispose()
+    trimMat.dispose()
   }
 
   return { scene, camera, renderer, labelRenderer, controls, clock, dispose }
