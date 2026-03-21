@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAegisStore } from '../stores/aegis'
 import { useAuthStore } from '../stores/auth'
 import { apiClient } from '../services/api/client'
@@ -10,9 +10,10 @@ import { assetUrl } from '../config'
 
 const { isMobile } = useResponsive()
 const route = useRoute()
+const router = useRouter()
 const auth = useAuthStore()
 // rooms/members 直接從 API 取
-import { Settings } from 'lucide-vue-next'
+import { Settings, Box } from 'lucide-vue-next'
 import { createOfficeGame, OfficeScene } from '../game/OfficeScene'
 import OfficeEditor from '../components/OfficeEditor.vue'
 import CharacterDialog from '../components/CharacterDialog.vue'
@@ -96,6 +97,11 @@ function enterEditMode() {
   game?.destroy(true)
   game = null
   isEditing.value = true
+}
+
+function goTo3D() {
+  const rid = currentRoomId.value
+  router.push(rid ? `/room-3d/${rid}` : '/room-3d')
 }
 
 // 成員資料
@@ -476,6 +482,14 @@ watch(
           <span v-if="!isMobile" class="text-[8px] text-amber-400 cursor-pointer" @click.stop="copyPos" title="Click to copy">
             row={{ hoverPos.row }}, col={{ hoverPos.col }}, frame={{ hoverPos.frame }}
           </span>
+          <button
+            @click="goTo3D"
+            class="flex items-center gap-1 px-1.5 py-0.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors"
+            title="切換 3D 視角"
+          >
+            <Box :size="12" />
+            <span class="text-[8px]">3D</span>
+          </button>
           <button
             v-if="!isMobile && auth.isAuthenticated"
             @click="enterEditMode"
