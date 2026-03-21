@@ -263,6 +263,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { GitBranch } from 'lucide-vue-next'
 import { config } from '../../config'
 import { authHeaders } from '../../utils/authFetch'
+import { useAegisStore } from '../../stores/aegis'
 
 const props = defineProps<{
   projectId: number
@@ -273,6 +274,7 @@ const emit = defineEmits<{
 }>()
 
 const API = config.apiUrl
+const aegis = useAegisStore()
 
 const tabs = computed(() => [
   { id: 'overview', label: 'Overview' },
@@ -368,6 +370,7 @@ async function doFetch() {
 }
 
 async function doPull() {
+  if (!confirm('確定要從遠端拉取？')) return
   pulling.value = true
   try {
     const res = await fetch(`${API}/api/v1/projects/${props.projectId}/git/pull`, { method: 'POST', headers: authHeaders() })
@@ -378,7 +381,7 @@ async function doPull() {
         await loadOverview()
         loadLog()
       } else {
-        alert(`拉取失敗: ${data.error}`)
+        aegis.addToast(`拉取失敗: ${data.error}`, 'error')
       }
     }
   } finally {
@@ -396,7 +399,7 @@ async function doPush() {
       if (data.ok) {
         await loadOverview()
       } else {
-        alert(`推送失敗: ${data.error}`)
+        aegis.addToast(`推送失敗: ${data.error}`, 'error')
       }
     }
   } finally {
@@ -405,6 +408,7 @@ async function doPush() {
 }
 
 async function deployToRuntime(source: 'dev' | 'origin') {
+  if (!confirm('確定要部署到運行環境？')) return
   deploying.value = true
   try {
     const res = await fetch(`${API}/api/v1/projects/${props.projectId}/git/deploy-to-runtime`, {
@@ -415,10 +419,10 @@ async function deployToRuntime(source: 'dev' | 'origin') {
     if (res.ok) {
       const data = await res.json()
       if (data.ok) {
-        alert(`部署任務已建立 #${data.card_id}`)
+        aegis.addToast(`部署任務已建立 #${data.card_id}`, 'success')
         emit('pull-triggered', data.card_id)
       } else {
-        alert(`部署失敗: ${data.error || '未知錯誤'}`)
+        aegis.addToast(`部署失敗: ${data.error || '未知錯誤'}`, 'error')
       }
     }
   } finally {
