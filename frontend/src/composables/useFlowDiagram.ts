@@ -52,7 +52,7 @@ export function useFlowDiagram(rawLogs: Ref<string[]>, memberName?: string) {
             if (!participants.has(toolId)) {
               participants.set(toolId, tool)
             }
-            events.push(`    Agent->>+${toolId}: call`)
+            events.push(`    Agent->>${toolId}: call`)
             lastToolName = toolId
           }
           break
@@ -63,7 +63,7 @@ export function useFlowDiagram(rawLogs: Ref<string[]>, memberName?: string) {
             participants.set(target, target)
           }
           const text = sanitize(truncate(line.content, 50))
-          events.push(`    ${target}-->>-Agent: ${text}`)
+          events.push(`    ${target}-->>Agent: ${text}`)
           break
         }
         case 'error': {
