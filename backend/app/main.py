@@ -19,6 +19,7 @@ from app.api import projects as projects_routes, cards as cards_routes
 from app.api import cron_jobs as cron_jobs_routes, members as members_routes
 from app.api import profile_page
 from app.api import graph as graph_routes
+from app.api import sprite_gen as sprite_gen_routes
 from app.core.telemetry import get_system_metrics
 from app.core.cron_poller import start_cron_poller
 from app.core.usage_poller import start_usage_poller
@@ -492,6 +493,7 @@ app.include_router(onestack_routes.router, prefix="/api/v1")
 app.include_router(updater_routes.router, prefix="/api/v1")
 app.include_router(profile_page.router)  # /u/profile（獨立頁面，無 prefix）
 app.include_router(graph_routes.router, prefix="/api/v1")
+app.include_router(sprite_gen_routes.router, prefix="/api/v1")
 app.include_router(webhooks.router, prefix="/api/v1")
 app.include_router(files.router, prefix="/api/v1")
 

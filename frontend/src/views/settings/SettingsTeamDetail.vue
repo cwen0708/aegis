@@ -602,7 +602,7 @@ onUnmounted(() => {
             <!-- Sprite Index -->
             <div>
               <label class="block text-sm text-slate-400 mb-2">小人物（空間用）</label>
-              <div class="flex gap-2">
+              <div class="flex items-center gap-2">
                 <button
                   v-for="i in 6"
                   :key="i - 1"
@@ -620,6 +620,13 @@ onUnmounted(() => {
                     />
                   </div>
                 </button>
+                <router-link
+                  v-if="memberId"
+                  :to="`/settings/team/${memberId}/sprite`"
+                  class="ml-2 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs rounded-lg transition flex items-center gap-1"
+                >
+                  AI 生成
+                </router-link>
               </div>
             </div>
           </div>

@@ -74,6 +74,7 @@ const router = createRouter({
         { path: 'archive', component: SettingsArchive },
         { path: 'team', component: Team },
         { path: 'team/:id', component: SettingsTeamDetail },
+        { path: 'team/:id/sprite', component: () => import('../views/settings/SettingsSpriteGen.vue') },
         { path: 'agents', component: Agents },
         { path: 'status', component: Dashboard },
         { path: 'onestack', component: SettingsOneStack },
