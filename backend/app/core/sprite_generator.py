@@ -32,7 +32,7 @@ BASE_STYLE = """CRITICAL PIXEL ART RULES:
 - LIMITED palette: 8-12 colors max
 - NO anti-aliasing, NO gradients, NO smooth transitions between blocks
 - Sharp, clean edges at every 4-pixel boundary
-- Transparent background (alpha channel = 0)
+- PURE WHITE background (#FFFFFF), no patterns, no checkerboard
 - Chibi/SD body proportions: large head, small body, approximately 2 head-heights tall
 - Simple clear silhouette, must be readable when shrunk to 16x32"""
 
@@ -70,7 +70,7 @@ POSE: Standing idle, front-facing (south direction)
 
 {BASE_STYLE}
 
-Single character, transparent background, 64x128 pixels."""
+Single character on pure white background, 64x128 pixels."""
 
 
 def _direction_prompt(desc: str, direction: str) -> str:
@@ -83,7 +83,7 @@ DIRECTION: {DIR_NAMES[direction]}
 
 Must be the SAME character as the reference image, just viewed from a different angle.
 Same outfit, same colors, same proportions.
-Single character, transparent background, 64x128 pixels."""
+Single character on pure white background, 64x128 pixels."""
 
 
 def _anim_prompt(desc: str, direction: str, action: str, frame: int) -> str:
@@ -97,7 +97,7 @@ POSE: {ACTION_FRAMES[action][frame]}
 
 CONSISTENCY: Must match the reference image exactly - same character, same colors, same outfit.
 Only the pose/limbs change for animation.
-Single character, transparent background, 64x128 pixels."""
+Single character on pure white background, 64x128 pixels."""
 
 
 # ===== Gemini 呼叫 =====
@@ -123,8 +123,23 @@ def _gen_image(api_key: str, prompt: str, ref: Optional[bytes] = None) -> bytes:
     raise ValueError("Gemini returned no image")
 
 
+def _remove_white_bg(img: Image.Image, threshold: int = 240) -> Image.Image:
+    """白底轉透明：接近白色的像素設為 alpha=0"""
+    img = img.convert("RGBA")
+    pixels = img.load()
+    w, h = img.size
+    for y in range(h):
+        for x in range(w):
+            r, g, b, a = pixels[x, y]
+            if r >= threshold and g >= threshold and b >= threshold:
+                pixels[x, y] = (0, 0, 0, 0)
+    return img
+
+
 def _downscale(data: bytes) -> Image.Image:
+    """64x128 → 去白底 → 16x32"""
     img = Image.open(io.BytesIO(data)).convert("RGBA")
+    img = _remove_white_bg(img)
     return img.resize((TARGET_W, TARGET_H), Image.NEAREST)
 
 
