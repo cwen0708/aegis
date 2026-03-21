@@ -6,6 +6,7 @@ import { apiClient } from '../services/api/client'
 import { Loader2, Box, Monitor } from 'lucide-vue-next'
 import CharacterDialog from '../components/CharacterDialog.vue'
 import { useOffice3D } from '../game3d/useOffice3D'
+import { assetUrl } from '../config'
 import type { SceneData3D, CharacterClickInfo } from '../game3d/types'
 
 const route = useRoute()
@@ -29,6 +30,7 @@ interface MemberInfo {
   avatar: string
   provider: string
   role?: string
+  portrait?: string
   sprite_index?: number
 }
 
@@ -88,10 +90,15 @@ const restingMembers = computed(() => {
 
 // ===== Character Dialog =====
 const showCharacterDialog = ref(false)
-const selectedCharacter = ref<{ memberId: number; name: string; provider: string } | null>(null)
+const selectedCharacter = ref<{ memberId: number; name: string; provider: string; role?: string; portrait?: string } | null>(null)
 
 function onCharacterClicked(info: CharacterClickInfo) {
-  selectedCharacter.value = info
+  const member = members.value.find(m => m.id === info.memberId)
+  selectedCharacter.value = {
+    ...info,
+    role: member?.role || (member?.provider === 'claude' ? 'Claude 開發者' : member?.provider === 'gemini' ? 'Gemini 開發者' : '開發者'),
+    portrait: member?.portrait || '',
+  }
   showCharacterDialog.value = true
 }
 
@@ -201,6 +208,8 @@ function goTo2D() {
       :member-id="selectedCharacter.memberId"
       :name="selectedCharacter.name"
       :provider="selectedCharacter.provider"
+      :role="selectedCharacter.role"
+      :portrait="assetUrl(selectedCharacter.portrait || '')"
       @close="closeCharacterDialog"
     />
   </div>

@@ -16,7 +16,7 @@ export function createScene(canvas: HTMLCanvasElement, labelContainer: HTMLDivEl
   // Scene
   const scene = new THREE.Scene()
   scene.background = new THREE.Color(0x1a1a2e)
-  scene.fog = new THREE.Fog(0x1a1a2e, 15, 25)
+  scene.fog = new THREE.Fog(0x1a1a2e, 30, 55)
 
   // Camera
   const camera = new THREE.PerspectiveCamera(
@@ -25,7 +25,7 @@ export function createScene(canvas: HTMLCanvasElement, labelContainer: HTMLDivEl
     0.1,
     50
   )
-  camera.position.set(8, 8, 8)
+  camera.position.set(20, 20, 20)
   camera.lookAt(0, 0, 0)
 
   // WebGL Renderer
@@ -52,8 +52,8 @@ export function createScene(canvas: HTMLCanvasElement, labelContainer: HTMLDivEl
   controls.dampingFactor = 0.08
   controls.minPolarAngle = Math.PI * 0.1
   controls.maxPolarAngle = Math.PI * 0.45
-  controls.minDistance = 4
-  controls.maxDistance = 18
+  controls.minDistance = 6
+  controls.maxDistance = 50
   controls.update()
 
   // Lights
@@ -68,11 +68,11 @@ export function createScene(canvas: HTMLCanvasElement, labelContainer: HTMLDivEl
   sun.castShadow = true
   sun.shadow.mapSize.set(1024, 1024)
   sun.shadow.camera.near = 0.5
-  sun.shadow.camera.far = 25
-  sun.shadow.camera.left = -8
-  sun.shadow.camera.right = 8
-  sun.shadow.camera.top = 8
-  sun.shadow.camera.bottom = -8
+  sun.shadow.camera.far = 60
+  sun.shadow.camera.left = -24
+  sun.shadow.camera.right = 24
+  sun.shadow.camera.top = 24
+  sun.shadow.camera.bottom = -24
   sun.shadow.bias = -0.0003
   scene.add(sun)
 
@@ -81,7 +81,7 @@ export function createScene(canvas: HTMLCanvasElement, labelContainer: HTMLDivEl
   scene.add(fill)
 
   // Ground plane
-  const groundGeo = new THREE.PlaneGeometry(16, 16)
+  const groundGeo = new THREE.PlaneGeometry(48, 48)
   const groundMat = new THREE.MeshStandardMaterial({
     color: 0x2a2a4a,
     roughness: 0.9,
@@ -93,7 +93,7 @@ export function createScene(canvas: HTMLCanvasElement, labelContainer: HTMLDivEl
   scene.add(ground)
 
   // Grid helper (subtle)
-  const grid = new THREE.GridHelper(16, 16, 0x3a3a5a, 0x3a3a5a)
+  const grid = new THREE.GridHelper(48, 48, 0x3a3a5a, 0x3a3a5a)
   grid.position.y = 0.005
   ;(grid.material as THREE.Material).opacity = 0.3
   ;(grid.material as THREE.Material).transparent = true

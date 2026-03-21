@@ -27,11 +27,11 @@ export function createFurnitureManager(scene: THREE.Scene) {
 
   async function buildOffice(deskCount: number): Promise<DeskPosition3D[]> {
     const desks: DeskPosition3D[] = []
-    const spacing = 3.0
+    const spacing = 4.0
     const rows = 2
     const cols = Math.ceil(deskCount / rows)
     const offsetX = -(cols - 1) * spacing / 2
-    const rowGap = 4.0
+    const rowGap = 5.0
 
     for (let i = 0; i < deskCount; i++) {
       const col = Math.floor(i / rows)
@@ -53,11 +53,16 @@ export function createFurnitureManager(scene: THREE.Scene) {
       })
     }
 
-    // Decorations — spread out more
-    await loadFurniture(FURNITURE.couch, new THREE.Vector3(-6, 0, 0), Math.PI / 2, 1)
-    await loadFurniture(FURNITURE.lamp, new THREE.Vector3(-6, 0, 2), 0, 1)
-    await loadFurniture(FURNITURE.cabinet, new THREE.Vector3(6, 0, -3), 0, 1)
-    await loadFurniture(FURNITURE.cactus, new THREE.Vector3(5.5, 0, 3), 0, 1.2)
+    // Decorations — spread around the office
+    await loadFurniture(FURNITURE.couch, new THREE.Vector3(-10, 0, 0), Math.PI / 2, 1)
+    await loadFurniture(FURNITURE.couch, new THREE.Vector3(10, 0, 0), -Math.PI / 2, 1)
+    await loadFurniture(FURNITURE.lamp, new THREE.Vector3(-10, 0, 3), 0, 1)
+    await loadFurniture(FURNITURE.lamp, new THREE.Vector3(10, 0, -3), 0, 1)
+    await loadFurniture(FURNITURE.cabinet, new THREE.Vector3(-8, 0, -8), 0, 1)
+    await loadFurniture(FURNITURE.cabinet, new THREE.Vector3(8, 0, 8), Math.PI, 1)
+    await loadFurniture(FURNITURE.cactus, new THREE.Vector3(12, 0, 5), 0, 1.2)
+    await loadFurniture(FURNITURE.cactus, new THREE.Vector3(-12, 0, -5), 0, 1.2)
+    await loadFurniture(FURNITURE.bookSet, new THREE.Vector3(0, 0, -8), 0, 1)
 
     return desks
   }

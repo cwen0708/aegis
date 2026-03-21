@@ -18,7 +18,6 @@ export function useOffice3D(
   let disposed = false
   let animFrameId = 0
 
-  // Scene modules (initialized in init())
   let sceneCtx: ReturnType<typeof createScene> | null = null
   let actorMgr: ReturnType<typeof createActorManager> | null = null
   let furnitureMgr: ReturnType<typeof createFurnitureManager> | null = null
@@ -26,8 +25,9 @@ export function useOffice3D(
   let interactionHandler: ReturnType<typeof createInteractionHandler> | null = null
   let desks: DeskPosition3D[] = []
 
-  // Track which members are currently displayed
   const currentMembers = new Set<number>()
+  // Prevent concurrent updateData from spawning duplicate actors
+  const pendingAdds = new Set<number>()
 
   async function init() {
     const canvas = canvasRef.value
@@ -38,7 +38,6 @@ export function useOffice3D(
     actorMgr = createActorManager(sceneCtx.scene)
     furnitureMgr = createFurnitureManager(sceneCtx.scene)
 
-    // Build office with 6 desks by default
     try {
       desks = await furnitureMgr.buildOffice(6)
     } catch (e) {
@@ -46,7 +45,7 @@ export function useOffice3D(
       desks = []
     }
 
-    const bounds = { minX: -6, maxX: 6, minZ: -5, maxZ: 5 }
+    const bounds = { minX: -18, maxX: 18, minZ: -15, maxZ: 15 }
     behaviorCtrl = createBehaviorController(actorMgr, desks, bounds)
 
     interactionHandler = createInteractionHandler(
@@ -58,7 +57,6 @@ export function useOffice3D(
 
     isLoading.value = false
 
-    // Render loop
     const loop = () => {
       if (disposed) return
       animFrameId = requestAnimationFrame(loop)
@@ -82,37 +80,45 @@ export function useOffice3D(
     for (const desk of data.desks) {
       newMemberIds.add(desk.memberId)
       const existing = actorMgr.actors.get(desk.memberId)
-      if (!existing) {
+      if (!existing && !pendingAdds.has(desk.memberId)) {
+        pendingAdds.add(desk.memberId)
         const deskPos = desks[desk.deskIndex]
-        const spawnPos = deskPos ? deskPos.position.clone().add(new THREE.Vector3(0, 0, 1)) : new THREE.Vector3(Math.random() * 4 - 2, 0, Math.random() * 4 - 2)
+        const spawnPos = deskPos
+          ? deskPos.position.clone().add(new THREE.Vector3(0, 0, 1))
+          : new THREE.Vector3(Math.random() * 6 - 3, 0, Math.random() * 6 - 3)
         try {
           await actorMgr.addActor(desk.memberId, desk.name, desk.provider, spawnPos, 'busy')
           behaviorCtrl.assignBusy(desk.memberId, desk.deskIndex)
         } catch (e) {
           console.warn(`[3D] Failed to add actor ${desk.name}:`, e)
+        } finally {
+          pendingAdds.delete(desk.memberId)
         }
-      } else if (existing.state !== 'busy') {
+      } else if (existing && existing.state !== 'busy') {
         existing.state = 'busy'
         behaviorCtrl.assignBusy(desk.memberId, desk.deskIndex)
       }
     }
 
-    // Process idle members (roaming) — spread them in a circle to avoid overlap
+    // Process idle members — spread in a circle
     for (let i = 0; i < data.resting.length; i++) {
       const rest = data.resting[i]!
       newMemberIds.add(rest.memberId)
       const existing = actorMgr.actors.get(rest.memberId)
-      if (!existing) {
+      if (!existing && !pendingAdds.has(rest.memberId)) {
+        pendingAdds.add(rest.memberId)
         const angle = (i / Math.max(data.resting.length, 1)) * Math.PI * 2
-        const radius = 2.5 + Math.random() * 2
+        const radius = 5 + Math.random() * 6
         const pos = new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius)
         try {
           await actorMgr.addActor(rest.memberId, rest.name, rest.provider, pos, 'idle')
           behaviorCtrl.assignIdle(rest.memberId)
         } catch (e) {
           console.warn(`[3D] Failed to add actor ${rest.name}:`, e)
+        } finally {
+          pendingAdds.delete(rest.memberId)
         }
-      } else if (existing.state !== 'idle') {
+      } else if (existing && existing.state !== 'idle') {
         existing.state = 'idle'
         behaviorCtrl.assignIdle(rest.memberId)
       }
