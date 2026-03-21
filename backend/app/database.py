@@ -258,7 +258,8 @@ def _migrate_db():
             pm_count = cur.execute("SELECT COUNT(*) FROM person_member").fetchone()[0]
             logger.info(f"[Migration] Created 'person_member' with {pm_count} records")
 
-        # Room: 首次建立時 seed 預設房間（重用上方的 tables 變數）
+        # Room: 首次建立時 seed 預設房間（重新掃描確保 create_all 的表都能檢測到）
+        tables = [row[0] for row in cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
         if "room" in tables:
             room_count = cur.execute("SELECT COUNT(*) FROM room").fetchone()[0]
             if room_count == 0:
