@@ -71,12 +71,56 @@ async function genFrame(dir: string, action: string, frame: number) {
   } finally { generating.value = '' }
 }
 
+const cancelled = ref(false)
+
 async function genAll() {
   generating.value = 'all'
+  cancelled.value = false
+  const id = memberId.value
+  const desc = description.value
+
   try {
-    await apiClient.post(`/api/v1/members/${memberId.value}/sprite/generate-all`, { description: description.value })
-    await loadProgress()
-  } finally { generating.value = '' }
+    // Hero
+    if (!progress.value['hero_south'] && !cancelled.value) {
+      generating.value = 'hero_south'
+      await apiClient.post(`/api/v1/members/${id}/sprite/hero`, { description: desc })
+      await loadProgress()
+    }
+
+    // Directions
+    for (const dir of ['west', 'east', 'north'] as const) {
+      if (cancelled.value) break
+      const key = `hero_${dir}`
+      if (progress.value[key]) continue
+      generating.value = key
+      await apiClient.post(`/api/v1/members/${id}/sprite/direction/${dir}`, { description: desc })
+      await loadProgress()
+    }
+
+    // Animation frames
+    for (const action of ACTIONS) {
+      for (const dir of DIRECTIONS) {
+        for (const f of [0, 1, 2]) {
+          if (cancelled.value) break
+          const key = `${action}_${dir}_f${f}`
+          if (progress.value[key]) continue
+          generating.value = key
+          await apiClient.post(`/api/v1/members/${id}/sprite/frame`, {
+            description: desc, direction: dir, action, frame: f,
+          })
+          await loadProgress()
+        }
+        if (cancelled.value) break
+      }
+      if (cancelled.value) break
+    }
+  } finally {
+    generating.value = ''
+  }
+}
+
+function cancelGen() {
+  cancelled.value = true
 }
 
 async function composite() {
@@ -124,13 +168,22 @@ onMounted(async () => {
       </div>
       <span class="text-xs text-slate-400">{{ completedFrames }}/{{ totalFrames }}</span>
       <button
-        @click="genAll" :disabled="!!generating"
-        class="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs rounded-lg"
+        v-if="!generating"
+        @click="genAll"
+        class="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded-lg"
       >
-        <Loader2 v-if="generating === 'all'" :size="12" class="animate-spin" />
-        <Play v-else :size="12" />
-        生成全部
+        <Play :size="12" />
+        {{ completedFrames > 0 ? '繼續生成' : '生成全部' }}
       </button>
+      <button
+        v-else
+        @click="cancelGen"
+        class="flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white text-xs rounded-lg"
+      >
+        <span class="w-2 h-2 bg-white rounded-sm" />
+        停止
+      </button>
+      <span v-if="generating" class="text-xs text-emerald-400">{{ generating }}</span>
     </div>
 
     <!-- Hero directions -->
@@ -208,8 +261,8 @@ onMounted(async () => {
         <Download :size="14" />
         套用到成員
       </button>
-      <span v-if="generating === 'all'" class="text-xs text-emerald-400 flex items-center gap-1">
-        <Loader2 :size="12" class="animate-spin" /> 正在生成...
+      <span v-if="generating" class="text-xs text-slate-500">
+        離開頁面不會丟失進度，回來可繼續
       </span>
     </div>
   </div>
