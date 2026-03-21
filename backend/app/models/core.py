@@ -382,7 +382,7 @@ class PersonProject(SQLModel, table=True):
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    person_id: int = Field(index=True)
+    person_id: int = Field(foreign_key="person.id", index=True)
     project_id: int = Field(foreign_key="project.id", index=True)
 
     # 身份描述（給 AI 讀的）
@@ -409,7 +409,7 @@ class PersonMember(SQLModel, table=True):
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    person_id: int = Field(index=True)
+    person_id: int = Field(foreign_key="person.id", index=True)
     member_id: int = Field(foreign_key="member.id", index=True)
 
     is_default: bool = Field(default=False)
