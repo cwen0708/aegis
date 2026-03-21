@@ -80,6 +80,10 @@ def _seed_shared_skills():
     if not api_file.exists():
         api_file.write_text(_read_seed_file("shared_aegis-api.md"), encoding="utf-8")
 
+    line_send_file = shared_dir / "line-send.md"
+    if not line_send_file.exists():
+        line_send_file.write_text(_read_seed_file("shared_line-send.md"), encoding="utf-8")
+
 
 def _setup_dev_directory(install_root: Path) -> Path:
     """建立自我進化用的開發目錄（與運行環境分離）。
