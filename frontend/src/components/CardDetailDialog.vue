@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { Zap, Square, Pencil, X, GitBranch } from 'lucide-vue-next'
 import TerminalViewer from './TerminalViewer.vue'
 import ExecutionFlowDiagram from './ExecutionFlowDiagram.vue'
@@ -21,6 +21,25 @@ const emit = defineEmits<{
 
 const isEditing = ref(false)
 const cardDetailTab = ref<'description' | 'prompt' | 'result' | 'flow'>('description')
+
+// 開啟對話框時，若 taskLogs 沒有資料，從 API 載入歷史廣播記錄
+onMounted(async () => {
+  if (!store.taskLogs.has(props.card.id) || store.taskLogs.get(props.card.id)!.length === 0) {
+    try {
+      const res = await fetch(`/api/v1/cards/${props.card.id}/broadcast-logs`)
+      if (res.ok) {
+        const logs: { line: string }[] = await res.json()
+        if (logs.length > 0) {
+          for (const log of logs) {
+            store.appendTaskLog(props.card.id, log.line)
+          }
+        }
+      }
+    } catch {
+      // 靜默失敗
+    }
+  }
+})
 
 // 備份原始值，取消時還原
 let backupTitle = ''
