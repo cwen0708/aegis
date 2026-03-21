@@ -73,7 +73,10 @@ export function createActorManager(scene: THREE.Scene) {
     const { scene: origScene, animations } = await loadGLTF(url)
 
     // Clone with SkeletonUtils to properly handle SkinnedMesh + bones
-    const model = SkeletonUtils.clone(origScene) as THREE.Group
+    const cloned = SkeletonUtils.clone(origScene)
+    // Wrap in a Group so position/rotation don't affect the clone's internal transforms
+    const model = new THREE.Group()
+    model.add(cloned)
     model.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh
@@ -85,13 +88,13 @@ export function createActorManager(scene: THREE.Scene) {
     model.position.copy(position)
     scene.add(model)
 
-    // Animation mixer
-    const mixer = new THREE.AnimationMixer(model)
+    // Animation mixer targets the cloned scene (not the wrapper group)
+    const mixer = new THREE.AnimationMixer(cloned)
     const actions = new Map<string, THREE.AnimationAction>()
 
-    // Register all animations from the GLB
+    // Clone each clip so retargeting works correctly with the cloned skeleton
     for (const clip of animations) {
-      const action = mixer.clipAction(clip)
+      const action = mixer.clipAction(clip.clone())
       // Normalize common clip names: e.g. "Idle", "Walk_A", "Sitting", etc.
       const normalizedName = normalizeClipName(clip.name)
       actions.set(normalizedName, action)
