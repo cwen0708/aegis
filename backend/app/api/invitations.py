@@ -1,4 +1,5 @@
 """邀請碼 + Bot User + Person 管理 API"""
+from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 from datetime import datetime, timezone
@@ -176,14 +177,34 @@ def delete_invitation(invitation_id: int, session: Session = Depends(get_session
 
 @router.get("/bot-users", dependencies=[Depends(require_admin_token)])
 def list_bot_users(session: Session = Depends(get_session)):
-    """列出所有 Bot User"""
+    """列出所有 Bot User（批量載入，3 queries）"""
     users = session.exec(select(BotUser).order_by(BotUser.created_at.desc())).all()
+
+    # 批量收集需要查詢的 ID
+    person_ids = [u.person_id for u in users if u.person_id]
+    member_ids = [u.default_member_id for u in users if u.default_member_id]
+
+    # 批量載入 PersonProject（按 person_id 分組）
+    pp_map: dict[int, list] = defaultdict(list)
+    if person_ids:
+        all_pp = session.exec(
+            select(PersonProject).where(PersonProject.person_id.in_(person_ids))
+        ).all()
+        for p in all_pp:
+            pp_map[p.person_id].append(p)
+
+    # 批量載入 Member（按 id 索引）
+    member_map: dict[int, Member] = {}
+    if member_ids:
+        all_members = session.exec(
+            select(Member).where(Member.id.in_(member_ids))
+        ).all()
+        member_map = {m.id: m for m in all_members}
+
     result = []
     for u in users:
-        projects = session.exec(
-            select(PersonProject).where(PersonProject.person_id == u.person_id)
-        ).all() if u.person_id else []
-        member = session.get(Member, u.default_member_id) if u.default_member_id else None
+        projects = pp_map.get(u.person_id, []) if u.person_id else []
+        member = member_map.get(u.default_member_id) if u.default_member_id else None
         result.append({
             "id": u.id,
             "platform": u.platform,
@@ -351,13 +372,149 @@ def _person_to_response(person: Person, session: Session) -> dict:
     }
 
 
+def _person_to_response_batch(persons: list[Person], session: Session) -> list[dict]:
+    """批量轉換 Person 為回應格式（6 queries，避免 N+1）"""
+    if not persons:
+        return []
+
+    person_ids = [p.id for p in persons]
+
+    # 批量載入 BotUser（按 person_id 分組）
+    bu_map: dict[int, list] = defaultdict(list)
+    all_bu = session.exec(
+        select(BotUser).where(BotUser.person_id.in_(person_ids))
+    ).all()
+    for bu in all_bu:
+        bu_map[bu.person_id].append(bu)
+
+    # 批量載入 InviteCode（按 owner_person_id 分組）
+    ic_map: dict[int, list] = defaultdict(list)
+    all_ic = session.exec(
+        select(InviteCode).where(InviteCode.owner_person_id.in_(person_ids))
+    ).all()
+    for ic in all_ic:
+        ic_map[ic.owner_person_id].append(ic)
+
+    # 批量載入 PersonProject（按 person_id 分組）
+    pp_map: dict[int, list] = defaultdict(list)
+    all_pp = session.exec(
+        select(PersonProject).where(PersonProject.person_id.in_(person_ids))
+    ).all()
+    for pp in all_pp:
+        pp_map[pp.person_id].append(pp)
+
+    # 批量載入 PersonMember（按 person_id 分組）
+    pm_map: dict[int, list] = defaultdict(list)
+    all_pm = session.exec(
+        select(PersonMember).where(PersonMember.person_id.in_(person_ids))
+    ).all()
+    for pm in all_pm:
+        pm_map[pm.person_id].append(pm)
+
+    # 批量載入 Member（PersonMember 引用的 member_id）
+    all_member_ids = list({pm.member_id for pm in all_pm})
+    member_map: dict[int, Member] = {}
+    if all_member_ids:
+        all_members = session.exec(
+            select(Member).where(Member.id.in_(all_member_ids))
+        ).all()
+        member_map = {m.id: m for m in all_members}
+
+    # 組裝回應
+    result = []
+    for person in persons:
+        bot_users = bu_map.get(person.id, [])
+        bot_users_data = [
+            {
+                "id": bu.id,
+                "platform": bu.platform,
+                "username": bu.username,
+                "platform_user_id": bu.platform_user_id,
+                "last_active_at": bu.last_active_at.isoformat() if bu.last_active_at else None,
+                "level": bu.level,
+                "is_active": bu.is_active,
+            }
+            for bu in bot_users
+        ]
+
+        invite_codes_data = [
+            {
+                "id": ic.id,
+                "code": ic.code,
+                "status": _invitation_status(ic),
+                "used_count": ic.used_count,
+                "max_uses": ic.max_uses,
+            }
+            for ic in ic_map.get(person.id, [])
+        ]
+
+        projects_data = [
+            {
+                "id": pp.id,
+                "project_id": pp.project_id,
+                "display_name": pp.display_name,
+                "description": pp.description,
+                "can_view": pp.can_view,
+                "can_create_card": pp.can_create_card,
+                "can_run_task": pp.can_run_task,
+                "can_access_sensitive": pp.can_access_sensitive,
+                "is_default": pp.is_default,
+            }
+            for pp in pp_map.get(person.id, [])
+        ]
+
+        members_data = []
+        for pm in pm_map.get(person.id, []):
+            member = member_map.get(pm.member_id)
+            members_data.append({
+                "id": pm.id,
+                "member_id": pm.member_id,
+                "member_name": member.name if member else f"#{pm.member_id}",
+                "member_avatar": member.avatar if member else "",
+                "is_default": pm.is_default,
+                "can_switch": pm.can_switch,
+            })
+
+        status = "active" if len(bot_users) > 0 else "pending"
+
+        # 過濾 extra_json 中的敏感欄位（ad_pass 明文密碼）
+        filtered_extra = None
+        has_ad = False
+        if person.extra_json:
+            try:
+                extra = json_module.loads(person.extra_json)
+                has_ad = bool(extra.get("ad_user") and extra.get("ad_pass"))
+                extra.pop("ad_pass", None)
+                filtered_extra = json_module.dumps(extra, ensure_ascii=False)
+            except (json_module.JSONDecodeError, TypeError):
+                filtered_extra = person.extra_json
+
+        result.append({
+            "id": person.id,
+            "display_name": person.display_name,
+            "description": person.description,
+            "level": person.level,
+            "extra_json": filtered_extra,
+            "has_ad": has_ad,
+            "access_expires_at": person.access_expires_at.isoformat() if person.access_expires_at else None,
+            "default_member_id": person.default_member_id,
+            "created_at": person.created_at.isoformat(),
+            "status": status,
+            "bot_users": bot_users_data,
+            "invite_codes": invite_codes_data,
+            "projects": projects_data,
+            "members": members_data,
+        })
+    return result
+
+
 @router.get("/persons", dependencies=[Depends(require_admin_token)])
 def list_persons(session: Session = Depends(get_session)):
-    """列出所有 Person"""
+    """列出所有 Person（批量載入，6 queries）"""
     persons = session.exec(
         select(Person).order_by(Person.created_at.desc())
     ).all()
-    return [_person_to_response(p, session) for p in persons]
+    return _person_to_response_batch(persons, session)
 
 
 @router.get("/persons/{person_id}", dependencies=[Depends(require_admin_token)])
