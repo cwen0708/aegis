@@ -62,6 +62,10 @@ export class OfficeScene extends Phaser.Scene {
   private characterSprites: Map<string, Phaser.GameObjects.Container> = new Map()
   private bubbleContainers: Map<number, Phaser.GameObjects.Container> = new Map()
 
+  // Member-specific sprites (AI generated)
+  private memberCharLoaded: Set<number> = new Set()
+  private memberCharAvailable: Set<number> = new Set()
+
   // Wandering
   private wanderTimers: Map<string, Phaser.Time.TimerEvent> = new Map()
 
@@ -170,6 +174,53 @@ export class OfficeScene extends Phaser.Scene {
       // 相容舊的 _type (用 work_up)
       this.anims.create({ key: `${key}_type`, frames: this.anims.generateFrameNumbers(key, { frames: [33, 34, 35, 34] }), frameRate: 3, repeat: -1 })
     }
+  }
+
+  /** 嘗試載入成員專屬 sprite（member_char_{id}.png），載入成功後建立動畫 */
+  tryLoadMemberSprite(memberId: number, callback?: () => void) {
+    if (this.memberCharLoaded.has(memberId)) {
+      callback?.()
+      return
+    }
+    this.memberCharLoaded.add(memberId)
+
+    const key = `mchar_${memberId}`
+    const url = `/assets/office/characters_4dir/member_char_${memberId}.png`
+
+    this.load.spritesheet(key, url, { frameWidth: CHAR_FRAME_W, frameHeight: CHAR_FRAME_H })
+    this.load.once('complete', () => {
+      if (!this.textures.exists(key)) return
+      // Verify it's not a broken/empty texture
+      const frame = this.textures.get(key).get()
+      if (frame.width < CHAR_FRAME_W) return
+
+      this.memberCharAvailable.add(memberId)
+      // Create animations for this member sprite
+      this._createAnimsForKey(key)
+      callback?.()
+    })
+    this.load.once('loaderror', () => {
+      // No custom sprite for this member, use default
+    })
+    this.load.start()
+  }
+
+  private _createAnimsForKey(key: string) {
+    if (this.anims.exists(`${key}_idle`)) return
+    this.anims.create({ key: `${key}_idle`, frames: [{ key, frame: 1 }], frameRate: 1, repeat: -1 })
+    this.anims.create({ key: `${key}_walk_down`, frames: this.anims.generateFrameNumbers(key, { frames: [0, 1, 2, 1] }), frameRate: 6, repeat: -1 })
+    this.anims.create({ key: `${key}_walk_left`, frames: this.anims.generateFrameNumbers(key, { frames: [3, 4, 5, 4] }), frameRate: 6, repeat: -1 })
+    this.anims.create({ key: `${key}_walk_right`, frames: this.anims.generateFrameNumbers(key, { frames: [6, 7, 8, 7] }), frameRate: 6, repeat: -1 })
+    this.anims.create({ key: `${key}_walk_up`, frames: this.anims.generateFrameNumbers(key, { frames: [9, 10, 11, 10] }), frameRate: 6, repeat: -1 })
+    this.anims.create({ key: `${key}_sit_down`, frames: this.anims.generateFrameNumbers(key, { frames: [12, 13, 14, 13] }), frameRate: 3, repeat: -1 })
+    this.anims.create({ key: `${key}_sit_left`, frames: this.anims.generateFrameNumbers(key, { frames: [15, 16, 17, 16] }), frameRate: 3, repeat: -1 })
+    this.anims.create({ key: `${key}_sit_right`, frames: this.anims.generateFrameNumbers(key, { frames: [18, 19, 20, 19] }), frameRate: 3, repeat: -1 })
+    this.anims.create({ key: `${key}_sit_up`, frames: this.anims.generateFrameNumbers(key, { frames: [21, 22, 23, 22] }), frameRate: 3, repeat: -1 })
+    this.anims.create({ key: `${key}_work_down`, frames: this.anims.generateFrameNumbers(key, { frames: [24, 25, 26, 25] }), frameRate: 3, repeat: -1 })
+    this.anims.create({ key: `${key}_work_left`, frames: this.anims.generateFrameNumbers(key, { frames: [27, 28, 29, 28] }), frameRate: 3, repeat: -1 })
+    this.anims.create({ key: `${key}_work_right`, frames: this.anims.generateFrameNumbers(key, { frames: [30, 31, 32, 31] }), frameRate: 3, repeat: -1 })
+    this.anims.create({ key: `${key}_work_up`, frames: this.anims.generateFrameNumbers(key, { frames: [33, 34, 35, 34] }), frameRate: 3, repeat: -1 })
+    this.anims.create({ key: `${key}_type`, frames: this.anims.generateFrameNumbers(key, { frames: [33, 34, 35, 34] }), frameRate: 3, repeat: -1 })
   }
 
   // ── Camera ────────────────────────────────────────────────────
@@ -466,7 +517,10 @@ export class OfficeScene extends Phaser.Scene {
     const container = this.add.container(cx, cy)
     container.setData('memberId', memberId)
     container.setData('spriteIndex', spriteIndex)
-    const charKey = `char_${spriteIndex % this.charCount}`
+    // Prefer member-specific sprite if available, fallback to default
+    const charKey = this.memberCharAvailable.has(memberId)
+      ? `mchar_${memberId}`
+      : `char_${spriteIndex % this.charCount}`
 
     const shadow = this.add.graphics()
     shadow.fillStyle(0x000000, 0.2)
@@ -565,7 +619,10 @@ export class OfficeScene extends Phaser.Scene {
     onComplete: () => void,
   ) {
     const spriteIndex = container.getData('spriteIndex') ?? 0
-    const charKey = `char_${spriteIndex % this.charCount}`
+    const memberId = container.getData('memberId') as number
+    const charKey = this.memberCharAvailable.has(memberId)
+      ? `mchar_${memberId}`
+      : `char_${spriteIndex % this.charCount}`
 
     if (path.length === 0 || !container.active) {
       const sprite = container.getAt(1) as Phaser.GameObjects.Sprite

@@ -230,21 +230,21 @@ def composite_sheet(member_id: int) -> Optional[str]:
 
 
 def apply_sheet(member_id: int, sprite_index: int) -> Optional[str]:
-    """Step 5: 複製到前端 assets"""
+    """Step 5: 複製到前端 assets，使用 member_char_{member_id}.png 不覆蓋預設"""
     src = _member_dir(member_id) / "sprite_sheet.png"
     if not src.exists():
         return None
 
     import shutil
-    # backend/ 的上一層是專案根目錄
+    filename = f"member_char_{member_id}.png"
     project_root = Path(__file__).parent.parent.parent.parent
     copied = False
     for subdir in ["frontend/public/assets/office/characters_4dir", "frontend/dist/assets/office/characters_4dir"]:
-        target = project_root / subdir / f"char_{sprite_index}.png"
+        target = project_root / subdir / filename
         if target.parent.exists():
             shutil.copy2(src, target)
             copied = True
     if not copied:
         return None
 
-    return f"char_{sprite_index}.png"
+    return filename
