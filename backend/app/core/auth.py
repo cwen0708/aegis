@@ -29,18 +29,26 @@ DEFAULT_PASSWORD = os.getenv("AEGIS_DEFAULT_PASSWORD", "aegis2026!")
 # Session Token（HMAC 簽名）
 # ==========================================
 _signing_secret: bytes | None = None
+_signing_secret_ts: float = 0
+_SIGNING_SECRET_MAX_AGE = 3600  # DB 來源快取 TTL（秒）
 
 
 def _get_signing_secret() -> bytes:
     """取得 HMAC 簽名密鑰（env > DB > 自動生成）"""
-    global _signing_secret
+    global _signing_secret, _signing_secret_ts
+
+    # TTL 過期時重置快取，強制重新讀取
+    if _signing_secret and time.time() - _signing_secret_ts > _SIGNING_SECRET_MAX_AGE:
+        _signing_secret = None
+
     if _signing_secret:
         return _signing_secret
 
-    # 1. 從環境變數
+    # 1. 從環境變數（不需要 TTL，永不過期）
     env_secret = os.getenv("AEGIS_SESSION_SECRET")
     if env_secret:
         _signing_secret = env_secret.encode()
+        _signing_secret_ts = float("inf")
         return _signing_secret
 
     # 2. 從 DB（或自動生成存入 DB）
@@ -51,16 +59,19 @@ def _get_signing_secret() -> bytes:
             setting = session.get(SystemSetting, "session_secret")
             if setting and setting.value:
                 _signing_secret = setting.value.encode()
+                _signing_secret_ts = time.time()
             else:
                 new_secret = secrets.token_hex(32)
                 setting = SystemSetting(key="session_secret", value=new_secret)
                 session.add(setting)
                 session.commit()
                 _signing_secret = new_secret.encode()
+                _signing_secret_ts = time.time()
                 logger.info("[Auth] Generated new session signing secret")
     except Exception:
         # Fallback: 產生一個不持久的隨機密鑰（每次重啟會失效）
         _signing_secret = secrets.token_bytes(32)
+        _signing_secret_ts = time.time()
 
     return _signing_secret
 
