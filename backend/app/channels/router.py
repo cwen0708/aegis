@@ -131,28 +131,34 @@ class MessageRouter:
             logger.warning("[Router] Failed to send placeholder")
             return
 
-        # 2. 執行 AI 對話
-        response_text = await handle_chat(msg, bot_user)
-
-        if not response_text:
-            response_text = "（無回應）"
-
-        # 2.5 偵測 AI 回應中的附件標記
-        cleaned_text, attachments_data = extract_attachments(response_text)
-        attachments = [
-            Attachment(type=a["type"], path=a["path"], caption=a.get("caption", ""))
-            for a in attachments_data
-        ]
-
-        # 3. 編輯訊息為實際回應（附帶附件）
-        edit_msg = OutboundMessage(
-            chat_id=msg.chat_id,
-            platform=msg.platform,
-            text=cleaned_text or response_text,
-            edit_message_id=str(message_id),
-            attachments=attachments,
+        # 2. 執行 AI 對話（Telegram 傳入 placeholder message_id 讓 AI 即時回應）
+        is_realtime = msg.platform == "telegram"
+        response_text = await handle_chat(
+            msg, bot_user,
+            placeholder_message_id=str(message_id) if is_realtime else "",
         )
-        await channel.send(edit_msg)
+
+        # 3. 即時模式下 AI 已透過 MCP 工具直接回應，不需再 edit
+        #    非即時模式（LINE 等）仍用舊的 edit 流程
+        if not is_realtime:
+            if not response_text:
+                response_text = "（無回應）"
+
+            # 偵測 AI 回應中的附件標記
+            cleaned_text, attachments_data = extract_attachments(response_text)
+            attachments = [
+                Attachment(type=a["type"], path=a["path"], caption=a.get("caption", ""))
+                for a in attachments_data
+            ]
+
+            edit_msg = OutboundMessage(
+                chat_id=msg.chat_id,
+                platform=msg.platform,
+                text=cleaned_text or response_text,
+                edit_message_id=str(message_id),
+                attachments=attachments,
+            )
+            await channel.send(edit_msg)
 
     async def _handle_email(self, msg: InboundMessage):
         """

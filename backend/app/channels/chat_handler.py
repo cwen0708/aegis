@@ -28,13 +28,14 @@ MONTHLY_TOKEN_LIMIT_L1 = 100_000
 MONTHLY_TOKEN_LIMIT_L2 = 1_000_000
 
 
-async def handle_chat(msg: InboundMessage, bot_user: BotUser) -> Optional[str]:
+async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_message_id: str = "") -> Optional[str]:
     """
     處理自然語言對話
 
     Args:
         msg: 訊息
         bot_user: 用戶
+        placeholder_message_id: 佔位訊息 ID（用於即時回應模式）
 
     Returns:
         AI 回應文字，或 None
@@ -135,6 +136,7 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser) -> Optional[str]:
         chat_id=msg.chat_id,
         platform=bot_user.platform,
         user_extra=user_extra,
+        placeholder_message_id=placeholder_message_id,
     )
 
     # 9. 取得 AI 帳號和模型
@@ -304,6 +306,7 @@ def _build_chat_prompt(
     chat_id: str = "",
     platform: str = "",
     user_extra: Optional[dict] = None,
+    placeholder_message_id: str = "",
 ) -> str:
     """
     組合完整 prompt = 靈魂 + 技能 + 用戶身份 + 專案範圍 + 歷史 + 新訊息
@@ -387,6 +390,21 @@ def _build_chat_prompt(
         lines.append("回覆格式範例：「這個任務比較複雜，需要 [說明原因]。要幫你建立任務卡片嗎？」")
         lines.append("如果用戶同意，回覆：[CREATE_TASK:專案ID:任務標題:任務描述]")
         lines.append(f"任務描述最後請加上：「完成後請透過 {platform} 通知 chat_id={chat_id}」")
+        lines.append("")
+
+    # 即時回應指引（Telegram / Discord 等支援即時編輯的平台）
+    if platform in ("telegram",) and chat_id and placeholder_message_id:
+        lines.append("## 即時回應模式")
+        lines.append(f"你正在 {platform} 上與用戶即時對話。系統已發送一則「🤔 思考中...」的佔位訊息。")
+        lines.append(f"- chat_id: `{chat_id}`")
+        lines.append(f"- 佔位訊息 message_id: `{placeholder_message_id}`")
+        lines.append("")
+        lines.append("**請使用 MCP Telegram 工具即時回應用戶：**")
+        lines.append(f"1. 開始工作時，立刻用 `edit_message`（chat_id={chat_id}, message_id={placeholder_message_id}）把「思考中...」改為你正在做的事情的簡短描述")
+        lines.append(f"2. 過程中有重要進展或結果，用 `reply`（chat_id={chat_id}）發送新訊息")
+        lines.append("3. 不需要在最後做完整總結——你的即時訊息就是最終輸出")
+        lines.append("")
+        lines.append("原則：像真人一樣即時溝通，不要讓用戶等太久才看到回應。簡潔扼要。")
         lines.append("")
 
     # 安全限制
