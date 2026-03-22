@@ -403,7 +403,7 @@ def _build_chat_prompt(
     # 即時回應指引（Telegram / Discord 等支援即時編輯的平台）
     if platform in ("telegram",) and chat_id and placeholder_message_id:
         lines.append("## 即時回應模式")
-        lines.append(f"你正在 {platform} 上與用戶即時對話。系統已發送一則「🤔 思考中...」的佔位訊息。")
+        lines.append(f"你正在 {platform} 上與用戶即時對話。系統已發送一則「⏳ 請稍候...」的佔位訊息。")
         lines.append(f"- chat_id: `{chat_id}`")
         lines.append(f"- 佔位訊息 message_id: `{placeholder_message_id}`")
         lines.append("")
@@ -413,7 +413,7 @@ def _build_chat_prompt(
         lines.append(f"發送新訊息：`[CH_SEND:{platform}:{chat_id}:你的文字]`")
         lines.append("")
         lines.append("**執行步驟：**")
-        lines.append(f"1. **第一件事**：輸出 `[CH_EDIT:{platform}:{chat_id}:{placeholder_message_id}:⏳ 請稍候...]`")
+        lines.append(f"1. **第一件事**：輸出 `[CH_EDIT:{platform}:{chat_id}:{placeholder_message_id}:🤔 思考中...]`（表示 AI 已接手）")
         lines.append(f"2. 開始處理用戶的請求")
         lines.append(f"3. 有重要進展時輸出 `[CH_SEND:{platform}:{chat_id}:進展內容]`")
         lines.append(f"4. 最終結論也用 `[CH_SEND:{platform}:{chat_id}:結論內容]`")
