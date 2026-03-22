@@ -23,8 +23,9 @@ logger = logging.getLogger(__name__)
 # Channel-send 標記格式：
 # [CH_EDIT:platform:chat_id:message_id:文字內容]
 # [CH_SEND:platform:chat_id:文字內容]
-_CH_EDIT_RE = re.compile(r'\[CH_EDIT:([^:]+):([^:]+):([^:]+):(.+)\]', re.DOTALL)
-_CH_SEND_RE = re.compile(r'\[CH_SEND:([^:]+):([^:]+):(.+)\]', re.DOTALL)
+# 結尾的 ] 可選（AI 長訊息可能不閉合）
+_CH_EDIT_RE = re.compile(r'\[CH_EDIT:([^:]+):([^:]+):([^:]+):(.*?)(?:\]|$)', re.DOTALL)
+_CH_SEND_RE = re.compile(r'\[CH_SEND:([^:]+):([^:]+):(.*?)(?:\]|$)', re.DOTALL)
 
 
 def _parse_stream_json_text(line: str) -> Optional[str]:
