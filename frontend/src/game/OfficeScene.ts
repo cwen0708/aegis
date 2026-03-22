@@ -172,6 +172,7 @@ export class OfficeScene extends Phaser.Scene {
     for (let i = 0; i < MAX_CHAR_COUNT; i++) {
       const key = `char_${i}`
       if (this.anims.exists(`${key}_idle`)) continue
+      if (!this.textures.exists(key)) continue
 
       // 新排列: 3 cols x 12 rows
       // Row 0-3: walk (down, left, right, up)
@@ -569,9 +570,11 @@ export class OfficeScene extends Phaser.Scene {
     container.setData('memberId', memberId)
     container.setData('spriteIndex', spriteIndex)
     // Prefer member-specific sprite if available, fallback to default
-    const charKey = this.memberCharAvailable.has(memberId)
+    let charKey = this.memberCharAvailable.has(memberId)
       ? `mchar_${memberId}`
       : `char_${spriteIndex % this.charCount}`
+    // 如果 texture 不存在，fallback 到 char_0
+    if (!this.textures.exists(charKey)) charKey = 'char_0'
 
     const shadow = this.add.graphics()
     shadow.fillStyle(0x000000, 0.2)
@@ -675,9 +678,10 @@ export class OfficeScene extends Phaser.Scene {
   ) {
     const spriteIndex = container.getData('spriteIndex') ?? 0
     const memberId = container.getData('memberId') as number
-    const charKey = this.memberCharAvailable.has(memberId)
+    let charKey = this.memberCharAvailable.has(memberId)
       ? `mchar_${memberId}`
       : `char_${spriteIndex % this.charCount}`
+    if (!this.textures.exists(charKey)) charKey = 'char_0'
 
     if (path.length === 0 || !container.active) {
       const sprite = container.getAt(1) as Phaser.GameObjects.Sprite
