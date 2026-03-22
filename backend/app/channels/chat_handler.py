@@ -227,6 +227,10 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
     # 12. 更新 Session 統計
     _update_session_stats(session_obj.id, token_info)
 
+    # 13. 即時模式下，AI 已透過 curl 自行回應，回傳 None 避免 router 重複 edit
+    if placeholder_message_id and "channel-send" in output:
+        return None
+
     return output
 
 
