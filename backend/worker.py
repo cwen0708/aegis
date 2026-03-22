@@ -1395,6 +1395,19 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
     logger.info(f"[Worker] Card {idx.card_id} {'cron_log+deleted' if is_cron_card else new_status}")
 
 
+def auto_activate_idle_cards():
+    """AI stage 裡的 idle 卡片自動改為 pending（讓 Worker 撿起來）"""
+    with Session(engine) as session:
+        idle_cards = session.exec(
+            select(CardIndex).where(CardIndex.status == "idle")
+        ).all()
+        for idx in idle_cards:
+            stage_list = session.get(StageList, idx.list_id)
+            if stage_list and stage_list.is_ai_stage and stage_list.member_id:
+                update_card_status(idx.card_id, "pending")
+                logger.info(f"[Worker] Auto-activated idle card {idx.card_id} in AI stage '{stage_list.name}'")
+
+
 def process_pending_cards():
     """處理一輪 pending 卡片（不同成員並行執行）"""
     import threading
@@ -1520,6 +1533,7 @@ def main():
             if is_worker_paused():
                 pass  # 靜默跳過
             else:
+                auto_activate_idle_cards()
                 process_pending_cards()
 
             # 每小時清理過期記錄和暫存檔案
