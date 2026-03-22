@@ -1,6 +1,7 @@
 """Runner Control & Cron Toggle API — 7 endpoints"""
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
+from typing import Optional
 from pydantic import BaseModel
 from app.database import get_session
 from app.models.core import SystemSetting, CardIndex, Project
@@ -105,6 +106,35 @@ async def internal_broadcast_event(req: BroadcastEventRequest):
     from app.core.ws_manager import broadcast_event
     await broadcast_event(req.event, req.payload)
     return {"ok": True}
+
+
+# ==========================================
+# Channel Send（AI 即時回應用）
+# ==========================================
+class ChannelSendRequest(BaseModel):
+    platform: str
+    chat_id: str
+    text: str
+    edit_message_id: Optional[str] = None
+
+@router.post("/internal/channel-send")
+async def internal_channel_send(req: ChannelSendRequest):
+    """AI runner 呼叫：透過 channel 發送/編輯訊息"""
+    from app.channels.manager import channel_manager
+    from app.channels.bus import OutboundMessage
+
+    channel = channel_manager.get_channel(req.platform)
+    if not channel:
+        return {"ok": False, "error": f"Channel {req.platform} not found"}
+
+    msg = OutboundMessage(
+        chat_id=req.chat_id,
+        platform=req.platform,
+        text=req.text,
+        edit_message_id=req.edit_message_id or None,
+    )
+    message_id = await channel.send(msg)
+    return {"ok": True, "message_id": message_id}
 
 
 # ==========================================
