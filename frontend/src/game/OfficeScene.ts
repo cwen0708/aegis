@@ -221,7 +221,15 @@ export class OfficeScene extends Phaser.Scene {
     const url = `/uploads/sprites/${memberId}/sprite_sheet.png`
 
     this.load.spritesheet(key, url, { frameWidth: CHAR_FRAME_W, frameHeight: CHAR_FRAME_H })
-    this.load.once('complete', () => {
+
+    const onSpriteReady = () => {
+      this.memberCharAvailable.add(memberId)
+      this._createAnimsForKey(key)
+      this._refreshMemberSprite(memberId)
+      callback?.()
+    }
+
+    this.load.once('filecomplete-spritesheet-' + key, () => {
       if (!this.textures.exists(key)) return
       const tex = this.textures.get(key)
       const source = tex.source[0]
@@ -231,20 +239,16 @@ export class OfficeScene extends Phaser.Scene {
       if (source.width < CHAR_FRAME_W) {
         this.textures.remove(key)
         this.load.spritesheet(key, url, { frameWidth: CHAR_LEGACY_W, frameHeight: CHAR_LEGACY_H })
-        this.load.once('complete', () => {
+        this.load.once('filecomplete-spritesheet-' + key, () => {
           if (!this.textures.exists(key)) return
           this.legacyCharKeys.add(key)
-          this.memberCharAvailable.add(memberId)
-          this._createAnimsForKey(key)
-          callback?.()
+          onSpriteReady()
         })
         this.load.start()
         return
       }
 
-      this.memberCharAvailable.add(memberId)
-      this._createAnimsForKey(key)
-      callback?.()
+      onSpriteReady()
     })
     this.load.once('loaderror', () => {
       // No custom sprite for this member, use default
@@ -268,6 +272,25 @@ export class OfficeScene extends Phaser.Scene {
     this.anims.create({ key: `${key}_work_right`, frames: this.anims.generateFrameNumbers(key, { frames: [30, 31, 32, 31] }), frameRate: 3, repeat: -1 })
     this.anims.create({ key: `${key}_work_up`, frames: this.anims.generateFrameNumbers(key, { frames: [33, 34, 35, 34] }), frameRate: 3, repeat: -1 })
     this.anims.create({ key: `${key}_type`, frames: this.anims.generateFrameNumbers(key, { frames: [33, 34, 35, 34] }), frameRate: 3, repeat: -1 })
+  }
+
+  /** 成員 sprite 載入完成後，更新場景中已存在的角色 texture 和 scale */
+  private _refreshMemberSprite(memberId: number) {
+    const spriteKey = this.memberSpriteKeys.get(memberId)
+    if (!spriteKey) return
+    const container = this.characterSprites.get(spriteKey)
+    if (!container || !container.active) return
+
+    const charKey = `mchar_${memberId}`
+    const sprite = container.getAt(1) as Phaser.GameObjects.Sprite
+    if (!sprite) return
+
+    const charScale = this.legacyCharKeys.has(charKey)
+      ? ZOOM
+      : ZOOM * (CHAR_LEGACY_W / CHAR_FRAME_W)
+    sprite.setTexture(charKey)
+    sprite.setScale(charScale)
+    sprite.play(`${charKey}_idle`)
   }
 
   // ── Camera ────────────────────────────────────────────────────
