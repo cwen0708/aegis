@@ -13,10 +13,56 @@ Runner — 輕量 AI 呼叫器（僅供即時互動場景使用）
 import asyncio
 import subprocess
 import json
+import re
 import logging
+import threading
 from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
+
+# Channel-send 標記格式：
+# [CH_EDIT:platform:chat_id:message_id:文字內容]
+# [CH_SEND:platform:chat_id:文字內容]
+_CH_EDIT_RE = re.compile(r'\[CH_EDIT:([^:]+):([^:]+):([^:]+):(.+)\]', re.DOTALL)
+_CH_SEND_RE = re.compile(r'\[CH_SEND:([^:]+):([^:]+):(.+)\]', re.DOTALL)
+
+
+def _intercept_channel_marker(line: str):
+    """即時攔截輸出中的 channel-send 標記，非同步發送訊息"""
+    import urllib.request
+
+    for pattern, has_edit_id in [(_CH_EDIT_RE, True), (_CH_SEND_RE, False)]:
+        m = pattern.search(line)
+        if not m:
+            continue
+        if has_edit_id:
+            platform, chat_id, edit_id, text = m.group(1), m.group(2), m.group(3), m.group(4)
+        else:
+            platform, chat_id, text = m.group(1), m.group(2), m.group(3)
+            edit_id = None
+
+        payload = json.dumps({
+            "platform": platform,
+            "chat_id": chat_id,
+            "text": text,
+            "edit_message_id": edit_id,
+        }).encode()
+
+        def _send(data=payload):
+            try:
+                req = urllib.request.Request(
+                    "http://127.0.0.1:8899/api/v1/internal/channel-send",
+                    data=data,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                urllib.request.urlopen(req, timeout=10)
+            except Exception as e:
+                logger.warning(f"[Runner] Channel send failed: {e}")
+
+        # 用 thread 發送，不阻塞 stdout 讀取
+        threading.Thread(target=_send, daemon=True).start()
+        return
 
 # 支援的 AI 提供者指令配置
 PROVIDERS = {
@@ -166,6 +212,8 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
             for raw_line in proc.stdout:
                 line = raw_line.decode("utf-8", errors="replace")
                 lines.append(line)
+                # 即時攔截 channel-send 標記
+                _intercept_channel_marker(line.strip())
             proc.wait()
             return lines
 

@@ -227,8 +227,8 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
     # 12. 更新 Session 統計
     _update_session_stats(session_obj.id, token_info)
 
-    # 13. 即時模式下，AI 已透過 curl 自行回應，回傳 None 避免 router 重複 edit
-    if placeholder_message_id and "channel-send" in output:
+    # 13. 即時模式下，AI 已透過標記自行回應，回傳 None 避免 router 重複 edit
+    if placeholder_message_id and ("[CH_SEND:" in output or "[CH_EDIT:" in output):
         return None
 
     return output
@@ -403,29 +403,18 @@ def _build_chat_prompt(
         lines.append(f"- chat_id: `{chat_id}`")
         lines.append(f"- 佔位訊息 message_id: `{placeholder_message_id}`")
         lines.append("")
-        lines.append("**請使用以下 curl 指令即時回應用戶，依序執行：**")
+        lines.append("**請在輸出中使用以下標記即時回應用戶（系統會自動攔截並發送）：**")
         lines.append("")
-        lines.append("編輯佔位訊息（把「思考中」改成其他文字）：")
-        lines.append(f'```bash')
-        lines.append(f'curl -s -X POST http://127.0.0.1:8899/api/v1/internal/channel-send \\')
-        lines.append(f'  -H "Content-Type: application/json" \\')
-        lines.append(f'  -d \'{{"platform":"{platform}","chat_id":"{chat_id}","text":"⏳ 請稍候...","edit_message_id":"{placeholder_message_id}"}}\'')
-        lines.append(f'```')
-        lines.append("")
-        lines.append("發送新訊息：")
-        lines.append(f'```bash')
-        lines.append(f'curl -s -X POST http://127.0.0.1:8899/api/v1/internal/channel-send \\')
-        lines.append(f'  -H "Content-Type: application/json" \\')
-        lines.append(f'  -d \'{{"platform":"{platform}","chat_id":"{chat_id}","text":"你要發的內容"}}\'')
-        lines.append(f'```')
+        lines.append(f"編輯佔位訊息：`[CH_EDIT:{platform}:{chat_id}:{placeholder_message_id}:你的文字]`")
+        lines.append(f"發送新訊息：`[CH_SEND:{platform}:{chat_id}:你的文字]`")
         lines.append("")
         lines.append("**執行步驟：**")
-        lines.append("1. **第一件事**：立刻用上面的「編輯」指令把「🤔 思考中...」改成「⏳ 請稍候...」")
-        lines.append("2. 開始處理用戶的請求")
-        lines.append("3. 過程中有重要進展或結果，用「發送新訊息」指令即時告知")
-        lines.append("4. 最終結論也用「發送新訊息」發送")
+        lines.append(f"1. **第一件事**：輸出 `[CH_EDIT:{platform}:{chat_id}:{placeholder_message_id}:⏳ 請稍候...]`")
+        lines.append(f"2. 開始處理用戶的請求")
+        lines.append(f"3. 有重要進展時輸出 `[CH_SEND:{platform}:{chat_id}:進展內容]`")
+        lines.append(f"4. 最終結論也用 `[CH_SEND:{platform}:{chat_id}:結論內容]`")
         lines.append("")
-        lines.append("原則：像真人一樣即時溝通。第一步一定是編輯佔位訊息，讓用戶知道你已開始。")
+        lines.append("注意：標記必須獨佔一行，系統會即時攔截發送，你不需要等待。像真人一樣即時溝通。")
         lines.append("")
 
     # 安全限制
