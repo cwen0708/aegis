@@ -19,7 +19,7 @@ from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from app.core.auth import _get_signing_secret
+from app.core.auth import _get_signing_secret, check_password
 
 router = APIRouter()
 
@@ -202,6 +202,11 @@ button[type=submit]:disabled { background: #334155; cursor: not-allowed; }
         <input type="text" id="webUsername" placeholder="設定網頁登入帳號" autocomplete="username">
         <p class="desc">用於網頁版登入（與 Telegram 帳號獨立）</p>
       </div>
+      <div class="field-group" id="currentPwGroup" style="display:none">
+        <label>目前密碼</label>
+        <input type="password" id="currentPassword" placeholder="請輸入目前的密碼" autocomplete="current-password">
+        <p class="desc">修改密碼時需要驗證</p>
+      </div>
       <div class="field-group">
         <label>密碼</label>
         <input type="password" id="webPassword" placeholder="設定網頁登入密碼（至少 6 字元）" autocomplete="new-password">
@@ -262,6 +267,7 @@ async function load() {
     if (data.web_username) {
       document.getElementById('webUsername').value = data.web_username;
       document.getElementById('webAccountStatus').textContent = '✅ 已設定網頁帳號：' + data.web_username;
+      document.getElementById('currentPwGroup').style.display = 'block';
     } else {
       document.getElementById('webAccountStatus').textContent = '尚未設定網頁登入帳號';
     }
@@ -350,6 +356,7 @@ document.getElementById('profileForm').onsubmit = async (e) => {
         display_name: displayName || null,
         web_username: webUsername || null,
         web_password: webPassword || null,
+        current_password: document.getElementById('currentPassword').value || null,
       })
     });
 
@@ -381,6 +388,7 @@ class ProfileSaveRequest(BaseModel):
     display_name: Optional[str] = None
     web_username: Optional[str] = None
     web_password: Optional[str] = None
+    current_password: Optional[str] = None
 
 
 @router.get("/u/profile", response_class=HTMLResponse)
@@ -507,8 +515,11 @@ async def save_profile(req: ProfileSaveRequest):
                     if conflict:
                         raise HTTPException(status_code=409, detail="此帳號已被使用")
                     web_user.platform_user_id = req.web_username
-                # 更新密碼（有填才改）
+                # 更新密碼（有填才改）— 已有密碼時需驗證舊密碼
                 if req.web_password and len(req.web_password) >= 6:
+                    if web_user.password_hash:
+                        if not req.current_password or not check_password(req.current_password, web_user.password_hash):
+                            raise HTTPException(status_code=403, detail="目前密碼不正確")
                     web_user.password_hash = hash_password(req.web_password)
             else:
                 # 新建 web BotUser
