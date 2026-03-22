@@ -86,11 +86,11 @@ export function useProjectSelector() {
   onMounted(() => window.addEventListener('aegis-auth-changed', onAuthChanged))
   onUnmounted(() => window.removeEventListener('aegis-auth-changed', onAuthChanged))
 
-  // URL query 變化時同步
+  // URL query 變化時同步（需驗證專案存在於已載入清單中）
   watch(() => route.query.project, (val) => {
     if (val) {
       const id = Number(val)
-      if (id !== selectedProjectId.value) {
+      if (id !== selectedProjectId.value && projects.value.find(p => p.id === id)) {
         selectedProjectId.value = id
         localStorage.setItem('aegis_selected_project', String(id))
       }
