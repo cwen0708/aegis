@@ -218,7 +218,7 @@ export class OfficeScene extends Phaser.Scene {
     this.memberCharLoaded.add(memberId)
 
     const key = `mchar_${memberId}`
-    const url = `/assets/office/characters_4dir/member_char_${memberId}.png`
+    const url = `/uploads/sprites/${memberId}/sprite_sheet.png`
 
     this.load.spritesheet(key, url, { frameWidth: CHAR_FRAME_W, frameHeight: CHAR_FRAME_H })
     this.load.once('complete', () => {
