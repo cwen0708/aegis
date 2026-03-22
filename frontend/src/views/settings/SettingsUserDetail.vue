@@ -129,8 +129,8 @@ async function savePerson() {
       level: form.value.level,
     }
     body.access_expires_at = form.value.access_expires_at
-      ? new Date(form.value.access_expires_at).toISOString()
-      : ''
+      ? form.value.access_expires_at + 'T00:00:00Z'
+      : null
     const res = await fetch(`${API}/api/v1/persons/${personId}`, {
       method: 'PATCH',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
@@ -235,6 +235,8 @@ async function removeProject(projectId: number) {
 }
 
 async function togglePermission(pp: PersonProjectInfo, field: string, value: boolean) {
+  const old = (pp as any)[field]
+  ;(pp as any)[field] = value
   try {
     const res = await fetch(`${API}/api/v1/persons/${personId}/projects/${pp.project_id}`, {
       method: 'PATCH',
@@ -242,9 +244,8 @@ async function togglePermission(pp: PersonProjectInfo, field: string, value: boo
       body: JSON.stringify({ [field]: value }),
     })
     if (!res.ok) throw new Error('更新失敗')
-    // Update local state
-    ;(pp as any)[field] = value
   } catch (e: any) {
+    ;(pp as any)[field] = old
     store.addToast(e.message || '更新失敗', 'error')
   }
 }
@@ -307,6 +308,8 @@ async function removeMember(memberId: number) {
 }
 
 async function toggleMemberField(pm: PersonMemberInfo, field: string, value: boolean) {
+  const old = (pm as any)[field]
+  ;(pm as any)[field] = value
   try {
     const res = await fetch(`${API}/api/v1/persons/${personId}/members/${pm.member_id}`, {
       method: 'PATCH',
@@ -314,8 +317,8 @@ async function toggleMemberField(pm: PersonMemberInfo, field: string, value: boo
       body: JSON.stringify({ [field]: value }),
     })
     if (!res.ok) throw new Error('更新失敗')
-    ;(pm as any)[field] = value
   } catch (e: any) {
+    ;(pm as any)[field] = old
     store.addToast(e.message || '更新失敗', 'error')
   }
 }
