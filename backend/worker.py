@@ -1313,10 +1313,22 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
         else:
             append_text = f"\n\n---\n\n### Error ({result['provider']})\n{result['output']}"
 
-        update_card_status(idx.card_id, new_status, append_text)
+        # 檢查卡片是否在執行期間被 AI 移走（如會議流轉）
+        # 如果 list_id 改變或 status 已被設為 pending，不覆蓋
+        with Session(engine) as session:
+            current_card = session.get(CardIndex, idx.card_id)
+            card_relocated = (
+                current_card
+                and (current_card.list_id != idx.list_id or current_card.status == "pending")
+            )
 
-        # 一般卡片也執行 stage action（流水線流轉）
-        _apply_worker_stage_action(idx, new_status)
+        if card_relocated:
+            logger.info(f"[Worker] Card {idx.card_id}: relocated during execution (list {idx.list_id}→{current_card.list_id}), skip status update")
+        else:
+            update_card_status(idx.card_id, new_status, append_text)
+
+            # 一般卡片也執行 stage action（流水線流轉）
+            _apply_worker_stage_action(idx, new_status)
 
         # 解析 AI 輸出中的 json:create_cards 區塊（跨成員協作、審查卡片等）
         output_text = result.get("output", "")
