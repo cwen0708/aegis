@@ -212,8 +212,9 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
             for raw_line in proc.stdout:
                 line = raw_line.decode("utf-8", errors="replace")
                 lines.append(line)
-                # 即時攔截 channel-send 標記
-                _intercept_channel_marker(line.strip())
+                # 非 JSON 模式下即時攔截 channel-send 標記
+                if not config.get("json_output"):
+                    _intercept_channel_marker(line.strip())
             proc.wait()
             return lines
 
@@ -236,6 +237,10 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
             token_info = _parse_claude_json(output)
             if token_info.get("result_text"):
                 actual_output = token_info["result_text"]
+
+        # JSON 模式下 stdout 攔截不到標記，從 result_text 後處理
+        for line in actual_output.split("\n"):
+            _intercept_channel_marker(line.strip())
 
         return {
             "status": status,
