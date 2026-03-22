@@ -24,6 +24,7 @@ class CardCreateRequest(BaseModel):
     list_id: int
     title: str
     description: Optional[str] = None
+    status: Optional[str] = None  # idle (default) or pending
 
 class CardUpdateRequest(BaseModel):
     list_id: Optional[int] = None
@@ -72,9 +73,10 @@ def create_card(card_in: CardCreateRequest, session: Session = Depends(get_sessi
         new_id = max(new_id, old_max_id + 1)
 
     now = datetime.now(timezone.utc)
+    initial_status = card_in.status if card_in.status in ("idle", "pending") else "idle"
     card_data = CardData(
         id=new_id, list_id=card_in.list_id, title=card_in.title,
-        description=card_in.description, content="", status="idle",
+        description=card_in.description, content="", status=initial_status,
         tags=[], created_at=now, updated_at=now,
     )
 
@@ -89,7 +91,7 @@ def create_card(card_in: CardCreateRequest, session: Session = Depends(get_sessi
     # Dual-write: also create old Card ORM record (transition)
     orm_card = Card(
         id=new_id, list_id=card_in.list_id, title=card_in.title,
-        description=card_in.description, status="idle",
+        description=card_in.description, status=initial_status,
         created_at=now, updated_at=now,
     )
     session.add(orm_card)
