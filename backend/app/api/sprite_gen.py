@@ -161,12 +161,28 @@ def gen_all(member_id: int, req: GenerateRequest, session: Session = Depends(get
 
 @router.post("/members/{member_id}/sprite/composite", dependencies=[Depends(require_admin_token)])
 def composite(member_id: int, session: Session = Depends(get_session)):
-    _get_member(member_id, session)
-    from app.core.sprite_generator import composite_sheet
+    member = _get_member(member_id, session)
+    from app.core.sprite_generator import composite_sheet, TARGET_W
     path = composite_sheet(member_id)
     if not path:
         raise HTTPException(400, "No frames to composite")
-    return {"status": "ok", "path": path}
+    # 更新成員的 sprite_sheet 路徑和 scale
+    # 用時間戳重命名避免快取
+    import time
+    ts = int(time.time())
+    sheet_dir = Path(path).parent
+    new_name = f"sheet_{ts}.png"
+    new_path = sheet_dir / new_name
+    Path(path).rename(new_path)
+    # 相對於 uploads 的 URL 路徑
+    sprite_url = f"/uploads/sprites/{member_id}/{new_name}"
+    # scale: 舊版 16px 基準，新版需要縮小
+    sprite_scale = 16.0 / TARGET_W  # 128 → 0.125
+    member.sprite_sheet = sprite_url
+    member.sprite_scale = sprite_scale
+    session.add(member)
+    session.commit()
+    return {"status": "ok", "path": sprite_url, "scale": sprite_scale}
 
 
 @router.post("/members/{member_id}/sprite/apply", dependencies=[Depends(require_admin_token)])

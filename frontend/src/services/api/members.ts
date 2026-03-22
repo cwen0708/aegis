@@ -20,6 +20,8 @@ export interface MemberInfo {
   description: string
   sprite_index: number
   portrait: string
+  sprite_sheet: string
+  sprite_scale: number
   provider: string
   accounts: MemberAccount[]
 }

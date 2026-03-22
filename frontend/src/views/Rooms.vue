@@ -326,11 +326,11 @@ function pushDataToScene() {
   scene.updateData({
     totalDesks: totalDesks.value,
     desks: deskAssignments.value.map(d => d ? {
-      member: { id: d.member.id, name: d.member.name, provider: d.member.provider, sprite_index: d.member.sprite_index ?? 0 },
+      member: { id: d.member.id, name: d.member.name, provider: d.member.provider, sprite_index: d.member.sprite_index ?? 0, sprite_sheet: (d.member as any).sprite_sheet, sprite_scale: (d.member as any).sprite_scale },
       task: { card_title: d.task.card_title, project: d.task.project },
     } : null),
     resting: restingMembers.value.map(m => ({
-      id: m.id, name: m.name, provider: m.provider, sprite_index: m.sprite_index ?? 0,
+      id: m.id, name: m.name, provider: m.provider, sprite_index: m.sprite_index ?? 0, sprite_sheet: (m as any).sprite_sheet, sprite_scale: (m as any).sprite_scale,
     })),
     bubbles: bubbles.value,
     used: store.systemInfo.workstations_used,

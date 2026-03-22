@@ -21,14 +21,14 @@ const MAX_CHAR_COUNT = 7  // 最大可用角色圖數量（preload 用）
 
 // ── Types ───────────────────────────────────────────────────────
 export type DeskInfo = {
-  member: { id: number; name: string; provider: string; sprite_index: number }
+  member: { id: number; name: string; provider: string; sprite_index: number; sprite_sheet?: string; sprite_scale?: number }
   task: { card_title: string; project: string }
 } | null
 
 export interface SceneData {
   totalDesks: number
   desks: DeskInfo[]
-  resting: { id: number; name: string; provider: string; sprite_index: number }[]
+  resting: { id: number; name: string; provider: string; sprite_index: number; sprite_sheet?: string; sprite_scale?: number }[]
   bubbles: Map<number, string>
   used: number
   total: number
@@ -66,6 +66,8 @@ export class OfficeScene extends Phaser.Scene {
 
   // Member-specific sprites (AI generated)
   private memberCharLoaded: Set<number> = new Set()
+  private memberSpriteUrls: Map<number, string> = new Map()
+  private memberSpriteScales: Map<number, number> = new Map()
   private memberCharAvailable: Set<number> = new Set()
 
   // 舊版 sprite（16x32）需要不同 scale
@@ -209,16 +211,23 @@ export class OfficeScene extends Phaser.Scene {
     }
   }
 
-  /** 嘗試載入成員專屬 sprite（member_char_{id}.png），載入成功後建立動畫 */
-  tryLoadMemberSprite(memberId: number, callback?: () => void) {
-    if (this.memberCharLoaded.has(memberId)) {
+  /** 嘗試載入成員專屬 sprite，載入成功後建立動畫 */
+  tryLoadMemberSprite(memberId: number, spriteUrl?: string, callback?: () => void) {
+    // 如果有新 URL 且跟已載入的不同，強制重新載入
+    const prevUrl = this.memberSpriteUrls.get(memberId)
+    if (prevUrl && prevUrl === spriteUrl) {
+      callback?.()
+      return
+    }
+    if (this.memberCharLoaded.has(memberId) && !spriteUrl) {
       callback?.()
       return
     }
     this.memberCharLoaded.add(memberId)
+    if (spriteUrl) this.memberSpriteUrls.set(memberId, spriteUrl)
 
     const key = `mchar_${memberId}`
-    const url = `/uploads/sprites/${memberId}/sprite_sheet.png`
+    const url = spriteUrl || `/uploads/sprites/${memberId}/sprite_sheet.png`
 
     this.load.spritesheet(key, url, { frameWidth: CHAR_FRAME_W, frameHeight: CHAR_FRAME_H })
 
@@ -437,12 +446,13 @@ export class OfficeScene extends Phaser.Scene {
     const slots = this.layout.slots || []
 
     // Try loading member-specific sprites for all current members
-    const allMembers = [
-      ...data.desks.filter(d => d).map(d => d!.member.id),
-      ...data.resting.map(m => m.id),
+    const allMemberData = [
+      ...data.desks.filter(d => d).map(d => d!.member),
+      ...data.resting,
     ]
-    for (const mid of allMembers) {
-      this.tryLoadMemberSprite(mid)
+    for (const m of allMemberData) {
+      if (m.sprite_scale) this.memberSpriteScales.set(m.id, m.sprite_scale)
+      this.tryLoadMemberSprite(m.id, m.sprite_sheet)
     }
 
     // Build sets of current workers and resters
@@ -607,10 +617,11 @@ export class OfficeScene extends Phaser.Scene {
     shadow.fillStyle(0x000000, 0.2)
     shadow.fillEllipse(0, 2, 12 * ZOOM, 4 * ZOOM)
 
-    // 舊版 sprite(16x32) 用 ZOOM，新版(128x256) 等比縮小到同樣畫面大小
+    // scale: 優先用成員設定的 sprite_scale，否則自動判斷
+    const memberScale = this.memberSpriteScales.get(memberId)
     const charScale = this.legacyCharKeys.has(charKey)
       ? ZOOM
-      : ZOOM * (CHAR_LEGACY_W / CHAR_FRAME_W)
+      : ZOOM * (memberScale || (CHAR_LEGACY_W / CHAR_FRAME_W))
     const sprite = this.add.sprite(0, 0, charKey).setScale(charScale).setOrigin(0.5, 1)
 
     if (mode === 'working') {

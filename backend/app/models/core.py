@@ -172,6 +172,8 @@ class Member(SQLModel, table=True):
     description: str = ""
     sprite_index: int = Field(default=0)  # 小人物圖索引 0-5
     portrait: str = ""  # 立繪圖片路徑
+    sprite_sheet: str = ""  # sprite sheet 路徑（如 /uploads/sprites/1/sheet_20260323.png）
+    sprite_scale: float = Field(default=1.0)  # sprite 縮放比例（前端用）
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
