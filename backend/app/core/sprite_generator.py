@@ -14,8 +14,8 @@ from google.genai import types
 
 # 生成尺寸（4 倍放大）
 GEN_W, GEN_H = 64, 128
-# 最終尺寸
-TARGET_W, TARGET_H = 16, 32
+# 最終尺寸（128x256，pixel art 以 8x8 色塊呈現）
+TARGET_W, TARGET_H = 128, 256
 SHEET_COLS, SHEET_ROWS = 3, 12
 
 DIRECTIONS = ["south", "west", "east", "north"]
@@ -143,11 +143,63 @@ def _remove_white_bg(img: Image.Image, threshold: int = 240) -> Image.Image:
     return img
 
 
+def _quantize_to_grid(img: Image.Image, grid: int = 4) -> Image.Image:
+    """將圖片量化為 grid x grid 的色塊（每個色塊取最常見的顏色）
+    確保縮放後不會產生混色/模糊的半透明像素"""
+    w, h = img.size
+    target_w = w // grid
+    target_h = h // grid
+    result = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
+    pixels = img.load()
+    result_pixels = result.load()
+
+    for ty in range(target_h):
+        for tx in range(target_w):
+            # 取 grid x grid 區塊內的所有像素
+            colors = {}
+            for dy in range(grid):
+                for dx in range(grid):
+                    sx = tx * grid + dx
+                    sy = ty * grid + dy
+                    if sx < w and sy < h:
+                        c = pixels[sx, sy]
+                        colors[c] = colors.get(c, 0) + 1
+            # 選最常見的顏色（多數決）
+            if colors:
+                result_pixels[tx, ty] = max(colors, key=colors.get)
+
+    return result
+
+
 def _downscale(data: bytes) -> Image.Image:
-    """64x128 → 去白底 → 16x32"""
+    """任意尺寸 → 去白底 → 量化到 16x32（無模糊）
+
+    流程：
+    1. 去白底
+    2. 先用 NEAREST 縮到精確的整數倍尺寸（如 64x128 = 4倍）
+    3. 再用 grid 量化取多數決顏色
+    這樣每個 grid 格子都是精確的 NxN，不會跨邊界
+    """
     img = Image.open(io.BytesIO(data)).convert("RGBA")
     img = _remove_white_bg(img)
-    return img.resize((TARGET_W, TARGET_H), Image.NEAREST)
+
+    w, h = img.size
+    if w == TARGET_W and h == TARGET_H:
+        return img
+
+    # 決定中繼倍率（盡量接近原圖大小，但必須是整數倍）
+    # 例如 720x1456 → scale_w=45, scale_h=45.5 → 取 45 → 中繼 720x1440
+    scale = min(w // TARGET_W, h // TARGET_H)
+    grid = max(scale, 1)
+
+    # 先 NEAREST 縮到精確的 grid 倍尺寸，去掉多餘像素
+    intermediate_w = TARGET_W * grid
+    intermediate_h = TARGET_H * grid
+    if (w, h) != (intermediate_w, intermediate_h):
+        img = img.resize((intermediate_w, intermediate_h), Image.NEAREST)
+
+    # grid 量化：每個 grid x grid 色塊取多數決
+    return _quantize_to_grid(img, grid)
 
 
 def _member_dir(member_id: int) -> Path:

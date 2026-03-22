@@ -12,8 +12,10 @@ import {
 import { findPath, simplifyPath } from './pathfinding'
 
 // ── Constants ───────────────────────────────────────────────────
-const CHAR_FRAME_W = 16
-const CHAR_FRAME_H = 32
+const CHAR_FRAME_W = 128
+const CHAR_FRAME_H = 256
+const CHAR_LEGACY_W = 16   // 舊版 sprite 尺寸
+const CHAR_LEGACY_H = 32
 const MAX_CHAR_COUNT = 7  // 最大可用角色圖數量（preload 用）
 
 
@@ -66,6 +68,9 @@ export class OfficeScene extends Phaser.Scene {
   private memberCharLoaded: Set<number> = new Set()
   private memberCharAvailable: Set<number> = new Set()
 
+  // 舊版 sprite（16x32）需要不同 scale
+  private legacyCharKeys: Set<string> = new Set()
+
   // Wandering
   private wanderTimers: Map<string, Phaser.Time.TimerEvent> = new Map()
 
@@ -86,11 +91,34 @@ export class OfficeScene extends Phaser.Scene {
 
   preload() {
     for (let i = 0; i < MAX_CHAR_COUNT; i++) {
-      this.load.spritesheet(`char_${i}`, `/assets/office/characters_4dir/char_${i}.png`, {
-        frameWidth: CHAR_FRAME_W, frameHeight: CHAR_FRAME_H,
-      })
+      this._loadCharSpritesheet(`char_${i}`, `/assets/office/characters_4dir/char_${i}.png`)
     }
     preloadOfficeAssets(this)
+  }
+
+  /** 載入 spritesheet，自動偵測新版(128x256)或舊版(16x32)幀尺寸 */
+  private _loadCharSpritesheet(key: string, url: string) {
+    // 先嘗試新版尺寸
+    this.load.spritesheet(key, url, {
+      frameWidth: CHAR_FRAME_W, frameHeight: CHAR_FRAME_H,
+    })
+    // 載入完成後檢查：如果總幀數為 0，代表圖片是舊版尺寸
+    this.load.once('filecomplete-spritesheet-' + key, () => {
+      const tex = this.textures.get(key)
+      const source = tex.source[0]
+      if (!source) return
+      // 舊版：48x384 (3*16 x 12*32)，新版：384x3072 (3*128 x 12*256)
+      if (source.width < CHAR_FRAME_W) {
+        // 舊版圖片，移除後用舊尺寸重新載入
+        this.textures.remove(key)
+        this.load.spritesheet(key, url, {
+          frameWidth: CHAR_LEGACY_W, frameHeight: CHAR_LEGACY_H,
+        })
+        this.load.start()
+        // 標記為舊版，scale 時需要放大
+        this.legacyCharKeys.add(key)
+      }
+    })
   }
 
   create() {
@@ -190,12 +218,26 @@ export class OfficeScene extends Phaser.Scene {
     this.load.spritesheet(key, url, { frameWidth: CHAR_FRAME_W, frameHeight: CHAR_FRAME_H })
     this.load.once('complete', () => {
       if (!this.textures.exists(key)) return
-      // Verify it's not a broken/empty texture
-      const frame = this.textures.get(key).get()
-      if (frame.width < CHAR_FRAME_W) return
+      const tex = this.textures.get(key)
+      const source = tex.source[0]
+      if (!source) return
+
+      // 偵測舊版 sprite（圖寬 < 128 = 舊版 48px 寬的 sheet）
+      if (source.width < CHAR_FRAME_W) {
+        this.textures.remove(key)
+        this.load.spritesheet(key, url, { frameWidth: CHAR_LEGACY_W, frameHeight: CHAR_LEGACY_H })
+        this.load.once('complete', () => {
+          if (!this.textures.exists(key)) return
+          this.legacyCharKeys.add(key)
+          this.memberCharAvailable.add(memberId)
+          this._createAnimsForKey(key)
+          callback?.()
+        })
+        this.load.start()
+        return
+      }
 
       this.memberCharAvailable.add(memberId)
-      // Create animations for this member sprite
       this._createAnimsForKey(key)
       callback?.()
     })
@@ -535,7 +577,11 @@ export class OfficeScene extends Phaser.Scene {
     shadow.fillStyle(0x000000, 0.2)
     shadow.fillEllipse(0, 2, 12 * ZOOM, 4 * ZOOM)
 
-    const sprite = this.add.sprite(0, 0, charKey).setScale(ZOOM).setOrigin(0.5, 1)
+    // 舊版 sprite(16x32) 用 ZOOM，新版(128x256) 等比縮小到同樣畫面大小
+    const charScale = this.legacyCharKeys.has(charKey)
+      ? ZOOM
+      : ZOOM * (CHAR_LEGACY_W / CHAR_FRAME_W)
+    const sprite = this.add.sprite(0, 0, charKey).setScale(charScale).setOrigin(0.5, 1)
 
     if (mode === 'working') {
       sprite.play(`${charKey}_work_${workDir}`)
@@ -698,7 +744,7 @@ export class OfficeScene extends Phaser.Scene {
       const pos = this.findChar(memberId)
       if (!pos) return
 
-      const bubble = this.add.container(pos.x, pos.y - CHAR_FRAME_H * ZOOM - 6)
+      const bubble = this.add.container(pos.x, pos.y - CHAR_LEGACY_H * ZOOM - 6)
       bubble.setDepth(999)
 
       const t = this.add.text(0, 0, text, {
@@ -735,7 +781,7 @@ export class OfficeScene extends Phaser.Scene {
       const pos = this.findChar(memberId)
       if (pos) {
         bubble.x = pos.x
-        bubble.y = pos.y - CHAR_FRAME_H * ZOOM - 6
+        bubble.y = pos.y - CHAR_LEGACY_H * ZOOM - 6
       }
     })
   }
