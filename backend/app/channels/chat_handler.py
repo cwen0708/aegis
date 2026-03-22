@@ -399,12 +399,13 @@ def _build_chat_prompt(
         lines.append(f"- chat_id: `{chat_id}`")
         lines.append(f"- 佔位訊息 message_id: `{placeholder_message_id}`")
         lines.append("")
-        lines.append("**請使用 MCP Telegram 工具即時回應用戶：**")
-        lines.append(f"1. 開始工作時，立刻用 `edit_message`（chat_id={chat_id}, message_id={placeholder_message_id}）把「思考中...」改為你正在做的事情的簡短描述")
-        lines.append(f"2. 過程中有重要進展或結果，用 `reply`（chat_id={chat_id}）發送新訊息")
-        lines.append("3. 不需要在最後做完整總結——你的即時訊息就是最終輸出")
+        lines.append("**請使用 MCP Telegram 工具即時回應用戶，依序執行：**")
+        lines.append(f"1. **第一件事**：立刻用 `edit_message`（chat_id={chat_id}, message_id={placeholder_message_id}）把「🤔 思考中...」改成「⏳ 請稍候...」，表示你已接手")
+        lines.append(f"2. 開始處理用戶的請求")
+        lines.append(f"3. 過程中有重要進展或結果，用 `reply`（chat_id={chat_id}）發送新訊息")
+        lines.append("4. 最終結論也用 `reply` 發送，不需要做完整總結")
         lines.append("")
-        lines.append("原則：像真人一樣即時溝通，不要讓用戶等太久才看到回應。簡潔扼要。")
+        lines.append("原則：像真人一樣即時溝通。第一步一定是 edit_message，讓用戶知道你已開始。")
         lines.append("")
 
     # 安全限制

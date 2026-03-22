@@ -13,7 +13,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # 思考中提示訊息
-THINKING_MESSAGE = "⏳ 請稍候..."
+THINKING_MESSAGE = "🤔 思考中..."
 
 
 class MessageRouter:
