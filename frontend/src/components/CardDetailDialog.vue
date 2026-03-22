@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue' 
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { Zap, Square, Pencil, X, GitBranch } from 'lucide-vue-next'
 import TerminalViewer from './TerminalViewer.vue'
 import ExecutionFlowDiagram from './ExecutionFlowDiagram.vue'
@@ -21,6 +21,13 @@ const emit = defineEmits<{
 
 const isEditing = ref(false)
 const cardDetailTab = ref<'description' | 'prompt' | 'result' | 'flow'>('description')
+
+// Escape 關閉對話框
+function handleKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') emit('close')
+}
+onMounted(() => window.addEventListener('keydown', handleKeydown))
+onUnmounted(() => window.removeEventListener('keydown', handleKeydown))
 
 // 開啟對話框時，若 taskLogs 沒有資料，從 API 載入歷史廣播記錄
 onMounted(async () => {

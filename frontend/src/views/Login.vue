@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { Lock, Loader2, ShieldAlert, User, Ticket } from 'lucide-vue-next'
 import { useAuthStore } from '../stores/auth'
@@ -19,6 +19,13 @@ const newPassword = ref('')
 const loading = ref(false)
 const error = ref('')
 const success = ref('')
+
+onMounted(() => {
+  if (auth.isAuthenticated) {
+    const redirect = (route.query.redirect as string) || '/kanban'
+    router.replace(redirect)
+  }
+})
 
 async function goAfterLogin() {
   // 重新載入權限相關資料（projects、rooms）
@@ -63,7 +70,7 @@ async function handleRegister() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        invite_code: inviteCode.value.trim(),
+        invite_code: inviteCode.value.trim().toUpperCase(),
         username: newUsername.value.trim(),
         password: newPassword.value,
       }),
