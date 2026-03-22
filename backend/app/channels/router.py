@@ -138,12 +138,9 @@ class MessageRouter:
             placeholder_message_id=str(message_id) if is_realtime else "",
         )
 
-        # 3. 即時模式下 AI 已透過 MCP 工具直接回應，不需再 edit
-        #    非即時模式（LINE 等）仍用舊的 edit 流程
-        if not is_realtime:
-            if not response_text:
-                response_text = "（無回應）"
-
+        # 3. Fallback：如果 AI 有回傳文字（代表沒有自己用 MCP 發訊息），
+        #    仍然 edit 佔位訊息。即時模式 + 非即時模式都走這條路。
+        if response_text:
             # 偵測 AI 回應中的附件標記
             cleaned_text, attachments_data = extract_attachments(response_text)
             attachments = [
@@ -157,6 +154,15 @@ class MessageRouter:
                 text=cleaned_text or response_text,
                 edit_message_id=str(message_id),
                 attachments=attachments,
+            )
+            await channel.send(edit_msg)
+        elif not is_realtime:
+            # 非即時模式且無回應
+            edit_msg = OutboundMessage(
+                chat_id=msg.chat_id,
+                platform=msg.platform,
+                text="（無回應）",
+                edit_message_id=str(message_id),
             )
             await channel.send(edit_msg)
 
