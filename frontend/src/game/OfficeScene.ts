@@ -114,6 +114,10 @@ export class OfficeScene extends Phaser.Scene {
         this.load.spritesheet(key, url, {
           frameWidth: CHAR_LEGACY_W, frameHeight: CHAR_LEGACY_H,
         })
+        // 重載完成後建立動畫（因為 create() 時 texture 還不存在所以 skip 了）
+        this.load.once('filecomplete-spritesheet-' + key, () => {
+          this.createAnimations()
+        })
         this.load.start()
         // 標記為舊版，scale 時需要放大
         this.legacyCharKeys.add(key)
