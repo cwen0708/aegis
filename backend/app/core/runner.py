@@ -115,7 +115,7 @@ PROVIDERS = {
     },
     "claude": {
         "cmd_base": ["claude"],
-        "args": ["-p", "{prompt}", "--dangerously-skip-permissions", "--model", "opus", "--output-format", "stream-json"],
+        "args": ["-p", "{prompt}", "--dangerously-skip-permissions", "--model", "opus", "--output-format", "stream-json", "--verbose"],
         "env": {},
         "json_output": True,  # 仍用 JSON 解析最終結果
         "stream_json": True,
