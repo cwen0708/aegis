@@ -477,7 +477,8 @@ def save_task_log(card_id: int, card_title: str, project_name: str, provider: st
 def save_cron_log(cron_job_id: int, cron_job_name: str, card_id: int, card_title: str,
                   project_id: int, project_name: str, provider: str,
                   member_id: Optional[int], status: str, output: str,
-                  error_message: str, prompt_snapshot: str, token_info: Dict[str, Any]):
+                  error_message: str, prompt_snapshot: str, token_info: Dict[str, Any],
+                  stage_action: str = ""):
     """儲存排程執行記錄到 CronLog"""
     try:
         with Session(engine) as session:
@@ -501,17 +502,19 @@ def save_cron_log(cron_job_id: int, cron_job_name: str, card_id: int, card_title
                 cache_read_tokens=token_info.get("cache_read_tokens", 0),
                 cache_creation_tokens=token_info.get("cache_creation_tokens", 0),
                 cost_usd=token_info.get("cost_usd", 0),
+                stage_action=stage_action,
             )
             session.add(log)
             session.commit()
-            logger.info(f"[CronLog] Saved log for cron_job {cron_job_id}, status={status}")
+            logger.info(f"[CronLog] Saved log for cron_job {cron_job_id}, status={status}, stage_action={stage_action}")
     except Exception as e:
         logger.warning(f"[CronLog] Failed to save: {e}")
 
 
-def _apply_worker_stage_action(idx, new_status: str):
+def _apply_worker_stage_action(idx, new_status: str) -> str:
     """根據 StageList 的 on_success_action / on_fail_action 處理卡片。
     排程卡片不寫入 content（log 已記錄），只做 move/archive/delete。
+    回傳實際執行的 action 字串（如 "move_to:42"、"delete"、"archive"、"none"）。
     """
     try:
         with Session(engine) as session:
@@ -519,7 +522,7 @@ def _apply_worker_stage_action(idx, new_status: str):
             if not stage_list:
                 # fallback: 找不到列表就刪除（舊行為）
                 delete_card_completely(idx.card_id)
-                return
+                return "delete"
 
             action = stage_list.on_success_action if new_status == "completed" else stage_list.on_fail_action
 
@@ -571,10 +574,12 @@ def _apply_worker_stage_action(idx, new_status: str):
             else:
                 # none: 只更新狀態，不刪不移
                 update_card_status(idx.card_id, new_status)
+            return action
     except Exception as e:
         logger.warning(f"[Worker] _apply_worker_stage_action failed for card {idx.card_id}: {e}")
         # fallback: 舊行為刪除
         delete_card_completely(idx.card_id)
+        return "delete"
 
 
 def delete_card_completely(card_id: int):
@@ -1332,6 +1337,9 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
             cron_job = session.get(CronJob, cron_job_id)
             cron_job_name = cron_job.name if cron_job else ""
 
+        # 排程卡片：依據 stage action 處理（預設 delete，可在 UI 調整）
+        applied_action = _apply_worker_stage_action(idx, new_status)
+
         save_cron_log(
             cron_job_id=cron_job_id,
             cron_job_name=cron_job_name,
@@ -1346,10 +1354,8 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
             error_message=error_msg,
             prompt_snapshot=card_data.content,
             token_info=token_info,
+            stage_action=applied_action,
         )
-
-        # 排程卡片：依據 stage action 處理（預設 delete，可在 UI 調整）
-        _apply_worker_stage_action(idx, new_status)
     else:
         # === 一般卡片：輸出追加在 content 後面，用分隔線隔開 ===
         if result["status"] == "success":

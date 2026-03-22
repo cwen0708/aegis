@@ -131,6 +131,8 @@ class CronLog(SQLModel, table=True):
     cache_read_tokens: int = Field(default=0)
     cache_creation_tokens: int = Field(default=0)
     cost_usd: float = Field(default=0.0)
+    stage_action: str = Field(default="", sa_column_kwargs={"server_default": ""})
+    # 排程完成後的流轉動作，如 move_to:42、delete、archive、none
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
