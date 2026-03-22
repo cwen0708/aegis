@@ -27,6 +27,47 @@ _CH_EDIT_RE = re.compile(r'\[CH_EDIT:([^:]+):([^:]+):([^:]+):(.+)\]', re.DOTALL)
 _CH_SEND_RE = re.compile(r'\[CH_SEND:([^:]+):([^:]+):(.+)\]', re.DOTALL)
 
 
+def _parse_stream_json_text(line: str) -> Optional[str]:
+    """從 stream-json 行提取 AI 文字輸出或 result"""
+    try:
+        data = json.loads(line.strip())
+        msg_type = data.get("type")
+        if msg_type == "assistant":
+            content = data.get("content", []) or (data.get("message", {}).get("content", []))
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        return block.get("text", "")
+        elif msg_type == "result":
+            return data.get("result", "")
+    except (json.JSONDecodeError, KeyError, TypeError):
+        pass
+    return None
+
+
+def _parse_stream_json_tokens(line: str) -> Dict[str, Any]:
+    """從 stream-json result 行提取 token 用量"""
+    try:
+        data = json.loads(line.strip())
+        if data.get("type") != "result":
+            return {}
+        usage = data.get("usage", {})
+        model_usage = data.get("modelUsage", {})
+        model_name = list(model_usage.keys())[0] if model_usage else ""
+        return {
+            "result_text": data.get("result", ""),
+            "model": model_name,
+            "duration_ms": data.get("duration_ms", 0),
+            "cost_usd": data.get("total_cost_usd", 0),
+            "input_tokens": usage.get("input_tokens", 0),
+            "output_tokens": usage.get("output_tokens", 0),
+            "cache_read_tokens": usage.get("cache_read_input_tokens", 0),
+            "cache_creation_tokens": usage.get("cache_creation_input_tokens", 0),
+        }
+    except (json.JSONDecodeError, KeyError, IndexError):
+        return {}
+
+
 def _intercept_channel_marker(line: str):
     """即時攔截輸出中的 channel-send 標記，非同步發送訊息"""
     import urllib.request
@@ -74,9 +115,10 @@ PROVIDERS = {
     },
     "claude": {
         "cmd_base": ["claude"],
-        "args": ["-p", "{prompt}", "--dangerously-skip-permissions", "--model", "opus", "--output-format", "json"],
+        "args": ["-p", "{prompt}", "--dangerously-skip-permissions", "--model", "opus", "--output-format", "stream-json"],
         "env": {},
-        "json_output": True,
+        "json_output": True,  # 仍用 JSON 解析最終結果
+        "stream_json": True,
     },
     "ollama": {
         "cmd_base": ["ollama", "run"],
@@ -207,13 +249,32 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
             proc.stdin.write(prompt.encode("utf-8"))
             proc.stdin.close()
 
+        is_stream_json = config.get("stream_json", False)
+        result_text_parts = []
+        stream_token_info = {}
+
         def _read_output():
             lines = []
             for raw_line in proc.stdout:
                 line = raw_line.decode("utf-8", errors="replace")
                 lines.append(line)
-                # 非 JSON 模式下即時攔截 channel-send 標記
-                if not config.get("json_output"):
+
+                if is_stream_json:
+                    # stream-json 模式：逐行解析文字、即時攔截標記
+                    clean = line.strip()
+                    if clean.startswith("{"):
+                        text = _parse_stream_json_text(clean)
+                        if text:
+                            result_text_parts.append(text)
+                            # 即時攔截 channel-send 標記
+                            for tl in text.split("\n"):
+                                _intercept_channel_marker(tl.strip())
+                        # 收集 token info（從 result 行）
+                        ti = _parse_stream_json_tokens(clean)
+                        if ti:
+                            nonlocal stream_token_info
+                            stream_token_info = ti
+                elif not config.get("json_output"):
                     _intercept_channel_marker(line.strip())
             proc.wait()
             return lines
@@ -234,13 +295,18 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
         token_info = {}
         actual_output = output
         if provider_name == "claude":
-            token_info = _parse_claude_json(output)
-            if token_info.get("result_text"):
-                actual_output = token_info["result_text"]
-
-        # JSON 模式下 stdout 攔截不到標記，從 result_text 後處理
-        for line in actual_output.split("\n"):
-            _intercept_channel_marker(line.strip())
+            if is_stream_json and result_text_parts:
+                # stream-json 模式：用逐行收集的文字（標記已即時攔截）
+                actual_output = "".join(result_text_parts)
+                token_info = stream_token_info
+            else:
+                # 舊 JSON 模式 fallback
+                token_info = _parse_claude_json(output)
+                if token_info.get("result_text"):
+                    actual_output = token_info["result_text"]
+                # 後處理標記
+                for tl in actual_output.split("\n"):
+                    _intercept_channel_marker(tl.strip())
 
         return {
             "status": status,
