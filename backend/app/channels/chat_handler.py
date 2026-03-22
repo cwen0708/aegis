@@ -227,11 +227,15 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
     # 12. 更新 Session 統計
     _update_session_stats(session_obj.id, token_info)
 
-    # 13. 即時模式下，AI 已透過標記自行回應，回傳 None 避免 router 重複 edit
-    if placeholder_message_id and ("[CH_SEND:" in output or "[CH_EDIT:" in output):
+    # 13. 清理輸出中的 channel 標記
+    clean_output = re.sub(r'\[CH_(?:SEND|EDIT):[^\]]*\]', '', output).strip()
+
+    # 14. 即時模式下，AI 已透過 [CH_SEND] 發送過訊息，回傳 None 避免 router 重複 edit
+    #     注意：[CH_EDIT] 只是改佔位訊息，不算已回應
+    if placeholder_message_id and "[CH_SEND:" in output:
         return None
 
-    return output
+    return clean_output or output
 
 
 def _get_member(member_id: Optional[int]) -> Optional[Member]:
