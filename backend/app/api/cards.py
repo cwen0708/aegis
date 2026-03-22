@@ -24,6 +24,7 @@ class CardCreateRequest(BaseModel):
     list_id: int
     title: str
     description: Optional[str] = None
+    content: Optional[str] = None  # 卡片內容（會被當作 AI prompt）
     status: Optional[str] = None  # idle (default) or pending
 
 class CardUpdateRequest(BaseModel):
@@ -76,7 +77,7 @@ def create_card(card_in: CardCreateRequest, session: Session = Depends(get_sessi
     initial_status = card_in.status if card_in.status in ("idle", "pending") else "idle"
     card_data = CardData(
         id=new_id, list_id=card_in.list_id, title=card_in.title,
-        description=card_in.description, content="", status=initial_status,
+        description=card_in.description, content=card_in.content or "", status=initial_status,
         tags=[], created_at=now, updated_at=now,
     )
 
