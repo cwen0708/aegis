@@ -8,6 +8,7 @@ from app.core.card_index import (
     remove_card_from_index,
     query_pending_cards,
     query_board,
+    query_archived,
     rebuild_index,
     next_card_id,
 )
@@ -111,6 +112,32 @@ def test_rebuild_index_empty_dir(db_session, tmp_path):
 
 def test_next_card_id_empty(db_session):
     assert next_card_id(db_session) == 1
+
+
+def test_query_archived(db_session, tmp_project):
+    """query_archived 應回傳已歸檔的卡片"""
+    # 建立一張已歸檔、一張未歸檔的卡片
+    card_active = _make_card(1)
+    card_archived = _make_card(2)
+    card_archived.is_archived = True
+
+    fpath1 = card_file_path(str(tmp_project), 1)
+    fpath2 = card_file_path(str(tmp_project), 2)
+    write_card(fpath1, card_active)
+    write_card(fpath2, card_archived)
+    sync_card_to_index(db_session, card_active, project_id=1, file_path=str(fpath1))
+    sync_card_to_index(db_session, card_archived, project_id=1, file_path=str(fpath2))
+    db_session.commit()
+
+    results = query_archived(db_session, project_id=1)
+    assert len(results) == 1
+    assert results[0].card_id == 2
+    assert results[0].is_archived is True
+
+    # query_board 不應包含已歸檔卡片
+    board = query_board(db_session, project_id=1)
+    assert len(board) == 1
+    assert board[0].card_id == 1
 
 
 def test_next_card_id_increments(db_session, tmp_project):
