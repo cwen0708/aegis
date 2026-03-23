@@ -910,8 +910,45 @@ async def _handle_aegis_command(command_type: str, payload: Dict) -> Dict:
         member_slug = payload.get("member_slug", "aegis")
         message = payload.get("message", "")
         logger.info(f"[OneStack] Chat command: {member_slug} - {message[:50]}")
-        # TODO: 接入 runner.handle_chat
-        return {"ok": True, "message": "Chat received (pending implementation)"}
+
+        try:
+            from app.core.runner import run_ai_task
+            from sqlmodel import Session as _Ses, select
+            from app.database import engine as _eng
+            from app.models.core import Member, Project
+
+            # 找成員和專案
+            with _Ses(_eng) as session:
+                member = session.exec(select(Member).where(Member.slug == member_slug)).first()
+                member_id = member.id if member else None
+                # 用 Aegis 專案作為 chat 的上下文
+                project = session.exec(select(Project).where(Project.id == 1)).first()
+                project_path = project.path if project else "/home/cwen0708/projects/Aegis"
+
+            # 寫 stream: 開始
+            await connector.stream_event(0, "status", "running", member_slug)
+
+            result = await run_ai_task(
+                task_id=0,
+                project_path=project_path,
+                prompt=message,
+                phase="chat",
+                member_id=member_id,
+            )
+
+            output = result.get("output", "")
+            status = result.get("status", "error")
+
+            # 寫 stream: 結果
+            evt_type = "result" if status == "success" else "error"
+            await connector.stream_event(0, evt_type, output[:3000], member_slug)
+
+            return {"ok": True, "output": output[:1000], "status": status}
+
+        except Exception as e:
+            logger.error(f"[OneStack] Chat failed: {e}")
+            await connector.stream_event(0, "error", str(e)[:500], member_slug)
+            return {"ok": False, "error": str(e)[:500]}
 
     elif command_type == "cancel":
         card_id = payload.get("card_id")
