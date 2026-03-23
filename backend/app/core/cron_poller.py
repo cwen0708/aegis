@@ -2,7 +2,7 @@ import asyncio
 import os
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from sqlmodel import Session, select
 from app.database import engine
@@ -252,6 +252,24 @@ async def poll_local_cron_jobs():
     last_check_at = now.isoformat()
 
     with Session(engine) as session:
+        # 清理 Card ORM 殘留：超過 2 小時仍為 pending 且 CardIndex 已不存在的幽靈卡片
+        try:
+            cutoff = (now - timedelta(hours=2)).isoformat()
+            stale_cards = session.exec(
+                select(Card).where(Card.status == "pending", Card.created_at < cutoff)
+            ).all()
+            cleaned = 0
+            for card in stale_cards:
+                idx = session.get(CardIndex, card.id)
+                if not idx or idx.status not in ("pending", "running"):
+                    card.status = "expired"
+                    session.add(card)
+                    cleaned += 1
+            if cleaned:
+                session.commit()
+                logger.info(f"[Cron Poller] Cleaned {cleaned} stale Card ORM entries")
+        except Exception as e:
+            logger.warning(f"[Cron Poller] Card cleanup failed: {e}")
         # 先取所有啟用的任務，然後在 Python 層比較時間（避免 SQLite 字串比較 bug）
         enabled_jobs = session.exec(
             select(CronJob).where(CronJob.is_enabled == True)

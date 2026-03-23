@@ -132,7 +132,7 @@ class MessageRouter:
             return
 
         # 2. 執行 AI 對話（Telegram 傳入 placeholder message_id 讓 AI 即時回應）
-        is_realtime = msg.platform == "telegram"
+        is_realtime = False  # TODO: Telegram 即時回應暫時關閉（截斷+重複問題待修）
         response_text = await handle_chat(
             msg, bot_user,
             placeholder_message_id=str(message_id) if is_realtime else "",
