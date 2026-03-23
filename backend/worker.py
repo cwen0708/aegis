@@ -219,15 +219,8 @@ def broadcast_log(card_id: int, line: str):
             pass  # 不影響廣播
 
         logger.info(f"[Broadcast] card={card_id} len={len(clean_line)}")
-        data = json.dumps({"card_id": card_id, "line": clean_line}).encode("utf-8")
-        req = urllib.request.Request(
-            f"{API_BASE}/internal/broadcast-log",
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST"
-        )
-        urllib.request.urlopen(req, timeout=5)
-        # OneStack stream 轉發由 FastAPI 端的 internal/broadcast-log 處理
+        from app.core.http_client import InternalAPI
+        InternalAPI.broadcast_log(card_id, clean_line)
     except Exception as e:
         logger.warning(f"[Broadcast] Failed: {e}")
         pass
@@ -272,17 +265,8 @@ def cleanup_media_files():
 
 def broadcast_event(event_type: str, payload: dict):
     """透過 HTTP 發送事件給 FastAPI 廣播"""
-    try:
-        data = json.dumps({"event": event_type, "payload": payload}).encode("utf-8")
-        req = urllib.request.Request(
-            f"{API_BASE}/internal/broadcast-event",
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST"
-        )
-        urllib.request.urlopen(req, timeout=5)
-    except Exception as e:
-        logger.warning(f"[Broadcast] Failed to send {event_type}: {e}")
+    from app.core.http_client import InternalAPI
+    InternalAPI.broadcast_event(event_type, payload)
 
 
 # ==========================================

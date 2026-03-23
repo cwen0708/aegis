@@ -182,12 +182,8 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
         _last_edit[0] = now
         _last_edit[1] = text
         try:
-            import httpx
-            async with httpx.AsyncClient(timeout=5) as client:
-                await client.post("http://127.0.0.1:8899/api/v1/internal/channel-send", json={
-                    "platform": msg.platform, "chat_id": msg.chat_id,
-                    "text": text, "edit_message_id": placeholder_message_id,
-                })
+            from app.core.http_client import InternalAPIAsync
+            await InternalAPIAsync.channel_send(msg.platform, msg.chat_id, text, placeholder_message_id)
         except Exception:
             pass
 
@@ -256,16 +252,9 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
     # 15. 即時模式：發新訊息（觸發推播）+ placeholder 改「✅」
     if placeholder_message_id and clean_output:
         try:
-            import httpx
-            async with httpx.AsyncClient(timeout=10) as client:
-                await client.post("http://127.0.0.1:8899/api/v1/internal/channel-send", json={
-                    "platform": msg.platform, "chat_id": msg.chat_id,
-                    "text": clean_output[:4000],
-                })
-                await client.post("http://127.0.0.1:8899/api/v1/internal/channel-send", json={
-                    "platform": msg.platform, "chat_id": msg.chat_id,
-                    "text": "✅", "edit_message_id": placeholder_message_id,
-                })
+            from app.core.http_client import InternalAPIAsync
+            await InternalAPIAsync.channel_send(msg.platform, msg.chat_id, clean_output[:4000])
+            await InternalAPIAsync.channel_send(msg.platform, msg.chat_id, "✅", placeholder_message_id)
         except Exception as e:
             logger.warning(f"[Chat] Failed to send final response: {e}")
             return clean_output  # fallback: 讓 Router 編輯 placeholder

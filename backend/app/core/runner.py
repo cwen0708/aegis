@@ -71,7 +71,7 @@ def _parse_stream_json_tokens(line: str) -> Dict[str, Any]:
 
 def _intercept_channel_marker(line: str):
     """即時攔截輸出中的 channel-send 標記，非同步發送訊息"""
-    import urllib.request
+    from app.core.http_client import InternalAPI
 
     for pattern, has_edit_id in [(_CH_EDIT_RE, True), (_CH_SEND_RE, False)]:
         m = pattern.search(line)
@@ -83,27 +83,7 @@ def _intercept_channel_marker(line: str):
             platform, chat_id, text = m.group(1), m.group(2), m.group(3)
             edit_id = None
 
-        payload = json.dumps({
-            "platform": platform,
-            "chat_id": chat_id,
-            "text": text,
-            "edit_message_id": edit_id,
-        }).encode()
-
-        def _send(data=payload):
-            try:
-                req = urllib.request.Request(
-                    "http://127.0.0.1:8899/api/v1/internal/channel-send",
-                    data=data,
-                    headers={"Content-Type": "application/json"},
-                    method="POST",
-                )
-                urllib.request.urlopen(req, timeout=10)
-            except Exception as e:
-                logger.warning(f"[Runner] Channel send failed: {e}")
-
-        # 用 thread 發送，不阻塞 stdout 讀取
-        threading.Thread(target=_send, daemon=True).start()
+        InternalAPI.channel_send_async(platform, chat_id, text, edit_id)
         return
 
 # 支援的 AI 提供者指令配置
