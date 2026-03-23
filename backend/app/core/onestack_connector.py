@@ -643,6 +643,166 @@ class OneStackConnector:
             self._email_digest_task.cancel()
             logger.info("[OneStack] Email digest stopped")
 
+    # ─── Aegis Stream（寫入執行輸出到 aegis_stream） ───
+
+    async def stream_event(
+        self,
+        card_id: int,
+        event_type: str,
+        content: str,
+        member_slug: Optional[str] = None,
+        metadata: Optional[Dict] = None,
+    ):
+        """寫入一筆執行事件到 aegis_stream（OneStack 前端 Realtime 訂閱）"""
+        if not self.enabled or not self.device_id:
+            return
+
+        # 需要 owner_id — 從 cli_devices 取得（快取）
+        owner_id = await self._get_owner_id()
+        if not owner_id:
+            return
+
+        await self._request(
+            "POST",
+            "aegis_stream",
+            json_data={
+                "owner_id": owner_id,
+                "device_id": self.device_id,
+                "card_id": card_id,
+                "member_slug": member_slug,
+                "event_type": event_type,
+                "content": content[:5000],  # 限制大小
+                "metadata": metadata or {},
+            }
+        )
+
+    _cached_owner_id: Optional[str] = None
+
+    async def _get_owner_id(self) -> Optional[str]:
+        """從 cli_devices 取得 owner_id（快取）"""
+        if self._cached_owner_id:
+            return self._cached_owner_id
+
+        result = await self._request(
+            "GET",
+            "cli_devices",
+            params={
+                "id": f"eq.{self.device_id}",
+                "select": "owner_id",
+            }
+        )
+        if result and isinstance(result, list) and len(result) > 0:
+            self._cached_owner_id = result[0].get("owner_id")
+        return self._cached_owner_id
+
+    async def stream_status(self, card_id: int, status: str, member_slug: Optional[str] = None):
+        """快捷：寫入狀態事件"""
+        await self.stream_event(card_id, "status", status, member_slug)
+
+    async def stream_output(self, card_id: int, content: str, member_slug: Optional[str] = None):
+        """快捷：寫入輸出事件"""
+        await self.stream_event(card_id, "output", content, member_slug)
+
+    async def stream_result(self, card_id: int, content: str, member_slug: Optional[str] = None, metadata: Optional[Dict] = None):
+        """快捷：寫入結果事件"""
+        await self.stream_event(card_id, "result", content, member_slug, metadata)
+
+    # ─── Aegis Commands（輪詢 aegis_commands） ───
+
+    async def poll_commands(self) -> List[Dict]:
+        """從 aegis_commands 取得待處理指令"""
+        if not self.enabled or not self.device_id:
+            return []
+
+        result = await self._request(
+            "GET",
+            "aegis_commands",
+            params={
+                "device_id": f"eq.{self.device_id}",
+                "status": "eq.pending",
+                "order": "created_at.asc",
+                "limit": "10",
+            }
+        )
+        return result if isinstance(result, list) else []
+
+    async def update_command_status(
+        self, command_id: int, status: str, result: Optional[Dict] = None
+    ):
+        """更新指令狀態"""
+        if not self.enabled:
+            return
+
+        data: Dict[str, Any] = {
+            "status": status,
+            "processed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if result:
+            data["result"] = result
+
+        await self._request(
+            "PATCH",
+            "aegis_commands",
+            params={"id": f"eq.{command_id}"},
+            json_data=data
+        )
+
+    _command_callback = None
+
+    def on_command(self, callback):
+        """註冊指令回調"""
+        self._command_callback = callback
+
+    async def _command_poll_loop(self):
+        """aegis_commands 輪詢循環（10 秒）"""
+        while True:
+            try:
+                commands = await self.poll_commands()
+                for cmd in commands:
+                    cmd_id = cmd.get("id")
+                    cmd_type = cmd.get("command_type")
+                    payload = cmd.get("payload", {})
+
+                    logger.info(f"[OneStack] Command received: {cmd_type} (id={cmd_id})")
+
+                    # 標記為 processing
+                    await self.update_command_status(cmd_id, "processing")
+
+                    try:
+                        if self._command_callback:
+                            result = await self._command_callback(cmd_type, payload)
+                            await self.update_command_status(cmd_id, "completed", result=result)
+                        else:
+                            await self.update_command_status(
+                                cmd_id, "failed",
+                                result={"error": "No command handler registered"}
+                            )
+                    except Exception as e:
+                        logger.error(f"[OneStack] Command {cmd_id} failed: {e}")
+                        await self.update_command_status(
+                            cmd_id, "failed",
+                            result={"error": str(e)[:500]}
+                        )
+            except Exception as e:
+                logger.error(f"[OneStack] Command poll error: {e}")
+            await asyncio.sleep(10)
+
+    _command_poll_task: Optional[asyncio.Task] = None
+
+    def start_command_polling(self):
+        """啟動 aegis_commands 輪詢"""
+        if not self.enabled:
+            return
+        if self._command_poll_task is None or self._command_poll_task.done():
+            self._command_poll_task = asyncio.create_task(self._command_poll_loop())
+            logger.info("[OneStack] Command polling started (every 10s)")
+
+    def stop_command_polling(self):
+        """停止 aegis_commands 輪詢"""
+        if self._command_poll_task and not self._command_poll_task.done():
+            self._command_poll_task.cancel()
+            logger.info("[OneStack] Command polling stopped")
+
     # ─── 離線 ───
 
     async def set_offline(self):
@@ -720,15 +880,64 @@ async def _handle_onestack_task(task: Dict[str, Any]):
         )
 
 
+async def _handle_aegis_command(command_type: str, payload: Dict) -> Dict:
+    """處理從 OneStack aegis_commands 收到的指令"""
+    if command_type == "create_card":
+        from sqlmodel import Session as _Ses
+        from app.database import engine as _eng
+        from app.api.onestack import create_card_from_onestack_task
+
+        member_slug = payload.get("member_slug")
+        title = payload.get("title", "OneStack 任務")
+        content = payload.get("content", "")
+
+        with _Ses(_eng) as session:
+            result = create_card_from_onestack_task(
+                session=session,
+                task_id="",
+                title=title,
+                description=content,
+                member_slug=member_slug,
+            )
+        return result
+
+    elif command_type == "chat":
+        # 即時對話（透過 runner）
+        member_slug = payload.get("member_slug", "aegis")
+        message = payload.get("message", "")
+        logger.info(f"[OneStack] Chat command: {member_slug} - {message[:50]}")
+        # TODO: 接入 runner.handle_chat
+        return {"ok": True, "message": "Chat received (pending implementation)"}
+
+    elif command_type == "cancel":
+        card_id = payload.get("card_id")
+        if card_id:
+            import httpx
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(f"http://127.0.0.1:8899/api/v1/cards/{card_id}/abort")
+                return {"ok": resp.status_code < 400}
+        return {"ok": False, "error": "Missing card_id"}
+
+    elif command_type == "sync":
+        return {"ok": True, "status": "online"}
+
+    else:
+        return {"ok": False, "error": f"Unknown command: {command_type}"}
+
+
 async def start_onestack_connector():
     """啟動 OneStack 連接器（供 main.py 呼叫）"""
     if connector.enabled:
         await connector.register_device()
         connector.start_heartbeat()
 
-        # 註冊任務回調 + 啟動輪詢
+        # 註冊 cli_tasks 回調 + 啟動輪詢（Phase 1 舊機制）
         connector.on_task(_handle_onestack_task)
         connector.start_polling()
+
+        # 註冊 aegis_commands 回調 + 啟動輪詢（新機制）
+        connector.on_command(_handle_aegis_command)
+        connector.start_command_polling()
 
         # 讀取 Email digest 設定
         try:
@@ -749,6 +958,7 @@ async def start_onestack_connector():
 async def stop_onestack_connector():
     """停止 OneStack 連接器"""
     if connector.enabled:
+        connector.stop_command_polling()
         connector.stop_email_digest()
         connector.stop_polling()
         connector.stop_heartbeat()
