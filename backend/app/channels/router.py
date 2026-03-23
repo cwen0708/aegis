@@ -131,38 +131,26 @@ class MessageRouter:
             logger.warning("[Router] Failed to send placeholder")
             return
 
-        # 2. 執行 AI 對話（Telegram 傳入 placeholder message_id 讓 AI 即時回應）
-        is_realtime = False  # TODO: Telegram 即時回應暫時關閉（截斷+重複問題待修）
+        # 2. 執行 AI 對話（傳入 placeholder message_id，程式控制即時編輯）
         response_text = await handle_chat(
             msg, bot_user,
-            placeholder_message_id=str(message_id) if is_realtime else "",
+            placeholder_message_id=str(message_id),
         )
 
-        # 3. Fallback：如果 AI 有回傳文字（代表沒有自己用 MCP 發訊息），
-        #    仍然 edit 佔位訊息。即時模式 + 非即時模式都走這條路。
+        # 3. 如果 handle_chat 回傳文字 → edit 佔位訊息（非即時模式 fallback）
+        #    回傳 None → handle_chat 內部已處理（即時模式），Router 不動
         if response_text:
-            # 偵測 AI 回應中的附件標記
             cleaned_text, attachments_data = extract_attachments(response_text)
             attachments = [
                 Attachment(type=a["type"], path=a["path"], caption=a.get("caption", ""))
                 for a in attachments_data
             ]
-
             edit_msg = OutboundMessage(
                 chat_id=msg.chat_id,
                 platform=msg.platform,
                 text=cleaned_text or response_text,
                 edit_message_id=str(message_id),
                 attachments=attachments,
-            )
-            await channel.send(edit_msg)
-        elif not is_realtime:
-            # 非即時模式且無回應
-            edit_msg = OutboundMessage(
-                chat_id=msg.chat_id,
-                platform=msg.platform,
-                text="（無回應）",
-                edit_message_id=str(message_id),
             )
             await channel.send(edit_msg)
 

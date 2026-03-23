@@ -2,7 +2,9 @@
 AI 對話處理器 — 處理非命令訊息，與 AI 角色對話
 """
 import re
+import time
 import logging
+import asyncio
 from datetime import datetime, timezone
 from typing import Optional, List
 from sqlmodel import Session, select
@@ -168,10 +170,40 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
         # 硬擋：沒有 AD 帳密就封鎖 NAS MCP
         mcp_extra_env["NAS_AUTH_BLOCKED"] = "1"
 
-    # 10. 呼叫 AI
+    # 10. 即時回饋：on_stream callback 編輯 placeholder
+    _last_edit = [0.0, ""]  # [timestamp, last_text]
+
+    async def _edit_placeholder(text: str):
+        if not placeholder_message_id or text == _last_edit[1]:
+            return
+        now = time.time()
+        if now - _last_edit[0] < 3.0:
+            return
+        _last_edit[0] = now
+        _last_edit[1] = text
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=5) as client:
+                await client.post("http://127.0.0.1:8899/api/v1/internal/channel-send", json={
+                    "platform": msg.platform, "chat_id": msg.chat_id,
+                    "text": text, "edit_message_id": placeholder_message_id,
+                })
+        except Exception:
+            pass
+
+    _loop = asyncio.get_event_loop()
+
+    def on_stream(raw_line: str):
+        from app.api.runner import _parse_tool_call
+        parsed = _parse_tool_call(raw_line)
+        if parsed and placeholder_message_id:
+            _, summary = parsed
+            asyncio.run_coroutine_threadsafe(_edit_placeholder(f"🤔 {summary}"), _loop)
+
+    # 11. 呼叫 AI（帶 on_stream）
     try:
         result = await run_ai_task(
-            task_id=0,  # 非卡片任務
+            task_id=0,
             project_path=".",
             prompt=prompt,
             phase="CHAT",
@@ -182,6 +214,7 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
             model_override=model,
             auth_info=auth_info,
             extra_env=mcp_extra_env or None,
+            on_stream=on_stream if placeholder_message_id else None,
         )
     except Exception as e:
         logger.error(f"[Chat] AI task failed: {e}")
@@ -193,24 +226,16 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
     output = result.get("output", "")
     token_info = result.get("token_info", {})
 
-    # 10.5 檢查是否要建立任務卡片
+    # 12. 檢查是否要建立任務卡片
     task_match = re.search(r'\[CREATE_TASK:(\d+):([^:]+):([^\]]+)\]', output)
     if task_match and bot_user.level >= 2:
         project_id = int(task_match.group(1))
         task_title = task_match.group(2).strip()
         task_desc = task_match.group(3).strip()
-
-        # 驗證用戶有權限存取該專案
         if any(p.id == project_id for p in accessible_projects):
-            card_id = _create_task_card(
-                project_id=project_id,
-                title=task_title,
-                content=task_desc,
-                chat_id=msg.chat_id,
-                platform=bot_user.platform,
-            )
+            card_id = _create_task_card(project_id=project_id, title=task_title,
+                                        content=task_desc, chat_id=msg.chat_id, platform=bot_user.platform)
             if card_id:
-                # 移除 [CREATE_TASK:...] 標記，加上成功訊息
                 output = re.sub(r'\[CREATE_TASK:[^\]]+\]', '', output).strip()
                 output += f"\n\n✅ 已建立任務卡片 #{card_id}，完成後會通知你。"
             else:
@@ -220,20 +245,31 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
             output = re.sub(r'\[CREATE_TASK:[^\]]+\]', '', output).strip()
             output += "\n\n⚠️ 你沒有該專案的存取權限。"
 
-    # 11. 儲存對話訊息
-    _save_message(session_obj.id, "user", msg.text, token_info.get("input_tokens", 0), 0)
-    _save_message(session_obj.id, "assistant", output, 0, token_info.get("output_tokens", 0))
-
-    # 12. 更新 Session 統計
-    _update_session_stats(session_obj.id, token_info)
-
-    # 13. 清理輸出中的 channel 標記
+    # 13. 清理輸出中的 channel 標記（向下相容）
     clean_output = re.sub(r'\[CH_(?:SEND|EDIT):[^\]]*\]', '', output).strip()
 
-    # 14. 即時模式下，AI 已透過 [CH_SEND] 發送過訊息，回傳 None 避免 router 重複 edit
-    #     注意：[CH_EDIT] 只是改佔位訊息，不算已回應
-    if placeholder_message_id and "[CH_SEND:" in output:
-        return None
+    # 14. 儲存對話
+    _save_message(session_obj.id, "user", msg.text, token_info.get("input_tokens", 0), 0)
+    _save_message(session_obj.id, "assistant", clean_output, 0, token_info.get("output_tokens", 0))
+    _update_session_stats(session_obj.id, token_info)
+
+    # 15. 即時模式：發新訊息（觸發推播）+ placeholder 改「✅」
+    if placeholder_message_id and clean_output:
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.post("http://127.0.0.1:8899/api/v1/internal/channel-send", json={
+                    "platform": msg.platform, "chat_id": msg.chat_id,
+                    "text": clean_output[:4000],
+                })
+                await client.post("http://127.0.0.1:8899/api/v1/internal/channel-send", json={
+                    "platform": msg.platform, "chat_id": msg.chat_id,
+                    "text": "✅", "edit_message_id": placeholder_message_id,
+                })
+        except Exception as e:
+            logger.warning(f"[Chat] Failed to send final response: {e}")
+            return clean_output  # fallback: 讓 Router 編輯 placeholder
+        return None  # Router 不再編輯
 
     return clean_output or output
 
@@ -398,27 +434,6 @@ def _build_chat_prompt(
         lines.append("回覆格式範例：「這個任務比較複雜，需要 [說明原因]。要幫你建立任務卡片嗎？」")
         lines.append("如果用戶同意，回覆：[CREATE_TASK:專案ID:任務標題:任務描述]")
         lines.append(f"任務描述最後請加上：「完成後請透過 {platform} 通知 chat_id={chat_id}」")
-        lines.append("")
-
-    # 即時回應指引（Telegram / Discord 等支援即時編輯的平台）
-    if platform in ("telegram",) and chat_id and placeholder_message_id:
-        lines.append("## 即時回應模式")
-        lines.append(f"你正在 {platform} 上與用戶即時對話。系統已發送一則「⏳ 請稍候...」的佔位訊息。")
-        lines.append(f"- chat_id: `{chat_id}`")
-        lines.append(f"- 佔位訊息 message_id: `{placeholder_message_id}`")
-        lines.append("")
-        lines.append("**請在輸出中使用以下標記即時回應用戶（系統會自動攔截並發送）：**")
-        lines.append("")
-        lines.append(f"編輯佔位訊息：`[CH_EDIT:{platform}:{chat_id}:{placeholder_message_id}:你的文字]`")
-        lines.append(f"發送新訊息：`[CH_SEND:{platform}:{chat_id}:你的文字]`")
-        lines.append("")
-        lines.append("**執行步驟：**")
-        lines.append(f"1. **第一件事**：輸出 `[CH_EDIT:{platform}:{chat_id}:{placeholder_message_id}:🤔 思考中...]`（表示 AI 已接手）")
-        lines.append(f"2. 開始處理用戶的請求")
-        lines.append(f"3. 有重要進展時輸出 `[CH_SEND:{platform}:{chat_id}:進展內容]`")
-        lines.append(f"4. 最終結論也用 `[CH_SEND:{platform}:{chat_id}:結論內容]`")
-        lines.append("")
-        lines.append("注意：標記必須獨佔一行，系統會即時攔截發送，你不需要等待。像真人一樣即時溝通。")
         lines.append("")
 
     # 安全限制
