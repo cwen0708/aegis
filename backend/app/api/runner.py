@@ -17,6 +17,33 @@ router = APIRouter(tags=["runner"])
 _stream_throttle: Dict[int, float] = {}
 _STREAM_INTERVAL = 2.0
 
+# card_id → chat_id 快取（從卡片 content 解析 <!-- chat_id: xxx -->）
+_card_chat_id_cache: Dict[int, Optional[str]] = {}
+
+def _get_chat_id_for_card(card_id: int) -> Optional[str]:
+    """從卡片 content 取得 chat_id（快取）"""
+    if card_id in _card_chat_id_cache:
+        return _card_chat_id_cache[card_id]
+    try:
+        from app.models.core import CardIndex
+        from app.database import engine
+        from sqlmodel import Session as _S
+        with _S(engine) as s:
+            idx = s.get(CardIndex, card_id)
+            if idx and idx.file_path:
+                from pathlib import Path
+                fp = Path(idx.file_path)
+                if fp.exists():
+                    text = fp.read_text(encoding='utf-8')[:500]
+                    m = _re.search(r'<!-- chat_id: (.+?) -->', text)
+                    if m:
+                        _card_chat_id_cache[card_id] = m.group(1)
+                        return m.group(1)
+    except Exception:
+        pass
+    _card_chat_id_cache[card_id] = None
+    return None
+
 # ===== 工具呼叫翻譯（stream-json → 人話） =====
 
 def _short_path(p: str) -> str:
@@ -203,7 +230,8 @@ async def internal_broadcast_log(req: BroadcastLogRequest):
                 last = _stream_throttle.get(req.card_id, 0)
                 if now - last >= _STREAM_INTERVAL:
                     _stream_throttle[req.card_id] = now
-                    await connector.stream_event(req.card_id, event_type, summary)
+                    chat_id = _get_chat_id_for_card(req.card_id)
+                    await connector.stream_event(req.card_id, event_type, summary, chat_id=chat_id)
     except Exception:
         pass
 
@@ -224,9 +252,12 @@ async def internal_broadcast_event(req: BroadcastEventRequest):
             if card_id and req.event in ("task_started", "task_completed", "task_failed"):
                 event_type = "status" if req.event == "task_started" else "result" if req.event == "task_completed" else "error"
                 content = req.payload.get("status", req.event)
-                await connector.stream_event(card_id, event_type, str(content))
-                # 清理節流快取
+                chat_id = _get_chat_id_for_card(card_id)
+                await connector.stream_event(card_id, event_type, str(content), chat_id=chat_id)
+                # 清理快取
                 _stream_throttle.pop(card_id, None)
+                if req.event in ("task_completed", "task_failed"):
+                    _card_chat_id_cache.pop(card_id, None)
     except Exception:
         pass
 
