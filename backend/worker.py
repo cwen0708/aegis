@@ -1220,7 +1220,7 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
         workspace_dir = None
         effective_cwd = project_path
         # 移除 chat metadata，只保留用戶訊息
-        clean_content = _re_chat.sub('', card_data.content or "").strip()
+        clean_content = _re_chat.sub(r'<!-- chat_id: .+? -->', '', card_data.content or "").strip()
         effective_prompt = clean_content or "你好"
         logger.info(f"[Worker] Chat mode: card={idx.card_id} chat_id={chat_id}")
     else:
