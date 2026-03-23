@@ -26,14 +26,17 @@ SPRITE_DIR.mkdir(parents=True, exist_ok=True)
 
 # ===== 提示詞 =====
 
+CHROMA_KEY = (255, 0, 255)  # #FF00FF 品紅色，去背用
+
 BASE_STYLE = """CRITICAL PIXEL ART RULES:
 - Output exactly 64x128 pixels
 - Every 4x4 pixel block must be the SAME solid color (simulating 16x32 pixel art at 4x scale)
 - LIMITED palette: 8-12 colors max
 - NO anti-aliasing, NO gradients, NO smooth transitions between blocks
 - Sharp, clean edges at every 4-pixel boundary
-- PURE WHITE background (#FFFFFF), no patterns, no checkerboard
-- Chibi/SD body proportions: large head, small body, approximately 2 head-heights tall
+- Background MUST be solid MAGENTA (#FF00FF) — fill ALL empty space with this exact color
+- Do NOT use magenta (#FF00FF) anywhere on the character itself
+- BODY PROPORTIONS: Head-to-body ratio MUST be exactly 1:2.5 (head is ~18px tall, full body is ~45px tall in the 64x128 canvas). Chibi/SD style with large head.
 - Simple clear silhouette, must be readable when shrunk to 16x32"""
 
 DIR_NAMES = {
@@ -75,7 +78,7 @@ POSE: Standing idle, front-facing (south direction)
 
 {BASE_STYLE}
 
-Single character on pure white background, 64x128 pixels."""
+Single character on solid MAGENTA (#FF00FF) background, 64x128 pixels."""
 
 
 def _direction_prompt(desc: str, direction: str) -> str:
@@ -88,7 +91,7 @@ DIRECTION: {DIR_NAMES[direction]}
 
 Must be the SAME character as the reference image, just viewed from a different angle.
 Same outfit, same colors, same proportions.
-Single character on pure white background, 64x128 pixels."""
+Single character on solid MAGENTA (#FF00FF) background, 64x128 pixels."""
 
 
 def _anim_prompt(desc: str, direction: str, action: str, frame: int) -> str:
@@ -102,7 +105,7 @@ POSE: {ACTION_FRAMES[action][frame]}
 
 CONSISTENCY: Must match the reference image exactly - same character, same colors, same outfit.
 Only the pose/limbs change for animation.
-Single character on pure white background, 64x128 pixels."""
+Single character on solid MAGENTA (#FF00FF) background, 64x128 pixels."""
 
 
 # ===== Gemini 呼叫 =====
@@ -130,15 +133,21 @@ def _gen_image(api_key: str, prompt: str, ref: Optional[bytes] = None, portrait:
     raise ValueError("Gemini returned no image")
 
 
-def _remove_white_bg(img: Image.Image, threshold: int = 240) -> Image.Image:
-    """白底轉透明：接近白色的像素設為 alpha=0"""
+def _remove_chroma_bg(img: Image.Image, tolerance: int = 30) -> Image.Image:
+    """品紅底（#FF00FF）轉透明：接近品紅色的像素設為 alpha=0
+    同時也處理白底（向下相容舊圖）"""
     img = img.convert("RGBA")
     pixels = img.load()
     w, h = img.size
+    cr, cg, cb = CHROMA_KEY
     for y in range(h):
         for x in range(w):
             r, g, b, a = pixels[x, y]
-            if r >= threshold and g >= threshold and b >= threshold:
+            # 品紅色去背
+            if abs(r - cr) <= tolerance and g <= tolerance and abs(b - cb) <= tolerance:
+                pixels[x, y] = (0, 0, 0, 0)
+            # 白底去背（向下相容）
+            elif r >= 240 and g >= 240 and b >= 240:
                 pixels[x, y] = (0, 0, 0, 0)
     return img
 
@@ -181,7 +190,7 @@ def _downscale(data: bytes) -> Image.Image:
     這樣每個 grid 格子都是精確的 NxN，不會跨邊界
     """
     img = Image.open(io.BytesIO(data)).convert("RGBA")
-    img = _remove_white_bg(img)
+    img = _remove_chroma_bg(img)
 
     w, h = img.size
     if w == TARGET_W and h == TARGET_H:
