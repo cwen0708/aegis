@@ -1,13 +1,18 @@
 """Runner Control & Cron Toggle API — 7 endpoints"""
+import time
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
-from typing import Optional
+from typing import Optional, Dict
 from pydantic import BaseModel
 from app.database import get_session
 from app.models.core import SystemSetting, CardIndex, Project
 import app.core.cron_poller as cron_module
 
 router = APIRouter(tags=["runner"])
+
+# OneStack stream 節流（每張卡片最少間隔 2 秒）
+_stream_throttle: Dict[int, float] = {}
+_STREAM_INTERVAL = 2.0
 
 
 # ==========================================
@@ -94,17 +99,45 @@ class BroadcastEventRequest(BaseModel):
 
 @router.post("/internal/broadcast-log")
 async def internal_broadcast_log(req: BroadcastLogRequest):
-    """Worker 呼叫：廣播任務輸出行"""
+    """Worker 呼叫：廣播任務輸出行 → WebSocket + OneStack stream"""
     from app.core.ws_manager import broadcast_event
     await broadcast_event("task_log", {"card_id": req.card_id, "line": req.line})
+
+    # 轉發到 OneStack aegis_stream（節流 2 秒）
+    try:
+        from app.core.onestack_connector import connector
+        if connector.enabled:
+            now = time.time()
+            last = _stream_throttle.get(req.card_id, 0)
+            if now - last >= _STREAM_INTERVAL:
+                _stream_throttle[req.card_id] = now
+                await connector.stream_output(req.card_id, req.line)
+    except Exception:
+        pass
+
     return {"ok": True}
 
 
 @router.post("/internal/broadcast-event")
 async def internal_broadcast_event(req: BroadcastEventRequest):
-    """Worker 呼叫：廣播事件"""
+    """Worker 呼叫：廣播事件 → WebSocket + OneStack stream"""
     from app.core.ws_manager import broadcast_event
     await broadcast_event(req.event, req.payload)
+
+    # 轉發任務狀態到 OneStack（不節流，重要事件）
+    try:
+        from app.core.onestack_connector import connector
+        if connector.enabled:
+            card_id = req.payload.get("card_id")
+            if card_id and req.event in ("task_started", "task_completed", "task_failed"):
+                event_type = "status" if req.event == "task_started" else "result" if req.event == "task_completed" else "error"
+                content = req.payload.get("status", req.event)
+                await connector.stream_event(card_id, event_type, str(content))
+                # 清理節流快取
+                _stream_throttle.pop(card_id, None)
+    except Exception:
+        pass
+
     return {"ok": True}
 
 

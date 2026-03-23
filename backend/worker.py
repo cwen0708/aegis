@@ -198,38 +198,8 @@ PROVIDERS = {
 # ==========================================
 # HTTP 工具
 # ==========================================
-def _onestack_stream_fire_and_forget(card_id: int, content: str, member_slug: str = ""):
-    """非阻塞寫入 OneStack aegis_stream（用 thread 避免拖慢 Worker）"""
-    try:
-        from app.core.onestack_connector import connector
-        if not connector.enabled or not connector.device_id:
-            return
-
-        import threading
-        import asyncio
-
-        def _do():
-            try:
-                loop = asyncio.new_event_loop()
-                loop.run_until_complete(
-                    connector.stream_output(card_id, content, member_slug or None)
-                )
-                loop.close()
-            except Exception:
-                pass  # 不影響主流程
-
-        threading.Thread(target=_do, daemon=True).start()
-    except Exception:
-        pass
-
-
-# 追蹤每張卡片的 stream 節流（避免洪峰）
-_stream_last_sent: Dict[int, float] = {}
-_STREAM_THROTTLE_SEC = 2.0  # 最少間隔 2 秒
-
-
 def broadcast_log(card_id: int, line: str):
-    """透過 HTTP 發送 log 給 FastAPI 廣播，同時寫入 BroadcastLog + OneStack stream"""
+    """透過 HTTP 發送 log 給 FastAPI 廣播，同時寫入 BroadcastLog"""
     try:
         # 過濾掉 ANSI escape codes 和控制字符
         import re
@@ -257,14 +227,7 @@ def broadcast_log(card_id: int, line: str):
             method="POST"
         )
         urllib.request.urlopen(req, timeout=5)
-
-        # OneStack stream（節流，每 2 秒最多一筆）
-        now = time.time()
-        last = _stream_last_sent.get(card_id, 0)
-        if now - last >= _STREAM_THROTTLE_SEC:
-            _stream_last_sent[card_id] = now
-            _onestack_stream_fire_and_forget(card_id, clean_line)
-
+        # OneStack stream 轉發由 FastAPI 端的 internal/broadcast-log 處理
     except Exception as e:
         logger.warning(f"[Broadcast] Failed: {e}")
         pass
@@ -814,8 +777,7 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
         "provider": provider_name
     })
 
-    # OneStack stream: 任務開始
-    _onestack_stream_fire_and_forget(card_id, f"running:{card_title}")
+    # OneStack stream 轉發由 FastAPI 端的 internal/broadcast-event 處理
 
     # 如果 workspace 有 .gitconfig（GitHub PAT），注入環境變數
     _ws_gitconfig = Path(project_path) / ".gitconfig"
@@ -1397,28 +1359,7 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
     event = "task_completed" if new_status == "completed" else "task_failed"
     broadcast_event(event, {"card_id": idx.card_id, "status": new_status})
 
-    # OneStack stream: 結果事件
-    try:
-        from app.core.onestack_connector import connector
-        if connector.enabled:
-            import threading, asyncio
-            output_summary = result.get("output", "")[:2000]
-            evt_type = "result" if new_status == "completed" else "error"
-            def _do():
-                try:
-                    loop = asyncio.new_event_loop()
-                    loop.run_until_complete(
-                        connector.stream_event(idx.card_id, evt_type, output_summary)
-                    )
-                    loop.close()
-                except Exception:
-                    pass
-            threading.Thread(target=_do, daemon=True).start()
-    except Exception:
-        pass
-
-    # 清理 stream 節流快取
-    _stream_last_sent.pop(idx.card_id, None)
+    # OneStack stream 轉發由 FastAPI 端的 internal/broadcast-event 處理
 
     # 生成 AVG 對話（從 AI 輸出解析）
     if member_id:
