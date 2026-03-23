@@ -1209,32 +1209,45 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
             project_path = _pp_match.group(1)
             logger.info(f"[Worker] Inbound task using project path: {project_path}")
 
-    # 準備工作區
-    workspace_dir = None
-    primary_provider = accounts_list[0][0] if accounts_list else "claude"
-    if member_slug:
-        workspace_dir = str(prepare_workspace(
-            card_id=idx.card_id,
-            member_slug=member_slug,
-            provider=primary_provider,
-            project_path=project_path,
-            card_content=card_data.content,
-            stage_name=stage_list.name if stage_list else "",
-            stage_description=stage_list.description or "" if stage_list else "",
-            stage_instruction=stage_list.system_instruction or "" if stage_list else "",
-        ))
+    # 偵測 chat 模式（標題以 [chat] 開頭）
+    import re as _re_chat
+    _chat_match = _re_chat.search(r'<!-- chat_id: (.+?) -->', card_data.content or "")
+    is_chat_mode = idx.title.startswith("[chat]") or _chat_match is not None
+    chat_id = _chat_match.group(1) if _chat_match else None
 
-    # CWD 策略：workspace 為 CWD（CLAUDE.md + skills 在這裡）
-    # 專案原始碼透過 symlink 連結進 workspace，修改直接落在開發目錄
-    if workspace_dir:
-        _link_project_into_workspace(workspace_dir, project_path)
-    effective_cwd = workspace_dir or project_path
-    _dialogue_hint = "\n\n請在所有輸出的最末行，用你的角色語氣寫一句簡短的任務總結（70字以內），格式：<!-- dialogue: 你的總結 -->"
-    # workspace 模式：優先用卡片 content（如果有），否則 fallback 到讀設定檔
-    if workspace_dir:
-        effective_prompt = (card_data.content.strip() or "請閱讀你的設定檔並執行本次任務。") + _dialogue_hint
+    if is_chat_mode:
+        # Chat 模式：不建 workspace，直接在專案目錄執行
+        workspace_dir = None
+        effective_cwd = project_path
+        # 移除 chat metadata，只保留用戶訊息
+        clean_content = _re_chat.sub('', card_data.content or "").strip()
+        effective_prompt = clean_content or "你好"
+        logger.info(f"[Worker] Chat mode: card={idx.card_id} chat_id={chat_id}")
     else:
-        effective_prompt = card_data.content + _dialogue_hint
+        # 準備工作區
+        workspace_dir = None
+        primary_provider = accounts_list[0][0] if accounts_list else "claude"
+        if member_slug:
+            workspace_dir = str(prepare_workspace(
+                card_id=idx.card_id,
+                member_slug=member_slug,
+                provider=primary_provider,
+                project_path=project_path,
+                card_content=card_data.content,
+                stage_name=stage_list.name if stage_list else "",
+                stage_description=stage_list.description or "" if stage_list else "",
+                stage_instruction=stage_list.system_instruction or "" if stage_list else "",
+            ))
+
+        # CWD 策略：workspace 為 CWD（CLAUDE.md + skills 在這裡）
+        if workspace_dir:
+            _link_project_into_workspace(workspace_dir, project_path)
+        effective_cwd = workspace_dir or project_path
+        _dialogue_hint = "\n\n請在所有輸出的最末行，用你的角色語氣寫一句簡短的任務總結（70字以內），格式：<!-- dialogue: 你的總結 -->"
+        if workspace_dir:
+            effective_prompt = (card_data.content.strip() or "請閱讀你的設定檔並執行本次任務。") + _dialogue_hint
+        else:
+            effective_prompt = card_data.content + _dialogue_hint
 
     # 執行任務（含 fallback 機制）
     if not accounts_list:
@@ -1283,6 +1296,34 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
         broadcast_event("task_failed", {"card_id": idx.card_id, "status": "retrying"})
         if workspace_dir:
             cleanup_workspace(idx.card_id)
+        return
+
+    if is_chat_mode:
+        # === Chat 卡片：寫入 aegis_stream + 刪除卡片 ===
+        output_text = result.get("output", "")
+        try:
+            from app.core.onestack_connector import connector
+            if connector.enabled and chat_id:
+                import threading, asyncio as _aio
+                evt_type = "result" if new_status == "completed" else "error"
+                def _stream_chat():
+                    try:
+                        loop = _aio.new_event_loop()
+                        loop.run_until_complete(
+                            connector.stream_event(idx.card_id, evt_type, output_text[:3000], member_slug, chat_id=chat_id)
+                        )
+                        loop.close()
+                    except Exception:
+                        pass
+                threading.Thread(target=_stream_chat, daemon=True).start()
+        except Exception:
+            pass
+
+        # Chat 卡片完成後刪除（不保留）
+        delete_card_completely(idx.card_id)
+        logger.info(f"[Worker] Chat card {idx.card_id} {new_status}, deleted")
+        broadcast_event("task_completed" if new_status == "completed" else "task_failed",
+                        {"card_id": idx.card_id, "status": new_status})
         return
 
     if is_cron_card:

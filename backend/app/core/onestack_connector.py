@@ -908,65 +908,76 @@ async def _handle_aegis_command(command_type: str, payload: Dict) -> Dict:
         return result
 
     elif command_type == "chat":
-        # 即時對話（透過 runner）
+        # 即時對話：建一張 [chat] 卡片，由 Worker 統一執行
         member_slug = payload.get("member_slug", "aegis")
         message = payload.get("message", "")
         chat_id = payload.get("chat_id", f"os:{member_slug}")
-        logger.info(f"[OneStack] Chat command: {member_slug} chat_id={chat_id} - {message[:50]}")
+        logger.info(f"[OneStack] Chat → card: {member_slug} chat_id={chat_id}")
 
         try:
-            from app.core.runner import run_ai_task
             from sqlmodel import Session as _Ses, select
             from app.database import engine as _eng
-            from app.models.core import Member, Project
+            from app.models.core import Member, StageList, CardIndex, Project
+            from app.core.card_file import CardData, write_card, card_file_path
 
             with _Ses(_eng) as session:
+                # 找成員的收件匣
                 member = session.exec(select(Member).where(Member.slug == member_slug)).first()
-                member_id = member.id if member else None
+                if not member:
+                    # fallback：用 aegis 成員
+                    member = session.exec(select(Member).where(Member.slug == "aegis")).first()
+
+                inbox = session.exec(
+                    select(StageList).where(
+                        StageList.project_id == 1,
+                        StageList.member_id == member.id,
+                        StageList.is_ai_stage == True,
+                    )
+                ).first()
+
+                if not inbox:
+                    return {"ok": False, "error": f"No inbox for {member_slug}"}
+
                 project = session.exec(select(Project).where(Project.id == 1)).first()
                 project_path = project.path if project else "/home/cwen0708/projects/Aegis"
 
-            # 寫 stream: 開始（帶 chat_id）
-            await connector.stream_event(0, "status", "running", member_slug, chat_id=chat_id)
+                # 建卡片
+                max_id = session.exec(select(CardIndex.card_id).order_by(CardIndex.card_id.desc())).first() or 0
+                card_id = max_id + 1
 
-            # 即時串流：解析工具呼叫翻譯為人話
-            import asyncio as _aio
-            _loop = _aio.get_event_loop()
-            _last_stream = [0.0]  # 節流用
+                content = f"<!-- chat_id: {chat_id} -->\n{message}"
+                card_data = CardData(
+                    id=card_id,
+                    list_id=inbox.id,
+                    title=f"[chat] {member_slug}: {message[:30]}",
+                    description=None,
+                    content=content,
+                    status="pending",
+                )
 
-            def _on_stream(raw_line: str):
-                from app.api.runner import _parse_tool_call
-                parsed = _parse_tool_call(raw_line)
-                if parsed:
-                    evt_type_s, summary = parsed
-                    now = time.time()
-                    if now - _last_stream[0] >= 2.0:
-                        _last_stream[0] = now
-                        _aio.run_coroutine_threadsafe(
-                            connector.stream_event(0, evt_type_s, summary, member_slug, chat_id=chat_id),
-                            _loop
-                        )
+                fp = card_file_path(project_path, card_id)
+                fp.parent.mkdir(parents=True, exist_ok=True)
+                write_card(fp, card_data)
 
-            result = await run_ai_task(
-                task_id=0,
-                project_path=project_path,
-                prompt=message,
-                phase="chat",
-                member_id=member_id,
-                on_stream=_on_stream,
-            )
+                # 寫索引
+                idx = CardIndex(
+                    card_id=card_id,
+                    project_id=1,
+                    list_id=inbox.id,
+                    title=card_data.title,
+                    status="pending",
+                    file_path=str(fp),
+                )
+                session.add(idx)
+                session.commit()
 
-            output = result.get("output", "")
-            status = result.get("status", "error")
+            # 寫 stream: 已接收
+            await connector.stream_event(card_id, "status", "pending", member_slug, chat_id=chat_id)
 
-            # 寫 stream: 結果（帶 chat_id）
-            evt_type = "result" if status == "success" else "error"
-            await connector.stream_event(0, evt_type, output[:3000], member_slug, chat_id=chat_id)
-
-            return {"ok": True, "output": output[:1000], "status": status}
+            return {"ok": True, "card_id": card_id, "message": "Chat card created"}
 
         except Exception as e:
-            logger.error(f"[OneStack] Chat failed: {e}")
+            logger.error(f"[OneStack] Chat card creation failed: {e}")
             await connector.stream_event(0, "error", str(e)[:500], member_slug, chat_id=chat_id)
             return {"ok": False, "error": str(e)[:500]}
 
