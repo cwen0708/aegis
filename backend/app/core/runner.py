@@ -39,8 +39,8 @@ def _parse_stream_json_text(line: str) -> Optional[str]:
                 for block in content:
                     if isinstance(block, dict) and block.get("type") == "text":
                         return block.get("text", "")
-        elif msg_type == "result":
-            return data.get("result", "")
+        # 不從 result 行提取文字——result 包含完整回應，會跟 assistant 行重複
+        # token info 由 _parse_stream_json_tokens 負責收集
     except (json.JSONDecodeError, KeyError, TypeError):
         pass
     return None
