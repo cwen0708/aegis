@@ -1300,7 +1300,8 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
 
     if is_chat_mode:
         # === Chat 卡片：寫入 aegis_stream + 刪除卡片 ===
-        output_text = result.get("output", "")
+        # 優先用解析後的文字（result_text），fallback 到原始 output
+        output_text = token_info.get("result_text") or result.get("output", "")
         try:
             from app.core.onestack_connector import connector
             if connector.enabled and chat_id:
