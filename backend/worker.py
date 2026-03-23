@@ -444,27 +444,7 @@ def mark_card_running(card_id: int, member_id: Optional[int]):
 # ==========================================
 # JSON 解析
 # ==========================================
-def parse_claude_json(output: str) -> Dict[str, Any]:
-    """從 Claude CLI JSON 輸出解析 token 用量"""
-    try:
-        data = json.loads(output.strip())
-        usage = data.get("usage", {})
-        model_usage = data.get("modelUsage", {})
-        model_name = ""
-        if model_usage:
-            model_name = list(model_usage.keys())[0]
-        return {
-            "result_text": data.get("result", ""),
-            "model": model_name,
-            "duration_ms": data.get("duration_ms", 0),
-            "cost_usd": data.get("total_cost_usd", 0),
-            "input_tokens": usage.get("input_tokens", 0),
-            "output_tokens": usage.get("output_tokens", 0),
-            "cache_read_tokens": usage.get("cache_read_input_tokens", 0),
-            "cache_creation_tokens": usage.get("cache_creation_input_tokens", 0),
-        }
-    except (json.JSONDecodeError, KeyError, IndexError):
-        return {}
+from app.core.stream_parsers import parse_claude_json  # 統一解析器
 
 
 def save_task_log(card_id: int, card_title: str, project_name: str, provider: str,

@@ -44,91 +44,10 @@ def _get_chat_id_for_card(card_id: int) -> Optional[str]:
     _card_chat_id_cache[card_id] = None
     return None
 
-# ===== 工具呼叫翻譯（stream-json → 人話） =====
+# ===== 工具呼叫翻譯（統一使用 stream_parsers） =====
+from app.core.stream_parsers import parse_tool_call as _parse_tool_call  # noqa: E402
 
-def _short_path(p: str) -> str:
-    """取短路徑（最後 2 層）"""
-    parts = PurePosixPath(p).parts
-    return "/".join(parts[-2:]) if len(parts) > 2 else p
 
-def _parse_tool_call(line: str) -> Optional[Tuple[str, str]]:
-    """嘗試從 stream-json 行解析工具呼叫，回傳 (event_type, 人話摘要)
-    回傳 None 表示不是工具呼叫或不值得顯示"""
-    try:
-        data = _json.loads(line)
-    except (ValueError, TypeError):
-        return None
-
-    # Claude stream-json 格式
-    msg = data.get("message", {}) if isinstance(data, dict) else {}
-    if not msg:
-        msg = data
-
-    # 找 content 裡的 tool_use
-    content = msg.get("content", [])
-    if isinstance(content, str):
-        return None
-    if not isinstance(content, list):
-        return None
-
-    for part in content:
-        if not isinstance(part, dict):
-            continue
-        ptype = part.get("type", "")
-
-        if ptype == "tool_use":
-            tool = part.get("name", "")
-            inp = part.get("input", {})
-            return _translate_tool(tool, inp)
-
-        if ptype == "text":
-            text = part.get("text", "").strip()
-            if text and len(text) < 200:
-                return ("output", f"💬 {text[:100]}")
-
-        if ptype == "thinking":
-            return ("output", "💭 思考中...")
-
-    return None
-
-def _translate_tool(tool: str, inp: dict) -> Tuple[str, str]:
-    """將工具名稱和參數翻譯成人話"""
-    if tool == "Read":
-        fp = inp.get("file_path", "")
-        return ("tool_call", f"📖 讀取 {_short_path(fp)}")
-    elif tool == "Edit":
-        fp = inp.get("file_path", "")
-        return ("tool_call", f"✏️ 修改 {_short_path(fp)}")
-    elif tool == "Write":
-        fp = inp.get("file_path", "")
-        return ("tool_call", f"📝 建立 {_short_path(fp)}")
-    elif tool == "Bash":
-        cmd = inp.get("command", "")[:60]
-        desc = inp.get("description", "")
-        label = desc[:40] if desc else cmd
-        return ("tool_call", f"💻 {label}")
-    elif tool == "Grep":
-        pattern = inp.get("pattern", "")
-        return ("tool_call", f"🔍 搜尋 {pattern[:40]}")
-    elif tool == "Glob":
-        pattern = inp.get("pattern", "")
-        return ("tool_call", f"📁 搜尋檔案 {pattern[:40]}")
-    elif tool == "WebFetch":
-        url = inp.get("url", "")[:60]
-        return ("tool_call", f"🌐 取得 {url}")
-    elif tool == "WebSearch":
-        query = inp.get("query", "")[:40]
-        return ("tool_call", f"🔎 搜尋 {query}")
-    elif tool == "Agent":
-        desc = inp.get("description", "子代理")[:40]
-        return ("tool_call", f"🤖 {desc}")
-    elif tool == "Skill":
-        skill = inp.get("skill", "")
-        return ("tool_call", f"⚡ 技能 {skill}")
-    elif tool == "TodoWrite":
-        return None  # 不顯示
-    else:
-        return ("tool_call", f"🔧 {tool}")
 
 
 # ==========================================

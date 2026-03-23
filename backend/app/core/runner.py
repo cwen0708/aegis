@@ -28,45 +28,10 @@ _CH_EDIT_RE = re.compile(r'\[CH_EDIT:([^:]+):([^:]+):([^:]+):(.*?)(?:\]|$)', re.
 _CH_SEND_RE = re.compile(r'\[CH_SEND:([^:]+):([^:]+):(.*?)(?:\]|$)', re.DOTALL)
 
 
-def _parse_stream_json_text(line: str) -> Optional[str]:
-    """從 stream-json 行提取 AI 文字輸出或 result"""
-    try:
-        data = json.loads(line.strip())
-        msg_type = data.get("type")
-        if msg_type == "assistant":
-            content = data.get("content", []) or (data.get("message", {}).get("content", []))
-            if isinstance(content, list):
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        return block.get("text", "")
-        # 不從 result 行提取文字——result 包含完整回應，會跟 assistant 行重複
-        # token info 由 _parse_stream_json_tokens 負責收集
-    except (json.JSONDecodeError, KeyError, TypeError):
-        pass
-    return None
-
-
-def _parse_stream_json_tokens(line: str) -> Dict[str, Any]:
-    """從 stream-json result 行提取 token 用量"""
-    try:
-        data = json.loads(line.strip())
-        if data.get("type") != "result":
-            return {}
-        usage = data.get("usage", {})
-        model_usage = data.get("modelUsage", {})
-        model_name = list(model_usage.keys())[0] if model_usage else ""
-        return {
-            "result_text": data.get("result", ""),
-            "model": model_name,
-            "duration_ms": data.get("duration_ms", 0),
-            "cost_usd": data.get("total_cost_usd", 0),
-            "input_tokens": usage.get("input_tokens", 0),
-            "output_tokens": usage.get("output_tokens", 0),
-            "cache_read_tokens": usage.get("cache_read_input_tokens", 0),
-            "cache_creation_tokens": usage.get("cache_creation_input_tokens", 0),
-        }
-    except (json.JSONDecodeError, KeyError, IndexError):
-        return {}
+from app.core.stream_parsers import (  # noqa: E402
+    parse_stream_json_text as _parse_stream_json_text,
+    parse_stream_json_tokens as _parse_stream_json_tokens,
+)
 
 
 def _intercept_channel_marker(line: str):
@@ -112,27 +77,7 @@ PROVIDERS = {
 }
 
 
-def _parse_claude_json(output: str) -> Dict[str, Any]:
-    """從 Claude CLI JSON 輸出解析 token 用量"""
-    try:
-        data = json.loads(output.strip())
-        usage = data.get("usage", {})
-        model_usage = data.get("modelUsage", {})
-        model_name = ""
-        if model_usage:
-            model_name = list(model_usage.keys())[0]
-        return {
-            "result_text": data.get("result", ""),
-            "model": model_name,
-            "duration_ms": data.get("duration_ms", 0),
-            "cost_usd": data.get("total_cost_usd", 0),
-            "input_tokens": usage.get("input_tokens", 0),
-            "output_tokens": usage.get("output_tokens", 0),
-            "cache_read_tokens": usage.get("cache_read_input_tokens", 0),
-            "cache_creation_tokens": usage.get("cache_creation_input_tokens", 0),
-        }
-    except (json.JSONDecodeError, KeyError, IndexError):
-        return {}
+from app.core.stream_parsers import parse_claude_json as _parse_claude_json  # noqa: E402
 
 
 def _get_member_mcp_config(member_id: int) -> Optional[str]:
