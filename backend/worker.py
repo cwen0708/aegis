@@ -1300,8 +1300,39 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
 
     if is_chat_mode:
         # === Chat 卡片：寫入 aegis_stream + 刪除卡片 ===
-        # 優先用解析後的文字（result_text），fallback 到原始 output
-        output_text = token_info.get("result_text") or result.get("output", "")
+        # 從 stream-json 提取最終 AI 回應文字
+        raw_output = result.get("output", "")
+        output_text = token_info.get("result_text", "")
+        if not output_text:
+            # subprocess 模式：從多行 stream-json 提取 result 文字
+            try:
+                for line in raw_output.strip().split("\n"):
+                    line = line.strip()
+                    if line.startswith("{") and '"subtype":"result"' in line:
+                        rd = json.loads(line)
+                        output_text = rd.get("result", "")
+                        break
+                if not output_text:
+                    # fallback: 提取所有 assistant text 內容
+                    texts = []
+                    for line in raw_output.strip().split("\n"):
+                        line = line.strip()
+                        if not line.startswith("{"):
+                            continue
+                        try:
+                            d = json.loads(line)
+                            msg = d.get("message", {})
+                            for part in (msg.get("content", []) if isinstance(msg.get("content"), list) else []):
+                                if isinstance(part, dict) and part.get("type") == "text":
+                                    texts.append(part["text"])
+                        except Exception:
+                            pass
+                    if texts:
+                        output_text = "\n".join(texts)
+            except Exception:
+                pass
+        if not output_text:
+            output_text = raw_output[:3000]
         try:
             from app.core.onestack_connector import connector
             if connector.enabled and chat_id:
