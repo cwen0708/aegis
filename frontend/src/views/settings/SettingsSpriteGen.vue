@@ -77,6 +77,17 @@ async function genFrame(dir: string, action: string, frame: number) {
 
 const cancelled = ref(false)
 
+async function resetAndGenAll() {
+  if (!confirm('確定要清除所有圖片並重新生成？')) return
+  try {
+    await apiClient.delete(`/api/v1/members/${memberId.value}/sprite/reset`)
+    await loadProgress()
+  } catch (e: any) {
+    console.error('清除失敗:', e)
+  }
+  await genAll()
+}
+
 async function genAll() {
   generating.value = 'all'
   cancelled.value = false
@@ -178,6 +189,14 @@ onMounted(async () => {
       >
         <Play :size="12" />
         {{ completedFrames > 0 ? '繼續生成' : '生成全部' }}
+      </button>
+      <button
+        v-if="!generating && completedFrames > 0"
+        @click="resetAndGenAll"
+        class="flex items-center gap-1 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs rounded-lg"
+      >
+        <Wand2 :size="12" />
+        重新生成
       </button>
       <button
         v-else

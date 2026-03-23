@@ -157,7 +157,20 @@ def gen_all(member_id: int, req: GenerateRequest, session: Session = Depends(get
     return {"status": "ok", "generated": len(results), "results": results}
 
 
-# ===== 合成 + 套用 =====
+# ===== 重置 + 合成 + 套用 =====
+
+@router.delete("/members/{member_id}/sprite/reset", dependencies=[Depends(require_admin_token)])
+def reset_sprite(member_id: int, session: Session = Depends(get_session)):
+    """清除該成員的所有 sprite 圖片（保留目錄）"""
+    _get_member(member_id, session)
+    from app.core.sprite_generator import SPRITE_DIR
+    d = SPRITE_DIR / str(member_id)
+    if d.exists():
+        import shutil
+        shutil.rmtree(d)
+        d.mkdir(parents=True, exist_ok=True)
+    return {"ok": True, "message": f"Member {member_id} sprites cleared"}
+
 
 @router.post("/members/{member_id}/sprite/composite", dependencies=[Depends(require_admin_token)])
 def composite(member_id: int, session: Session = Depends(get_session)):
