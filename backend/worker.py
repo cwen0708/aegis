@@ -673,19 +673,20 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
 
     # 建構命令，支援成員指定的模型
     default_model = config.get("default_model", "")
-    model = forced_model if forced_model else default_model
+    model = forced_model if forced_model is not None else default_model
     cmd_parts = list(config["cmd_base"])
+    model_replaced = False
     for arg in config["args"]:
         if "{prompt}" in arg:
             cmd_parts.append(arg.replace("{prompt}", prompt))
         elif "{model}" in arg:
             cmd_parts.append(arg.replace("{model}", model))
+            model_replaced = True
         else:
-            # 動態替換 --model 參數值
             cmd_parts.append(arg)
 
-    # 如果成員有指定模型，替換 args 中的 --model 值
-    if forced_model:
+    # 如果成員有指定模型且 placeholder 未處理，替換 args 中的 --model 值
+    if forced_model is not None and not model_replaced:
         for i, arg in enumerate(cmd_parts):
             if arg == "--model" and i + 1 < len(cmd_parts):
                 cmd_parts[i + 1] = forced_model
@@ -897,17 +898,7 @@ def run_task_pty_windows(
     # 找出需要刪除的 CLAUDE 相關環境變數
     claude_env_keys = [k for k in os.environ.keys() if k.upper().startswith(("CLAUDE", "ANTHROPIC"))]
     old_claude_env = {k: os.environ.get(k) for k in claude_env_keys}
-
-    # 從 os.environ 中刪除這些變數（這是 PTY 關鍵！）
-    for key in claude_env_keys:
-        del os.environ[key]
-
-    # 設定我們需要的環境變數
     old_env = {k: os.environ.get(k) for k in env.keys()}
-    os.environ.update(env)
-    os.chdir(project_path)
-
-    logger.info(f"[Task {card_id}] PTY env cleaned: removed {claude_env_keys}")
 
     # 檢查是否使用 stream-json 格式
     stream_json = config.get("stream_json", False)
@@ -929,6 +920,15 @@ def run_task_pty_windows(
     heartbeat_thread.start()
 
     try:
+        # 從 os.environ 中刪除 CLAUDE 相關變數（這是 PTY 關鍵！）
+        for key in claude_env_keys:
+            del os.environ[key]
+
+        # 設定我們需要的環境變數
+        os.environ.update(env)
+        os.chdir(project_path)
+
+        logger.info(f"[Task {card_id}] PTY env cleaned: removed {claude_env_keys}")
         # 使用 PtyProcess.spawn
         pty_process = PtyProcess.spawn(cmd_parts)
 
