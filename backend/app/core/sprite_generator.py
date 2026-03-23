@@ -105,6 +105,7 @@ POSE: {ACTION_FRAMES[action][frame]}
 
 CONSISTENCY: Must match the reference image exactly - same character, same colors, same outfit.
 Only the pose/limbs change for animation.
+IMPORTANT: Draw ONLY ONE character. No duplicates, no multiple figures.
 Single character on solid MAGENTA (#FF00FF) background, 64x128 pixels."""
 
 

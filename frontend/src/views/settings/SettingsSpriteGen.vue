@@ -61,6 +61,7 @@ async function genDirection(dir: string) {
 }
 
 async function genFrame(dir: string, action: string, frame: number) {
+  if (generating.value === 'all') return  // 全部生成中，不允許單獨點
   const key = `${action}_${dir}_f${frame}`
   generating.value = key
   try {
@@ -68,6 +69,9 @@ async function genFrame(dir: string, action: string, frame: number) {
       description: description.value, direction: dir, action, frame,
     })
     await loadProgress()
+  } catch (e: any) {
+    console.error(`生成 ${key} 失敗:`, e)
+    alert(`生成失敗: ${e?.message || '未知錯誤'}`)
   } finally { generating.value = '' }
 }
 
