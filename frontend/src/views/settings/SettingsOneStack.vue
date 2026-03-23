@@ -22,10 +22,8 @@ const pairStatus = ref<{
   connected: boolean
 } | null>(null)
 
-// 配對表單
+// 配對表單（URL 和 key 已寫死在後端，前端只需配對碼）
 const form = ref({
-  supabase_url: '',
-  supabase_anon_key: '',
   pairing_code: '',
   device_name: '',
 })
@@ -40,13 +38,6 @@ async function fetchStatus() {
     const resp = await fetch(`${API}/api/v1/node/pair/status`)
     if (resp.ok) {
       pairStatus.value = await resp.json()
-      // 自動回填已知的 Supabase 連線資訊
-      if (pairStatus.value?.supabase_url && !form.value.supabase_url) {
-        form.value.supabase_url = pairStatus.value.supabase_url
-      }
-      if (pairStatus.value?.supabase_anon_key && !form.value.supabase_anon_key) {
-        form.value.supabase_anon_key = pairStatus.value.supabase_anon_key
-      }
     }
   } catch (e) {
     console.error('Failed to fetch pair status:', e)
@@ -64,14 +55,6 @@ async function handlePair() {
     error.value = '請輸入配對碼'
     return
   }
-  if (!form.value.supabase_url.trim()) {
-    error.value = '請輸入 Supabase URL'
-    return
-  }
-  if (!form.value.supabase_anon_key.trim()) {
-    error.value = '請輸入 Supabase Anon Key'
-    return
-  }
 
   pairing.value = true
   try {
@@ -79,8 +62,6 @@ async function handlePair() {
       method: 'POST',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
-        supabase_url: form.value.supabase_url.trim(),
-        supabase_anon_key: form.value.supabase_anon_key.trim(),
         pairing_code: code.toUpperCase(),
         device_name: form.value.device_name.trim() || undefined,
       }),
@@ -185,31 +166,6 @@ async function handlePair() {
           />
           <p class="text-[11px] text-slate-500 mt-1">從 OneStack 設定頁取得配對碼</p>
         </div>
-
-        <!-- Supabase 連線（已有則隱藏） -->
-        <template v-if="!form.supabase_url || !form.supabase_anon_key">
-          <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1.5">Supabase URL</label>
-            <input
-              v-model="form.supabase_url"
-              type="text"
-              placeholder="https://xxx.supabase.co"
-              class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200
-                focus:ring-2 focus:ring-cyan-500 outline-none text-sm font-mono"
-            />
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1.5">Supabase Anon Key</label>
-            <input
-              v-model="form.supabase_anon_key"
-              type="password"
-              placeholder="eyJ..."
-              class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200
-                focus:ring-2 focus:ring-cyan-500 outline-none text-sm font-mono"
-            />
-            <p class="text-[11px] text-slate-500 mt-1">首次配對需輸入，之後會自動記住</p>
-          </div>
-        </template>
 
         <!-- 錯誤訊息 -->
         <div v-if="error" class="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-lg">

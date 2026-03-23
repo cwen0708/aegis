@@ -24,11 +24,17 @@ logger = logging.getLogger(__name__)
 
 # 配置
 ONESTACK_ENABLED = os.getenv("ONESTACK_ENABLED", "false").lower() == "true"
-ONESTACK_SUPABASE_URL = os.getenv("ONESTACK_SUPABASE_URL", "")
-ONESTACK_SUPABASE_ANON_KEY = os.getenv("ONESTACK_SUPABASE_ANON_KEY", "")
+# OneStack Supabase 預設值（所有 Aegis 實例共用同一個）
+_DEFAULT_URL = "https://avioqoteujivjkpnvyyo.supabase.co"
+_DEFAULT_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF2aW9xb3RldWppdmprcG52eXlvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY3Mjk1MzYsImV4cCI6MjA4MjMwNTUzNn0.PcoN9eQIJwK3cgMoWls-N9NObzoWDR_JWJH_ULVmTO4"
+
+ONESTACK_SUPABASE_URL = os.getenv("ONESTACK_SUPABASE_URL", _DEFAULT_URL)
+ONESTACK_SUPABASE_ANON_KEY = os.getenv("ONESTACK_SUPABASE_ANON_KEY", _DEFAULT_KEY)
 # 向後相容：舊 env var 名稱
-if not ONESTACK_SUPABASE_ANON_KEY:
-    ONESTACK_SUPABASE_ANON_KEY = os.getenv("ONESTACK_SUPABASE_KEY", "")
+if ONESTACK_SUPABASE_ANON_KEY == _DEFAULT_KEY:
+    env_key = os.getenv("ONESTACK_SUPABASE_KEY", "")
+    if env_key:
+        ONESTACK_SUPABASE_ANON_KEY = env_key
 ONESTACK_DEVICE_NAME = os.getenv("ONESTACK_DEVICE_NAME", "Aegis")
 # 預設裝置認證（從 OneStack 設定頁取得）
 ONESTACK_DEVICE_ID = os.getenv("ONESTACK_DEVICE_ID", "")
@@ -62,25 +68,23 @@ class OneStackConnector:
         # 認證來源：env / file / auto
         self._credentials_source: Optional[str] = None
 
-        if self.enabled:
-            if not self.supabase_url or not self.supabase_key:
-                logger.warning("[OneStack] Enabled but missing SUPABASE_URL or SUPABASE_ANON_KEY")
-                self.enabled = False
-            else:
-                # 優先順序：Env Vars > 本地檔案 > 自動註冊
-                if ONESTACK_DEVICE_ID and ONESTACK_DEVICE_TOKEN:
-                    self.device_id = ONESTACK_DEVICE_ID
-                    self.device_token = ONESTACK_DEVICE_TOKEN
-                    self._credentials_source = "env"
-                    logger.info(f"[OneStack] Using env credentials: {self.device_id[:8]}... ({self.device_name})")
-                else:
-                    self._load_device_credentials()
-                    self._credentials_source = "file" if self.device_id else "auto"
+        # 優先順序：Env Vars > 本地檔案
+        if ONESTACK_DEVICE_ID and ONESTACK_DEVICE_TOKEN:
+            self.device_id = ONESTACK_DEVICE_ID
+            self.device_token = ONESTACK_DEVICE_TOKEN
+            self._credentials_source = "env"
+        else:
+            self._load_device_credentials()
+            self._credentials_source = "file" if self.device_id else None
 
-                if self.device_id:
-                    logger.info(f"[OneStack] Connector initialized: {self.device_name} ({self.device_id[:8]}...)")
-                else:
-                    logger.info(f"[OneStack] Connector initialized: {self.device_name} (未註冊，將自動註冊)")
+        # 有 credentials 就自動啟用（不需要 ONESTACK_ENABLED=true）
+        if self.device_id and self.device_token:
+            self.enabled = True
+            logger.info(f"[OneStack] Connector initialized: {self.device_name} ({self.device_id[:8]}...) [source={self._credentials_source}]")
+        elif self.enabled:
+            logger.info(f"[OneStack] Connector enabled but no credentials (等待配對)")
+        else:
+            logger.debug("[OneStack] Connector disabled")
 
     # ─── 裝置認證管理 ───
 

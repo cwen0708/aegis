@@ -85,12 +85,17 @@ def get_node_info(
     }
 
 
+# OneStack Supabase 預設值（所有 Aegis 實例共用同一個）
+ONESTACK_DEFAULT_URL = "https://avioqoteujivjkpnvyyo.supabase.co"
+ONESTACK_DEFAULT_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF2aW9xb3RldWppdmprcG52eXlvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY3Mjk1MzYsImV4cCI6MjA4MjMwNTUzNn0.PcoN9eQIJwK3cgMoWls-N9NObzoWDR_JWJH_ULVmTO4"
+
+
 class NodePairPayload(BaseModel):
-    """配對碼連線請求"""
-    supabase_url: str
-    supabase_anon_key: str
+    """配對碼連線請求（URL 和 key 有預設值，前端只需傳配對碼）"""
     pairing_code: str
     device_name: Optional[str] = None
+    supabase_url: str = ONESTACK_DEFAULT_URL
+    supabase_anon_key: str = ONESTACK_DEFAULT_ANON_KEY
 
 
 @router.post("/node/pair")
