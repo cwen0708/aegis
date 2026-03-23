@@ -13,6 +13,7 @@ OneStack 連接器
 - device_token: 註冊時由 Supabase 產生，存在同一檔案
 """
 import os
+import time
 import asyncio
 import json
 import logging
@@ -928,12 +929,31 @@ async def _handle_aegis_command(command_type: str, payload: Dict) -> Dict:
             # 寫 stream: 開始（帶 chat_id）
             await connector.stream_event(0, "status", "running", member_slug, chat_id=chat_id)
 
+            # 即時串流：解析工具呼叫翻譯為人話
+            import asyncio as _aio
+            _loop = _aio.get_event_loop()
+            _last_stream = [0.0]  # 節流用
+
+            def _on_stream(raw_line: str):
+                from app.api.runner import _parse_tool_call
+                parsed = _parse_tool_call(raw_line)
+                if parsed:
+                    evt_type_s, summary = parsed
+                    now = time.time()
+                    if now - _last_stream[0] >= 2.0:
+                        _last_stream[0] = now
+                        _aio.run_coroutine_threadsafe(
+                            connector.stream_event(0, evt_type_s, summary, member_slug, chat_id=chat_id),
+                            _loop
+                        )
+
             result = await run_ai_task(
                 task_id=0,
                 project_path=project_path,
                 prompt=message,
                 phase="chat",
                 member_id=member_id,
+                on_stream=_on_stream,
             )
 
             output = result.get("output", "")

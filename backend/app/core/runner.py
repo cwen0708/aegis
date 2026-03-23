@@ -16,7 +16,7 @@ import json
 import re
 import logging
 import threading
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +179,8 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
                       model_override: Optional[str] = None,
                       project_id: Optional[int] = None,
                       auth_info: Optional[Dict[str, str]] = None,
-                      extra_env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+                      extra_env: Optional[Dict[str, str]] = None,
+                      on_stream: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
     """
     執行單一 AI 呼叫（用於 chat / email 等即時場景）。
 
@@ -275,6 +276,9 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
                         if ti:
                             nonlocal stream_token_info
                             stream_token_info = ti
+                        # 即時串流回呼（工具呼叫翻譯）
+                        if on_stream:
+                            on_stream(clean)
                 elif not config.get("json_output"):
                     _intercept_channel_marker(line.strip())
             proc.wait()
