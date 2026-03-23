@@ -656,6 +656,7 @@ class OneStackConnector:
         content: str,
         member_slug: Optional[str] = None,
         metadata: Optional[Dict] = None,
+        chat_id: Optional[str] = None,
     ):
         """寫入一筆執行事件到 aegis_stream（OneStack 前端 Realtime 訂閱）"""
         if not self.enabled or not self.device_id:
@@ -666,19 +667,19 @@ class OneStackConnector:
         if not owner_id:
             return
 
-        await self._request(
-            "POST",
-            "aegis_stream",
-            json_data={
-                "owner_id": owner_id,
-                "device_id": self.device_id,
-                "card_id": card_id,
-                "member_slug": member_slug,
-                "event_type": event_type,
-                "content": content[:5000],  # 限制大小
-                "metadata": metadata or {},
-            }
-        )
+        data: Dict[str, Any] = {
+            "owner_id": owner_id,
+            "device_id": self.device_id,
+            "card_id": card_id,
+            "member_slug": member_slug,
+            "event_type": event_type,
+            "content": content[:5000],
+            "metadata": metadata or {},
+        }
+        if chat_id:
+            data["chat_id"] = chat_id
+
+        await self._request("POST", "aegis_stream", json_data=data)
 
     _cached_owner_id: Optional[str] = None
 
@@ -699,17 +700,17 @@ class OneStackConnector:
             self._cached_owner_id = result[0].get("owner_id")
         return self._cached_owner_id
 
-    async def stream_status(self, card_id: int, status: str, member_slug: Optional[str] = None):
+    async def stream_status(self, card_id: int, status: str, member_slug: Optional[str] = None, chat_id: Optional[str] = None):
         """快捷：寫入狀態事件"""
-        await self.stream_event(card_id, "status", status, member_slug)
+        await self.stream_event(card_id, "status", status, member_slug, chat_id=chat_id)
 
-    async def stream_output(self, card_id: int, content: str, member_slug: Optional[str] = None):
+    async def stream_output(self, card_id: int, content: str, member_slug: Optional[str] = None, chat_id: Optional[str] = None):
         """快捷：寫入輸出事件"""
-        await self.stream_event(card_id, "output", content, member_slug)
+        await self.stream_event(card_id, "output", content, member_slug, chat_id=chat_id)
 
-    async def stream_result(self, card_id: int, content: str, member_slug: Optional[str] = None, metadata: Optional[Dict] = None):
+    async def stream_result(self, card_id: int, content: str, member_slug: Optional[str] = None, metadata: Optional[Dict] = None, chat_id: Optional[str] = None):
         """快捷：寫入結果事件"""
-        await self.stream_event(card_id, "result", content, member_slug, metadata)
+        await self.stream_event(card_id, "result", content, member_slug, metadata, chat_id=chat_id)
 
     # ─── Aegis Commands（輪詢 aegis_commands） ───
 
@@ -909,7 +910,8 @@ async def _handle_aegis_command(command_type: str, payload: Dict) -> Dict:
         # 即時對話（透過 runner）
         member_slug = payload.get("member_slug", "aegis")
         message = payload.get("message", "")
-        logger.info(f"[OneStack] Chat command: {member_slug} - {message[:50]}")
+        chat_id = payload.get("chat_id", f"os:{member_slug}")
+        logger.info(f"[OneStack] Chat command: {member_slug} chat_id={chat_id} - {message[:50]}")
 
         try:
             from app.core.runner import run_ai_task
@@ -917,16 +919,14 @@ async def _handle_aegis_command(command_type: str, payload: Dict) -> Dict:
             from app.database import engine as _eng
             from app.models.core import Member, Project
 
-            # 找成員和專案
             with _Ses(_eng) as session:
                 member = session.exec(select(Member).where(Member.slug == member_slug)).first()
                 member_id = member.id if member else None
-                # 用 Aegis 專案作為 chat 的上下文
                 project = session.exec(select(Project).where(Project.id == 1)).first()
                 project_path = project.path if project else "/home/cwen0708/projects/Aegis"
 
-            # 寫 stream: 開始
-            await connector.stream_event(0, "status", "running", member_slug)
+            # 寫 stream: 開始（帶 chat_id）
+            await connector.stream_event(0, "status", "running", member_slug, chat_id=chat_id)
 
             result = await run_ai_task(
                 task_id=0,
@@ -939,15 +939,15 @@ async def _handle_aegis_command(command_type: str, payload: Dict) -> Dict:
             output = result.get("output", "")
             status = result.get("status", "error")
 
-            # 寫 stream: 結果
+            # 寫 stream: 結果（帶 chat_id）
             evt_type = "result" if status == "success" else "error"
-            await connector.stream_event(0, evt_type, output[:3000], member_slug)
+            await connector.stream_event(0, evt_type, output[:3000], member_slug, chat_id=chat_id)
 
             return {"ok": True, "output": output[:1000], "status": status}
 
         except Exception as e:
             logger.error(f"[OneStack] Chat failed: {e}")
-            await connector.stream_event(0, "error", str(e)[:500], member_slug)
+            await connector.stream_event(0, "error", str(e)[:500], member_slug, chat_id=chat_id)
             return {"ok": False, "error": str(e)[:500]}
 
     elif command_type == "cancel":
