@@ -921,10 +921,8 @@ async def _handle_aegis_command(command_type: str, payload: Dict) -> Dict:
             from app.core.card_file import CardData, write_card, card_file_path
 
             with _Ses(_eng) as session:
-                # 找成員的收件匣
                 member = session.exec(select(Member).where(Member.slug == member_slug)).first()
                 if not member:
-                    # fallback：用 aegis 成員
                     member = session.exec(select(Member).where(Member.slug == "aegis")).first()
 
                 inbox = session.exec(
@@ -945,7 +943,32 @@ async def _handle_aegis_command(command_type: str, payload: Dict) -> Dict:
                 max_id = session.exec(select(CardIndex.card_id).order_by(CardIndex.card_id.desc())).first() or 0
                 card_id = max_id + 1
 
-                content = f"<!-- chat_id: {chat_id} -->\n{message}"
+                # 撈對話歷史（從 aegis_stream 取最近 10 筆 result，同 chat_id）
+                history_lines = []
+                try:
+                    history = await connector._request(
+                        "GET", "aegis_stream",
+                        params={
+                            "device_id": f"eq.{connector.device_id}",
+                            "chat_id": f"eq.{chat_id}",
+                            "event_type": "eq.result",
+                            "order": "created_at.desc",
+                            "limit": "10",
+                        }
+                    )
+                    if history and isinstance(history, list):
+                        for h in reversed(history):
+                            c = h.get("content", "")
+                            if c and c not in ("completed", "task_started", "running"):
+                                history_lines.append(f"[上一次回應] {c[:500]}")
+                except Exception:
+                    pass
+
+                history_block = ""
+                if history_lines:
+                    history_block = "## 對話歷史（最近 " + str(len(history_lines)) + " 輪）\n\n" + "\n\n---\n\n".join(history_lines[-5:]) + "\n\n---\n\n"
+
+                content = f"<!-- chat_id: {chat_id} -->\n{history_block}## 用戶訊息\n\n{message}"
                 card_data = CardData(
                     id=card_id,
                     list_id=inbox.id,
@@ -971,6 +994,8 @@ async def _handle_aegis_command(command_type: str, payload: Dict) -> Dict:
                 session.add(idx)
                 session.commit()
 
+            # 寫 stream: 用戶訊息（供歷史記憶用）
+            await connector.stream_event(card_id, "output", f"[用戶] {message}", member_slug, chat_id=chat_id)
             # 寫 stream: 已接收
             await connector.stream_event(card_id, "status", "pending", member_slug, chat_id=chat_id)
 
