@@ -37,11 +37,14 @@ async function loadProgress() {
     progress.value = data.frames || {}
     totalFrames.value = data.total
     completedFrames.value = data.completed
+    cacheBuster.value = Date.now()
   } catch { /* ignore */ }
 }
 
+const cacheBuster = ref(Date.now())
+
 function frameUrl(name: string) {
-  return `/api/v1/members/${memberId.value}/sprite/frame/${name}_orig`
+  return `/api/v1/members/${memberId.value}/sprite/frame/${name}_orig?t=${cacheBuster.value}`
 }
 
 async function genHero() {

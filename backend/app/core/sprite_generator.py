@@ -219,7 +219,12 @@ def _member_dir(member_id: int) -> Path:
 
 
 def _save(member_id: int, name: str, data: bytes) -> str:
+    import time
     d = _member_dir(member_id)
+    ts = int(time.time())
+    # 原圖用時間戳避免快取
+    (d / f"{name}_orig_{ts}.png").write_bytes(data)
+    # 也保留固定名稱（供 composite_sheet 和 ref 使用）
     (d / f"{name}_orig.png").write_bytes(data)
     small = _downscale(data)
     path = d / f"{name}.png"
