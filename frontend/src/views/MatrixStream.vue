@@ -64,9 +64,10 @@ function drawMatrix() {
   ctx.font = `${FONT_SIZE}px monospace`
 
   for (let i = 0; i < drops.length; i++) {
-    const char = CHARS[Math.floor(Math.random() * CHARS.length)]
+    const char = CHARS.charAt(Math.floor(Math.random() * CHARS.length))
     const x = i * FONT_SIZE
-    const y = drops[i] * FONT_SIZE
+    const drop = drops[i] ?? 0
+    const y = drop * FONT_SIZE
 
     // Head character: bright green/white
     if (Math.random() > 0.8) {
@@ -83,54 +84,13 @@ function drawMatrix() {
     if (y > canvas.height && Math.random() > 0.975) {
       drops[i] = 0
     }
-    drops[i] += 0.5 + Math.random() * 0.5
+    drops[i] = (drops[i] ?? 0) + 0.5 + Math.random() * 0.5
   }
 
   animFrame = requestAnimationFrame(drawMatrix)
 }
 
-// --- WebSocket Raw Message Hook ---
-let origOnMessage: ((ev: MessageEvent) => void) | null = null
-let wsRef: WebSocket | null = null
-let wsCheckInterval = 0
-
-function getWsInstance(): WebSocket | null {
-  // Access the module-level ws via a probe: check all WebSocket instances
-  // We hook into the global WebSocket to intercept Aegis messages
-  return wsRef
-}
-
-function hookWebSocket() {
-  // Intercept WebSocket constructor to grab the Aegis WS instance
-  const OrigWS = window.WebSocket
-  const patchedConstruct = new Proxy(OrigWS, {
-    construct(target, args) {
-      const instance = new target(...(args as [string, string?]))
-      const url = args[0] as string
-      if (url.includes('/ws')) {
-        wsRef = instance
-        attachMessageHook(instance)
-      }
-      return instance
-    },
-  })
-  window.WebSocket = patchedConstruct as any
-
-  // Also try to find existing WS connections
-  wsCheckInterval = window.setInterval(() => {
-    if (wsRef && wsRef.readyState === WebSocket.OPEN) {
-      clearInterval(wsCheckInterval)
-    }
-  }, 1000)
-}
-
-function attachMessageHook(ws: WebSocket) {
-  const originalOnMessage = ws.onmessage
-  ws.addEventListener('message', (event: MessageEvent) => {
-    handleRawMessage(event.data)
-  })
-}
-
+// --- WebSocket Raw Message ---
 function handleRawMessage(raw: string) {
   try {
     const parsed = JSON.parse(raw)
@@ -162,34 +122,6 @@ function handleRawMessage(raw: string) {
   }
 }
 
-// Use a simpler approach: listen to CustomEvents dispatched by useWebSocket
-// AND also intercept via a global message event listener
-function setupWsListener() {
-  // Listen for all aegis events
-  window.addEventListener('aegis:task-event', handleAegisEvent as EventListener)
-  window.addEventListener('aegis:member-dialogue', handleAegisEvent as EventListener)
-  window.addEventListener('aegis:clone-progress', handleAegisEvent as EventListener)
-
-  // Also hook into the raw WebSocket by patching the store
-  const token = localStorage.getItem('aegis-token') || ''
-  const wsUrl = `${config.wsUrl}/ws?token=${token}`
-
-  // Create a secondary WS connection dedicated to this page for raw message capture
-  const rawWs = new WebSocket(wsUrl)
-  rawWs.onmessage = (event) => {
-    handleRawMessage(event.data)
-  }
-  rawWs.onclose = () => {
-    // Reconnect after 3s if page still mounted
-    if (mounted) {
-      setTimeout(() => {
-        if (mounted) setupRawWs()
-      }, 3000)
-    }
-  }
-  return rawWs
-}
-
 let rawWsInstance: WebSocket | null = null
 let mounted = true
 
@@ -207,10 +139,6 @@ function setupRawWs() {
       }, 3000)
     }
   }
-}
-
-function handleAegisEvent(event: CustomEvent) {
-  // These come from useWebSocket's handleMessage — we already get them via raw WS
 }
 
 // --- Type Colors ---
@@ -285,14 +213,10 @@ onUnmounted(() => {
   mounted = false
   cancelAnimationFrame(animFrame)
   window.removeEventListener('resize', resizeCanvas)
-  window.removeEventListener('aegis:task-event', handleAegisEvent as EventListener)
-  window.removeEventListener('aegis:member-dialogue', handleAegisEvent as EventListener)
-  window.removeEventListener('aegis:clone-progress', handleAegisEvent as EventListener)
   if (rawWsInstance) {
     rawWsInstance.close()
     rawWsInstance = null
   }
-  if (wsCheckInterval) clearInterval(wsCheckInterval)
 })
 </script>
 
