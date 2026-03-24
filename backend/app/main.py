@@ -1,5 +1,8 @@
+from pathlib import Path
 from dotenv import load_dotenv
-load_dotenv()  # 載入 .env 檔案
+# 載入 .env：先找 CWD，再找上一層（systemd WorkingDirectory 可能在 backend/）
+load_dotenv()
+load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
