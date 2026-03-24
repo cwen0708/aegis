@@ -180,10 +180,11 @@ PROVIDERS = {
     "claude": {
         "cmd_base": ["claude"],
         # 使用 stream-json + verbose 實現即時串流輸出
-        "args": ["-p", "{prompt}", "--dangerously-skip-permissions", "--model", "sonnet",
+        "args": ["--dangerously-skip-permissions", "--model", "sonnet",
                  "--output-format", "stream-json", "--verbose"],
         "json_output": False,
         "stream_json": True,  # 標記需要解析 stream-json
+        "stdin_prompt": True,  # 避免 prompt 中的 --- 被 CLI parser 誤解析
     },
     "ollama": {
         "cmd_base": ["ollama", "run"],
