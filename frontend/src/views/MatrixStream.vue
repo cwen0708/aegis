@@ -30,9 +30,30 @@ interface WsMessage {
 let ctx: CanvasRenderingContext2D | null = null
 let animFrame = 0
 let drops: number[] = []
+let dropTexts: string[] = []  // 每欄綁定一段真實文字
+let dropCharIdx: number[] = [] // 每欄目前打到哪個字元
 const FONT_SIZE = 16
-const KATAKANA = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン'
-const CHARS = KATAKANA + '0123456789ABCDEF{}[]:<>'
+const FALLBACK_CHARS = '0123456789ABCDEF{}[]:<>"type"data'
+
+// 真實訊息文字池（從 WS 訊息餵入）
+const textPool: string[] = []
+const MAX_POOL = 50
+
+function feedTextPool(raw: string) {
+  // 把 JSON 攤平成可讀字串塞進池子
+  const text = raw.replace(/[{}[\]]/g, ' ').replace(/"/g, '').replace(/,/g, ' ').trim()
+  if (text.length > 5) {
+    textPool.push(text)
+    if (textPool.length > MAX_POOL) textPool.shift()
+  }
+}
+
+function pickText(): string {
+  if (textPool.length > 0) {
+    return textPool[Math.floor(Math.random() * textPool.length)] ?? FALLBACK_CHARS
+  }
+  return FALLBACK_CHARS
+}
 
 function initCanvas() {
   const canvas = canvasRef.value
@@ -48,6 +69,8 @@ function resizeCanvas() {
   canvas.height = window.innerHeight
   const cols = Math.floor(canvas.width / FONT_SIZE)
   drops = Array.from({ length: cols }, () => Math.random() * -100)
+  dropTexts = Array.from({ length: cols }, () => pickText())
+  dropCharIdx = Array.from({ length: cols }, () => 0)
 }
 
 function drawMatrix() {
@@ -64,7 +87,11 @@ function drawMatrix() {
   ctx.font = `${FONT_SIZE}px monospace`
 
   for (let i = 0; i < drops.length; i++) {
-    const char = CHARS.charAt(Math.floor(Math.random() * CHARS.length))
+    // 從綁定的文字中依序取字元
+    const text = dropTexts[i] || FALLBACK_CHARS
+    const idx = dropCharIdx[i] ?? 0
+    const char = text.charAt(idx % text.length)
+
     const x = i * FONT_SIZE
     const drop = drops[i] ?? 0
     const y = drop * FONT_SIZE
@@ -73,16 +100,18 @@ function drawMatrix() {
     if (Math.random() > 0.8) {
       ctx.fillStyle = '#ffffff'
     } else {
-      // Varying green brightness
       const brightness = 180 + Math.floor(Math.random() * 75)
       ctx.fillStyle = `rgb(0, ${brightness}, ${Math.floor(brightness * 0.25)})`
     }
 
     ctx.fillText(char, x, y)
+    dropCharIdx[i] = idx + 1
 
     // Reset drop to top when it goes below screen
     if (y > canvas.height && Math.random() > 0.975) {
       drops[i] = 0
+      dropTexts[i] = pickText()  // 換一段新文字
+      dropCharIdx[i] = 0
     }
     drops[i] = (drops[i] ?? 0) + 0.5 + Math.random() * 0.5
   }
@@ -93,6 +122,7 @@ function drawMatrix() {
 // --- WebSocket Raw Message ---
 function handleRawMessage(raw: string) {
   try {
+    feedTextPool(raw)
     const parsed = JSON.parse(raw)
     const msg: WsMessage = {
       id: ++msgCount.value,
