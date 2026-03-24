@@ -108,7 +108,8 @@ This frame MUST continue the motion smoothly:
 CHARACTER: {desc}
 DIRECTION: {DIR_NAMES[direction]}
 POSE: {ACTION_FRAMES[action][frame]}
-FRAME: {frame + 1} of 3 in {action} animation cycle
+FRAME: {frame + 1} of 3 in {action} animation cycle (loops: 1→2→3→1→2→3…)
+Frame 3 must transition smoothly BACK to frame 1 — this is a looping cycle, not a one-way sequence.
 {chain_note}
 
 {BASE_STYLE}
