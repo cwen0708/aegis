@@ -2,13 +2,14 @@
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useAegisStore } from '../stores/aegis'
 import { config } from '../config'
-import { Pause, Play, Trash2, Wifi, WifiOff, X } from 'lucide-vue-next'
+import { Pause, Play, Trash2, Wifi, WifiOff, X, Eye, EyeOff } from 'lucide-vue-next'
 
 const store = useAegisStore()
 
 // --- State ---
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const paused = ref(false)
+const showCards = ref(true)
 const messages = ref<WsMessage[]>([])
 const selectedMsg = ref<WsMessage | null>(null)
 const msgCount = ref(0)
@@ -30,29 +31,45 @@ interface WsMessage {
 let ctx: CanvasRenderingContext2D | null = null
 let animFrame = 0
 let drops: number[] = []
-let dropTexts: string[] = []  // 每欄綁定一段真實文字
+let dropTexts: string[] = []   // 每欄綁定一段真實文字
+let dropTypes: string[] = []   // 每欄的訊息 type（決定顏色）
 let dropCharIdx: number[] = [] // 每欄目前打到哪個字元
 const FONT_SIZE = 16
 const FALLBACK_CHARS = '0123456789ABCDEF{}[]:<>"type"data'
 
-// 真實訊息文字池（從 WS 訊息餵入）
-const textPool: string[] = []
+// 真實訊息文字池（從 WS 訊息餵入），帶 type 資訊
+interface PoolEntry { text: string; type: string }
+const textPool: PoolEntry[] = []
 const MAX_POOL = 50
 
-function feedTextPool(raw: string) {
-  // 把 JSON 攤平成可讀字串塞進池子
+function feedTextPool(raw: string, type: string) {
   const text = raw.replace(/[{}[\]]/g, ' ').replace(/"/g, '').replace(/,/g, ' ').trim()
   if (text.length > 5) {
-    textPool.push(text)
+    textPool.push({ text, type })
     if (textPool.length > MAX_POOL) textPool.shift()
   }
 }
 
-function pickText(): string {
+function pickEntry(): PoolEntry {
   if (textPool.length > 0) {
-    return textPool[Math.floor(Math.random() * textPool.length)] ?? FALLBACK_CHARS
+    return textPool[Math.floor(Math.random() * textPool.length)] ?? { text: FALLBACK_CHARS, type: 'default' }
   }
-  return FALLBACK_CHARS
+  return { text: FALLBACK_CHARS, type: 'default' }
+}
+
+// Canvas 用的 RGB 色彩對照（依 message type）
+function rainColor(type: string, brightness: number): string {
+  switch (type) {
+    case 'task_completed': return `rgb(0, ${brightness}, ${Math.floor(brightness * 0.3)})`       // green
+    case 'task_started':   return `rgb(0, ${Math.floor(brightness * 0.7)}, ${brightness})`       // cyan
+    case 'task_failed':    return `rgb(${brightness}, ${Math.floor(brightness * 0.3)}, ${Math.floor(brightness * 0.3)})` // red
+    case 'task_log':       return `rgb(0, ${Math.floor(brightness * 0.7)}, ${Math.floor(brightness * 0.2)})` // dim green
+    case 'running_tasks_update': return `rgb(${brightness}, ${Math.floor(brightness * 0.75)}, 0)` // amber
+    case 'system_info_update':   return `rgb(0, ${Math.floor(brightness * 0.6)}, ${Math.floor(brightness * 0.4)})` // emerald dim
+    case 'member_dialogue': return `rgb(${Math.floor(brightness * 0.7)}, 0, ${brightness})`      // purple
+    case 'clone_progress':  return `rgb(0, ${Math.floor(brightness * 0.5)}, ${brightness})`      // blue
+    default:               return `rgb(0, ${brightness}, ${Math.floor(brightness * 0.25)})`      // default green
+  }
 }
 
 function initCanvas() {
@@ -69,7 +86,9 @@ function resizeCanvas() {
   canvas.height = window.innerHeight
   const cols = Math.floor(canvas.width / FONT_SIZE)
   drops = Array.from({ length: cols }, () => Math.random() * -100)
-  dropTexts = Array.from({ length: cols }, () => pickText())
+  const entries = Array.from({ length: cols }, () => pickEntry())
+  dropTexts = entries.map(e => e.text)
+  dropTypes = entries.map(e => e.type)
   dropCharIdx = Array.from({ length: cols }, () => 0)
 }
 
@@ -96,12 +115,13 @@ function drawMatrix() {
     const drop = drops[i] ?? 0
     const y = drop * FONT_SIZE
 
-    // Head character: bright green/white
-    if (Math.random() > 0.8) {
-      ctx.fillStyle = '#ffffff'
+    // 依 type 上色
+    const colType = dropTypes[i] || 'default'
+    if (Math.random() > 0.85) {
+      ctx.fillStyle = '#ffffff'  // 偶爾閃白
     } else {
       const brightness = 180 + Math.floor(Math.random() * 75)
-      ctx.fillStyle = `rgb(0, ${brightness}, ${Math.floor(brightness * 0.25)})`
+      ctx.fillStyle = rainColor(colType, brightness)
     }
 
     ctx.fillText(char, x, y)
@@ -110,7 +130,9 @@ function drawMatrix() {
     // Reset drop to top when it goes below screen
     if (y > canvas.height && Math.random() > 0.975) {
       drops[i] = 0
-      dropTexts[i] = pickText()  // 換一段新文字
+      const entry = pickEntry()
+      dropTexts[i] = entry.text
+      dropTypes[i] = entry.type
       dropCharIdx[i] = 0
     }
     drops[i] = (drops[i] ?? 0) + 0.5 + Math.random() * 0.5
@@ -122,8 +144,8 @@ function drawMatrix() {
 // --- WebSocket Raw Message ---
 function handleRawMessage(raw: string) {
   try {
-    feedTextPool(raw)
     const parsed = JSON.parse(raw)
+    feedTextPool(raw, parsed.type || 'unknown')
     const msg: WsMessage = {
       id: ++msgCount.value,
       type: parsed.type || 'unknown',
@@ -272,6 +294,14 @@ onUnmounted(() => {
           </span>
         </div>
         <button
+          @click="showCards = !showCards"
+          class="p-1.5 rounded border border-green-500/30 text-green-400 hover:bg-green-500/20 transition-colors"
+          :title="showCards ? '隱藏卡片' : '顯示卡片'"
+        >
+          <EyeOff v-if="showCards" class="w-4 h-4" />
+          <Eye v-else class="w-4 h-4" />
+        </button>
+        <button
           @click="paused = !paused"
           class="p-1.5 rounded border border-green-500/30 text-green-400 hover:bg-green-500/20 transition-colors"
           :title="paused ? '繼續' : '暫停'"
@@ -290,7 +320,7 @@ onUnmounted(() => {
     </div>
 
     <!-- Message Waterfall Overlay -->
-    <div class="absolute inset-0 z-10 flex gap-1 px-2 pt-12 pb-2 overflow-hidden pointer-events-none">
+    <div v-show="showCards" class="absolute inset-0 z-10 flex gap-1 px-2 pt-12 pb-2 overflow-hidden pointer-events-none">
       <div
         v-for="col in COLUMN_COUNT"
         :key="col"
