@@ -38,7 +38,7 @@ git diff --name-only --diff-filter=U
 
 嘗試解決：
 - **簡單衝突**（格式、import 順序）：手動修正，`git add` + `git commit`
-- **複雜衝突**（邏輯衝突、大幅重構）：`git merge --abort`，標記 [blocked]，等人工介入
+- **複雜衝突**（邏輯衝突、大幅重構）：`git merge --abort`，加 Blocked tag（`curl -s -X POST "http://127.0.0.1:8899/api/v1/cards/$CARD_ID/tags" -H "Content-Type: application/json" -d '{"tag_name":"Blocked"}'`），等人工介入
 
 ### Step 3: 驗證
 
@@ -52,7 +52,7 @@ cd ~/projects/Aegis/frontend
 npx vue-tsc -b --force && pnpm build
 ```
 
-驗證失敗 → `git merge --abort`，標記 [blocked]。
+驗證失敗 → `git merge --abort`，加 Blocked tag（`curl -s -X POST "http://127.0.0.1:8899/api/v1/cards/$CARD_ID/tags" -H "Content-Type: application/json" -d '{"tag_name":"Blocked"}'`）。
 
 ### Step 4: 部署到運行環境
 
@@ -110,6 +110,6 @@ sudo systemctl restart aegis-worker
 ## 重要限制
 
 - **不要 git push** — 推送權在管理者
-- **複雜衝突不要硬解** — 標記 [blocked] 等人工處理
+- **複雜衝突不要硬解** — 加 Blocked tag（`curl -s -X POST "http://127.0.0.1:8899/api/v1/cards/$CARD_ID/tags" -H "Content-Type: application/json" -d '{"tag_name":"Blocked"}'`） 等人工處理
 - **部署後一定要驗證服務狀態**
 - **還原要快** — 服務掛了就立即 git checkout 還原

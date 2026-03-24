@@ -636,6 +636,22 @@ async function unarchiveCard(cardId: number) {
 
               <h4 class="text-sm font-medium text-slate-100 group-hover:text-emerald-400 transition-colors pr-6">{{ card.title }}</h4>
 
+              <!-- Tags -->
+              <div v-if="card.tags?.length" class="flex flex-wrap gap-1 mt-1.5">
+                <span v-for="tag in card.tags.filter((t: string) => !t.startsWith('cron_'))" :key="tag"
+                  class="text-[9px] px-1.5 py-0.5 rounded-full border font-medium"
+                  :class="{
+                    'bg-red-500/15 border-red-500/30 text-red-400': tag === 'Blocked' || tag === 'Bug',
+                    'bg-teal-500/15 border-teal-500/30 text-teal-400': tag === 'Dispatched',
+                    'bg-amber-500/15 border-amber-500/30 text-amber-400': tag === 'Retry',
+                    'bg-indigo-500/15 border-indigo-500/30 text-indigo-400': tag === 'Chat',
+                    'bg-orange-500/15 border-orange-500/30 text-orange-400': tag === 'Ops',
+                    'bg-purple-500/15 border-purple-500/30 text-purple-400': tag === 'AI-Coding',
+                    'bg-green-500/15 border-green-500/30 text-green-400': tag === 'Feature',
+                    'bg-slate-500/15 border-slate-600/30 text-slate-400': !['Blocked','Bug','Dispatched','Retry','Chat','Ops','AI-Coding','Feature'].includes(tag),
+                  }">{{ tag }}</span>
+              </div>
+
               <!-- AI Execution Indicator -->
               <div v-if="card.status === 'pending' || card.status === 'running'" class="mt-4 bg-slate-900/50 rounded-lg p-2.5 flex items-center justify-between border border-slate-700/50">
                 <div class="flex items-center gap-2">
@@ -768,6 +784,20 @@ async function unarchiveCard(cardId: number) {
           </div>
 
           <h4 class="text-sm font-medium text-slate-100 pr-8">{{ card.title }}</h4>
+
+          <!-- Tags (mobile) -->
+          <div v-if="card.tags?.length" class="flex flex-wrap gap-1 mt-1">
+            <span v-for="tag in card.tags.filter((t: string) => !t.startsWith('cron_'))" :key="tag"
+              class="text-[9px] px-1.5 py-0.5 rounded-full border font-medium"
+              :class="{
+                'bg-red-500/15 border-red-500/30 text-red-400': tag === 'Blocked' || tag === 'Bug',
+                'bg-teal-500/15 border-teal-500/30 text-teal-400': tag === 'Dispatched',
+                'bg-amber-500/15 border-amber-500/30 text-amber-400': tag === 'Retry',
+                'bg-indigo-500/15 border-indigo-500/30 text-indigo-400': tag === 'Chat',
+                'bg-orange-500/15 border-orange-500/30 text-orange-400': tag === 'Ops',
+                'bg-slate-500/15 border-slate-600/30 text-slate-400': !['Blocked','Bug','Dispatched','Retry','Chat','Ops'].includes(tag),
+              }">{{ tag }}</span>
+          </div>
 
           <!-- AI Execution Indicator -->
           <div v-if="card.status === 'pending' || card.status === 'running'" class="mt-3 bg-slate-900/50 rounded-lg p-2 flex items-center justify-between border border-slate-700/50">

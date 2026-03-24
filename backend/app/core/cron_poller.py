@@ -151,9 +151,14 @@ def create_card_for_cron_job(session: Session, job: CronJob, ops_tag: Tag = None
     tz_name = _get_system_timezone(session)
 
     # 去重：檢查是否已存在待處理/執行中的卡片（failed 不阻擋下次觸發）
+    # 向後相容：同時檢查 tags_json（新）和 title（舊）
+    from sqlalchemy import or_
     existing = session.exec(
         select(CardIndex)
-        .where(CardIndex.title.contains(cron_tag))
+        .where(or_(
+            CardIndex.tags_json.contains(cron_tag),
+            CardIndex.title.contains(cron_tag),
+        ))
         .where(CardIndex.status.in_(["pending", "running"]))
     ).first()
     if existing:
@@ -209,11 +214,11 @@ def create_card_for_cron_job(session: Session, job: CronJob, ops_tag: Tag = None
     card_data = CardData(
         id=card_id,
         list_id=sched_list.id,
-        title=f"[{cron_tag}] {job.name}",
+        title=job.name,
         description=job.description or 'Auto-generated from Aegis Cron',
         content=full_content,
         status="pending",
-        tags=["Ops"],
+        tags=["Ops", cron_tag],
     )
     fpath = card_file_path(project.path, card_id)
     write_card(fpath, card_data)

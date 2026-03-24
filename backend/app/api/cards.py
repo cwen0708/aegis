@@ -26,6 +26,7 @@ class CardCreateRequest(BaseModel):
     description: Optional[str] = None
     content: Optional[str] = None  # 卡片內容（會被當作 AI prompt）
     status: Optional[str] = None  # idle (default) or pending
+    tags: Optional[List[str]] = None  # 標籤名稱列表
 
 class CardUpdateRequest(BaseModel):
     list_id: Optional[int] = None
@@ -33,6 +34,7 @@ class CardUpdateRequest(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     content: Optional[str] = None
+    tags: Optional[List[str]] = None  # 標籤名稱列表
 
 
 # ==========================================
@@ -78,7 +80,7 @@ def create_card(card_in: CardCreateRequest, session: Session = Depends(get_sessi
     card_data = CardData(
         id=new_id, list_id=card_in.list_id, title=card_in.title,
         description=card_in.description, content=card_in.content or "", status=initial_status,
-        tags=[], created_at=now, updated_at=now,
+        tags=card_in.tags or [], created_at=now, updated_at=now,
     )
 
     # Write MD file
@@ -120,6 +122,8 @@ def update_card(card_id: int, update_data: CardUpdateRequest, session: Session =
             cd.description = update_data.description
         if update_data.content is not None:
             cd.content = update_data.content
+        if update_data.tags is not None:
+            cd.tags = update_data.tags
         cd.updated_at = now
 
         write_card(Path(idx.file_path), cd)

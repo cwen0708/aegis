@@ -536,7 +536,7 @@ def _git_commit_changes(project_path: str, card_id: int, card_title: str,
     """git add -A + commit，回傳 commit hash 或 None"""
     import subprocess as _sp
     _sp.run(["git", "add", "-A"], cwd=project_path, timeout=10)
-    clean_title = card_title.replace("[reviewed] ", "").replace("[重構] ", "refactor: ").strip()
+    clean_title = card_title.replace("[重構] ", "refactor: ").strip()
     if not any(clean_title.startswith(p) for p in ("feat:", "fix:", "refactor:", "chore:", "test:", "docs:")):
         clean_title = f"{prefix}: {clean_title}"
     author = member_slug or "aegis"
@@ -1256,10 +1256,12 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
             project_path = _pp_match.group(1)
             logger.info(f"[Worker] Inbound task using project path: {project_path}")
 
-    # 偵測 chat 模式（標題以 [chat] 開頭）
+    # 偵測 chat 模式（tags 含 Chat 或標題以 [chat] 開頭（向後相容））
     import re as _re_chat
+    import json as _json_chat
+    _card_tags = _json_chat.loads(idx.tags_json) if idx.tags_json else []
     _chat_match = _re_chat.search(r'<!-- chat_id: (.+?) -->', card_data.content or "")
-    is_chat_mode = idx.title.startswith("[chat]") or _chat_match is not None
+    is_chat_mode = "Chat" in _card_tags or idx.title.startswith("[chat]") or _chat_match is not None
     chat_id = _chat_match.group(1) if _chat_match else None
 
     if is_chat_mode:

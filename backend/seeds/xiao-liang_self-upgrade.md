@@ -27,8 +27,8 @@ npx vue-tsc -b --force && pnpm build
 ## Step 3: 判斷
 
 - **通過** → 繼續 Step 4
-- **不通過且無 [retry:1]** → 用 aegis-api 建退回卡片給小茵（標記 [retry:1]），結束
-- **不通過且已有 [retry:1]** → 用 aegis-api 標記原卡片 [blocked]，結束
+- **不通過且無 Retry tag** → 用 aegis-api 建退回卡片給小茵，並對原卡片加 Retry tag（`curl -s -X POST "http://127.0.0.1:8899/api/v1/cards/{card_id}/tags" -H "Content-Type: application/json" -d '{"tag_name":"Retry"}'`），結束
+- **不通過且已有 Retry tag** → 對原卡片加 Blocked tag（`curl -s -X POST "http://127.0.0.1:8899/api/v1/cards/{card_id}/tags" -H "Content-Type: application/json" -d '{"tag_name":"Blocked"}'`），結束
 
 ## Step 4: 部署（必須執行，不可跳過）
 
@@ -122,5 +122,5 @@ sudo systemctl restart aegis-worker
 - **Step 4、5、6 是必須執行的**，不是參考文件
 - 不要 git push
 - 不要改 .env 或 DB
-- 退回上限 1 次，超過標記 [blocked]
+- 退回上限 1 次，超過加 Blocked tag
 - **卡片狀態只能用 `completed` 或 `failed`**，不要用 `done` 或其他自創狀態

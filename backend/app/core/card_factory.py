@@ -112,9 +112,10 @@ def create_chat_card(
             return create_card(
                 project_id=project_id,
                 list_id=inbox.id,
-                title=f"[chat] {member_slug}: {message[:30]}",
+                title=f"{member_slug}: {message[:30]}",
                 content=content,
                 status="pending",
+                tags=["Chat"],
             )
     except Exception as e:
         logger.error(f"[CardFactory] Failed to create chat card: {e}")

@@ -1,12 +1,17 @@
 # Backlog 審查與任務分派
 
-你負責定期審查 AEGIS 專案的 Backlog，挑選一張卡片進行深入規劃，然後分派到「開發中」列表。
+你負責定期審查 AEGIS 專案的 Backlog，**挑選 1 張卡片**進行深入規劃，然後分派到「開發中」列表。
 
-**核心原則：一次只深入處理一張卡片。**
+## ⛔ 嚴格限制
+
+- **一次只處理 1 張卡片**，完成後立即結束。不要迴圈處理多張。
+- **不要批量標記**。掃描列表只是為了「選出 1 張」，不是為了「處理全部」。
+- 只有兩種結果：**派發到開發中**（加 Dispatched tag）或 **暫時跳過**（什麼都不做）。
+- **禁止在同一次執行中處理第 2 張卡片。**
 
 ## 審查流程
 
-### Step 1: 掃描標題（快速瀏覽，不深入閱讀）
+### Step 1: 掃描待處理卡片（只看標題，不深入）
 
 ```bash
 curl -s "http://127.0.0.1:8899/api/v1/projects/1/board" | python3 -c "
@@ -15,58 +20,64 @@ d = json.loads(sys.stdin.read())
 for stage in d:
     if stage['name'] == 'Backlog':
         for c in stage.get('cards', []):
-            if c['status'] == 'idle' and '[reviewed]' not in c.get('title', '') and '[blocked]' not in c.get('title', ''):
-                print(f'#{c[\"id\"]} {c[\"title\"]}')
+            tags = c.get('tags', [])
+            if c['status'] == 'idle' and 'Dispatched' not in tags and 'Blocked' not in tags:
+                print(f'#{c[\"id\"]} {c.get(\"title\", \"\")}')
 "
 ```
 
-選出 **1 張**最適合的。優先高效益，大任務拆小。
+從結果中選出 **1 張**最適合的。優先級：P0 > P1 > P2 > 其他。大任務拆小。
 
-### Step 2: 深入規劃
+如果沒有合適的卡片，**直接結束，什麼都不做**。
+
+### Step 2: 深入規劃（只針對選出的那 1 張）
 
 1. 閱讀卡片完整描述和相關程式碼
 2. 拆解成一個最小可執行的步驟（30 分鐘內能完成）
 3. 列出具體修改步驟（哪個檔案、哪個函式、怎麼改）
 
-### Step 3: 分派到「開發中」列表
+### Step 3: 派發 + 標記（一個腳本，不可拆開）
 
-查出「開發中」列表的 list_id，建立規劃卡片：
+⚠️ **必須用下面這個單一腳本完成所有操作**。不要分開執行。
+將 `ORIG_ID`、`NEW_TITLE`、`DESCRIPTION` 三個變數替換為實際值後執行：
 
 ```bash
-DEV_LIST=$(curl -s "http://127.0.0.1:8899/api/v1/projects/1/board" | python3 -c "
-import sys, json
-for s in json.loads(sys.stdin.read()):
-    if s['name'] == '開發中':
-        print(s['id']); break
-")
+python3 -c "
+import json, urllib.request
 
-CARD_RESP=$(curl -s -X POST "http://127.0.0.1:8899/api/v1/cards/" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"title\": \"具體的修改描述\",
-    \"list_id\": $DEV_LIST,
-    \"project_id\": 1,
-    \"description\": \"## 任務來源\n原始卡片 #XXXX\n\n## 修改步驟\n1. ...\n2. ...\n\n## 驗證方式\n- python import 通過\n- vue-tsc 通過（如適用）\"
-  }")
+API = 'http://127.0.0.1:8899/api/v1'
+ORIG_ID = 0        # ← 替換為原 Backlog 卡片 ID
+NEW_TITLE = ''      # ← 替換為開發卡片標題（具體的修改描述）
+DESCRIPTION = ''    # ← 替換為開發卡片描述（含修改步驟和驗證方式）
 
-CARD_ID=$(echo $CARD_RESP | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('id',''))")
-curl -s -X POST "http://127.0.0.1:8899/api/v1/cards/$CARD_ID/trigger"
-echo "分派到開發中: #$CARD_ID"
+# 1) 查「開發中」list_id
+board = json.loads(urllib.request.urlopen(f'{API}/projects/1/board').read())
+dev_list = next(s['id'] for s in board if s['name'] == '開發中')
+
+# 2) 建立開發卡片
+data = json.dumps({'title': NEW_TITLE, 'list_id': dev_list, 'project_id': 1, 'description': DESCRIPTION}).encode()
+req = urllib.request.Request(f'{API}/cards/', data=data, headers={'Content-Type': 'application/json'}, method='POST')
+card = json.loads(urllib.request.urlopen(req).read())
+card_id = card.get('card_id', card.get('id'))
+print(f'Created dev card #{card_id}')
+
+# 3) 觸發開發卡片
+urllib.request.urlopen(urllib.request.Request(f'{API}/cards/{card_id}/trigger', method='POST'))
+print(f'Triggered #{card_id}')
+
+# 4) 加 Dispatched tag 到原卡片（建卡成功才會到這一行）
+tag_data = json.dumps({'tag_name': 'Dispatched'}).encode()
+urllib.request.urlopen(urllib.request.Request(f'{API}/cards/{ORIG_ID}/tags', data=tag_data, headers={'Content-Type': 'application/json'}, method='POST'))
+print(f'Tagged #{ORIG_ID} as Dispatched')
+
+print('Done.')
+"
 ```
 
-然後標記原 Backlog 卡片：
-```bash
-curl -s -X PATCH "http://127.0.0.1:8899/api/v1/cards/{原卡片id}" \
-  -H "Content-Type: application/json" \
-  -d '{"title": "[reviewed] 原標題"}'
-```
+### Step 4: 結束
 
-### Step 4: 不適合的卡片
+腳本執行完畢後**立即結束**。不要繼續處理下一張。
 
-標記 [reviewed] + 寫具體原因。**標記後結束，不要再挑第二張。**
-
-## 注意事項
-- **一次只選 1 張、只規劃 1 張、只分派 1 張**
-- 分派到「開發中」列表（不是小茵收件匣）
-- 卡片完成後系統會自動流轉：開發中 → 審查中 → 完成
-- 如果 Backlog 沒有合適的卡片，直接結束
+## Tag 說明
+- `Dispatched` = 已派發到開發中，有對應的開發卡片
+- `Blocked` = 被阻塞，需要等待其他工作完成

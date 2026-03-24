@@ -18,7 +18,7 @@ from app.api import channels as channels_routes, invitations as invitations_rout
 from app.api import auth as auth_routes, runner as runner_routes, messaging as messaging_routes
 from app.api import github as github_routes, system as system_routes
 from app.api import onestack as onestack_routes, updater_routes
-from app.api import projects as projects_routes, cards as cards_routes
+from app.api import projects as projects_routes, cards as cards_routes, tags as tags_routes
 from app.api import cron_jobs as cron_jobs_routes, members as members_routes
 from app.api import profile_page
 from app.api import graph as graph_routes
@@ -499,6 +499,7 @@ app.include_router(graph_routes.router, prefix="/api/v1")
 app.include_router(sprite_gen_routes.router, prefix="/api/v1")
 app.include_router(webhooks.router, prefix="/api/v1")
 app.include_router(files.router, prefix="/api/v1")
+app.include_router(tags_routes.router, prefix="/api/v1")
 
 # ==========================================
 # SPA Frontend (serve from frontend/dist)

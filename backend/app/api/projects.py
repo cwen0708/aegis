@@ -8,6 +8,7 @@ from app.models.core import Project, Card, StageList, SystemSetting, Account, Me
 from app.core.card_index import sync_card_to_index, remove_card_from_index, query_board, rebuild_index
 from app.api.deps import get_domain_filter, get_visibility_filter, get_card_lock, get_member_primary_provider, get_project_for_list
 from pathlib import Path
+import json
 import subprocess
 import time as time_module
 import threading
@@ -24,6 +25,7 @@ class CardResponse(BaseModel):
     title: str
     description: Optional[str]
     status: str
+    tags: List[str] = []
     created_at: datetime
 
 class MemberBrief(BaseModel):
@@ -352,7 +354,9 @@ def read_project_board(project_id: int, request: Request, session: Session = Dep
             member=member_brief,
             cards=[CardResponse(
                 id=ci.card_id, list_id=ci.list_id, title=ci.title,
-                description=ci.description, status=ci.status, created_at=ci.created_at
+                description=ci.description, status=ci.status,
+                tags=json.loads(ci.tags_json) if ci.tags_json else [],
+                created_at=ci.created_at,
             ) for ci in list_cards],
             # 階段配置
             system_instruction=l.system_instruction,

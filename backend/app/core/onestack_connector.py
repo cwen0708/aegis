@@ -1156,10 +1156,11 @@ async def _handle_aegis_command(command_type: str, payload: Dict) -> Dict:
                 card_data = CardData(
                     id=card_id,
                     list_id=inbox.id,
-                    title=f"[chat] {member_slug}: {message[:30]}",
+                    title=f"{member_slug}: {message[:30]}",
                     description=None,
                     content=content,
                     status="pending",
+                    tags=["Chat"],
                 )
 
                 fp = card_file_path(project_path, card_id)

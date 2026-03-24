@@ -442,6 +442,12 @@ def seed_data():
             "Feature": "green",
             "Ops": "orange",
             "Docs": "cyan",
+            # 取代方括號標題的標籤
+            "Chat": "indigo",
+            "Email": "yellow",
+            "Dispatched": "teal",
+            "Blocked": "red",
+            "Retry": "amber",
         }
         tag_objs = {}
         existing_tags = {t.name: t for t in session.exec(select(Tag)).all()}
