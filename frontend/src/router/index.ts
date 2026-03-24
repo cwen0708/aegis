@@ -26,6 +26,7 @@ import SettingsRoomDetail from '../views/settings/SettingsRoomDetail.vue'
 import FileBrowser from '../views/FileBrowser.vue'
 import GitManager from '../views/GitManager.vue'
 import RelationGraph from '../views/RelationGraph.vue'
+import MatrixStream from '../views/MatrixStream.vue'
 import { useAuthStore } from '../stores/auth'
 
 const router = createRouter({
@@ -45,6 +46,7 @@ const router = createRouter({
     { path: '/files/:projectId', component: FileBrowser, meta: { requiresAuth: true } },
     { path: '/git', component: GitManager, meta: { requiresAuth: true } },
     { path: '/graph', component: RelationGraph, meta: { requiresAuth: true } },
+    { path: '/matrix', component: MatrixStream, meta: { requiresAuth: true } },
     {
       path: '/settings',
       component: SettingsLayout,
