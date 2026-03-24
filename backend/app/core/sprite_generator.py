@@ -53,14 +53,14 @@ ACTION_FRAMES = {
         "right leg 2px forward, left arm slightly forward, right arm slightly back, weight on left foot, torso upright",
     ],
     "sit": [
-        "sitting on a small stool, knees bent 90 degrees, both hands resting on thighs, feet flat on ground",
-        "same sitting pose, head tilted 1px right, hands unchanged on thighs, stool and body position identical",
-        "same sitting pose, head centered, one hand slightly raised from thigh, stool and body position identical",
+        "sitting pose with NO furniture, knees bent 90 degrees floating in air, both hands resting on thighs, feet dangling",
+        "same sitting pose, head tilted 1px right, hands unchanged on thighs, body position identical, NO chair or stool",
+        "same sitting pose, head centered, one hand slightly raised from thigh, body position identical, NO chair or stool",
     ],
     "work": [
-        "sitting at a small desk, arms extended forward onto desk surface, hands together, desk visible at waist height",
-        "same desk and sitting position, left hand 1px higher in typing motion, right hand stays on desk",
-        "same desk and sitting position, right hand 1px higher in typing motion, left hand stays on desk",
+        "sitting pose with arms extended forward as if typing, hands together at waist height, NO desk NO chair, floating sit",
+        "same sitting pose, left hand 1px higher in typing motion, right hand stays, NO furniture, body position identical",
+        "same sitting pose, right hand 1px higher in typing motion, left hand stays, NO furniture, body position identical",
     ],
 }
 
@@ -100,7 +100,7 @@ ANIMATION CONTINUITY: A previous animation frame is attached as reference.
 This frame MUST continue the motion smoothly:
 - Keep the EXACT same body position, outfit, colors, and proportions
 - ONLY move the specific limbs described in the POSE
-- Props (desk, stool) must stay in the EXACT same position and size
+- Do NOT draw any furniture (no chair, no desk, no stool) — character will be overlaid on game furniture
 - Background and character placement must be identical""" if is_chained else ""
 
     return f"""Generate a pixel art character sprite animation frame.
