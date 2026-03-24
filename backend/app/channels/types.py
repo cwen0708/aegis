@@ -89,6 +89,9 @@ class OutboundMessage:
     # 用於編輯訊息（先回再更新）
     edit_message_id: Optional[str] = None
 
+    # LINE Reply API token（免費，不計配額）
+    reply_token: Optional[str] = None
+
     # 多模態附件
     attachments: list[Attachment] = field(default_factory=list)
 

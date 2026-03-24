@@ -134,6 +134,7 @@ class MessageRouter:
             platform=msg.platform,
             text=THINKING_MESSAGE,
             parse_mode=ParseMode.PLAIN,
+            reply_token=msg.raw_data.get("reply_token"),
         )
         message_id = await channel.send(placeholder_msg)
 

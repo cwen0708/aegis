@@ -385,6 +385,14 @@ class LineChannel(ChannelBase):
             logger.warning("[LINE] API not ready")
             return False
 
+        # Reply API 優先（免費，不計配額）
+        if msg.reply_token:
+            success = await self.reply(msg.reply_token, msg.text)
+            if success:
+                import time
+                return str(int(time.time() * 1000))
+            # reply_token 過期（30秒限制），fallthrough 到 push
+
         # LINE 不支援編輯訊息，直接跳過 thinking 訊息
         if msg.edit_message_id:
             # 編輯 = 發送新訊息（LINE 限制）
