@@ -317,6 +317,7 @@ const stageConfigForm = ref({
   is_ai_stage: true,
   on_success_action: 'none',
   on_fail_action: 'none',
+  auto_commit: false,
 })
 
 useEscapeKey(showStageConfigDialog, () => { showStageConfigDialog.value = false })
@@ -329,6 +330,7 @@ function openStageConfigDialog(stage: any) {
     is_ai_stage: stage.is_ai_stage ?? true,
     on_success_action: stage.on_success_action || 'none',
     on_fail_action: stage.on_fail_action || 'none',
+    auto_commit: stage.auto_commit ?? false,
   }
   showStageConfigDialog.value = true
 }
@@ -998,6 +1000,24 @@ async function unarchiveCard(cardId: number) {
           >
             <option v-for="opt in getActionOptions(configuringStage?.id)" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
           </select>
+        </div>
+
+        <!-- Auto Commit -->
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-sm text-slate-200">自動提交</div>
+            <div class="text-[10px] text-slate-500">成功自動 git commit，失敗保存到分支</div>
+          </div>
+          <button
+            @click="stageConfigForm.auto_commit = !stageConfigForm.auto_commit"
+            class="relative w-10 h-5 rounded-full transition-colors"
+            :class="stageConfigForm.auto_commit ? 'bg-emerald-500' : 'bg-slate-600'"
+          >
+            <span
+              class="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform"
+              :class="stageConfigForm.auto_commit ? 'left-5' : 'left-0.5'"
+            />
+          </button>
         </div>
 
         <!-- Actions -->
