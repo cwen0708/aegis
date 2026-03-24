@@ -24,7 +24,7 @@ async function fetchProjects() {
     const data = await res.json()
     let filtered = data.filter((p: any) => p.is_active)
 
-    projects.value = filtered
+    projects.value = filtered.sort((a: any, b: any) => a.name.localeCompare(b.name))
   }
 }
 
