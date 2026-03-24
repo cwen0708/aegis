@@ -287,6 +287,14 @@ onMounted(async () => {
         <Download :size="14" />
         套用到成員
       </button>
+      <a
+        :href="`/api/v1/members/${memberId}/sprite/download-raw`"
+        target="_blank"
+        class="flex items-center gap-1.5 px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white text-sm rounded-lg"
+      >
+        <Download :size="14" />
+        下載原圖
+      </a>
       <span v-if="generating" class="text-xs text-slate-500">
         離開頁面不會丟失進度，回來可繼續
       </span>
