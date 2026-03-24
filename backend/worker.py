@@ -1458,12 +1458,20 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
             # 一般卡片也執行 stage action（流水線流轉）
             _apply_worker_stage_action(idx, new_status)
 
-            # 自動 git 管理：成功 → commit，失敗 → 保存到分支再還原 main
+            # 自動 git 管理（需列表開啟 auto_commit）
             if project_path:
-                if new_status == "completed":
-                    _auto_commit_on_success(project_path, idx.card_id, idx.title, member_slug)
-                else:
-                    _auto_shelve_on_failure(project_path, idx.card_id, idx.title, member_slug)
+                stage_auto_commit = False
+                try:
+                    with Session(engine) as _s:
+                        _sl = _s.get(StageList, idx.list_id)
+                        stage_auto_commit = _sl.auto_commit if _sl else False
+                except Exception:
+                    pass
+                if stage_auto_commit:
+                    if new_status == "completed":
+                        _auto_commit_on_success(project_path, idx.card_id, idx.title, member_slug)
+                    else:
+                        _auto_shelve_on_failure(project_path, idx.card_id, idx.title, member_slug)
 
         # 解析 AI 輸出中的 json:create_cards 區塊（跨成員協作、審查卡片等）
         output_text = result.get("output", "")

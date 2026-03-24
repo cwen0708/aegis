@@ -49,6 +49,7 @@ class StageListResponse(BaseModel):
     # 完成/失敗動作
     on_success_action: str = "none"
     on_fail_action: str = "none"
+    auto_commit: bool = False
 
 # ==========================================
 # Project Schemas
@@ -85,6 +86,7 @@ class StageListUpdateRequest(BaseModel):
     # 完成/失敗後動作
     on_success_action: Optional[str] = None  # none | move_to:<list_id> | archive | delete
     on_fail_action: Optional[str] = None
+    auto_commit: Optional[bool] = None  # 成功自動 git commit
 
 
 class MemberListCreateRequest(BaseModel):

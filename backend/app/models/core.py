@@ -46,6 +46,7 @@ class StageList(SQLModel, table=True):
     # 完成/失敗後動作: none | move_to:<list_id> | archive | delete
     on_success_action: str = Field(default="none")
     on_fail_action: str = Field(default="none")
+    auto_commit: bool = Field(default=False)  # 成功自動 git commit，失敗自動 shelve 到分支
 
     project: Optional[Project] = Relationship(back_populates="lists")
     cards: List["Card"] = Relationship(back_populates="stage_list")
