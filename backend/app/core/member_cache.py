@@ -127,10 +127,21 @@ class MemberCache:
         return profile
 
     def _is_stale(self, profile: MemberProfile) -> bool:
-        """檢查任一檔案的 mtime 是否變動。"""
+        """檢查檔案變動（mtime 改變）或刪除（檔案不存在）或新增（目錄內容變了）。"""
         for path_str, old_mtime in profile._mtimes.items():
-            if _get_mtime(Path(path_str)) != old_mtime:
-                return True
+            p = Path(path_str)
+            if not p.exists():
+                return True  # 檔案被刪除
+            if _get_mtime(p) != old_mtime:
+                return True  # 檔案被修改
+        # 檢查新增：skills 目錄的檔案數是否變了
+        member_dir = _MEMBERS_ROOT / profile.slug
+        skills_dir = member_dir / "skills"
+        if skills_dir.exists():
+            current_files = {str(md) for md in skills_dir.glob("*.md")}
+            cached_files = {p for p in profile._mtimes if "/skills/" in p or "\\skills\\" in p}
+            if current_files != cached_files:
+                return True  # 有新增或刪除的 skill 檔案
         return False
 
 
