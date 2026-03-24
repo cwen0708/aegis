@@ -135,8 +135,7 @@ def _gen_image(api_key: str, prompt: str, ref: Optional[bytes] = None, portrait:
 
 
 def _remove_chroma_bg(img: Image.Image, tolerance: int = 30) -> Image.Image:
-    """品紅底（#FF00FF）轉透明：接近品紅色的像素設為 alpha=0
-    同時也處理白底（向下相容舊圖）"""
+    """品紅底（#FF00FF）轉透明：接近品紅色的像素設為 alpha=0"""
     img = img.convert("RGBA")
     pixels = img.load()
     w, h = img.size
@@ -144,11 +143,7 @@ def _remove_chroma_bg(img: Image.Image, tolerance: int = 30) -> Image.Image:
     for y in range(h):
         for x in range(w):
             r, g, b, a = pixels[x, y]
-            # 品紅色去背
             if abs(r - cr) <= tolerance and g <= tolerance and abs(b - cb) <= tolerance:
-                pixels[x, y] = (0, 0, 0, 0)
-            # 白底去背（向下相容）
-            elif r >= 240 and g >= 240 and b >= 240:
                 pixels[x, y] = (0, 0, 0, 0)
     return img
 
