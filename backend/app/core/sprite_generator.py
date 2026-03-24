@@ -48,19 +48,22 @@ DIR_NAMES = {
 
 ACTION_FRAMES = {
     "walk": [
-        "left leg 2px forward, right arm slightly forward, left arm slightly back, weight on right foot, torso upright",
-        "legs spread 4px apart in mid-stride, right leg back left leg front, both arms at mid-swing, body 1px lower",
-        "right leg 2px forward, left arm slightly forward, right arm slightly back, weight on left foot, torso upright",
+        # Frame 1→2→3→1 迴圈：左偏→中立→右偏→左偏...
+        "LEFT STEP: left foot 2px forward, right foot 2px back, right arm forward left arm back, torso upright",
+        "NEUTRAL: both feet side by side centered, both arms relaxed at sides, standing straight (return pose)",
+        "RIGHT STEP: right foot 2px forward, left foot 2px back, left arm forward right arm back, torso upright (mirror of frame 1)",
     ],
     "sit": [
-        "sitting pose with NO furniture, knees bent 90 degrees floating in air, both hands resting on thighs, feet dangling",
-        "same sitting pose, head tilted 1px right, hands unchanged on thighs, body position identical, NO chair or stool",
-        "same sitting pose, head centered, one hand slightly raised from thigh, body position identical, NO chair or stool",
+        # 坐姿微動迴圈：正坐→右傾→正坐(微變)→正坐...
+        "sitting pose, NO furniture, knees bent 90 degrees, both hands resting on thighs, head centered, feet dangling",
+        "same sitting pose, head tilted 1px right, hands unchanged, body identical, NO chair NO stool",
+        "same sitting pose as frame 1, head centered, fingers slightly spread on thighs, NO chair NO stool (loops back to frame 1)",
     ],
     "work": [
-        "sitting pose with arms extended forward as if typing, hands together at waist height, NO desk NO chair, floating sit",
-        "same sitting pose, left hand 1px higher in typing motion, right hand stays, NO furniture, body position identical",
-        "same sitting pose, right hand 1px higher in typing motion, left hand stays, NO furniture, body position identical",
+        # 打字迴圈：雙手齊→左手抬→雙手齊(同frame1)→左手抬...
+        "sitting pose, arms extended forward typing, both hands at same height, NO desk NO chair, floating sit",
+        "same pose, left hand raised 1px (keystroke), right hand stays, NO furniture, body identical",
+        "same pose as frame 1, both hands back to same height, NO furniture, body identical (loops back to frame 1)",
     ],
 }
 
@@ -108,8 +111,9 @@ This frame MUST continue the motion smoothly:
 CHARACTER: {desc}
 DIRECTION: {DIR_NAMES[direction]}
 POSE: {ACTION_FRAMES[action][frame]}
-FRAME: {frame + 1} of 3 in {action} animation cycle (loops: 1→2→3→1→2→3…)
-Frame 3 must transition smoothly BACK to frame 1 — this is a looping cycle, not a one-way sequence.
+FRAME: {frame + 1} of 3 — LOOPING cycle: 1→2→3→1→2→3…
+Frame 2 is the neutral/return pose. Frames 1 and 3 are opposite extremes (mirror of each other).
+Frame 3 MUST look almost identical to frame 1 but mirrored, so the loop is seamless.
 {chain_note}
 
 {BASE_STYLE}
