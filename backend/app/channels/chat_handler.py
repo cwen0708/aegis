@@ -73,36 +73,12 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
     if session_obj.total_output_tokens > token_limit:
         return "📊 本月 token 配額已用盡，請聯繫管理員"
 
-    # 5. 載入靈魂檔案
-    soul = ""
-    if member.slug:
-        soul = get_soul_content(member.slug)
-
-    # 5.5 載入技能檔案（shared + 成員專屬）
-    skills_content = ""
-    skill_texts = []
-
-    # 先載入 shared skills
-    from app.core.task_workspace import _INSTALL_ROOT
-    shared_skills_dir = _INSTALL_ROOT / ".aegis" / "shared" / "skills"
-    if shared_skills_dir.exists():
-        for md_file in sorted(shared_skills_dir.glob("*.md")):
-            try:
-                skill_texts.append(md_file.read_text(encoding="utf-8"))
-            except Exception:
-                pass
-
-    # 再載入成員專屬 skills（可覆蓋 shared）
-    if member.slug:
-        skills_list = list_skills(member.slug)
-        if skills_list:
-            for skill in skills_list:
-                content = get_skill_content(member.slug, skill["name"])
-                if content:
-                    skill_texts.append(content)
-
-    if skill_texts:
-        skills_content = "\n\n---\n\n".join(skill_texts)
+    # 5. 載入靈魂 + 技能（從預載快取，mtime 變動自動重讀）
+    from app.core.member_cache import member_cache
+    profile = member_cache.get(member.slug) if member.slug else None
+    soul = profile.soul if profile else ""
+    skill_texts = (profile.shared_skills + profile.skills) if profile else []
+    skills_content = "\n\n---\n\n".join(skill_texts) if skill_texts else ""
 
     # 6. 載入最近對話歷史
     history = _get_recent_messages(session_obj.id, limit=MAX_HISTORY_MESSAGES)
