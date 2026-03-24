@@ -171,7 +171,7 @@ function setupWsListener() {
   window.addEventListener('aegis:clone-progress', handleAegisEvent as EventListener)
 
   // Also hook into the raw WebSocket by patching the store
-  const token = sessionStorage.getItem('aegis-token') || ''
+  const token = localStorage.getItem('aegis-token') || ''
   const wsUrl = `${config.wsUrl}/ws?token=${token}`
 
   // Create a secondary WS connection dedicated to this page for raw message capture
@@ -194,7 +194,7 @@ let rawWsInstance: WebSocket | null = null
 let mounted = true
 
 function setupRawWs() {
-  const token = sessionStorage.getItem('aegis-token') || ''
+  const token = localStorage.getItem('aegis-token') || ''
   const wsUrl = `${config.wsUrl}/ws?token=${token}`
   rawWsInstance = new WebSocket(wsUrl)
   rawWsInstance.onmessage = (event) => {

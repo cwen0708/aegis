@@ -126,8 +126,8 @@ async function changePassword() {
     if (res.ok) {
       passwordSuccess.value = '密碼已更新'
       passwordForm.value = { current: '', new: '', confirm: '' }
-      // 清除 session，下次進入需重新驗證
-      sessionStorage.removeItem('aegis-admin-auth')
+      // 清除登入狀態，下次進入需重新驗證
+      localStorage.removeItem('aegis-admin-auth')
     } else {
       passwordError.value = data.detail || '修改失敗'
     }

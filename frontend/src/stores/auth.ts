@@ -13,7 +13,7 @@ interface UserInfo {
 }
 
 export const useAuthStore = defineStore('auth', () => {
-  const token = ref<string | null>(sessionStorage.getItem(TOKEN_KEY))
+  const token = ref<string | null>(localStorage.getItem(TOKEN_KEY))
   const requireLoginToView = ref(false)
   const policyLoaded = ref(false)
 
@@ -73,10 +73,10 @@ export const useAuthStore = defineStore('auth', () => {
     userType.value = type
     userInfo.value = user || null
     userProjectIds.value = projectIds || null
-    sessionStorage.setItem(TOKEN_KEY, newToken)
+    localStorage.setItem(TOKEN_KEY, newToken)
     // 相容舊機制
     if (type === 'admin') {
-      sessionStorage.setItem('aegis-admin-auth', 'true')
+      localStorage.setItem('aegis-admin-auth', 'true')
     }
   }
 
@@ -85,8 +85,8 @@ export const useAuthStore = defineStore('auth', () => {
     userType.value = null
     userInfo.value = null
     userProjectIds.value = null
-    sessionStorage.removeItem(TOKEN_KEY)
-    sessionStorage.removeItem('aegis-admin-auth')
+    localStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem('aegis-admin-auth')
   }
 
   function getAuthHeaders(): Record<string, string> {

@@ -29,7 +29,7 @@ export function useWebSocket() {
       return
     }
 
-    const token = sessionStorage.getItem('aegis-token') || ''
+    const token = localStorage.getItem('aegis-token') || ''
     const wsUrl = `${config.wsUrl}/ws?token=${token}`
 
     ws = new WebSocket(wsUrl)

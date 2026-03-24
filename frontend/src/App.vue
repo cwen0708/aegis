@@ -17,8 +17,8 @@ const auth = useAuthStore()
 const canAccessSettings = computed(() => {
   if (auth.isAdmin) return true
   if ((auth.userInfo?.level ?? 0) >= 3) return true
-  // 重整時 fetchMe 尚未完成，先用 sessionStorage 判斷
-  if (auth.token && sessionStorage.getItem('aegis-admin-auth')) return true
+  // 重整時 fetchMe 尚未完成，先用 localStorage 判斷
+  if (auth.token && localStorage.getItem('aegis-admin-auth')) return true
   return false
 })
 
@@ -39,7 +39,7 @@ const { isMobile } = useResponsive()
 const rooms = ref<{id: number, name: string}[]>([])
 async function fetchRooms() {
   try {
-    const token = sessionStorage.getItem('aegis-token')
+    const token = localStorage.getItem('aegis-token')
     const headers: Record<string, string> = {}
     if (token) headers['Authorization'] = `Bearer ${token}`
     const res = await fetch(`${config.apiUrl}/api/v1/rooms`, { headers })

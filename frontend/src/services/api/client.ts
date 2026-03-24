@@ -3,7 +3,7 @@ import { config } from '../../config'
 const BASE = config.apiUrl
 
 function authHeaders(extra?: Record<string, string>): Record<string, string> {
-  const token = sessionStorage.getItem('aegis-token')
+  const token = localStorage.getItem('aegis-token')
   const headers: Record<string, string> = { ...extra }
   if (token) headers['Authorization'] = `Bearer ${token}`
   return headers
@@ -11,8 +11,8 @@ function authHeaders(extra?: Record<string, string>): Record<string, string> {
 
 function handle401(res: Response) {
   if (res.status === 401) {
-    sessionStorage.removeItem('aegis-token')
-    sessionStorage.removeItem('aegis-admin-auth')
+    localStorage.removeItem('aegis-token')
+    localStorage.removeItem('aegis-admin-auth')
     window.location.href = '/login'
   }
 }
