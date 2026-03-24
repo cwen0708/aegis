@@ -48,19 +48,19 @@ DIR_NAMES = {
 
 ACTION_FRAMES = {
     "walk": [
-        "standing with left foot slightly forward, arms at sides (walk frame 1)",
-        "mid-stride, legs apart, arms swinging (walk frame 2)",
-        "standing with right foot slightly forward, arms at sides (walk frame 3)",
+        "left leg 2px forward, right arm slightly forward, left arm slightly back, weight on right foot, torso upright",
+        "legs spread 4px apart in mid-stride, right leg back left leg front, both arms at mid-swing, body 1px lower",
+        "right leg 2px forward, left arm slightly forward, right arm slightly back, weight on left foot, torso upright",
     ],
     "sit": [
-        "sitting on an invisible chair, hands on knees (sit frame 1)",
-        "sitting, slight head movement (sit frame 2)",
-        "sitting, hands repositioned slightly (sit frame 3)",
+        "sitting on a small stool, knees bent 90 degrees, both hands resting on thighs, feet flat on ground",
+        "same sitting pose, head tilted 1px right, hands unchanged on thighs, stool and body position identical",
+        "same sitting pose, head centered, one hand slightly raised from thigh, stool and body position identical",
     ],
     "work": [
-        "sitting at invisible desk, hands forward typing (work frame 1)",
-        "sitting, arms slightly moved, typing gesture (work frame 2)",
-        "sitting, hands shifted on keyboard (work frame 3)",
+        "sitting at a small desk, arms extended forward onto desk surface, hands together, desk visible at waist height",
+        "same desk and sitting position, left hand 1px higher in typing motion, right hand stays on desk",
+        "same desk and sitting position, right hand 1px higher in typing motion, left hand stays on desk",
     ],
 }
 
@@ -94,17 +94,27 @@ Same outfit, same colors, same proportions.
 Single character on solid MAGENTA (#FF00FF) background, 64x128 pixels."""
 
 
-def _anim_prompt(desc: str, direction: str, action: str, frame: int) -> str:
+def _anim_prompt(desc: str, direction: str, action: str, frame: int, is_chained: bool = False) -> str:
+    chain_note = """
+ANIMATION CONTINUITY: A previous animation frame is attached as reference.
+This frame MUST continue the motion smoothly:
+- Keep the EXACT same body position, outfit, colors, and proportions
+- ONLY move the specific limbs described in the POSE
+- Props (desk, stool) must stay in the EXACT same position and size
+- Background and character placement must be identical""" if is_chained else ""
+
     return f"""Generate a pixel art character sprite animation frame.
 
 CHARACTER: {desc}
 DIRECTION: {DIR_NAMES[direction]}
 POSE: {ACTION_FRAMES[action][frame]}
+FRAME: {frame + 1} of 3 in {action} animation cycle
+{chain_note}
 
 {BASE_STYLE}
 
 CONSISTENCY: Must match the reference image exactly - same character, same colors, same outfit.
-Only the pose/limbs change for animation.
+Only the specific limbs described in POSE change between frames.
 IMPORTANT: Draw ONLY ONE character. No duplicates, no multiple figures.
 Single character on solid MAGENTA (#FF00FF) background, 64x128 pixels."""
 
@@ -246,10 +256,20 @@ def generate_direction(member_id: int, desc: str, direction: str, api_key: str) 
 
 
 def generate_frame(member_id: int, desc: str, direction: str, action: str, frame: int, api_key: str) -> dict:
-    """Step 3: 動畫幀"""
-    ref_path = _member_dir(member_id) / f"hero_{direction}_orig.png"
+    """Step 3: 動畫幀（鏈式生成：frame 1/2 參考 frame 0）"""
+    d = _member_dir(member_id)
+
+    if frame == 0:
+        # frame 0: 參考該方向的靜態圖
+        ref_path = d / f"hero_{direction}_orig.png"
+    else:
+        # frame 1/2: 參考 frame 0 的原圖（鏈式連續性）
+        chain_path = d / f"{action}_{direction}_f0_orig.png"
+        ref_path = chain_path if chain_path.exists() else d / f"hero_{direction}_orig.png"
+
     ref = ref_path.read_bytes() if ref_path.exists() else None
-    data = _gen_image(api_key, _anim_prompt(desc, direction, action, frame), ref)
+    is_chained = frame > 0 and ref_path.name.startswith(f"{action}_")
+    data = _gen_image(api_key, _anim_prompt(desc, direction, action, frame, is_chained), ref)
     name = f"{action}_{direction}_f{frame}"
     path = _save(member_id, name, data)
     return {"status": "ok", "path": path, "step": name}
