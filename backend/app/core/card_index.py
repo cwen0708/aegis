@@ -15,6 +15,7 @@ def sync_card_to_index(
     card: CardData,
     project_id: int,
     file_path: str,
+    cron_job_id: int | None = None,
 ) -> None:
     """Upsert a single card's metadata into the index."""
     fpath = Path(file_path)
@@ -36,6 +37,8 @@ def sync_card_to_index(
         existing.updated_at = card.updated_at
         existing.content_hash = content_hash
         existing.file_mtime = mtime
+        if cron_job_id is not None:
+            existing.cron_job_id = cron_job_id
         session.add(existing)
     else:
         idx = CardIndex(
@@ -52,6 +55,7 @@ def sync_card_to_index(
             updated_at=card.updated_at,
             content_hash=content_hash,
             file_mtime=mtime,
+            cron_job_id=cron_job_id,
         )
         session.add(idx)
 

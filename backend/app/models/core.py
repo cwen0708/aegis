@@ -88,6 +88,7 @@ class CardIndex(SQLModel, table=True):
     content_hash: str = ""
     file_mtime: float = Field(default=0.0)
     member_id: Optional[int] = Field(default=None, index=True)  # 執行中的成員 ID
+    cron_job_id: Optional[int] = Field(default=None, index=True)  # 由哪個排程建立
 
 
 class CronJob(SQLModel, table=True):

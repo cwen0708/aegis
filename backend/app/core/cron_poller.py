@@ -147,17 +147,16 @@ def create_card_for_cron_job(session: Session, job: CronJob, ops_tag: Tag = None
     為 CronJob 建立執行卡片。
     回傳 (card_id, error_message)。card_id=None 表示跳過或失敗。
     """
-    cron_tag = f"cron_{job.id}"
     tz_name = _get_system_timezone(session)
 
     # 去重：檢查是否已存在待處理/執行中的卡片（failed 不阻擋下次觸發）
-    # 向後相容：同時檢查 tags_json（新）和 title（舊）
     from sqlalchemy import or_
+    cron_tag = f"cron_{job.id}"  # 向後相容用
     existing = session.exec(
         select(CardIndex)
         .where(or_(
-            CardIndex.tags_json.contains(cron_tag),
-            CardIndex.title.contains(cron_tag),
+            CardIndex.cron_job_id == job.id,
+            CardIndex.title.contains(cron_tag),  # 向後相容舊卡片
         ))
         .where(CardIndex.status.in_(["pending", "running"]))
     ).first()
@@ -218,11 +217,11 @@ def create_card_for_cron_job(session: Session, job: CronJob, ops_tag: Tag = None
         description=job.description or 'Auto-generated from Aegis Cron',
         content=full_content,
         status="pending",
-        tags=["Ops", cron_tag],
+        tags=["Ops"],
     )
     fpath = card_file_path(project.path, card_id)
     write_card(fpath, card_data)
-    sync_card_to_index(session, card_data, project_id=project.id, file_path=str(fpath))
+    sync_card_to_index(session, card_data, project_id=project.id, file_path=str(fpath), cron_job_id=job.id)
 
     # --- Dual-write: ORM Card ---
     old_card = Card(
