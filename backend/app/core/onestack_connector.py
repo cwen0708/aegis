@@ -62,6 +62,7 @@ class OneStackConnector:
         self.device_token: Optional[str] = None
         self._heartbeat_task: Optional[asyncio.Task] = None
         self._poll_task: Optional[asyncio.Task] = None
+        self._catalog_task: Optional[asyncio.Task] = None
         self._email_digest_task: Optional[asyncio.Task] = None
         self._email_digest_interval_hours: int = 6
         self._task_callback = None  # 外部註冊的任務回調
@@ -141,13 +142,14 @@ class OneStackConnector:
         method: str,
         table: str,
         params: Optional[Dict] = None,
-        json_data: Optional[Dict] = None
+        json_data: Optional[Any] = None,
+        prefer_override: Optional[str] = None,
     ) -> Optional[Any]:
         """發送請求到 Supabase REST API"""
         import httpx
 
         url = f"{self.supabase_url}/rest/v1/{table}"
-        prefer = "return=minimal" if method in ["PATCH", "DELETE"] else "return=representation"
+        prefer = prefer_override or ("return=minimal" if method in ["PATCH", "DELETE"] else "return=representation")
         headers = self._make_headers(prefer)
 
         try:
@@ -330,6 +332,151 @@ class OneStackConnector:
         if self._heartbeat_task and not self._heartbeat_task.done():
             self._heartbeat_task.cancel()
             logger.info("[OneStack] Heartbeat stopped")
+
+    # ─── 目錄同步（成員 + 專案 → Supabase） ───
+
+    CATALOG_SYNC_INTERVAL = 300  # 5 分鐘
+
+    async def sync_catalog(self):
+        """全量同步成員 + 專案目錄到 OneStack Supabase"""
+        if not self.enabled or not self.device_id:
+            return
+        try:
+            await self._sync_members()
+            await self._sync_projects()
+            logger.debug("[OneStack] Catalog synced")
+        except Exception as e:
+            logger.error(f"[OneStack] Catalog sync error: {e}")
+
+    async def _sync_members(self):
+        """UPSERT 成員列表"""
+        from sqlmodel import Session, select
+        from app.database import engine
+        from app.models.core import Member
+
+        with Session(engine) as session:
+            members = session.exec(select(Member)).all()
+
+        now = datetime.now(timezone.utc).isoformat()
+        rows = [
+            {
+                "device_id": self.device_id,
+                "aegis_member_id": m.id,
+                "name": m.name,
+                "slug": m.slug,
+                "avatar": m.avatar or "",
+                "role": m.role or "",
+                "description": m.description or "",
+                "portrait_url": m.portrait or "",
+                "sprite_sheet_url": m.sprite_sheet or "",
+                "sprite_scale": m.sprite_scale or 1.0,
+                "quick_actions": [],
+                "synced_at": now,
+            }
+            for m in members
+        ]
+
+        if rows:
+            await self._request(
+                "POST",
+                "aegis_members?on_conflict=device_id,aegis_member_id",
+                json_data=rows,
+                prefer_override="resolution=merge-duplicates,return=minimal",
+            )
+
+        # 刪除已移除的成員
+        aegis_ids = [m.id for m in members]
+        if aegis_ids:
+            id_list = ",".join(str(i) for i in aegis_ids)
+            await self._request(
+                "DELETE",
+                "aegis_members",
+                params={
+                    "device_id": f"eq.{self.device_id}",
+                    "aegis_member_id": f"not.in.({id_list})",
+                },
+            )
+
+    async def _sync_projects(self):
+        """UPSERT 專案列表"""
+        from sqlmodel import Session, select
+        from app.database import engine
+        from app.models.core import Project, StageList, Member
+
+        with Session(engine) as session:
+            projects = session.exec(
+                select(Project).where(Project.is_active == True)
+            ).all()
+
+            now = datetime.now(timezone.utc).isoformat()
+            rows = []
+            for p in projects:
+                stages = session.exec(
+                    select(StageList)
+                    .where(StageList.project_id == p.id)
+                    .order_by(StageList.position)
+                ).all()
+                default_slug = ""
+                if p.default_member_id:
+                    dm = session.get(Member, p.default_member_id)
+                    if dm:
+                        default_slug = dm.slug
+                rows.append({
+                    "device_id": self.device_id,
+                    "aegis_project_id": p.id,
+                    "name": p.name,
+                    "is_active": p.is_active,
+                    "is_system": p.is_system,
+                    "default_member_slug": default_slug,
+                    "stage_names": [s.name for s in stages],
+                    "synced_at": now,
+                })
+
+        if rows:
+            await self._request(
+                "POST",
+                "aegis_projects?on_conflict=device_id,aegis_project_id",
+                json_data=rows,
+                prefer_override="resolution=merge-duplicates,return=minimal",
+            )
+
+        # 刪除已移除的專案
+        aegis_ids = [r["aegis_project_id"] for r in rows]
+        if aegis_ids:
+            id_list = ",".join(str(i) for i in aegis_ids)
+            await self._request(
+                "DELETE",
+                "aegis_projects",
+                params={
+                    "device_id": f"eq.{self.device_id}",
+                    "aegis_project_id": f"not.in.({id_list})",
+                },
+            )
+
+    async def _catalog_sync_loop(self):
+        """目錄同步循環（啟動立即一次，之後每 5 分鐘）"""
+        await asyncio.sleep(5)  # 等 DB 初始化完
+        await self.sync_catalog()
+        while True:
+            await asyncio.sleep(self.CATALOG_SYNC_INTERVAL)
+            try:
+                await self.sync_catalog()
+            except Exception as e:
+                logger.error(f"[OneStack] Catalog sync loop error: {e}")
+
+    def start_catalog_sync(self):
+        """啟動目錄同步任務"""
+        if not self.enabled:
+            return
+        if self._catalog_task is None or self._catalog_task.done():
+            self._catalog_task = asyncio.create_task(self._catalog_sync_loop())
+            logger.info("[OneStack] Catalog sync started (every 5min)")
+
+    def stop_catalog_sync(self):
+        """停止目錄同步任務"""
+        if self._catalog_task and not self._catalog_task.done():
+            self._catalog_task.cancel()
+            logger.info("[OneStack] Catalog sync stopped")
 
     # ─── 任務輪詢（未來可改 Realtime） ───
 
@@ -1066,6 +1213,9 @@ async def start_onestack_connector():
         # 註冊 aegis_commands 回調 + 啟動輪詢（新機制）
         connector.on_command(_handle_aegis_command)
         connector.start_command_polling()
+
+        # 啟動目錄同步（成員 + 專案 → Supabase）
+        connector.start_catalog_sync()
 
         # 讀取 Email digest 設定
         try:
