@@ -198,6 +198,17 @@ def composite(member_id: int, session: Session = Depends(get_session)):
     return {"status": "ok", "path": sprite_url, "scale": sprite_scale}
 
 
+@router.get("/members/{member_id}/sprite/download-raw")
+def download_raw_sheet(member_id: int, session: Session = Depends(get_session)):
+    """下載原尺寸合併圖（未縮小、未去背，品紅底），供手動編輯"""
+    _get_member(member_id, session)
+    from app.core.sprite_generator import composite_sheet_raw
+    path = composite_sheet_raw(member_id)
+    if not path:
+        raise HTTPException(400, "No original frames found")
+    return FileResponse(path, media_type="image/png", filename=f"sprite_raw_{member_id}.png")
+
+
 @router.post("/members/{member_id}/sprite/apply", dependencies=[Depends(require_admin_token)])
 def apply(member_id: int, session: Session = Depends(get_session)):
     member = _get_member(member_id, session)

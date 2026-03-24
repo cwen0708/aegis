@@ -291,6 +291,48 @@ def composite_sheet(member_id: int) -> Optional[str]:
     return str(out)
 
 
+def composite_sheet_raw(member_id: int) -> Optional[str]:
+    """合成原尺寸 sprite sheet（未縮小、未去背），供手動編輯用"""
+    d = _member_dir(member_id)
+
+    # 偵測原圖尺寸（從第一張 _orig 取）
+    sample = None
+    for action in ACTIONS:
+        for direction in DIRECTIONS:
+            p = d / f"{action}_{direction}_f0_orig.png"
+            if p.exists():
+                sample = Image.open(p)
+                break
+        if sample:
+            break
+    if not sample:
+        # fallback: 用 hero_south_orig
+        p = d / "hero_south_orig.png"
+        if p.exists():
+            sample = Image.open(p)
+    if not sample:
+        return None
+
+    orig_w, orig_h = sample.size
+    sheet = Image.new("RGBA", (orig_w * SHEET_COLS, orig_h * SHEET_ROWS), CHROMA_KEY + (255,))
+
+    row = 0
+    for action in ACTIONS:
+        for direction in DIRECTIONS:
+            for frame in range(3):
+                p = d / f"{action}_{direction}_f{frame}_orig.png"
+                if p.exists():
+                    img = Image.open(p).convert("RGBA")
+                    if img.size != (orig_w, orig_h):
+                        img = img.resize((orig_w, orig_h), Image.NEAREST)
+                    sheet.paste(img, (frame * orig_w, row * orig_h))
+            row += 1
+
+    out = d / "sprite_sheet_raw.png"
+    sheet.save(out, "PNG")
+    return str(out)
+
+
 def apply_sheet(member_id: int, sprite_index: int) -> Optional[str]:
     """Step 5: 複製到前端 assets，使用 member_char_{member_id}.png 不覆蓋預設"""
     src = _member_dir(member_id) / "sprite_sheet.png"
