@@ -105,7 +105,8 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
                       project_id: Optional[int] = None,
                       auth_info: Optional[Dict[str, str]] = None,
                       extra_env: Optional[Dict[str, str]] = None,
-                      on_stream: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
+                      on_stream: Optional[Callable[[str], None]] = None,
+                      resume_session_id: Optional[str] = None) -> Dict[str, Any]:
     """
     執行單一 AI 呼叫（用於 chat / email 等即時場景）。
 
@@ -136,6 +137,11 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
         mcp_config_path = _get_member_mcp_config(member_id)
         if mcp_config_path:
             cmd.extend(["--mcp-config", mcp_config_path])
+
+    # Session resume 支援（chat 對話延續）
+    if resume_session_id and provider_name == "claude":
+        cmd.extend(["--resume", resume_session_id])
+        logger.info(f"[Runner] Resuming session {resume_session_id[:8]}...")
 
     stdin_prompt = config.get("stdin_prompt", False)
 
@@ -244,6 +250,7 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
             "provider": provider_name,
             "exit_code": proc.returncode,
             "token_info": token_info,
+            "session_id": token_info.get("session_id"),
         }
 
     except Exception as e:

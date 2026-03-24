@@ -736,7 +736,8 @@ def _save_member_dialogue(member_id: int, card_id: int, card_title: str,
 def run_task(card_id: int, project_path: str, prompt: str, phase: str,
              forced_provider: Optional[str], forced_model: str, card_title: str,
              project_name: str, member_id: Optional[int],
-             auth_info: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+             auth_info: Optional[Dict[str, str]] = None,
+             resume_session_id: Optional[str] = None) -> Dict[str, Any]:
     """執行單一 AI 任務（使用 PTY 實現即時輸出串流）
 
     auth_info: 帳號認證資訊
@@ -769,6 +770,11 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
             if arg == "--model" and i + 1 < len(cmd_parts):
                 cmd_parts[i + 1] = forced_model
                 break
+
+    # Session resume 支援（chat 對話延續）
+    if resume_session_id and provider_name == "claude":
+        cmd_parts.extend(["--resume", resume_session_id])
+        logger.info(f"[Worker] Resuming session {resume_session_id[:8]}... for card {card_id}")
 
     stdin_prompt = config.get("stdin_prompt", False)
 
@@ -1264,6 +1270,12 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
     is_chat_mode = "Chat" in _card_tags or idx.title.startswith("[chat]") or _chat_match is not None
     chat_id = _chat_match.group(1) if _chat_match else None
 
+    # Session Pool 查詢（chat 對話延續）
+    _resume_session_id = None
+    if is_chat_mode and chat_id:
+        from app.core.session_pool import session_pool as _sp
+        _resume_session_id, _ = _sp.get_or_create(chat_id)
+
     if is_chat_mode:
         # Chat 模式：不建 workspace，直接在專案目錄執行
         workspace_dir = None
@@ -1271,7 +1283,7 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
         # 移除 chat metadata，只保留用戶訊息
         clean_content = _re_chat.sub(r'<!-- chat_id: .+? -->', '', card_data.content or "").strip()
         effective_prompt = clean_content or "你好"
-        logger.info(f"[Worker] Chat mode: card={idx.card_id} chat_id={chat_id}")
+        logger.info(f"[Worker] Chat mode: card={idx.card_id} chat_id={chat_id} resume={'yes' if _resume_session_id else 'new'}")
     else:
         # 準備工作區
         workspace_dir = None
@@ -1319,6 +1331,7 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
             project_name=project_name,
             member_id=member_id,
             auth_info=acct_auth,
+            resume_session_id=_resume_session_id if is_chat_mode else None,
         )
 
         if result["status"] == "success":
@@ -1399,6 +1412,12 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
                 threading.Thread(target=_stream_chat, daemon=True).start()
         except Exception:
             pass
+
+        # 註冊 session（供下次 resume）
+        _new_sid = result.get("token_info", {}).get("session_id")
+        if _new_sid and chat_id:
+            from app.core.session_pool import session_pool as _sp2
+            _sp2.register(chat_id, _new_sid)
 
         # Chat 卡片完成後刪除（不保留）
         delete_card_completely(idx.card_id)

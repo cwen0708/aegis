@@ -25,6 +25,7 @@ def parse_claude_json(output: str) -> Dict[str, Any]:
             model_name = list(model_usage.keys())[0]
         return {
             "result_text": data.get("result", ""),
+            "session_id": data.get("session_id"),
             "model": model_name,
             "duration_ms": data.get("duration_ms", 0),
             "cost_usd": data.get("total_cost_usd", 0),
@@ -64,6 +65,7 @@ def parse_stream_json_tokens(line: str) -> Dict[str, Any]:
         model_name = list(model_usage.keys())[0] if model_usage else ""
         return {
             "result_text": data.get("result", ""),
+            "session_id": data.get("session_id"),
             "model": model_name,
             "duration_ms": data.get("duration_ms", 0),
             "cost_usd": data.get("total_cost_usd", 0),
