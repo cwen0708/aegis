@@ -512,36 +512,81 @@ def save_cron_log(cron_job_id: int, cron_job_name: str, card_id: int, card_title
         logger.warning(f"[CronLog] Failed to save: {e}")
 
 
-def _auto_commit_on_success(project_path: str, card_id: int, card_title: str, member_slug: str = ""):
-    """任務成功後自動 commit 未追蹤/已修改的檔案到 git（僅本地，不 push）"""
+def _git_has_changes(project_path: str) -> bool:
+    """檢查 project_path 是否為 git repo 且有未提交的變更"""
+    import subprocess as _sp
     try:
-        import subprocess as _sp
-        # 檢查是否有變更
-        status = _sp.run(
+        r = _sp.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=project_path, capture_output=True, text=True, timeout=5
+        )
+        if r.returncode != 0:
+            return False
+        s = _sp.run(
             ["git", "status", "--porcelain"],
             cwd=project_path, capture_output=True, text=True, timeout=10
         )
-        if not status.stdout.strip():
+        return bool(s.stdout.strip())
+    except Exception:
+        return False
+
+
+def _git_commit_changes(project_path: str, card_id: int, card_title: str,
+                        member_slug: str = "", prefix: str = "feat"):
+    """git add -A + commit，回傳 commit hash 或 None"""
+    import subprocess as _sp
+    _sp.run(["git", "add", "-A"], cwd=project_path, timeout=10)
+    clean_title = card_title.replace("[reviewed] ", "").replace("[重構] ", "refactor: ").strip()
+    if not any(clean_title.startswith(p) for p in ("feat:", "fix:", "refactor:", "chore:", "test:", "docs:")):
+        clean_title = f"{prefix}: {clean_title}"
+    author = member_slug or "aegis"
+    msg = f"{clean_title}\n\nCard #{card_id} by {author}"
+    r = _sp.run(
+        ["git", "commit", "-m", msg, "--author", f"{author} <{author}@aegis.local>"],
+        cwd=project_path, capture_output=True, text=True, timeout=15
+    )
+    if r.returncode == 0:
+        h = _sp.run(["git", "rev-parse", "--short", "HEAD"],
+                     cwd=project_path, capture_output=True, text=True, timeout=5)
+        return h.stdout.strip()
+    return None
+
+
+def _auto_commit_on_success(project_path: str, card_id: int, card_title: str, member_slug: str = ""):
+    """任務成功後自動 commit 到 main（僅本地，不 push）"""
+    try:
+        if not _git_has_changes(project_path):
             logger.info(f"[AutoCommit] Card {card_id}: no changes to commit")
             return
-
-        # git add -A
-        _sp.run(["git", "add", "-A"], cwd=project_path, timeout=10)
-
-        # 組合 commit message：卡片 title + 來源資訊
-        clean_title = card_title.replace("[reviewed] ", "").replace("[重構] ", "refactor: ").strip()
-        if not any(clean_title.startswith(p) for p in ("feat:", "fix:", "refactor:", "chore:", "test:", "docs:")):
-            clean_title = f"feat: {clean_title}"
-        author = member_slug or "aegis"
-        msg = f"{clean_title}\n\nCard #{card_id} by {author}"
-
-        _sp.run(
-            ["git", "commit", "-m", msg, "--author", f"{author} <{author}@aegis.local>"],
-            cwd=project_path, capture_output=True, text=True, timeout=15
-        )
-        logger.info(f"[AutoCommit] Card {card_id}: committed to {project_path}")
+        h = _git_commit_changes(project_path, card_id, card_title, member_slug)
+        logger.info(f"[AutoCommit] Card {card_id}: committed {h} to {project_path}")
     except Exception as e:
         logger.warning(f"[AutoCommit] Card {card_id}: failed: {e}")
+
+
+def _auto_shelve_on_failure(project_path: str, card_id: int, card_title: str, member_slug: str = ""):
+    """任務失敗後：將殘留變更保存到分支 failed/card-{id}，然後還原 main"""
+    try:
+        if not _git_has_changes(project_path):
+            return
+        import subprocess as _sp
+        branch = f"failed/card-{card_id}"
+        # 建分支、commit 失敗的變更
+        _sp.run(["git", "checkout", "-b", branch], cwd=project_path, timeout=10)
+        h = _git_commit_changes(project_path, card_id, card_title, member_slug, prefix="wip")
+        # 切回 main
+        _sp.run(["git", "checkout", "main"], cwd=project_path, timeout=10)
+        logger.info(f"[AutoShelve] Card {card_id}: shelved {h} to branch {branch}, main is clean")
+    except Exception as e:
+        # 確保回到 main
+        try:
+            import subprocess as _sp2
+            _sp2.run(["git", "checkout", "main"], cwd=project_path, timeout=10)
+            _sp2.run(["git", "checkout", "--", "."], cwd=project_path, timeout=10)
+            _sp2.run(["git", "clean", "-fd"], cwd=project_path, timeout=10)
+        except Exception:
+            pass
+        logger.warning(f"[AutoShelve] Card {card_id}: failed: {e}")
 
 
 def _apply_worker_stage_action(idx, new_status: str) -> str:
@@ -1413,9 +1458,12 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
             # 一般卡片也執行 stage action（流水線流轉）
             _apply_worker_stage_action(idx, new_status)
 
-            # 成功時自動 commit 到本地 git（不 push）
-            if new_status == "completed" and project_path:
-                _auto_commit_on_success(project_path, idx.card_id, idx.title, member_slug)
+            # 自動 git 管理：成功 → commit，失敗 → 保存到分支再還原 main
+            if project_path:
+                if new_status == "completed":
+                    _auto_commit_on_success(project_path, idx.card_id, idx.title, member_slug)
+                else:
+                    _auto_shelve_on_failure(project_path, idx.card_id, idx.title, member_slug)
 
         # 解析 AI 輸出中的 json:create_cards 區塊（跨成員協作、審查卡片等）
         output_text = result.get("output", "")
