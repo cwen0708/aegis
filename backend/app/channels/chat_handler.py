@@ -172,12 +172,10 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
             _, summary = parsed
             asyncio.run_coroutine_threadsafe(_edit_placeholder(f"🤔 {summary}"), _loop)
 
-    # 11. 查詢 Session Pool（延續對話）
-    from app.core.session_pool import session_pool
+    # 11. 呼叫 AI（Process Pool 持久進程）
     chat_session_key = f"{bot_user.platform}:{msg.chat_id}:{member.slug}"
-    resume_id, _is_new = session_pool.get_or_create(chat_session_key)
+    use_pool = provider == "claude"  # Claude 走 Process Pool，Gemini/Ollama 走原有路徑
 
-    # 12. 呼叫 AI（帶 on_stream + session resume）
     try:
         result = await run_ai_task(
             task_id=0,
@@ -192,16 +190,12 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
             auth_info=auth_info,
             extra_env=mcp_extra_env or None,
             on_stream=on_stream if placeholder_message_id else None,
-            resume_session_id=resume_id,
+            use_process_pool=use_pool,
+            chat_key=chat_session_key if use_pool else None,
         )
     except Exception as e:
         logger.error(f"[Chat] AI task failed: {e}")
         return "❌ AI 回應失敗，請稍後再試"
-
-    # 13. 註冊 session（供下次 resume）
-    new_session_id = result.get("session_id")
-    if new_session_id:
-        session_pool.register(chat_session_key, new_session_id)
 
     if result.get("status") != "success":
         return f"❌ AI 回應錯誤: {result.get('output', '未知錯誤')[:100]}"
