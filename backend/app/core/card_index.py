@@ -32,6 +32,7 @@ def sync_card_to_index(
         existing.title = card.title
         existing.description = card.description
         existing.tags_json = tags_json
+        existing.model = card.model
         existing.is_archived = card.is_archived
         existing.created_at = card.created_at
         existing.updated_at = card.updated_at
@@ -50,6 +51,7 @@ def sync_card_to_index(
             title=card.title,
             description=card.description,
             tags_json=tags_json,
+            model=card.model,
             is_archived=card.is_archived,
             created_at=card.created_at,
             updated_at=card.updated_at,

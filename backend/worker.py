@@ -1199,6 +1199,15 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
     if not accounts_list:
         accounts_list = [("claude", "", {}, "default")]
 
+    # 卡片級模型覆蓋：若卡片 frontmatter 指定了 model，優先使用
+    card_model = getattr(idx, "model", None) or None
+    if card_model:
+        accounts_list = [
+            (provider, card_model, auth, name)
+            for provider, _model, auth, name in accounts_list
+        ]
+        logger.info(f"[Worker] Card {idx.card_id}: card-level model override → {card_model}")
+
     result = None
     for attempt_idx, (acct_provider, acct_model, acct_auth, acct_name) in enumerate(accounts_list):
         if attempt_idx > 0:
