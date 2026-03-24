@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { Building2, Plus, Loader2, ChevronRight, FolderKanban, Users } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
+import { useDialogState } from '../../composables/useDialogState'
 import { config } from '../../config'
 import { authHeaders } from '../../utils/authFetch'
 
@@ -27,7 +28,7 @@ const loading = ref(true)
 const rooms = ref<RoomInfo[]>([])
 
 // Create dialog
-const showCreateDialog = ref(false)
+const createDialog = useDialogState()
 const createForm = ref({
   name: '',
   description: '',
@@ -56,7 +57,7 @@ onMounted(() => {
 
 function openCreateDialog() {
   createForm.value = { name: '', description: '' }
-  showCreateDialog.value = true
+  createDialog.open()
 }
 
 async function createRoom() {
@@ -77,7 +78,7 @@ async function createRoom() {
     }
     const newRoom = await res.json()
     store.addToast('房間已建立', 'success')
-    showCreateDialog.value = false
+    createDialog.close()
     router.push(`/settings/rooms/${newRoom.id}`)
   } catch (e: any) {
     store.addToast(e.message, 'error')
@@ -143,9 +144,9 @@ async function createRoom() {
     <!-- Dialog: Create Room -->
     <Teleport to="body">
       <div
-        v-if="showCreateDialog"
+        v-if="createDialog.isOpen.value"
         class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-        @click.self="showCreateDialog = false"
+        @click.self="createDialog.close()"
       >
         <div class="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-lg p-6 space-y-4">
           <h3 class="text-sm font-bold text-slate-200">新增房間</h3>
@@ -172,7 +173,7 @@ async function createRoom() {
 
           <div class="flex justify-end gap-3 pt-2">
             <button
-              @click="showCreateDialog = false"
+              @click="createDialog.close()"
               class="px-4 py-2 text-slate-400 hover:text-slate-200 transition"
             >
               取消

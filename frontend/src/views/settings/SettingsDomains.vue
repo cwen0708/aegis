@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { Globe, Plus, Loader2, Building2, Star, ChevronRight, X } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
+import { useDialogState } from '../../composables/useDialogState'
 import { config } from '../../config'
 import { authHeaders } from '../../utils/authFetch'
 
@@ -34,7 +35,7 @@ const domains = ref<DomainInfo[]>([])
 const roomOptions = ref<RoomOption[]>([])
 
 // Create dialog
-const showCreateDialog = ref(false)
+const createDialog = useDialogState()
 const createForm = ref({
   hostname: '',
   name: '',
@@ -80,7 +81,7 @@ onMounted(() => {
 
 function openCreateDialog() {
   createForm.value = { hostname: '', name: '', is_default: false, room_ids: [] }
-  showCreateDialog.value = true
+  createDialog.open()
 }
 
 async function createDomain() {
@@ -106,7 +107,7 @@ async function createDomain() {
     }
     const created = await res.json()
     store.addToast('網域已建立', 'success')
-    showCreateDialog.value = false
+    createDialog.close()
     router.push(`/settings/domains/${created.id}`)
   } catch (e: any) {
     store.addToast(e.message, 'error')
@@ -198,14 +199,14 @@ function getRoomName(id: number): string {
     <!-- Dialog: Create Domain -->
     <Teleport to="body">
       <div
-        v-if="showCreateDialog"
+        v-if="createDialog.isOpen.value"
         class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-        @click.self="showCreateDialog = false"
+        @click.self="createDialog.close()"
       >
         <div class="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-lg p-6 space-y-4 max-h-[85vh] overflow-y-auto">
           <div class="flex items-center justify-between">
             <h3 class="text-sm font-bold text-slate-200">新增網域</h3>
-            <button @click="showCreateDialog = false" class="text-slate-400 hover:text-slate-200">
+            <button @click="createDialog.close()" class="text-slate-400 hover:text-slate-200">
               <X class="w-5 h-5" />
             </button>
           </div>
@@ -269,7 +270,7 @@ function getRoomName(id: number): string {
 
           <div class="flex justify-end gap-3 pt-2">
             <button
-              @click="showCreateDialog = false"
+              @click="createDialog.close()"
               class="px-4 py-2 text-slate-400 hover:text-slate-200 transition"
             >
               取消

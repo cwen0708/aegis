@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { Plus, FolderOpen, Lock, Loader2, Github, Search, Globe, ChevronRight, X } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
+import { useDialogState } from '../../composables/useDialogState'
 
 import { config } from '../../config'
 import { authHeaders } from '../../utils/authFetch'
@@ -42,7 +43,7 @@ const projects = ref<ProjectInfo[]>([])
 const members = ref<MemberOption[]>([])
 
 // Create Dialog (only for creating new projects)
-const showCreateDialog = ref(false)
+const createDialog = useDialogState()
 const createMode = ref<'local' | 'github'>('local')
 const form = ref({
   name: '',
@@ -105,7 +106,7 @@ function openCreateDialog() {
   githubSelectedRepo.value = null
   cloning.value = false
   cloneStatus.value = ''
-  showCreateDialog.value = true
+  createDialog.open()
 }
 
 // --- Local create ---
@@ -126,7 +127,7 @@ async function createProject() {
       throw new Error(err.detail)
     }
     store.addToast('專案已建立', 'success')
-    showCreateDialog.value = false
+    createDialog.close()
     await fetchProjects()
   } catch (e: any) {
     store.addToast(e.message, 'error')
@@ -202,7 +203,7 @@ function onCloneProgress(e: Event) {
     cloning.value = false
     cloneStatus.value = ''
     store.addToast('Clone 完成，專案已建立', 'success')
-    showCreateDialog.value = false
+    createDialog.close()
     fetchProjects()
   } else if (detail.status === 'error') {
     cloning.value = false
@@ -262,7 +263,7 @@ async function pollCloneStatus(taskId: string) {
         cloning.value = false
         cloneStatus.value = ''
         store.addToast('Clone 完成，專案已建立', 'success')
-        showCreateDialog.value = false
+        createDialog.close()
         fetchProjects()
         return
       } else if (data.status === 'error') {
@@ -368,14 +369,14 @@ const canSaveGithub = computed(() => {
     <!-- Dialog: Create Project (only for new projects) -->
     <Teleport to="body">
       <div
-        v-if="showCreateDialog"
+        v-if="createDialog.isOpen.value"
         class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-        @click.self="showCreateDialog = false"
+        @click.self="createDialog.close()"
       >
         <div class="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-lg p-6 space-y-4 max-h-[85vh] overflow-y-auto">
           <div class="flex items-center justify-between">
             <h3 class="text-sm font-bold text-slate-200">新增專案</h3>
-            <button @click="showCreateDialog = false" class="text-slate-400 hover:text-slate-200">
+            <button @click="createDialog.close()" class="text-slate-400 hover:text-slate-200">
               <X class="w-5 h-5" />
             </button>
           </div>
@@ -496,7 +497,7 @@ const canSaveGithub = computed(() => {
 
           <!-- Actions -->
           <div class="flex justify-end gap-3 pt-2">
-            <button @click="showCreateDialog = false" class="px-4 py-2 text-slate-400 hover:text-slate-200 transition" :disabled="cloning">取消</button>
+            <button @click="createDialog.close()" class="px-4 py-2 text-slate-400 hover:text-slate-200 transition" :disabled="cloning">取消</button>
             <button v-if="createMode === 'local'" @click="createProject" :disabled="saving || !form.name.trim() || !form.path.trim()" class="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition">
               <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
               建立
