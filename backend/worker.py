@@ -512,6 +512,38 @@ def save_cron_log(cron_job_id: int, cron_job_name: str, card_id: int, card_title
         logger.warning(f"[CronLog] Failed to save: {e}")
 
 
+def _auto_commit_on_success(project_path: str, card_id: int, card_title: str, member_slug: str = ""):
+    """任務成功後自動 commit 未追蹤/已修改的檔案到 git（僅本地，不 push）"""
+    try:
+        import subprocess as _sp
+        # 檢查是否有變更
+        status = _sp.run(
+            ["git", "status", "--porcelain"],
+            cwd=project_path, capture_output=True, text=True, timeout=10
+        )
+        if not status.stdout.strip():
+            logger.info(f"[AutoCommit] Card {card_id}: no changes to commit")
+            return
+
+        # git add -A
+        _sp.run(["git", "add", "-A"], cwd=project_path, timeout=10)
+
+        # 組合 commit message：卡片 title + 來源資訊
+        clean_title = card_title.replace("[reviewed] ", "").replace("[重構] ", "refactor: ").strip()
+        if not any(clean_title.startswith(p) for p in ("feat:", "fix:", "refactor:", "chore:", "test:", "docs:")):
+            clean_title = f"feat: {clean_title}"
+        author = member_slug or "aegis"
+        msg = f"{clean_title}\n\nCard #{card_id} by {author}"
+
+        _sp.run(
+            ["git", "commit", "-m", msg, "--author", f"{author} <{author}@aegis.local>"],
+            cwd=project_path, capture_output=True, text=True, timeout=15
+        )
+        logger.info(f"[AutoCommit] Card {card_id}: committed to {project_path}")
+    except Exception as e:
+        logger.warning(f"[AutoCommit] Card {card_id}: failed: {e}")
+
+
 def _apply_worker_stage_action(idx, new_status: str) -> str:
     """根據 StageList 的 on_success_action / on_fail_action 處理卡片。
     排程卡片不寫入 content（log 已記錄），只做 move/archive/delete。
@@ -1380,6 +1412,10 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
 
             # 一般卡片也執行 stage action（流水線流轉）
             _apply_worker_stage_action(idx, new_status)
+
+            # 成功時自動 commit 到本地 git（不 push）
+            if new_status == "completed" and project_path:
+                _auto_commit_on_success(project_path, idx.card_id, idx.title, member_slug)
 
         # 解析 AI 輸出中的 json:create_cards 區塊（跨成員協作、審查卡片等）
         output_text = result.get("output", "")
