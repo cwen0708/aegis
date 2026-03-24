@@ -296,9 +296,9 @@ def read_project_board(project_id: int, request: Request, session: Session = Dep
     cards_by_list: dict[int, list[CardIndex]] = {}
     for ci in card_indices:
         cards_by_list.setdefault(ci.list_id, []).append(ci)
-    # Sort each group by created_at desc
+    # Sort each group by created_at desc (strip tzinfo to avoid naive vs aware comparison)
     for lst in cards_by_list.values():
-        lst.sort(key=lambda c: c.created_at, reverse=True)
+        lst.sort(key=lambda c: c.created_at.replace(tzinfo=None) if c.created_at else datetime.min, reverse=True)
 
     # 批量預載所有相關 Member，避免 N+1 查詢
     member_ids = [l.member_id for l in lists if l.member_id]
