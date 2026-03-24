@@ -18,6 +18,8 @@ from app.core.card_file import CardData, write_card, card_file_path
 from app.core.card_index import sync_card_to_index, next_card_id
 from app.core.member_profile import get_soul_content, list_skills, get_skill_content
 from app.core.runner import run_ai_task
+from app.core.member_cache import member_cache
+from app.core.sdk_chat import stream_chat, resolve_model
 from .types import InboundMessage
 from .bot_user import get_user_projects, get_user_context, get_default_project, get_user_extra
 
@@ -73,36 +75,11 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
     if session_obj.total_output_tokens > token_limit:
         return "📊 本月 token 配額已用盡，請聯繫管理員"
 
-    # 5. 載入靈魂檔案
-    soul = ""
-    if member.slug:
-        soul = get_soul_content(member.slug)
-
-    # 5.5 載入技能檔案（shared + 成員專屬）
-    skills_content = ""
-    skill_texts = []
-
-    # 先載入 shared skills
-    from app.core.task_workspace import _INSTALL_ROOT
-    shared_skills_dir = _INSTALL_ROOT / ".aegis" / "shared" / "skills"
-    if shared_skills_dir.exists():
-        for md_file in sorted(shared_skills_dir.glob("*.md")):
-            try:
-                skill_texts.append(md_file.read_text(encoding="utf-8"))
-            except Exception:
-                pass
-
-    # 再載入成員專屬 skills（可覆蓋 shared）
-    if member.slug:
-        skills_list = list_skills(member.slug)
-        if skills_list:
-            for skill in skills_list:
-                content = get_skill_content(member.slug, skill["name"])
-                if content:
-                    skill_texts.append(content)
-
-    if skill_texts:
-        skills_content = "\n\n---\n\n".join(skill_texts)
+    # 5. 載入靈魂 + 技能（從預載快取，mtime 變動自動重讀）
+    profile = member_cache.get(member.slug) if member.slug else None
+    soul = profile.soul if profile else ""
+    skill_texts = (profile.shared_skills + profile.skills) if profile else []
+    skills_content = "\n\n---\n\n".join(skill_texts) if skill_texts else ""
 
     # 6. 載入最近對話歷史
     history = _get_recent_messages(session_obj.id, limit=MAX_HISTORY_MESSAGES)
@@ -196,36 +173,74 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
             _, summary = parsed
             asyncio.run_coroutine_threadsafe(_edit_placeholder(f"🤔 {summary}"), _loop)
 
-    # 11. 查詢 Session Pool（延續對話）
-    from app.core.session_pool import session_pool
-    chat_session_key = f"{bot_user.platform}:{msg.chat_id}:{member.slug}"
-    resume_id, _is_new = session_pool.get_or_create(chat_session_key)
+    # 11. 呼叫 AI — SDK 優先（快），CLI fallback（有 MCP 支援）
+    api_key = auth_info.get("api_key") or None
+    use_sdk = provider == "claude" and api_key  # SDK 需要 API key
 
-    # 12. 呼叫 AI（帶 on_stream + session resume）
-    try:
-        result = await run_ai_task(
-            task_id=0,
-            project_path=".",
-            prompt=prompt,
-            phase="CHAT",
-            forced_provider=provider,
-            card_title=f"Chat with {bot_user.username or bot_user.platform_user_id}",
-            project_name="Aegis Bot",
-            member_id=member.id,
-            model_override=model,
-            auth_info=auth_info,
-            extra_env=mcp_extra_env or None,
-            on_stream=on_stream if placeholder_message_id else None,
-            resume_session_id=resume_id,
+    if use_sdk:
+        # SDK 直接呼叫（無進程啟動開銷）
+        system_prompt = _build_system_prompt(
+            soul=soul, skills=skills_content, member=member,
+            user_context=user_context, accessible_projects=accessible_projects,
+            user_level=bot_user.level, chat_id=msg.chat_id,
+            platform=bot_user.platform, user_extra=user_extra,
         )
-    except Exception as e:
-        logger.error(f"[Chat] AI task failed: {e}")
-        return "❌ AI 回應失敗，請稍後再試"
+        sdk_messages = _build_sdk_messages(history, user_message)
 
-    # 13. 註冊 session（供下次 resume）
-    new_session_id = result.get("session_id")
-    if new_session_id:
-        session_pool.register(chat_session_key, new_session_id)
+        # SDK on_text callback（累積後更新 placeholder）
+        _text_buf = [""]
+        def _on_sdk_text(delta: str):
+            _text_buf[0] += delta
+            if placeholder_message_id and (len(_text_buf[0]) > 80 or delta.endswith(("。", "！", "？", "\n"))):
+                asyncio.run_coroutine_threadsafe(
+                    _edit_placeholder(_text_buf[0][:200] + ("..." if len(_text_buf[0]) > 200 else "")),
+                    _loop,
+                )
+
+        try:
+            result = await asyncio.to_thread(
+                stream_chat,
+                system_prompt=system_prompt,
+                messages=sdk_messages,
+                model=resolve_model(model),
+                api_key=api_key,
+                on_text=_on_sdk_text if placeholder_message_id else None,
+            )
+            logger.info(f"[Chat] SDK response OK, model={model}")
+        except Exception as e:
+            logger.warning(f"[Chat] SDK failed ({e}), fallback to CLI")
+            use_sdk = False  # fallback
+
+    if not use_sdk:
+        # CLI fallback（支援 MCP、OAuth、--resume）
+        from app.core.session_pool import session_pool
+        chat_session_key = f"{bot_user.platform}:{msg.chat_id}:{member.slug}"
+        resume_id, _is_new = session_pool.get_or_create(chat_session_key)
+
+        try:
+            result = await run_ai_task(
+                task_id=0,
+                project_path=".",
+                prompt=prompt,
+                phase="CHAT",
+                forced_provider=provider,
+                card_title=f"Chat with {bot_user.username or bot_user.platform_user_id}",
+                project_name="Aegis Bot",
+                member_id=member.id,
+                model_override=model,
+                auth_info=auth_info,
+                extra_env=mcp_extra_env or None,
+                on_stream=on_stream if placeholder_message_id else None,
+                resume_session_id=resume_id,
+            )
+        except Exception as e:
+            logger.error(f"[Chat] CLI fallback also failed: {e}")
+            return "❌ AI 回應失敗，請稍後再試"
+
+        # 註冊 CLI session（供下次 resume）
+        new_session_id = result.get("session_id")
+        if new_session_id:
+            session_pool.register(chat_session_key, new_session_id)
 
     if result.get("status") != "success":
         return f"❌ AI 回應錯誤: {result.get('output', '未知錯誤')[:100]}"
@@ -336,6 +351,73 @@ def _get_primary_account(member_id: int) -> tuple:
             account = session.get(Account, ma.account_id)
             return account, ma.model or ""
     return None, ""
+
+
+def _build_system_prompt(
+    soul: str, skills: str, member, user_context=None, accessible_projects=None,
+    user_level: int = 0, chat_id: str = "", platform: str = "", user_extra=None,
+) -> str:
+    """組裝 system prompt（不含歷史和用戶訊息）— 供 SDK 模式使用。"""
+    lines = []
+    if soul:
+        lines.append(soul.strip())
+        lines.append("")
+    else:
+        lines.append(f"你是 {member.name}，{member.role}。")
+        if member.description:
+            lines.append(member.description)
+        lines.append("")
+
+    if skills:
+        lines.append("## 你的技能與知識")
+        lines.append(skills.strip())
+        lines.append("")
+
+    if user_context:
+        lines.append("## 當前用戶")
+        if user_context.display_name:
+            lines.append(f"姓名：{user_context.display_name}")
+        if user_context.description:
+            lines.append(f"身份描述：{user_context.description}")
+        lines.append("")
+        lines.append("請根據用戶的身份和權限範圍回答，用適當的稱呼和語氣。")
+        lines.append("")
+
+    if user_extra:
+        lines.append("## 用戶額外資料")
+        for k, v in user_extra.items():
+            lines.append(f"- {k}: {v}")
+        lines.append("")
+
+    if accessible_projects:
+        lines.append("## 用戶可存取的專案")
+        for p in accessible_projects:
+            lines.append(f"- {p.name}（ID: {p.id}）")
+        lines.append("")
+
+    if user_level >= 2 and accessible_projects:
+        lines.append("## 複雜任務處理")
+        lines.append("如果用戶的請求太複雜，可以建議建立任務卡片。")
+        lines.append("格式：[CREATE_TASK:專案ID:任務標題:任務描述]")
+        lines.append(f"任務描述最後請加上：「完成後請透過 {platform} 通知 chat_id={chat_id}」")
+        lines.append("")
+
+    lines.append("## 安全限制")
+    lines.append("- 禁止修改系統檔案、安裝套件、執行破壞性指令")
+    lines.append("- 如果用戶要求修改系統或程式碼，請建議建立任務卡片或聯繫管理員")
+    lines.append("")
+    lines.append("請以你的角色身份回應（簡潔、友善、專業）。")
+    return "\n".join(lines)
+
+
+def _build_sdk_messages(history: List[ChatMessage], user_message: str) -> List[dict]:
+    """組裝 SDK messages 陣列（歷史 + 當前用戶訊息）。"""
+    messages = []
+    for msg in history:
+        content = msg.content[:500] + "..." if len(msg.content) > 500 else msg.content
+        messages.append({"role": msg.role, "content": content})
+    messages.append({"role": "user", "content": user_message})
+    return messages
 
 
 def _build_chat_prompt(
