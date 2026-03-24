@@ -194,13 +194,6 @@ async def lifespan(app: FastAPI):
     # 啟動時初始化資料庫
     init_db()
 
-    # 預載成員 soul + skills 快取
-    try:
-        from app.core.member_cache import member_cache
-        member_cache.load_all()
-    except Exception as e:
-        logger.warning(f"Failed to preload member cache: {e}")
-
     # 更新系統版本號
     try:
         from app.database import engine
