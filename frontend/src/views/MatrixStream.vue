@@ -145,7 +145,13 @@ function drawMatrix() {
 function handleRawMessage(raw: string) {
   try {
     const parsed = JSON.parse(raw)
-    feedTextPool(raw, parsed.type || 'unknown')
+    const msgType = parsed.type || 'unknown'
+    // task_log 用 data.line（每行不同），其他 type 用整段 raw
+    if (msgType === 'task_log' && parsed.data?.line) {
+      feedTextPool(parsed.data.line, msgType)
+    } else {
+      feedTextPool(raw, msgType)
+    }
     const msg: WsMessage = {
       id: ++msgCount.value,
       type: parsed.type || 'unknown',
