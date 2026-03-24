@@ -138,19 +138,33 @@ async def internal_broadcast_log(req: BroadcastLogRequest):
     from app.core.ws_manager import broadcast_event
     await broadcast_event("task_log", {"card_id": req.card_id, "line": req.line})
 
-    # 解析工具呼叫 → 人話，轉發到 OneStack aegis_stream（節流 2 秒）
+    # 轉發到 OneStack aegis_stream（節流 2 秒）
+    # Worker PTY 已將 stream-json 翻譯為人話（📖 Read: ...），直接偵測轉發
     try:
         from app.core.onestack_connector import connector
         if connector.enabled:
-            parsed = _parse_tool_call(req.line)
-            if parsed:
-                event_type, summary = parsed
+            line = req.line.strip()
+            # 方式一：偵測已翻譯的工具呼叫（Worker parse_stream_json_line 輸出）
+            _TOOL_PREFIXES = ('📖', '✏️', '📝', '💻', '🔍', '🔧', '🤖', '🌐', '🔎', '📋', '📁')
+            _THOUGHT_PREFIXES = ('💭', '💬')
+            event_type = None
+            if any(line.startswith(p) for p in _TOOL_PREFIXES):
+                event_type = "tool_call"
+            elif any(line.startswith(p) for p in _THOUGHT_PREFIXES):
+                event_type = "output"
+            # 方式二：fallback 嘗試 JSON 解析（相容舊格式）
+            if not event_type:
+                parsed = _parse_tool_call(req.line)
+                if parsed:
+                    event_type, line = parsed
+
+            if event_type:
                 now = time.time()
                 last = _stream_throttle.get(req.card_id, 0)
                 if now - last >= _STREAM_INTERVAL:
                     _stream_throttle[req.card_id] = now
                     chat_id = _get_chat_id_for_card(req.card_id)
-                    await connector.stream_event(req.card_id, event_type, summary, chat_id=chat_id)
+                    await connector.stream_event(req.card_id, event_type, line, chat_id=chat_id)
     except Exception:
         pass
 
