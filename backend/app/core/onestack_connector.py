@@ -267,9 +267,14 @@ class OneStackConnector:
 
                 max_ws_setting = session.get(SystemSetting, "max_workstations")
                 max_workstations = int(max_ws_setting.value) if max_ws_setting else 3
+
+                # 團隊角色對應
+                team_roles_setting = session.get(SystemSetting, "onestack_team_roles")
+                team_roles = json.loads(team_roles_setting.value) if team_roles_setting and team_roles_setting.value else {}
         except Exception:
             running_count = 0
             max_workstations = 3
+            team_roles = {}
 
         # 系統指標
         try:
@@ -285,6 +290,7 @@ class OneStackConnector:
             "current_workstations": running_count,
             "cpu_percent": metrics.get("cpu_percent", 0),
             "memory_percent": metrics.get("memory_percent", 0),
+            "team_roles": team_roles,
         }
 
     # ─── 心跳 ───

@@ -207,6 +207,42 @@ def get_pair_status():
     }
 
 
+@router.get("/node/team-roles")
+def get_team_roles(session: Session = Depends(get_session)):
+    """取得 OneStack 團隊角色對應"""
+    import json
+    setting = session.get(SystemSetting, "onestack_team_roles")
+    if setting and setting.value:
+        try:
+            return json.loads(setting.value)
+        except Exception:
+            pass
+    return {}
+
+
+@router.put("/node/team-roles")
+async def set_team_roles(payload: dict, session: Session = Depends(get_session)):
+    """儲存 OneStack 團隊角色對應，並觸發同步"""
+    import json
+    setting = session.get(SystemSetting, "onestack_team_roles")
+    value = json.dumps(payload, ensure_ascii=False)
+    if setting:
+        setting.value = value
+    else:
+        session.add(SystemSetting(key="onestack_team_roles", value=value))
+    session.commit()
+
+    # 觸發即時同步
+    try:
+        from app.core.onestack_connector import connector
+        if connector.enabled:
+            await connector.send_heartbeat()
+    except Exception:
+        pass
+
+    return {"ok": True}
+
+
 def create_card_from_onestack_task(
     session: Session,
     task_id: str,

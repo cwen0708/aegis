@@ -14,6 +14,7 @@ const loading = ref(true)
 const channelConfigs = ref<Record<string, any>>({})
 const channelStatuses = ref<Record<string, { connected: boolean; error?: string }>>({})
 const channelRestarting = ref(false)
+const onestackConnected = ref(false)
 
 // 頻道定義
 const channelDefs = [
@@ -26,13 +27,13 @@ const channelDefs = [
   { name: 'email', label: 'Email (IMAP/SMTP)', icon: '📧', iconColor: 'bg-amber-500/20' },
 ]
 
-function getStatus(name: string) {
+function getStatusRing(name: string) {
   const cfg = channelConfigs.value[name]
   const st = channelStatuses.value[name]
-  if (!cfg || !cfg.enabled) return { text: '未啟用', color: 'bg-slate-500' }
-  if (st?.connected) return { text: '已連線', color: 'bg-emerald-500' }
-  if (st?.error) return { text: '錯誤', color: 'bg-red-500' }
-  return { text: '等待中', color: 'bg-amber-500' }
+  if (!cfg || !cfg.enabled) return 'ring-slate-600'
+  if (st?.connected) return 'ring-emerald-500'
+  if (st?.error) return 'ring-red-500'
+  return 'ring-amber-500'
 }
 
 function getModeText(name: string) {
@@ -87,9 +88,22 @@ async function restartChannels() {
   }
 }
 
+async function fetchOnestackStatus() {
+  try {
+    const res = await fetch(`${API}/api/v1/node/pair/status`)
+    if (res.ok) {
+      const data = await res.json()
+      onestackConnected.value = !!data.connected
+    }
+  } catch {
+    onestackConnected.value = false
+  }
+}
+
 onMounted(() => {
   fetchChannelConfigs()
   fetchChannelStatuses()
+  fetchOnestackStatus()
 })
 </script>
 
@@ -116,6 +130,26 @@ onMounted(() => {
 
     <!-- Channel List -->
     <div v-else class="space-y-3">
+      <!-- OneStack（置頂） -->
+      <div
+        class="bg-slate-900/50 rounded-xl border border-slate-700/50 p-4 cursor-pointer hover:border-slate-600 hover:bg-slate-800/50 transition-all"
+        @click="router.push('/settings/onestack')"
+      >
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3 flex-1 min-w-0">
+            <div :class="['w-9 h-9 rounded-lg flex items-center justify-center bg-violet-500/20 shrink-0 ring-[3px]', onestackConnected ? 'ring-emerald-500' : 'ring-slate-600']">
+              <Layers class="w-4 h-4 text-violet-400" />
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="font-medium text-slate-200">OneStack</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">平台連接</span>
+            </div>
+          </div>
+          <ChevronRight class="w-5 h-5 text-slate-600 ml-4 shrink-0" />
+        </div>
+      </div>
+
+      <!-- 通訊頻道 -->
       <div
         v-for="ch in channelDefs"
         :key="ch.name"
@@ -123,42 +157,15 @@ onMounted(() => {
         @click="router.push(`/settings/channels/${ch.name}`)"
       >
         <div class="flex items-center justify-between">
-          <!-- Left: Info -->
           <div class="flex items-center gap-3 flex-1 min-w-0">
-            <div :class="['w-8 h-8 rounded-lg flex items-center justify-center text-base shrink-0', ch.iconColor]">
+            <div :class="['w-9 h-9 rounded-lg flex items-center justify-center text-base shrink-0 ring-[3px]', ch.iconColor, getStatusRing(ch.name)]">
               {{ ch.icon }}
             </div>
-            <div class="min-w-0">
-              <div class="flex items-center gap-2">
-                <span class="font-medium text-slate-200">{{ ch.label }}</span>
-                <!-- Status light -->
-                <span :class="['w-2 h-2 rounded-full shrink-0', getStatus(ch.name).color]" />
-                <span class="text-xs text-slate-500">{{ getStatus(ch.name).text }}</span>
-                <span v-if="getModeText(ch.name)" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
-                  {{ getModeText(ch.name) }}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Right: Chevron -->
-          <ChevronRight class="w-5 h-5 text-slate-600 ml-4 shrink-0" />
-        </div>
-      </div>
-
-      <!-- OneStack -->
-      <div
-        class="bg-slate-900/50 rounded-xl border border-slate-700/50 p-4 cursor-pointer hover:border-slate-600 hover:bg-slate-800/50 transition-all"
-        @click="router.push('/settings/onestack')"
-      >
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-3 flex-1 min-w-0">
-            <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-violet-500/20 shrink-0">
-              <Layers class="w-4 h-4 text-violet-400" />
-            </div>
-            <div>
-              <span class="font-medium text-slate-200">OneStack</span>
-              <span class="text-xs text-slate-500 ml-2">平台連接</span>
+            <div class="flex items-center gap-2">
+              <span class="font-medium text-slate-200">{{ ch.label }}</span>
+              <span v-if="getModeText(ch.name)" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                {{ getModeText(ch.name) }}
+              </span>
             </div>
           </div>
           <ChevronRight class="w-5 h-5 text-slate-600 ml-4 shrink-0" />

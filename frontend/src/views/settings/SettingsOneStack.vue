@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Link, Wifi, WifiOff, CheckCircle2, AlertCircle, Loader2 } from 'lucide-vue-next'
+import { Link, Wifi, WifiOff, CheckCircle2, AlertCircle, Loader2, Users } from 'lucide-vue-next'
 import { config } from '../../config'
 import { authHeaders } from '../../utils/authFetch'
+import { useAegisStore } from '../../stores/aegis'
 
 const API = config.apiUrl
+const store = useAegisStore()
 
 // 狀態
 const loading = ref(true)
@@ -28,8 +30,62 @@ const form = ref({
   device_name: '',
 })
 
+// 團隊角色對應
+const teamRoleDefs = [
+  { key: 'pm', label: '專案主管', icon: '📋' },
+  { key: 'tech', label: '技術主管', icon: '🔧' },
+  { key: 'finance', label: '財務主管', icon: '💰' },
+  { key: 'marketing', label: '行銷經理', icon: '📣' },
+]
+const teamRoles = ref<Record<string, string>>({})
+const members = ref<{ id: number; name: string; slug: string; avatar: string }[]>([])
+const savingRoles = ref(false)
+
+async function fetchTeamRoles() {
+  try {
+    const res = await fetch(`${API}/api/v1/node/team-roles`)
+    if (res.ok) teamRoles.value = await res.json()
+  } catch { /* ignore */ }
+}
+
+async function fetchMembers() {
+  try {
+    const res = await fetch(`${API}/api/v1/members`)
+    if (res.ok) {
+      const data = await res.json()
+      members.value = (data.members || data).map((m: any) => ({
+        id: m.id, name: m.name, slug: m.slug, avatar: m.avatar || '',
+      }))
+    }
+  } catch { /* ignore */ }
+}
+
+async function saveTeamRoles() {
+  savingRoles.value = true
+  try {
+    const res = await fetch(`${API}/api/v1/node/team-roles`, {
+      method: 'PUT',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(teamRoles.value),
+    })
+    if (res.ok) {
+      store.addToast('角色對應已儲存', 'success')
+    } else {
+      store.addToast('儲存失敗', 'error')
+    }
+  } catch {
+    store.addToast('儲存失敗', 'error')
+  } finally {
+    savingRoles.value = false
+  }
+}
+
 onMounted(async () => {
   await fetchStatus()
+  if (pairStatus.value?.connected) {
+    fetchMembers()
+    fetchTeamRoles()
+  }
 })
 
 async function fetchStatus() {
@@ -137,6 +193,43 @@ async function handlePair() {
             <p class="text-xs text-slate-500">在下方輸入配對碼以連線到 OneStack</p>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- 團隊角色對應（已連線時顯示） -->
+    <div v-if="pairStatus?.connected" class="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
+      <div class="px-6 py-4 border-b border-slate-700/50">
+        <div class="flex items-center gap-2">
+          <Users class="w-4 h-4 text-cyan-400" />
+          <h2 class="text-sm font-semibold text-slate-200">團隊角色對應</h2>
+        </div>
+        <p class="text-xs text-slate-500 mt-1">指定 OneStack 各角色由哪位 Aegis 成員負責，變更會同步到 OneStack。</p>
+      </div>
+      <div class="p-6 space-y-4">
+        <div v-for="role in teamRoleDefs" :key="role.key" class="flex items-center gap-3">
+          <span class="text-base w-6 text-center shrink-0">{{ role.icon }}</span>
+          <span class="text-sm text-slate-300 w-20 shrink-0">{{ role.label }}</span>
+          <select
+            v-model="teamRoles[role.key]"
+            class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:ring-2 focus:ring-cyan-500 outline-none"
+          >
+            <option value="">（未指定）</option>
+            <option v-for="m in members" :key="m.slug" :value="m.slug">
+              {{ m.avatar }} {{ m.name }} ({{ m.slug }})
+            </option>
+          </select>
+        </div>
+
+        <button
+          @click="saveTeamRoles"
+          :disabled="savingRoles"
+          class="w-full flex items-center justify-center gap-2 px-6 py-2.5
+            bg-cyan-500 hover:bg-cyan-600 disabled:opacity-50
+            text-white rounded-lg font-bold text-sm transition-all"
+        >
+          <Loader2 v-if="savingRoles" class="w-4 h-4 animate-spin" />
+          儲存角色對應
+        </button>
       </div>
     </div>
 
