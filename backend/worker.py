@@ -989,7 +989,7 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
     from app.hooks import collect_hooks
     from app.hooks.websocket import WebSocketHook
     from app.hooks.onestack import OneStackHook
-    from app.core.executor.emitter import StreamEmitter, parse_stream_event
+    from app.core.executor.emitter import HookEmitter
 
     task_hooks = collect_hooks("worker")
     for h in task_hooks:
@@ -1000,25 +1000,7 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
             h.member_slug = member_slug
             h.chat_id = chat_id or ""
 
-    # StreamEmitter 的 on_line callback 分發給所有 Hook.on_stream
-    from app.hooks import run_on_stream
-    class _HookEmitter(StreamEmitter):
-        def emit_raw(self, raw_line: str):
-            event = parse_stream_event(raw_line)
-            if not event:
-                return
-            if event.kind == "text":
-                self._text_parts.append(event.content)
-            if event.kind == "result" and event.token_info:
-                self._token_info = event.token_info
-            run_on_stream(task_hooks, event)
-
-        def emit_output(self, text: str):
-            """非 stream_json 模式：直接當 output 事件送給 Hook"""
-            from app.core.executor.emitter import StreamEvent
-            run_on_stream(task_hooks, StreamEvent(kind="output", content=text))
-
-    task_emitter = _HookEmitter(targets=[])
+    task_emitter = HookEmitter(task_hooks)
 
     # 執行任務（含 fallback 機制）
     if not accounts_list:

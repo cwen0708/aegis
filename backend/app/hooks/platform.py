@@ -2,6 +2,7 @@
 import time
 import logging
 from app.hooks import Hook, StreamEvent
+from app.core.executor.emitter import sanitize_output
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,8 @@ class PlatformHook(Hook):
         if not self.placeholder_id:
             return
 
-        summary = f"🤔 {event.content}" if event.kind != "heartbeat" else event.content
+        content = sanitize_output(event.content)
+        summary = f"🤔 {content}" if event.kind != "heartbeat" else content
         now = time.time()
         if now - self._last_edit_time < self._throttle or summary == self._last_edit_text:
             return

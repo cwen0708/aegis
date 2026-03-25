@@ -20,38 +20,6 @@ logger = logging.getLogger(__name__)
 is_paused = False
 
 
-def _extract_dialogue(output: str) -> Optional[str]:
-    """從 AI 輸出中解析 <!-- dialogue: xxx --> 標記"""
-    m = re.search(r'<!--\s*dialogue:\s*(.+?)\s*-->', output)
-    return m.group(1).strip() if m else None
-
-
-async def _save_member_dialogue(member_id: int, card_id: int, card_title: str,
-                                project_name: str, dialogue_type: str, text: str):
-    """儲存成員對話到 DB 並透過 WebSocket 推送"""
-    try:
-        from app.core.ws_manager import broadcast_event
-        with Session(engine) as session:
-            d = MemberDialogue(
-                member_id=member_id,
-                card_id=card_id,
-                card_title=card_title,
-                project_name=project_name,
-                dialogue_type=dialogue_type,
-                text=text,
-                status="success" if dialogue_type == "task_complete" else "error",
-            )
-            session.add(d)
-            session.commit()
-        await broadcast_event("member_dialogue", {
-            "member_id": member_id,
-            "text": text,
-            "dialogue_type": dialogue_type,
-            "card_title": card_title,
-        })
-        logger.info(f"[Dialogue] {dialogue_type}: {text[:40]}")
-    except Exception as e:
-        logger.warning(f"[Dialogue] Failed to save: {e}")
 
 # 已派發的任務數（含排隊等 semaphore 的）
 _dispatched_count = 0
@@ -616,15 +584,15 @@ async def _execute_and_update(
         event = "task_completed" if new_status == "completed" else "task_failed"
         await broadcast_event(event, {"card_id": card_id, "status": new_status})
 
-        # 生成 AVG 對話（從 AI 輸出解析 <!-- dialogue: xxx --> 標記）
+        # 生成 AVG 對話（委託給 DialogueHook）
         if member_id:
-            dialogue_text = _extract_dialogue(result.get("output", ""))
-            if dialogue_text:
-                await _save_member_dialogue(
-                    member_id, card_id, card_title, project_name,
-                    "task_complete" if new_status == "completed" else "task_failed",
-                    dialogue_text,
-                )
+            from app.hooks.dialogue import DialogueHook
+            from app.hooks import TaskContext
+            DialogueHook().on_complete(TaskContext(
+                card_id=card_id, card_title=card_title,
+                project_name=project_name, member_id=member_id,
+                status=new_status, output=result.get("output", ""),
+            ))
 
         # 發送頻道通知（如有啟用）
         await _notify_channels(card_id, card_title, project_name, new_status, result)

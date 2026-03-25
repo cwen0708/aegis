@@ -1,13 +1,14 @@
 """
 Executor — 統一 Worker/Runner 的共用邏輯模組
 
-消除兩條 AI 執行路徑的重複程式碼：
 - providers.py: PROVIDERS 設定 + build_command()
 - auth.py: inject_auth_env() + get_mcp_config_path()
 - context.py: MemberContext dataclass + resolve 函式
-- config_md.py: build_config_md() + PROVIDER_CONFIG（多 provider 設定檔模板）
-- emitter.py: StreamEmitter 三層架構（StreamEvent + StreamTarget）
+- config_md.py: build_config_md() + PROVIDER_CONFIG
+- emitter.py: StreamEmitter + HookEmitter + StreamEvent + parse_stream_event
 - heartbeat.py: heartbeat_monitor context manager
+
+串流輸出和任務後處理由 app/hooks/ 統一管理。
 """
 
 from app.core.executor.providers import PROVIDERS, build_command  # noqa: F401
@@ -17,43 +18,22 @@ from app.core.executor.context import (  # noqa: F401
     resolve_member_for_task, resolve_member_for_chat,
 )
 from app.core.executor.config_md import (  # noqa: F401
-    build_config_md, build_claude_md,  # build_claude_md = 向後相容別名
+    build_config_md, build_claude_md,
     PROVIDER_CONFIG, get_config_filename, get_dot_dir,
 )
 from app.core.executor.emitter import (  # noqa: F401
-    StreamEmitter, StreamEvent, StreamTarget,
-    WebSocketTarget, PlatformTarget, OneStackTarget, NullTarget,
-    parse_stream_event,
+    StreamEmitter, HookEmitter, StreamEvent,
+    StreamTarget, NullTarget,  # StreamTarget + NullTarget 供測試用
+    parse_stream_event, clean_ansi, sanitize_output,
 )
 from app.core.executor.heartbeat import heartbeat_monitor  # noqa: F401
 
 __all__ = [
-    # providers
-    "PROVIDERS",
-    "build_command",
-    # auth
-    "inject_auth_env",
-    "get_mcp_config_path",
-    # context
-    "MemberContext",
-    "AccountInfo",
-    "resolve_member_for_task",
-    "resolve_member_for_chat",
-    # config_md
-    "build_config_md",
-    "build_claude_md",  # 向後相容
-    "PROVIDER_CONFIG",
-    "get_config_filename",
-    "get_dot_dir",
-    # emitter
-    "StreamEmitter",
-    "StreamEvent",
-    "StreamTarget",
-    "WebSocketTarget",
-    "PlatformTarget",
-    "OneStackTarget",
-    "NullTarget",
-    "parse_stream_event",
-    # heartbeat
+    "PROVIDERS", "build_command",
+    "inject_auth_env", "get_mcp_config_path",
+    "MemberContext", "AccountInfo", "resolve_member_for_task", "resolve_member_for_chat",
+    "build_config_md", "build_claude_md", "PROVIDER_CONFIG", "get_config_filename", "get_dot_dir",
+    "StreamEmitter", "HookEmitter", "StreamEvent", "StreamTarget", "NullTarget",
+    "parse_stream_event", "clean_ansi", "sanitize_output",
     "heartbeat_monitor",
 ]

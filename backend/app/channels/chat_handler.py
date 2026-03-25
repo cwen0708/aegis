@@ -127,27 +127,16 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
         mcp_extra_env["NAS_AUTH_BLOCKED"] = "1"
 
     # 10. 建立 Hook 驅動的串流
-    from app.hooks import collect_hooks, run_on_stream
+    from app.hooks import collect_hooks
     from app.hooks.platform import PlatformHook
-    from app.core.executor.emitter import StreamEmitter, parse_stream_event
+    from app.core.executor.emitter import HookEmitter
 
     chat_hooks = collect_hooks("chat")
     if placeholder_message_id:
         _loop = asyncio.get_event_loop()
         chat_hooks.insert(0, PlatformHook(msg.platform, msg.chat_id, placeholder_message_id, _loop))
 
-    class _ChatHookEmitter(StreamEmitter):
-        def emit_raw(self, raw_line: str):
-            event = parse_stream_event(raw_line)
-            if not event:
-                return
-            if event.kind == "text":
-                self._text_parts.append(event.content)
-            if event.kind == "result" and event.token_info:
-                self._token_info = event.token_info
-            run_on_stream(chat_hooks, event)
-
-    emitter = _ChatHookEmitter(targets=[])
+    emitter = HookEmitter(chat_hooks)
 
     # 11. 呼叫 AI（Process Pool 持久進程 or CLI fallback）
     use_pool = provider == "claude"

@@ -37,9 +37,24 @@ _DIRECTIVE_RE = re.compile(r'<!-- directive:(.*?) -->')
 
 
 def clean_ansi(text: str) -> str:
-    """清除 ANSI escape codes 和不可列印字元。公開供 worker PTY loop 使用。"""
+    """清除 ANSI escape codes 和不可列印字元。"""
     clean = _ANSI_RE.sub("", text)
     return "".join(c for c in clean if c.isprintable() or c in "\n\r\t")
+
+
+# 路徑去敏
+_SENSITIVE_PATHS = [
+    "/home/cwen0708/.local/aegis/",
+    "/home/cwen0708/projects/",
+    "/home/cwen0708/",
+]
+
+
+def sanitize_output(text: str) -> str:
+    """去除敏感路徑（伺服器路徑 → 相對路徑）。用於送出給用戶的內容。"""
+    for path in _SENSITIVE_PATHS:
+        text = text.replace(path, "")
+    return text
 
 
 # ════════════════════════════════════════
@@ -126,136 +141,9 @@ class StreamTarget(Protocol):
     def handle(self, event: StreamEvent) -> None: ...
 
 
-class WebSocketTarget:
-    """Worker 前端 Kanban — broadcast_log → WS + BroadcastLog DB。"""
 
-    def __init__(self, card_id: int):
-        self.card_id = card_id
-
-    def handle(self, event: StreamEvent) -> None:
-        if event.kind == "result":
-            return  # result 不廣播
-
-        # directive → 走 broadcast_directive 路徑
-        if event.kind == "directive":
-            try:
-                from app.core.http_client import InternalAPI
-                directive_data = event.token_info  # {action, params, ...}
-                InternalAPI.post("/internal/directive", {
-                    "card_id": self.card_id,
-                    "action": directive_data.get("action", "notify"),
-                    "params": directive_data.get("params", {}),
-                })
-            except Exception as e:
-                logger.warning(f"[WebSocketTarget] directive card={self.card_id}: {e}")
-            return
-
-        clean = clean_ansi(event.content)
-        if not clean.strip():
-            return
-
-        # 寫入 BroadcastLog 暫存表
-        try:
-            from sqlmodel import Session
-            from app.database import engine
-            from app.models.core import BroadcastLog
-            with Session(engine) as session:
-                session.add(BroadcastLog(card_id=self.card_id, line=clean))
-                session.commit()
-        except Exception:
-            pass
-
-        # HTTP POST → FastAPI → WebSocket 廣播
-        try:
-            from app.core.http_client import InternalAPI
-            InternalAPI.broadcast_log(self.card_id, clean)
-        except Exception as e:
-            logger.warning(f"[WebSocketTarget] card={self.card_id}: {e}")
-
-
-class PlatformTarget:
-    """Chat placeholder 編輯（Telegram/LINE）— 節流 3 秒。"""
-
-    def __init__(self, platform: str, chat_id: str, placeholder_id: str, loop=None):
-        self.platform = platform
-        self.chat_id = chat_id
-        self.placeholder_id = placeholder_id
-        self.loop = loop
-        self._last_edit_time = 0.0
-        self._last_edit_text = ""
-        self._throttle = 3.0
-
-    def handle(self, event: StreamEvent) -> None:
-        if event.kind not in ("tool_call", "output", "thinking", "heartbeat"):
-            return  # text / result 不編輯 placeholder
-
-        summary = f"🤔 {event.content}" if event.kind != "heartbeat" else event.content
-
-        now = time.time()
-        if now - self._last_edit_time < self._throttle or summary == self._last_edit_text:
-            return
-
-        self._last_edit_time = now
-        self._last_edit_text = summary
-
-        if self.loop:
-            import asyncio
-            asyncio.run_coroutine_threadsafe(self._edit(summary), self.loop)
-        else:
-            try:
-                from app.core.http_client import InternalAPI
-                InternalAPI.channel_send(self.platform, self.chat_id, summary, self.placeholder_id)
-            except Exception:
-                pass
-
-    async def _edit(self, text: str) -> None:
-        try:
-            from app.core.http_client import InternalAPIAsync
-            await InternalAPIAsync.channel_send(
-                self.platform, self.chat_id, text, self.placeholder_id,
-            )
-        except Exception:
-            pass
-
-
-class OneStackTarget:
-    """OneStack aegis_stream — Supabase Realtime，節流 2 秒。"""
-
-    def __init__(self, card_id: int, member_slug: str = "", chat_id: str = ""):
-        self.card_id = card_id
-        self.member_slug = member_slug
-        self.chat_id = chat_id
-        self._last_time = 0.0
-        self._throttle = 2.0
-
-    def handle(self, event: StreamEvent) -> None:
-        if event.kind not in ("tool_call", "output"):
-            return
-
-        now = time.time()
-        if now - self._last_time < self._throttle:
-            return
-        self._last_time = now
-
-        try:
-            import asyncio
-            from app.core.onestack_connector import connector
-            if not connector.enabled:
-                return
-            loop = asyncio.get_event_loop()
-            asyncio.run_coroutine_threadsafe(
-                connector.stream_event(
-                    self.card_id,
-                    event.event_type or event.kind,
-                    event.content,
-                    self.member_slug,
-                    chat_id=self.chat_id,
-                ),
-                loop,
-            )
-        except Exception:
-            pass
-
+# WebSocketTarget, PlatformTarget, OneStackTarget 已遷移到 app/hooks/
+# 保留 NullTarget 供測試用
 
 class NullTarget:
     """靜默 — 不輸出（email 或測試用）。"""
@@ -322,3 +210,40 @@ class StreamEmitter:
     def token_info(self) -> dict:
         """最後一個 result 行的 token 資訊"""
         return self._token_info
+
+
+class HookEmitter(StreamEmitter):
+    """Hook 驅動的 StreamEmitter — emit_raw 分發給 Hook.on_stream，取代 Target。
+
+    用法：
+        hooks = collect_hooks("worker")
+        emitter = HookEmitter(hooks)
+        emitter.emit_raw(json_line)      # stream-json → parse → Hook.on_stream
+        emitter.emit_output("plain text") # 非 stream-json → 直接當 output 事件
+    """
+
+    def __init__(self, hooks: list = None):
+        super().__init__(targets=[])
+        self._hooks = hooks or []
+
+    def emit_raw(self, raw_line: str) -> None:
+        event = parse_stream_event(raw_line)
+        if not event:
+            return
+        if event.kind == "text":
+            self._text_parts.append(event.content)
+        if event.kind == "result" and event.token_info:
+            self._token_info = event.token_info
+        from app.hooks import run_on_stream
+        run_on_stream(self._hooks, event)
+
+    def emit_output(self, text: str) -> None:
+        """非 stream-json 模式：直接當 output 事件送給 Hook。"""
+        from app.hooks import run_on_stream
+        run_on_stream(self._hooks, StreamEvent(kind="output", content=text))
+
+    def emit_heartbeat(self, idle_seconds: int) -> None:
+        from app.hooks import run_on_stream
+        run_on_stream(self._hooks, StreamEvent(
+            kind="heartbeat", content=f"⏳ 處理中... ({idle_seconds}s)",
+        ))

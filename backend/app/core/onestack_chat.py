@@ -18,12 +18,11 @@ async def handle_onestack_chat(
     chat_id: str,
     user_id: Optional[str] = None,
 ) -> dict:
-    """處理 OneStack 即時對話 — ProcessPool 路徑。
-
-    Returns: {"ok": True/False, "output": str, ...}
-    """
+    """處理 OneStack 即時對話 — ProcessPool 路徑。"""
     from app.core.executor.context import resolve_member_for_chat
-    from app.core.executor.emitter import StreamEmitter, OneStackTarget
+    from app.core.executor.emitter import HookEmitter
+    from app.hooks import collect_hooks, run_hooks, TaskContext
+    from app.hooks.onestack import OneStackHook
     from sqlmodel import Session, select
     from app.database import engine
     from app.models.core import Member
@@ -41,10 +40,9 @@ async def handle_onestack_chat(
     if not ctx.has_member:
         return {"ok": False, "error": "Member context failed"}
 
-    # 2. Chat workspace（OneStack 用戶 = 管理者，有完整控制權）
+    # 2. Chat workspace（OneStack 用戶 = 管理者）
     from app.core.chat_workspace import ensure_chat_workspace
 
-    # 簡易 user_context：OneStack 用戶預設為管理者
     class _AdminContext:
         display_name = "管理者"
         description = "OneStack 管理者，對此 Aegis 節點有完整控制權"
@@ -61,18 +59,23 @@ async def handle_onestack_chat(
         platform="onestack",
     )
 
-    # 3. Emitter（只推 OneStack aegis_stream）
-    from app.core.onestack_connector import connector
-    emitter = StreamEmitter(targets=[
-        OneStackTarget(card_id=0, member_slug=ctx.member_slug, chat_id=chat_id),
-    ])
+    # 3. Hook 驅動的 Emitter
+    os_hooks = collect_hooks("onestack")
+    for h in os_hooks:
+        if isinstance(h, OneStackHook):
+            h.card_id = 0
+            h.member_slug = ctx.member_slug
+            h.chat_id = chat_id
 
-    # 4. 寫 stream: 用戶訊息（供歷史記憶用）
+    emitter = HookEmitter(os_hooks)
+
+    # 4. 寫 stream: 用戶訊息
+    from app.core.onestack_connector import connector
     if connector.enabled:
         await connector.stream_event(0, "output", f"[用戶] {message}", ctx.member_slug, chat_id=chat_id)
         await connector.stream_event(0, "status", "running", ctx.member_slug, chat_id=chat_id)
 
-    # 5. 呼叫 AI（ProcessPool 持久進程）
+    # 5. 呼叫 AI
     from app.core.runner import run_ai_task
 
     provider = ctx.primary_provider
@@ -111,6 +114,13 @@ async def handle_onestack_chat(
     if connector.enabled:
         evt_type = "result" if status == "success" else "error"
         await connector.stream_event(0, evt_type, output[:3000], ctx.member_slug, chat_id=chat_id)
+
+    # 7. POST hooks
+    run_hooks(TaskContext(
+        card_id=0, card_title=f"OneStack chat: {message[:30]}",
+        member_id=ctx.member_id, member_slug=ctx.member_slug,
+        status=status, output=output, source="onestack",
+    ), os_hooks)
 
     logger.info(f"[OneStack Chat] Done: status={status} output_len={len(output)}")
     return {"ok": status == "success", "output": output[:3000], "status": status}

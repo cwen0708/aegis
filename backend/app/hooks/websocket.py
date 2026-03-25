@@ -1,7 +1,7 @@
 """WebSocketHook — Worker Kanban 即時 log（DURING only）"""
 import logging
 from app.hooks import Hook, StreamEvent
-from app.core.executor.emitter import clean_ansi
+from app.core.executor.emitter import clean_ansi, sanitize_output
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ class WebSocketHook(Hook):
                 logger.warning(f"[WebSocketHook] directive: {e}")
             return
 
-        clean = clean_ansi(event.content)
+        clean = sanitize_output(clean_ansi(event.content))
         if not clean.strip():
             return
         # DB
