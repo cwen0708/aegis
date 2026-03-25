@@ -53,39 +53,9 @@ def export_recent_chats(hours: int = 2) -> int:
 
     _last_export_time = datetime.now(timezone.utc)
 
-    # 清理超過 8 小時沒更新的 chat 記憶檔
-    cleaned = _cleanup_stale_chat_memories(hours=8)
-
-    if exported or cleaned:
-        logger.info(f"[ChatExport] Exported {exported} sessions, cleaned {cleaned} stale files")
+    if exported:
+        logger.info(f"[ChatExport] Exported {exported} sessions")
     return exported
-
-
-def _cleanup_stale_chat_memories(hours: int = 8) -> int:
-    """刪除超過 N 小時沒更新的 chat-*.md 記憶檔。"""
-    import os
-
-    cutoff = datetime.now(timezone.utc).timestamp() - hours * 3600
-    cleaned = 0
-
-    _INSTALL_ROOT = Path(__file__).resolve().parent.parent.parent
-    members_root = _INSTALL_ROOT.parent / ".aegis" / "members"
-
-    if not members_root.exists():
-        return 0
-
-    for member_dir in members_root.iterdir():
-        if not member_dir.is_dir():
-            continue
-        short_term = member_dir / "memory" / "short-term"
-        if not short_term.exists():
-            continue
-        for f in short_term.glob("chat-*.md"):
-            if os.path.getmtime(f) < cutoff:
-                f.unlink()
-                cleaned += 1
-
-    return cleaned
 
 
 def _export_session(s: Session, chat_session: ChatSession, since: datetime) -> int:
