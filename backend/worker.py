@@ -653,7 +653,7 @@ def run_task_pty_windows(
     stream_json = config.get("stream_json", False)
     output_lines = []
     result_text_parts = []  # 收集實際的文字輸出
-    _use_emitter = emitter is not None and stream_json  # stream_json 模式才用 emitter
+    _has_emitter = emitter is not None
 
     try:
         # 從 os.environ 中刪除 CLAUDE 相關變數（這是 PTY 關鍵！）
@@ -674,7 +674,7 @@ def run_task_pty_windows(
 
         # 使用 read() 讀取並按行處理（heartbeat_monitor 管理心跳）
         from app.core.executor.emitter import StreamEmitter as _SE, WebSocketTarget as _WST
-        _hb_emitter = emitter if _use_emitter else _SE(targets=[_WST(card_id)])
+        _hb_emitter = emitter if _has_emitter else _SE(targets=[_WST(card_id)])
         buffer = ""
         with heartbeat_monitor(_hb_emitter) as touch:
             while pty_process.isalive():
@@ -688,7 +688,10 @@ def run_task_pty_windows(
                         except Exception:
                             pass
                         clear_abort_signal(card_id)
-                        broadcast_log(card_id, "\n🛑 任務已被中止\n")
+                        if _has_emitter:
+                            emitter.emit_output("\n🛑 任務已被中止\n")
+                        else:
+                            broadcast_log(card_id, "\n🛑 任務已被中止\n")
                         break
 
                     chunk = pty_process.read(512)
@@ -704,18 +707,13 @@ def run_task_pty_windows(
                             if stream_json:
                                 clean_line = _clean_ansi(line)
                                 if clean_line.strip().startswith("{"):
-                                    if _use_emitter:
-                                        # 透過 emitter 統一處理（解析 + 分發到所有 target）
+                                    if _has_emitter:
                                         emitter.emit_raw(clean_line)
-                                        # 同時收集文字（向後相容 result_text_parts）
-                                        text = parse_stream_json_text(clean_line)
-                                        if text:
-                                            result_text_parts.append(text)
-                                    else:
-                                        text = parse_stream_json_text(clean_line)
-                                        if text:
-                                            result_text_parts.append(text)
-                                            broadcast_log(card_id, text)
+                                    text = parse_stream_json_text(clean_line)
+                                    if text:
+                                        result_text_parts.append(text)
+                            elif _has_emitter:
+                                emitter.emit_output(line + "\n")
                             else:
                                 broadcast_log(card_id, line + "\n")
                 except EOFError:
@@ -741,16 +739,13 @@ def run_task_pty_windows(
                 for line in buffer.split("\n"):
                     clean_line = _clean_ansi(line)
                     if clean_line.strip().startswith("{"):
-                        if _use_emitter:
+                        if _has_emitter:
                             emitter.emit_raw(clean_line)
-                            text = parse_stream_json_text(clean_line)
-                            if text:
-                                result_text_parts.append(text)
-                        else:
-                            text = parse_stream_json_text(clean_line)
-                            if text:
-                                result_text_parts.append(text)
-                                broadcast_log(card_id, text)
+                        text = parse_stream_json_text(clean_line)
+                        if text:
+                            result_text_parts.append(text)
+            elif _has_emitter:
+                emitter.emit_output(buffer)
             else:
                 broadcast_log(card_id, buffer)
 
@@ -844,13 +839,19 @@ def run_task_subprocess(
                 touch()
                 line = raw_line.decode("utf-8", errors="replace")
                 output_lines.append(line)
-                broadcast_log(card_id, line)
+                if _has_emitter:
+                    emitter.emit_output(line)
+                else:
+                    broadcast_log(card_id, line)
                 # 檢查 abort 信號
                 if is_abort_requested(card_id):
                     logger.info(f"[Task {card_id}] Abort signal received, killing process")
                     proc.kill()
                     clear_abort_signal(card_id)
-                    broadcast_log(card_id, "\n🛑 任務已被中止\n")
+                    if _has_emitter:
+                        emitter.emit_output("\n🛑 任務已被中止\n")
+                    else:
+                        broadcast_log(card_id, "\n🛑 任務已被中止\n")
                     break
 
         proc.wait()
@@ -1038,6 +1039,11 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
                 self._token_info = event.token_info
             run_on_stream(task_hooks, event)
 
+        def emit_output(self, text: str):
+            """非 stream_json 模式：直接當 output 事件送給 Hook"""
+            from app.core.executor.emitter import StreamEvent
+            run_on_stream(task_hooks, StreamEvent(kind="output", content=text))
+
     task_emitter = _HookEmitter(targets=[])
 
     # 執行任務（含 fallback 機制）
@@ -1074,7 +1080,7 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
     for attempt_idx, (acct_provider, acct_model, acct_auth, acct_name) in enumerate(accounts_list):
         if attempt_idx > 0:
             logger.info(f"[Worker] Card {idx.card_id}: fallback → '{acct_name}' (priority={attempt_idx})")
-            broadcast_log(idx.card_id, f"\n⚠️ 主帳號失敗，切換至備用帳號: {acct_name}\n")
+            task_emitter.emit_output(f"\n⚠️ 主帳號失敗，切換至備用帳號: {acct_name}\n")
 
         result = run_task(
             card_id=idx.card_id,
