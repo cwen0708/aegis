@@ -137,74 +137,30 @@ def handle_regular_result(idx, result, new_status, card_data, project_path, memb
 
 
 def post_task_hooks(idx, result, new_status, token_info, card_data, project_name,
-                    member_id, member_slug, workspace_dir, cron_job_id,
-                    *, broadcast_event, extract_dialogue, save_member_dialogue, cleanup_workspace):
-    """共用後處理：廣播 + dialogue + OneStack 回報 + 記憶 + 清理"""
-    broadcast_event(
-        "task_completed" if new_status == "completed" else "task_failed",
-        {"card_id": idx.card_id, "status": new_status},
+                    member_id, member_slug, workspace_dir, cron_job_id, **_kwargs):
+    """共用後處理 — 委託給 Hook 機制（executor/hooks.py）"""
+    from app.core.executor.hooks import TaskContext, run_post_hooks
+
+    ctx = TaskContext(
+        card_id=idx.card_id,
+        card_title=idx.title,
+        project_id=idx.project_id,
+        project_name=project_name,
+        project_path="",
+        member_id=member_id,
+        member_slug=member_slug,
+        list_id=idx.list_id,
+        status=new_status,
+        output=result.get("output", ""),
+        provider=result.get("provider", ""),
+        exit_code=result.get("exit_code", 0),
+        token_info=token_info,
+        card_content=card_data.content or "",
+        workspace_dir=workspace_dir or "",
+        cron_job_id=cron_job_id,
     )
 
-    # AVG 對話
-    if member_id:
-        dialogue_text = extract_dialogue(result.get("output", ""))
-        if dialogue_text:
-            save_member_dialogue(member_id, idx.card_id, idx.title, project_name,
-                                "task_complete" if new_status == "completed" else "task_failed", dialogue_text)
-
-    # OneStack 任務完成回報
-    try:
-        from app.core.onestack_connector import connector as _os_connector
-        if _os_connector.enabled:
-            import asyncio
-            asyncio.run(_os_connector.report_task_completion(
-                card_id=idx.card_id, output=result.get("output", ""),
-                status=result.get("status", "error"),
-                duration_ms=token_info.get("duration_ms", 0),
-                cost_usd=token_info.get("total_cost_usd", 0),
-            ))
-    except Exception as e:
-        logger.debug(f"[OneStack] Report completion failed: {e}")
-
-    # OneStack 文件分析回報
-    _doc_match = re.search(r'<!-- document_id: (.+?) -->', card_data.content or "")
-    if _doc_match:
-        _doc_id = _doc_match.group(1)
-        try:
-            from app.core.onestack_connector import connector as _doc_conn
-            if _doc_conn.enabled:
-                import asyncio as _doc_aio
-                _doc_output = token_info.get("result_text", "") or result.get("output", "")[:3000]
-                _doc_evt = "result" if new_status == "completed" else "error"
-                _doc_json_content = _doc_output
-                _json_match = re.search(r'```json\s*\n([\s\S]*?)\n```', _doc_output)
-                if _json_match:
-                    _doc_json_content = _json_match.group(1).strip()
-                _doc_aio.run(_doc_conn.stream_event(
-                    card_id=idx.card_id, event_type=_doc_evt, content=_doc_json_content[:5000],
-                    member_slug=member_slug, metadata={"document_id": _doc_id, "type": "file_result"},
-                    chat_id=f"doc:{_doc_id}",
-                ))
-                logger.info(f"[Task] Document {_doc_id[:8]}... result sent to OneStack")
-        except Exception as e:
-            logger.debug(f"[OneStack] Document report failed: {e}")
-
-    # 成員記憶
-    if member_slug:
-        try:
-            from app.core.memory_manager import write_member_short_term_memory
-            write_member_short_term_memory(
-                member_slug,
-                f"## 任務: {idx.title}\n專案: {project_name}\n結果: {result['status']}\n\n{result.get('output', '')[:500]}"
-            )
-        except Exception as e:
-            logger.warning(f"[Memory] Failed: {e}")
-
-    # 清理工作區
-    if workspace_dir:
-        cleanup_workspace(idx.card_id)
-
-    logger.info(f"[Task] Card {idx.card_id} {'cron_log' if cron_job_id else new_status}")
+    run_post_hooks(ctx)
 
 
 def _extract_chat_output(raw_output: str) -> str:

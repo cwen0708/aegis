@@ -961,9 +961,7 @@ def _handle_regular_result(idx, result, new_status, card_data, project_path, mem
 
 
 def _post_task_hooks(idx, result, new_status, token_info, card_data, project_name, member_id, member_slug, workspace_dir, cron_job_id):
-    _post_task_hooks_impl(idx, result, new_status, token_info, card_data, project_name, member_id, member_slug, workspace_dir, cron_job_id,
-                          broadcast_event=broadcast_event, extract_dialogue=_extract_dialogue,
-                          save_member_dialogue=_save_member_dialogue, cleanup_workspace=cleanup_workspace)
+    _post_task_hooks_impl(idx, result, new_status, token_info, card_data, project_name, member_id, member_slug, workspace_dir, cron_job_id)
 
 
 def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):

@@ -1039,60 +1039,6 @@ async def _handle_onestack_task(task: Dict[str, Any]):
         )
 
 
-async def _build_chat_history(chat_id: str, max_rounds: int = 5) -> str:
-    """從 aegis_stream 撈對話歷史（用戶問題 + AI 回應），回傳 Markdown 區塊"""
-    STATUS_WORDS = {"completed", "task_started", "task_completed", "task_failed", "running", "pending"}
-    try:
-        # 撈最近的 result 和用戶訊息（output 含 [用戶] 前綴）
-        history = await connector._request(
-            "GET", "aegis_stream",
-            params={
-                "device_id": f"eq.{connector.device_id}",
-                "chat_id": f"eq.{chat_id}",
-                "event_type": "in.(result,output)",
-                "order": "created_at.desc",
-                "limit": str(max_rounds * 3),  # 多撈一些，過濾後取 max_rounds 輪
-            }
-        )
-        if not history or not isinstance(history, list):
-            return ""
-
-        # 組成對話格式（從舊到新）
-        pairs = []
-        for h in reversed(history):
-            c = h.get("content", "").strip()
-            if not c or c in STATUS_WORDS:
-                continue
-            if c.startswith("{"):  # 原始 JSON，跳過
-                continue
-            if c.startswith("[用戶]"):
-                pairs.append(("user", c[4:].strip()))
-            elif h.get("event_type") == "result":
-                pairs.append(("assistant", c[:500]))
-
-        if not pairs:
-            return ""
-
-        # 只取最近 max_rounds 輪
-        lines = []
-        for role, text in pairs[-(max_rounds * 2):]:
-            if role == "user":
-                lines.append(f"**用戶**：{text}")
-            else:
-                lines.append(f"**AI**：{text}")
-
-        return "## 對話歷史\n\n" + "\n\n".join(lines) + "\n\n---\n\n"
-
-    except Exception as e:
-        logger.debug(f"[OneStack] Failed to load history: {e}")
-        return ""
-
-
-async def _build_chat_card_content(chat_id: str, message: str, max_rounds: int = 5) -> str:
-    """組合 chat 卡片的完整 content（歷史 + 用戶訊息）"""
-    history = await _build_chat_history(chat_id, max_rounds)
-    return f"<!-- chat_id: {chat_id} -->\n{history}## 用戶訊息\n\n{message}"
-
 
 async def _handle_aegis_command(command_type: str, payload: Dict) -> Dict:
     """處理從 OneStack aegis_commands 收到的指令"""
