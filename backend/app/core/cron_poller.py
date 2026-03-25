@@ -142,26 +142,41 @@ def _parse_datetime(dt_str: str) -> datetime | None:
     return None
 
 
-async def _execute_api_call(session: Session, job, meta: dict, tz_name: str):
-    """直接呼叫 API（不建卡片，不耗 AI token）。
+async def _execute_job(session: Session, job, tz_name: str):
+    """統一排程執行入口。
 
-    metadata 格式：
-    {
-        "action": "api_call",
-        "api_url": "/api/v1/agent-chat/meeting",
-        "api_body": { ... }
-    }
+    metadata 有 api_url → 直接 HTTP POST（會議、webhook 等）
+    metadata 沒有 api_url → 預設建卡片（AI 任務）
     """
+    meta = json.loads(job.metadata_json) if job.metadata_json else {}
+    api_url = meta.get("api_url")
+
+    if api_url:
+        await _execute_api_call(session, job, api_url, meta, tz_name)
+    else:
+        # 預設：建卡片給 Worker 執行
+        ops_tag = session.exec(select(Tag).where(Tag.name == "Ops")).first()
+        if not ops_tag:
+            ops_tag = Tag(name="Ops", color="purple")
+            session.add(ops_tag)
+            session.commit()
+            session.refresh(ops_tag)
+
+        card_id, error = create_card_for_cron_job(session, job, ops_tag, update_next_time=True)
+        if error:
+            logger.info(f"[Cron Poller] Skip {job.name}: {error}")
+        elif card_id:
+            logger.info(f"[Cron Poller] Created card {card_id} for '{job.name}'")
+
+
+async def _execute_api_call(session: Session, job, api_url: str, meta: dict, tz_name: str):
+    """直接呼叫 API（不建卡片，不耗 AI token）。"""
     import urllib.request
-    import urllib.error
 
-    url = meta["api_url"]
-    if url.startswith("/"):
-        url = f"http://127.0.0.1:8899{url}"
-
+    url = api_url if api_url.startswith("http") else f"http://127.0.0.1:8899{api_url}"
     body = meta.get("api_body", {})
 
-    # 支援日期變數替換
+    # 支援 ${DATE} 變數替換
     tz = timezone(timedelta(hours=8))
     today = datetime.now(tz).strftime("%Y-%m-%d")
     body_str = json.dumps(body, ensure_ascii=False).replace("${DATE}", today)
@@ -175,42 +190,27 @@ async def _execute_api_call(session: Session, job, meta: dict, tz_name: str):
         )
         with urllib.request.urlopen(req, timeout=300) as resp:
             result = resp.read().decode("utf-8")
-            logger.info(f"[Cron Poller] API call '{job.name}' → {resp.status} ({len(result)} chars)")
+            logger.info(f"[Cron Poller] API '{job.name}' → {resp.status} ({len(result)} chars)")
 
-        # 寫 CronLog
         from app.models.core import CronLog
         session.add(CronLog(
-            cron_job_id=job.id,
-            cron_job_name=job.name,
-            card_id=0,
-            card_title=f"[api_call] {job.name}",
-            project_id=job.project_id,
-            project_name="",
-            member_slug="",
-            member_id=None,
-            status="success",
-            output=result[:2000],
-            error="",
-            stage_action="",
-            token_info_json="{}",
+            cron_job_id=job.id, cron_job_name=job.name,
+            card_id=0, card_title=f"[api] {job.name}",
+            project_id=job.project_id, project_name="",
+            member_slug="", member_id=None,
+            status="success", output=result[:2000], error="",
+            stage_action="", token_info_json="{}",
         ))
     except Exception as e:
-        logger.error(f"[Cron Poller] API call '{job.name}' failed: {e}")
+        logger.error(f"[Cron Poller] API '{job.name}' failed: {e}")
         from app.models.core import CronLog
         session.add(CronLog(
-            cron_job_id=job.id,
-            cron_job_name=job.name,
-            card_id=0,
-            card_title=f"[api_call] {job.name}",
-            project_id=job.project_id,
-            project_name="",
-            member_slug="",
-            member_id=None,
-            status="error",
-            output="",
-            error=str(e)[:500],
-            stage_action="",
-            token_info_json="{}",
+            cron_job_id=job.id, cron_job_name=job.name,
+            card_id=0, card_title=f"[api] {job.name}",
+            project_id=job.project_id, project_name="",
+            member_slug="", member_id=None,
+            status="error", output="", error=str(e)[:500],
+            stage_action="", token_info_json="{}",
         ))
 
     # 更新下次執行時間
@@ -380,28 +380,11 @@ async def poll_local_cron_jobs():
             if not due_jobs:
                 return
 
-        logger.info(f"[Cron Poller] Found {len(due_jobs)} due jobs in local DB. Creating Aegis Cards...")
+        logger.info(f"[Cron Poller] Found {len(due_jobs)} due jobs")
 
-        # 確保有 Ops 標籤
-        ops_tag = session.exec(select(Tag).where(Tag.name == "Ops")).first()
-        if not ops_tag:
-            ops_tag = Tag(name="Ops", color="purple")
-            session.add(ops_tag)
-            session.commit()
-            session.refresh(ops_tag)
-
+        tz_name = _get_system_timezone(session)
         for job in due_jobs:
-            # 直接 API 呼叫模式：metadata 有 api_call 就直接 POST，不建卡片
-            meta = json.loads(job.metadata_json) if job.metadata_json else {}
-            if meta.get("action") == "api_call" and meta.get("api_url"):
-                await _execute_api_call(session, job, meta, _get_system_timezone(session))
-                continue
-
-            card_id, error = create_card_for_cron_job(session, job, ops_tag, update_next_time=True)
-            if error:
-                logger.info(f"[Cron Poller] Skip {job.name}: {error}")
-            elif card_id:
-                logger.info(f"[Cron Poller] Created card {card_id} for '{job.name}'")
+            await _execute_job(session, job, tz_name)
 
 async def start_cron_poller():
     """獨立的排程迴圈，每 60 秒檢查一次本地資料庫"""
