@@ -1,10 +1,8 @@
 """
 Agent Chat — AI 成員間對話 API
 
-讓 AI 成員可以在對話中諮詢其他成員，底層復用 ProcessPool 持久進程。
-用法：
-  - Shared skill 呼叫 POST /api/v1/agent-chat/ask
-  - ConversationRoom coordinator 呼叫同一個 endpoint（未來）
+- POST /agent-chat/ask — 一對一即時諮詢
+- POST /agent-chat/meeting — 啟動多人會議（輪流制 / 主持人制）
 """
 import asyncio
 import logging
@@ -112,4 +110,74 @@ async def ask_member(req: AskRequest):
         member_name=ctx.member_name or req.target,
         status=status,
         token_info=result.get("token_info", {}),
+    )
+
+
+# ════════════════════════════════════════
+# Meeting — 多人會議
+# ════════════════════════════════════════
+
+class MeetingRequest(BaseModel):
+    meeting_id: str                     # 會議 ID（如 standup-2026-03-25）
+    title: str = ""                     # 會議標題
+    moderator: str                      # 主持人 slug
+    speakers: list[str]                 # 發言者 slug 列表
+    mode: str = "round_robin"           # "round_robin" | "moderated"
+    rounds: int = 1                     # 輪流制的輪數
+    max_turns: int = 10                 # 主持人制的最大輪數
+    opening: str = ""                   # 開場白
+
+
+class MeetingResponse(BaseModel):
+    meeting_id: str
+    file_path: str
+    total_entries: int
+    history: list[dict]   # [{speaker, slug, content}]
+    status: str
+
+
+@router.post("/meeting", response_model=MeetingResponse)
+async def start_meeting(req: MeetingRequest):
+    """啟動多人會議。
+
+    輪流制：固定順序，每人發言 N 輪，最後主持人總結。
+    主持人制：主持人每輪決定下一個誰講，[DONE] 結束。
+    """
+    from app.core.conversation.room import ConversationRoom
+    from app.core.conversation.coordinator import run_round_robin, run_moderated
+
+    all_participants = [req.moderator] + req.speakers
+    room = ConversationRoom(
+        meeting_id=req.meeting_id,
+        title=req.title or req.meeting_id,
+        participants=all_participants,
+    )
+
+    try:
+        if req.mode == "moderated":
+            await run_moderated(
+                room=room,
+                moderator=req.moderator,
+                participants=req.speakers,
+                opening=req.opening,
+                max_turns=req.max_turns,
+            )
+        else:
+            await run_round_robin(
+                room=room,
+                moderator=req.moderator,
+                speakers=req.speakers,
+                rounds=req.rounds,
+                opening=req.opening,
+            )
+    except Exception as e:
+        logger.error(f"[Meeting] Failed: {e}")
+        raise HTTPException(500, f"會議執行失敗: {e}")
+
+    return MeetingResponse(
+        meeting_id=room.meeting_id,
+        file_path=str(room.file_path),
+        total_entries=len(room.history),
+        history=room.history,
+        status="completed",
     )
