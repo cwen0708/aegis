@@ -18,7 +18,7 @@ from typing import Dict, Any, Optional, Callable
 
 from app.core.executor import PROVIDERS, build_command
 from app.core.executor.providers import get_provider_config
-from app.core.executor.auth import inject_auth_env, get_mcp_config_path
+from app.core.executor.auth import get_mcp_config_path
 
 logger = logging.getLogger(__name__)
 
@@ -101,16 +101,18 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
         resume_session_id=resume_session_id,
     )
 
-    from app.core.sandbox import build_sanitized_env, get_popen_kwargs
-    env = build_sanitized_env(project_id=project_id)
+    from app.core.sandbox import get_popen_kwargs
+    from app.core.env_builder import EnvironmentBuilder
 
-    # 注入額外環境變數（如 per-user AD 帳密 for MCP）
-    if extra_env:
-        env.update(extra_env)
+    env = (EnvironmentBuilder()
+        .with_system_keys()
+        .with_project_vars(project_id)
+        .with_global_api_keys()
+        .with_member_extra(extra_env)
+        .with_auth(provider_name, auth_info or {})
+        .build())
 
-    # 透過 executor 注入認證（統一 auth 邏輯）
-    auth_info = auth_info or {}
-    inject_auth_env(env, provider_name, auth_info)
+    # 移除舊的環境變數組裝邏輯，已統一到 EnvironmentBuilder
 
     logger.info(f"[Runner] Executing {provider_name} (task_id={task_id}, phase={phase})")
 

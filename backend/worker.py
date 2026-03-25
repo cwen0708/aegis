@@ -175,7 +175,6 @@ MAX_WORKSTATIONS = 3  # 預設，啟動時從 DB 讀取
 # Provider 設定統一由 executor 管理
 from app.core.executor import PROVIDERS, build_command
 from app.core.executor.providers import get_provider_config
-from app.core.executor.auth import inject_auth_env
 from app.core.executor.emitter import clean_ansi as _clean_ansi
 
 
@@ -674,8 +673,9 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
         resume_session_id=resume_session_id,
     )
 
-    # 環境變數白名單隔離（透過 sandbox 模組）
-    from app.core.sandbox import build_sanitized_env
+    # 環境變數組裝（透過統一的 EnvironmentBuilder API）
+    from app.core.env_builder import EnvironmentBuilder
+
     # 從 project_path 反查 project_id 用於注入專案環境變數
     _project_id = None
     try:
@@ -690,16 +690,18 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
                 _project_id = _proj.id
     except Exception:
         pass
-    env = build_sanitized_env(project_id=_project_id)
-    env["CLAUDE_CODE_ENTRY_POINT"] = "worker"
 
-    # 注入 GitHub git credential（如果 workspace 有 .gitconfig）
+    # Git config 路徑（如果 workspace 有 .gitconfig）
     ws_gitconfig = os.path.join(project_path, ".gitconfig")
-    if os.path.exists(ws_gitconfig):
-        env["GIT_CONFIG_GLOBAL"] = ws_gitconfig
 
-    # 透過 executor 注入認證（統一 auth 邏輯）
-    inject_auth_env(env, provider_name, auth_info, log_prefix=f"[Task {card_id}]")
+    env = (EnvironmentBuilder()
+        .with_system_keys()
+        .with_project_vars(_project_id)
+        .with_global_api_keys()
+        .with_entry_point("worker")
+        .with_git_config(ws_gitconfig)
+        .with_auth(provider_name, auth_info, log_prefix=f"[Task {card_id}]")
+        .build())
 
     logger.info(f"[Task {card_id}] Executing {provider_name} in {project_path} (PTY mode)")
     logger.info(f"[Task {card_id}] Command: {' '.join(cmd_parts[:3])}...")
