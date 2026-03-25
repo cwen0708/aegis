@@ -1619,10 +1619,15 @@ def main():
                 auto_activate_idle_cards()
                 process_pending_cards()
 
-            # 每小時清理過期記錄和暫存檔案
+            # 每小時清理過期記錄和暫存檔案 + 匯出對話記憶
             if time.time() - last_cleanup > 3600:
                 cleanup_broadcast_logs()
                 cleanup_media_files()
+                try:
+                    from app.core.chat_memory_export import export_recent_chats
+                    export_recent_chats(hours=2)
+                except Exception as e:
+                    logger.warning(f"[ChatExport] Failed: {e}")
                 last_cleanup = time.time()
         except Exception as e:
             logger.error(f"[Worker Error] {e}")
