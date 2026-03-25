@@ -175,6 +175,7 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
     # 11. 呼叫 AI（Process Pool 持久進程 or CLI fallback）
     chat_session_key = f"{bot_user.platform}:{msg.chat_id}:{member.slug}"
     use_pool = provider == "claude"
+    logger.info(f"[Chat] Calling AI: provider={provider} use_pool={use_pool} key={chat_session_key} model={model}")
 
     try:
         result = await run_ai_task(
