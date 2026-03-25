@@ -142,10 +142,15 @@ class MessageRouter:
             return
 
         # 2. 執行 AI 對話（傳入 placeholder message_id，程式控制即時編輯）
-        response_text = await handle_chat(
-            msg, bot_user,
-            placeholder_message_id=str(message_id),
-        )
+        try:
+            response_text = await handle_chat(
+                msg, bot_user,
+                placeholder_message_id=str(message_id),
+            )
+        except Exception as e:
+            import traceback
+            logger.error(f"[Router] handle_chat CRASHED: {e}\n{traceback.format_exc()}")
+            response_text = f"❌ 內部錯誤: {str(e)[:100]}"
 
         # 3. 如果 handle_chat 回傳文字 → edit 佔位訊息（非即時模式 fallback）
         #    回傳 None → handle_chat 內部已處理（即時模式），Router 不動
