@@ -155,3 +155,19 @@ def parse_tool_call(line: str) -> Optional[Tuple[str, str]]:
             return ("output", "💭 思考中...")
 
     return None
+
+
+def parse_openai_json(output: str) -> Dict[str, Any]:
+    """從 OpenAI CLI wrapper 的 JSON 輸出解析結果與 token 用量"""
+    try:
+        data = json.loads(output.strip())
+        return {
+            "result_text": data.get("result_text", ""),
+            "model": data.get("model", ""),
+            "duration_ms": data.get("duration_ms", 0),
+            "cost_usd": data.get("cost_usd", 0),
+            "input_tokens": data.get("input_tokens", 0),
+            "output_tokens": data.get("output_tokens", 0),
+        }
+    except (json.JSONDecodeError, KeyError):
+        return {}

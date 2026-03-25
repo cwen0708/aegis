@@ -17,6 +17,11 @@ PROVIDERS = {
         "cmd_base": ["gemini"],
         "json_output": False,
     },
+    "openai": {
+        "cmd_base": ["python", "scripts/openai_chat.py"],
+        "json_output": True,
+        "default_model": "gpt-4o",
+    },
     "ollama": {
         "cmd_base": ["ollama", "run"],
         "json_output": False,
