@@ -57,21 +57,35 @@ class TaskHook(Protocol):
 
 # ── Hook 註冊表（按順序執行，cleanup 永遠最後）──
 
-def collect_hooks() -> list[TaskHook]:
-    """收集所有已註冊的 Hook"""
+def collect_hooks(source: str = "worker") -> list[TaskHook]:
+    """收集適用於指定來源的 Hook。
+
+    source: "worker" | "chat" | "meeting" | "onestack"
+    """
     from app.hooks.broadcast import BroadcastHook
     from app.hooks.dialogue import DialogueHook
     from app.hooks.onestack import OneStackHook
     from app.hooks.memory import MemoryHook
     from app.hooks.cleanup import CleanupHook
 
-    return [
-        BroadcastHook(),
-        DialogueHook(),
-        OneStackHook(),
-        MemoryHook(),
-        CleanupHook(),   # 清理永遠最後
-    ]
+    if source == "worker":
+        return [
+            BroadcastHook(),
+            DialogueHook(),
+            OneStackHook(),
+            MemoryHook(),
+            CleanupHook(),
+        ]
+    elif source in ("chat", "onestack"):
+        return [
+            MemoryHook(),
+        ]
+    elif source == "meeting":
+        return [
+            MemoryHook(),
+        ]
+    else:
+        return [MemoryHook()]
 
 
 def run_hooks(ctx: TaskContext, hooks: list[TaskHook] = None) -> None:
