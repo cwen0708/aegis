@@ -12,8 +12,17 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# 思考中提示訊息
-THINKING_MESSAGE = "⏳ 請稍候..."
+# 思考中提示訊息（含 commit hash 方便識別版本）
+def _get_thinking_message():
+    try:
+        from pathlib import Path
+        ver_file = Path(__file__).parent.parent.parent / "VERSION"
+        version = ver_file.read_text().strip() if ver_file.exists() else "?"
+        return f"⏳ {version}"
+    except Exception:
+        return "⏳ 請稍候..."
+
+THINKING_MESSAGE = _get_thinking_message()
 
 
 class MessageRouter:

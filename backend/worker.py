@@ -1543,6 +1543,35 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
     except Exception as e:
         logger.debug(f"[OneStack] Report completion failed: {e}")
 
+    # OneStack 文件分析回報（偵測 document_id 標記）
+    _doc_match = re.search(r'<!-- document_id: (.+?) -->', card_data.content or "")
+    if _doc_match:
+        _doc_id = _doc_match.group(1)
+        try:
+            from app.core.onestack_connector import connector as _doc_conn
+            if _doc_conn.enabled:
+                import asyncio as _doc_aio
+                _doc_output = result.get("output", "")
+                _doc_evt = "result" if new_status == "completed" else "error"
+
+                # 嘗試從 AI 輸出提取 JSON 結果
+                _doc_json_content = _doc_output
+                _json_match = re.search(r'```json\s*\n([\s\S]*?)\n```', _doc_output)
+                if _json_match:
+                    _doc_json_content = _json_match.group(1).strip()
+
+                _doc_aio.run(_doc_conn.stream_event(
+                    card_id=idx.card_id,
+                    event_type=_doc_evt,
+                    content=_doc_json_content[:5000],
+                    member_slug=member_slug,
+                    metadata={"document_id": _doc_id, "type": "file_result"},
+                    chat_id=f"doc:{_doc_id}",
+                ))
+                logger.info(f"[Worker] Document {_doc_id[:8]}... analysis result sent to OneStack")
+        except Exception as e:
+            logger.debug(f"[OneStack] Document report failed: {e}")
+
     # 寫入成員記憶
     if member_slug:
         try:

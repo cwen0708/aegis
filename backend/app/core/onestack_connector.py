@@ -1203,8 +1203,152 @@ async def _handle_aegis_command(command_type: str, payload: Dict) -> Dict:
     elif command_type == "sync":
         return {"ok": True, "status": "online"}
 
+    elif command_type == "process_file":
+        return await _handle_process_file(payload)
+
     else:
         return {"ok": False, "error": f"Unknown command: {command_type}"}
+
+
+async def _handle_process_file(payload: Dict) -> Dict:
+    """處理 OneStack 文件分析指令：下載檔案 → 建 AI 卡片"""
+    import httpx
+    from pathlib import Path
+
+    document_id = payload.get("document_id")
+    signed_url = payload.get("signed_url")
+    file_name = payload.get("file_name", "unknown")
+    mime_type = payload.get("mime_type", "")
+    project_name = payload.get("project_name", "")
+
+    if not document_id or not signed_url:
+        return {"ok": False, "error": "Missing document_id or signed_url"}
+
+    logger.info(f"[OneStack] process_file: {file_name} (doc={document_id[:8]}...)")
+
+    # 1. 下載檔案到專案目錄 files/
+    try:
+        from sqlmodel import Session as _Ses, select
+        from app.database import engine as _eng
+        from app.models.core import Project
+
+        # 取得預設專案路徑
+        with _Ses(_eng) as session:
+            project = session.exec(select(Project).where(Project.id == 1)).first()
+            project_path = project.path if project else "/home/cwen0708/projects/Aegis"
+
+        # 建立下載目錄：files/{project_name 或 incoming}/
+        sub_dir = project_name.replace("/", "_").strip() if project_name else "incoming"
+        files_dir = Path(project_path) / "files" / sub_dir
+        files_dir.mkdir(parents=True, exist_ok=True)
+
+        # 下載
+        safe_name = file_name.replace("/", "_")
+        local_path = files_dir / f"{document_id[:8]}_{safe_name}"
+
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.get(signed_url)
+            if resp.status_code >= 400:
+                return {"ok": False, "error": f"Download failed: HTTP {resp.status_code}"}
+            local_path.write_bytes(resp.content)
+
+        logger.info(f"[OneStack] Downloaded {file_name} → {local_path}")
+
+    except Exception as e:
+        logger.error(f"[OneStack] Download error: {e}")
+        return {"ok": False, "error": str(e)[:500]}
+
+    # 2. 建立 AI 分析卡片
+    try:
+        from app.models.core import Member, StageList, CardIndex
+        from app.core.card_file import CardData, write_card, card_file_path
+
+        with _Ses(_eng) as session:
+            # 找可用的 AI 成員（優先 aegis）
+            member = session.exec(select(Member).where(Member.slug == "aegis")).first()
+            if not member:
+                member = session.exec(select(Member)).first()
+
+            inbox = session.exec(
+                select(StageList).where(
+                    StageList.project_id == 1,
+                    StageList.member_id == member.id,
+                    StageList.is_ai_stage == True,
+                )
+            ).first()
+
+            if not inbox:
+                return {"ok": False, "error": "No AI stage found"}
+
+            # 建卡片
+            max_id = session.exec(select(CardIndex.card_id).order_by(CardIndex.card_id.desc())).first() or 0
+            card_id = max_id + 1
+
+            # 組合 prompt：讓 AI 讀取檔案並分析
+            is_image = mime_type.startswith("image/") if mime_type else False
+            content = f"""<!-- document_id: {document_id} -->
+
+請分析以下文件並回傳 JSON 格式的結果。
+
+**檔案路徑**: `{local_path}`
+**檔案名稱**: {file_name}
+**檔案類型**: {mime_type}
+
+## 任務
+
+1. {'讀取這張圖片' if is_image else '讀取這個檔案'}，判斷它是什麼類型的文件（發票、收據、報價單、合約、出差單、對帳單等）
+2. 提取文件中的關鍵結構化欄位（金額、日期、對象、統編等）
+3. 用一句話摘要這份文件的內容
+
+## 輸出格式
+
+請在回應的最後輸出一個 JSON 區塊：
+
+```json
+{{
+  "doc_type": "invoice",
+  "doc_type_label": "三聯式發票",
+  "confidence": 0.95,
+  "summary": "一句話摘要",
+  "extracted": {{
+    "...依文件類型而定..."
+  }}
+}}
+```
+
+doc_type 可以是：invoice, receipt, quotation, contract, expense_report, statement, general
+"""
+
+            card_data = CardData(
+                id=card_id,
+                list_id=inbox.id,
+                title=f"[file] {file_name[:40]}",
+                description=None,
+                content=content,
+                status="pending",
+            )
+
+            fp = card_file_path(project_path, card_id)
+            fp.parent.mkdir(parents=True, exist_ok=True)
+            write_card(fp, card_data)
+
+            idx = CardIndex(
+                card_id=card_id,
+                project_id=1,
+                list_id=inbox.id,
+                title=card_data.title,
+                status="pending",
+                file_path=str(fp),
+            )
+            session.add(idx)
+            session.commit()
+
+        logger.info(f"[OneStack] Created file analysis card {card_id} for {file_name}")
+        return {"ok": True, "card_id": card_id}
+
+    except Exception as e:
+        logger.error(f"[OneStack] Card creation error: {e}")
+        return {"ok": False, "error": str(e)[:500]}
 
 
 async def start_onestack_connector():
