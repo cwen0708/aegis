@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 # ANSI escape code 清理
 _ANSI_RE = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07?')
+_DIRECTIVE_RE = re.compile(r'<!-- directive:(.*?) -->')
 
 
 def clean_ansi(text: str) -> str:
@@ -48,7 +49,7 @@ def clean_ansi(text: str) -> str:
 @dataclass
 class StreamEvent:
     """統一串流事件"""
-    kind: str           # "tool_call" | "output" | "thinking" | "text" | "heartbeat" | "result"
+    kind: str           # "tool_call" | "output" | "thinking" | "text" | "heartbeat" | "result" | "directive"
     content: str        # 人話摘要（emoji + 說明）或原始文字
     raw_line: str = ""  # 原始 JSON 行（某些 target 需要）
     event_type: str = ""  # OneStack event_type（tool_call / output）
@@ -95,6 +96,19 @@ def parse_stream_event(raw_line: str) -> Optional[StreamEvent]:
 
         text = parse_stream_json_text(raw_line)
         if text:
+            # 偵測 directive 標記
+            m = _DIRECTIVE_RE.search(text)
+            if m:
+                try:
+                    directive_data = json.loads(m.group(1))
+                    return StreamEvent(
+                        kind="directive",
+                        content=text,
+                        raw_line=raw_line,
+                        token_info=directive_data,  # 借用 token_info 存放 directive payload
+                    )
+                except (json.JSONDecodeError, ValueError):
+                    pass
             return StreamEvent(
                 kind="text", content=text, raw_line=raw_line,
             )
@@ -121,6 +135,20 @@ class WebSocketTarget:
     def handle(self, event: StreamEvent) -> None:
         if event.kind == "result":
             return  # result 不廣播
+
+        # directive → 走 broadcast_directive 路徑
+        if event.kind == "directive":
+            try:
+                from app.core.http_client import InternalAPI
+                directive_data = event.token_info  # {action, params, ...}
+                InternalAPI.post("/internal/directive", {
+                    "card_id": self.card_id,
+                    "action": directive_data.get("action", "notify"),
+                    "params": directive_data.get("params", {}),
+                })
+            except Exception as e:
+                logger.warning(f"[WebSocketTarget] directive card={self.card_id}: {e}")
+            return
 
         clean = clean_ansi(event.content)
         if not clean.strip():

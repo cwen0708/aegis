@@ -121,6 +121,11 @@ export function useWebSocket() {
       case 'clone_progress':
         window.dispatchEvent(new CustomEvent('aegis:clone-progress', { detail: data }))
         break
+
+      case 'directive':
+        window.dispatchEvent(new CustomEvent('aegis:directive', { detail: data }))
+        store.handleDirective(data)
+        break
     }
   }
 

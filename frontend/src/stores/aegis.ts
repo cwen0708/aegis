@@ -29,6 +29,12 @@ export interface Toast {
   type: 'success' | 'error' | 'info'
 }
 
+export interface Directive {
+  action: string
+  params: Record<string, any>
+  card_id?: number | null
+}
+
 export const useAegisStore = defineStore('aegis', () => {
   // 系統設定
   const settings = ref<Record<string, string>>({})
@@ -48,6 +54,9 @@ export const useAegisStore = defineStore('aegis', () => {
   // Log streaming 緩衝
   const taskLogs = ref<Map<number, string[]>>(new Map())
 
+  // Directive 佇列
+  const directiveQueue = ref<Directive[]>([])
+
   // Toast 通知
   const toasts = ref<Toast[]>([])
   let toastId = 0
@@ -60,6 +69,27 @@ export const useAegisStore = defineStore('aegis', () => {
 
   function removeToast(id: number) {
     toasts.value = toasts.value.filter(t => t.id !== id)
+  }
+
+  function handleDirective(data: Directive) {
+    directiveQueue.value.push(data)
+    // 限制佇列長度
+    if (directiveQueue.value.length > 100) {
+      directiveQueue.value.splice(0, directiveQueue.value.length - 100)
+    }
+
+    switch (data.action) {
+      case 'notify': {
+        const p = data.params || {}
+        const message = p.message || 'Directive notification'
+        const level = p.level || 'info'
+        const type = level === 'error' ? 'error' : level === 'success' ? 'success' : 'info'
+        addToast(message, type as Toast['type'])
+        break
+      }
+      default:
+        console.warn(`[Directive] Unknown action: ${data.action}`)
+    }
   }
 
   function setConnected(val: boolean) {
@@ -212,8 +242,10 @@ export const useAegisStore = defineStore('aegis', () => {
     systemInfo,
     taskLogs,
     toasts,
+    directiveQueue,
     addToast,
     removeToast,
+    handleDirective,
     setConnected,
     updateRunningTasks,
     updateSystemInfo,

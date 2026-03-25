@@ -198,6 +198,22 @@ async def internal_broadcast_event(req: BroadcastEventRequest):
 
 
 # ==========================================
+# Directive Protocol（AI → 前端指令）
+# ==========================================
+class DirectiveRequest(BaseModel):
+    card_id: Optional[int] = None
+    action: str
+    params: dict = {}
+
+@router.post("/internal/directive")
+async def internal_directive(req: DirectiveRequest):
+    """Worker 呼叫：廣播 directive 事件 → 前端"""
+    from app.core.ws_manager import broadcast_directive
+    await broadcast_directive(req.action, req.params, req.card_id)
+    return {"ok": True}
+
+
+# ==========================================
 # Channel Send（AI 即時回應用）
 # ==========================================
 class ChannelSendRequest(BaseModel):

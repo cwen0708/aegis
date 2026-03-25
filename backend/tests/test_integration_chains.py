@@ -187,6 +187,36 @@ class TestStreamEmitterPipeline:
 
         assert emitter.token_info.get("input_tokens") == 300
 
+    def test_directive_notify_parsed(self):
+        """AI 輸出中嵌入 directive 標記 → parse 為 kind='directive'"""
+        text = '任務完成 <!-- directive:{"action":"notify","params":{"message":"部署成功","level":"success"}} --> 結束' + 'x' * 200
+        line = _make_long_text_line(text)
+        event = parse_stream_event(line)
+        assert event is not None
+        assert event.kind == "directive"
+        assert event.token_info["action"] == "notify"
+        assert event.token_info["params"]["message"] == "部署成功"
+        assert event.token_info["params"]["level"] == "success"
+
+    def test_directive_emitter_does_not_accumulate_text(self):
+        """directive 事件不應累積到 collected_text"""
+        recorder = RecordingTarget()
+        emitter = StreamEmitter(targets=[recorder])
+        text = '完成 <!-- directive:{"action":"notify","params":{"message":"ok"}} --> 結束' + 'x' * 200
+        emitter.emit_raw(_make_long_text_line(text))
+        # directive 不是 kind="text"，不累積
+        assert emitter.collected_text == ""
+        assert len(recorder.events) == 1
+        assert recorder.events[0].kind == "directive"
+
+    def test_directive_invalid_json_falls_through(self):
+        """directive 標記 JSON 無效時，退回為普通 text 事件"""
+        text = '測試 <!-- directive:{invalid json} --> 結束' + 'x' * 200
+        line = _make_long_text_line(text)
+        event = parse_stream_event(line)
+        assert event is not None
+        assert event.kind == "text"
+
 
 # ════════════════════════════════════════════════════════
 # Chain 2: model_router → build_command 路由鏈

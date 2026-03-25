@@ -36,6 +36,15 @@ async def broadcast_event(event_type: str, payload: Dict[str, Any] = None):
     })
 
 
+async def broadcast_directive(action: str, params: Dict[str, Any], card_id: int | None = None):
+    """廣播 directive 事件給前端"""
+    await broadcast_event("directive", {
+        "action": action,
+        "params": params,
+        "card_id": card_id,
+    })
+
+
 async def periodic_broadcast():
     """定期廣播系統狀態 + 運行中任務（每 5 秒）"""
     from app.core.telemetry import get_system_metrics
