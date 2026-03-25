@@ -114,3 +114,63 @@ def cleanup_workspace(card_id: int) -> None:
     if ws.exists():
         shutil.rmtree(ws, ignore_errors=True)
         logger.info(f"[Workspace] Cleaned up task-{card_id}")
+
+
+def link_project_into_workspace(workspace_dir: str, project_path: str) -> None:
+    """在 workspace 中建立連結指向專案目錄的原始碼。
+
+    workspace 保持為 CWD（CLAUDE.md、.claude/ 在這裡），
+    專案原始碼透過 symlink/junction 映射進來，改動直接落在開發目錄。
+    """
+    import platform as _platform
+    ws = Path(workspace_dir)
+    proj = Path(project_path)
+
+    if not proj.exists():
+        return
+
+    is_windows = _platform.system() == "Windows"
+
+    skip = {
+        "CLAUDE.md", ".gemini.md", ".claude", ".gemini",
+        ".mcp.json", ".gitconfig",
+    }
+
+    linked = 0
+    for item in proj.iterdir():
+        if item.name in skip or item.name.startswith(".aegis"):
+            continue
+        link_path = ws / item.name
+        if link_path.exists() or link_path.is_symlink():
+            continue
+        try:
+            if is_windows and item.is_dir():
+                import subprocess
+                subprocess.run(
+                    ["cmd", "/c", "mklink", "/J", str(link_path), str(item)],
+                    check=True, capture_output=True, timeout=5,
+                )
+            else:
+                link_path.symlink_to(item)
+            linked += 1
+        except Exception as e:
+            logger.warning(f"[Workspace] Failed to link {item.name}: {e}")
+
+    # .git 連結
+    git_link = ws / ".git"
+    git_src = proj / ".git"
+    if git_src.exists() and not git_link.exists():
+        try:
+            if is_windows:
+                import subprocess
+                subprocess.run(
+                    ["cmd", "/c", "mklink", "/J", str(git_link), str(git_src)],
+                    check=True, capture_output=True, timeout=5,
+                )
+            else:
+                git_link.symlink_to(git_src)
+            linked += 1
+        except Exception:
+            pass
+
+    logger.info(f"[Workspace] Linked {linked} items from {proj} into {ws}")

@@ -70,76 +70,7 @@ from app.core.task_workspace import prepare_workspace, cleanup_workspace
 from app.core.poller import _parse_and_create_cards
 
 
-def _link_project_into_workspace(workspace_dir: str, project_path: str) -> None:
-    """在 workspace 中建立連結指向專案目錄的原始碼。
-
-    策略：workspace 保持為 CWD（CLAUDE.md、.claude/ 安全在這裡），
-    專案的原始碼透過連結方式映射進來，AI 修改 → 改動直接落在開發目錄。
-
-    平台相容性：
-    - Linux/macOS：使用 symlink（無需額外權限）
-    - Windows 目錄：優先 junction（不需管理員權限），失敗才用 symlink
-    - Windows 檔案：使用 hardlink（不需管理員權限），失敗才用 symlink
-
-    好處：
-    - 設定檔不會污染專案目錄、不會蓋掉專案的 .claude/ 或 skills
-    - 改動直接落在 git repo，commit 自然生效
-    - 清理 workspace 時連結直接刪除，不影響專案
-    """
-    import platform
-    ws = Path(workspace_dir)
-    proj = Path(project_path)
-
-    if not proj.exists():
-        return
-
-    is_windows = platform.system() == "Windows"
-
-    # workspace 自己的檔案，不要被覆蓋
-    skip = {
-        "CLAUDE.md", ".gemini.md", ".claude", ".gemini",
-        ".mcp.json", ".gitconfig",
-    }
-
-    linked = 0
-    for item in proj.iterdir():
-        if item.name in skip or item.name.startswith(".aegis"):
-            continue
-        link_path = ws / item.name
-        if link_path.exists() or link_path.is_symlink():
-            continue
-        try:
-            if is_windows and item.is_dir():
-                # Windows: junction 不需管理員權限（僅限目錄）
-                import subprocess
-                subprocess.run(
-                    ["cmd", "/c", "mklink", "/J", str(link_path), str(item)],
-                    check=True, capture_output=True, timeout=5,
-                )
-            else:
-                link_path.symlink_to(item)
-            linked += 1
-        except Exception as e:
-            logger.warning(f"[Workspace] Failed to link {item.name}: {e}")
-
-    # .git 連結（讓 git 指令在 workspace 中也能用）
-    git_link = ws / ".git"
-    git_src = proj / ".git"
-    if git_src.exists() and not git_link.exists():
-        try:
-            if is_windows:
-                import subprocess
-                subprocess.run(
-                    ["cmd", "/c", "mklink", "/J", str(git_link), str(git_src)],
-                    check=True, capture_output=True, timeout=5,
-                )
-            else:
-                git_link.symlink_to(git_src)
-            linked += 1
-        except Exception:
-            pass
-
-    logger.info(f"[Workspace] Linked {linked} items from {proj} into {ws}")
+from app.core.task_workspace import link_project_into_workspace as _link_project_into_workspace
 from app.core.memory_manager import write_member_short_term_memory
 
 # HTTP client for broadcasting
@@ -354,7 +285,7 @@ def mark_card_running(card_id: int, member_id: Optional[int]):
 # ==========================================
 # JSON 解析
 # ==========================================
-from app.core.stream_parsers import parse_claude_json  # 統一解析器
+from app.core.stream_parsers import parse_claude_json, parse_stream_json_text  # 統一解析器
 
 
 def save_task_log(card_id: int, card_title: str, project_name: str, provider: str,
@@ -740,112 +671,6 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
     )
 
 
-def parse_stream_json_line(line: str) -> Optional[str]:
-    """解析 stream-json 行，提取簡化的輸出摘要
-
-    輸出規則：
-    - system/init: 跳過
-    - assistant/text: 回傳文字
-    - assistant/tool_use: 回傳工具摘要（如 "🔧 Read: /path..."）
-    - user/tool_result: 跳過（太冗長）
-    - result: 回傳結果
-    """
-    try:
-        data = json.loads(line.strip())
-        msg_type = data.get("type")
-
-        # 跳過 system 訊息
-        if msg_type == "system":
-            return None
-
-        # 跳過 user 訊息（通常是工具結果，太冗長）
-        if msg_type == "user":
-            return None
-
-        # assistant 類型：處理 text 和 tool_use
-        if msg_type == "assistant":
-            # 檢查頂層 content
-            content = data.get("content", [])
-            # 也檢查 message.content（嵌套結構）
-            if not content:
-                msg = data.get("message", {})
-                content = msg.get("content", [])
-
-            if content and isinstance(content, list):
-                for block in content:
-                    if not isinstance(block, dict):
-                        continue
-                    block_type = block.get("type")
-
-                    # 文字輸出
-                    if block_type == "text":
-                        text = block.get("text", "")
-                        if text:
-                            return text
-
-                    # 工具呼叫：顯示簡短摘要
-                    if block_type == "tool_use":
-                        tool_name = block.get("name", "unknown")
-                        tool_input = block.get("input", {})
-                        # 提取關鍵參數作為摘要
-                        summary = _format_tool_summary(tool_name, tool_input)
-                        return summary
-
-        # result 類型：最終結果
-        if msg_type == "result":
-            return data.get("result", "")
-
-    except (json.JSONDecodeError, KeyError, TypeError):
-        pass
-    return None
-
-
-def _format_tool_summary(tool_name: str, tool_input: dict) -> str:
-    """格式化工具呼叫摘要"""
-    # 常見工具的關鍵參數
-    if tool_name == "Read":
-        path = tool_input.get("file_path", "")
-        return f"📖 Read: {_truncate_path(path)}"
-    elif tool_name == "Write":
-        path = tool_input.get("file_path", "")
-        return f"✏️ Write: {_truncate_path(path)}"
-    elif tool_name == "Edit":
-        path = tool_input.get("file_path", "")
-        return f"🔧 Edit: {_truncate_path(path)}"
-    elif tool_name == "Bash":
-        cmd = tool_input.get("command", "")[:50]
-        return f"💻 Bash: {cmd}{'...' if len(tool_input.get('command', '')) > 50 else ''}"
-    elif tool_name == "Glob":
-        pattern = tool_input.get("pattern", "")
-        return f"🔍 Glob: {pattern}"
-    elif tool_name == "Grep":
-        pattern = tool_input.get("pattern", "")
-        return f"🔍 Grep: {pattern}"
-    elif tool_name == "TodoWrite":
-        return "📋 更新待辦清單"
-    elif tool_name == "Agent":
-        desc = tool_input.get("description", "")
-        return f"🤖 Agent: {desc}"
-    elif tool_name == "WebFetch":
-        url = tool_input.get("url", "")[:40]
-        return f"🌐 Fetch: {url}..."
-    elif tool_name == "WebSearch":
-        query = tool_input.get("query", "")
-        return f"🔎 Search: {query}"
-    else:
-        return f"🔧 {tool_name}"
-
-
-def _truncate_path(path: str, max_len: int = 50) -> str:
-    """截斷過長的路徑"""
-    if len(path) <= max_len:
-        return path
-    # 保留檔名和部分路徑
-    parts = path.replace("\\", "/").split("/")
-    if len(parts) <= 2:
-        return path[:max_len] + "..."
-    return f".../{'/'.join(parts[-2:])}"
-
 
 def run_task_pty_windows(
     card_id: int, project_path: str, cmd_parts: list, stdin_prompt: bool,
@@ -925,11 +750,11 @@ def run_task_pty_windows(
                                         # 透過 emitter 統一處理（解析 + 分發到所有 target）
                                         emitter.emit_raw(clean_line)
                                         # 同時收集文字（向後相容 result_text_parts）
-                                        text = parse_stream_json_line(clean_line)
+                                        text = parse_stream_json_text(clean_line)
                                         if text:
                                             result_text_parts.append(text)
                                     else:
-                                        text = parse_stream_json_line(clean_line)
+                                        text = parse_stream_json_text(clean_line)
                                         if text:
                                             result_text_parts.append(text)
                                             broadcast_log(card_id, text)
@@ -960,11 +785,11 @@ def run_task_pty_windows(
                     if clean_line.strip().startswith("{"):
                         if _use_emitter:
                             emitter.emit_raw(clean_line)
-                            text = parse_stream_json_line(clean_line)
+                            text = parse_stream_json_text(clean_line)
                             if text:
                                 result_text_parts.append(text)
                         else:
-                            text = parse_stream_json_line(clean_line)
+                            text = parse_stream_json_text(clean_line)
                             if text:
                                 result_text_parts.append(text)
                                 broadcast_log(card_id, text)
