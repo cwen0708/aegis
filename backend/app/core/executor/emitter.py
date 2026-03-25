@@ -42,18 +42,49 @@ def clean_ansi(text: str) -> str:
     return "".join(c for c in clean if c.isprintable() or c in "\n\r\t")
 
 
-# 路徑去敏
-_SENSITIVE_PATHS = [
-    "/home/cwen0708/.local/aegis/",
-    "/home/cwen0708/projects/",
-    "/home/cwen0708/",
-]
+# 路徑去敏（動態取得 HOME，不寫死用戶名）
+import os as _os
+from pathlib import Path as _Path
+
+_HOME = _Path(_os.path.expanduser("~"))
+_INSTALL_ROOT = _Path(__file__).resolve().parent.parent.parent.parent
+
+_SENSITIVE_PATHS: list[str] = []
+
+
+def _build_sensitive_paths() -> list[str]:
+    """動態建構敏感路徑列表（長路徑在前，避免短路徑先匹配導致殘留）。"""
+    paths = set()
+    home = str(_HOME)
+
+    # 用 / 和 \ 兩種格式（跨平台）
+    for h in [home, home.replace("\\", "/")]:
+        for sub in [".local/aegis/", "projects/", ""]:
+            p = f"{h}/{sub}" if not h.endswith("/") else f"{h}{sub}"
+            paths.add(p)
+
+    # Aegis 安裝目錄
+    install = str(_INSTALL_ROOT)
+    for p in [install, install.replace("\\", "/")]:
+        paths.add(p + "/" if not p.endswith("/") else p)
+
+    # 長路徑在前
+    return sorted(paths, key=len, reverse=True)
+
+
+_HOME_RE = re.compile(r'/home/[^/]+/')  # 任何 Linux 用戶的 home
 
 
 def sanitize_output(text: str) -> str:
     """去除敏感路徑（伺服器路徑 → 相對路徑）。用於送出給用戶的內容。"""
+    global _SENSITIVE_PATHS
+    if not _SENSITIVE_PATHS:
+        _SENSITIVE_PATHS = _build_sensitive_paths()
+    # 精確替換（已知路徑）
     for path in _SENSITIVE_PATHS:
         text = text.replace(path, "")
+    # 通用替換（任何 /home/xxx/ 開頭）
+    text = _HOME_RE.sub("", text)
     return text
 
 
