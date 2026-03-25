@@ -112,13 +112,6 @@ from app.core.executor.emitter import clean_ansi as _clean_ansi
 # ==========================================
 # HTTP 工具
 # ==========================================
-def broadcast_log(card_id: int, line: str):
-    """透過 Hook 發送 log（向後相容，PTY non-emitter fallback 用）。"""
-    from app.hooks.websocket import WebSocketHook
-    from app.hooks import StreamEvent
-    hook = WebSocketHook(card_id=card_id)
-    hook.on_stream(StreamEvent(kind="output", content=line))
-
 
 def cleanup_broadcast_logs():
     """清理超過 24 小時的廣播記錄"""
@@ -653,7 +646,7 @@ def run_task_pty_windows(
     stream_json = config.get("stream_json", False)
     output_lines = []
     result_text_parts = []  # 收集實際的文字輸出
-    _has_emitter = emitter is not None
+    # emitter 由 _execute_card_task 永遠傳入（_HookEmitter）
 
     try:
         # 從 os.environ 中刪除 CLAUDE 相關變數（這是 PTY 關鍵！）
@@ -673,10 +666,8 @@ def run_task_pty_windows(
             pty_process.write(prompt + "\n")
 
         # 使用 read() 讀取並按行處理（heartbeat_monitor 管理心跳）
-        from app.core.executor.emitter import StreamEmitter as _SE, WebSocketTarget as _WST
-        _hb_emitter = emitter if _has_emitter else _SE(targets=[_WST(card_id)])
         buffer = ""
-        with heartbeat_monitor(_hb_emitter) as touch:
+        with heartbeat_monitor(emitter) as touch:
             while pty_process.isalive():
                 try:
                     # 檢查 abort 信號
@@ -688,10 +679,7 @@ def run_task_pty_windows(
                         except Exception:
                             pass
                         clear_abort_signal(card_id)
-                        if _has_emitter:
-                            emitter.emit_output("\n🛑 任務已被中止\n")
-                        else:
-                            broadcast_log(card_id, "\n🛑 任務已被中止\n")
+                        emitter.emit_output("\n🛑 任務已被中止\n")
                         break
 
                     chunk = pty_process.read(512)
@@ -700,22 +688,17 @@ def run_task_pty_windows(
                         output_lines.append(chunk)
                         buffer += chunk
 
-                        # 按行處理
                         while "\n" in buffer:
                             line, buffer = buffer.split("\n", 1)
-
                             if stream_json:
                                 clean_line = _clean_ansi(line)
                                 if clean_line.strip().startswith("{"):
-                                    if _has_emitter:
-                                        emitter.emit_raw(clean_line)
+                                    emitter.emit_raw(clean_line)
                                     text = parse_stream_json_text(clean_line)
                                     if text:
                                         result_text_parts.append(text)
-                            elif _has_emitter:
-                                emitter.emit_output(line + "\n")
                             else:
-                                broadcast_log(card_id, line + "\n")
+                                emitter.emit_output(line + "\n")
                 except EOFError:
                     break
                 except Exception as e:
@@ -739,15 +722,12 @@ def run_task_pty_windows(
                 for line in buffer.split("\n"):
                     clean_line = _clean_ansi(line)
                     if clean_line.strip().startswith("{"):
-                        if _has_emitter:
-                            emitter.emit_raw(clean_line)
+                        emitter.emit_raw(clean_line)
                         text = parse_stream_json_text(clean_line)
                         if text:
                             result_text_parts.append(text)
-            elif _has_emitter:
-                emitter.emit_output(buffer)
             else:
-                broadcast_log(card_id, buffer)
+                emitter.emit_output(buffer)
 
         # 取得退出碼
         pty_process.wait()
@@ -841,17 +821,12 @@ def run_task_subprocess(
                 output_lines.append(line)
                 if _has_emitter:
                     emitter.emit_output(line)
-                else:
-                    broadcast_log(card_id, line)
                 # 檢查 abort 信號
                 if is_abort_requested(card_id):
                     logger.info(f"[Task {card_id}] Abort signal received, killing process")
                     proc.kill()
                     clear_abort_signal(card_id)
-                    if _has_emitter:
-                        emitter.emit_output("\n🛑 任務已被中止\n")
-                    else:
-                        broadcast_log(card_id, "\n🛑 任務已被中止\n")
+                    emitter.emit_output("\n🛑 任務已被中止\n")
                     break
 
         proc.wait()
