@@ -1611,6 +1611,7 @@ def main():
         logger.warning(f"[Worker] Failed to recover stale cards: {e}")
 
     last_cleanup = time.time()
+    last_chat_export = time.time()
     while not _shutdown_requested:
         try:
             if is_worker_paused():
@@ -1619,16 +1620,20 @@ def main():
                 auto_activate_idle_cards()
                 process_pending_cards()
 
-            # 每小時清理過期記錄和暫存檔案 + 匯出對話記憶
+            # 每小時清理過期記錄和暫存檔案
             if time.time() - last_cleanup > 3600:
                 cleanup_broadcast_logs()
                 cleanup_media_files()
+                last_cleanup = time.time()
+
+            # 每 8 小時匯出對話記憶
+            if time.time() - last_chat_export > 28800:
                 try:
                     from app.core.chat_memory_export import export_recent_chats
-                    export_recent_chats(hours=2)
+                    export_recent_chats(hours=9)  # 多撈 1 小時避免邊界遺漏
                 except Exception as e:
                     logger.warning(f"[ChatExport] Failed: {e}")
-                last_cleanup = time.time()
+                last_chat_export = time.time()
         except Exception as e:
             logger.error(f"[Worker Error] {e}")
 
