@@ -200,11 +200,6 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
         logger.error(f"[Chat] AI task failed: {e}")
         return "❌ AI 回應失敗，請稍後再試"
 
-    # ProcessPool 內部管理 session，不需要手動註冊
-    new_session_id = result.get("session_id")
-    if new_session_id:
-        session_pool.register(chat_session_key, new_session_id)
-
     if result.get("status") != "success":
         return f"❌ AI 回應錯誤: {result.get('output', '未知錯誤')[:100]}"
 
@@ -238,12 +233,19 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
     _save_message(session_obj.id, "assistant", clean_output, 0, token_info.get("output_tokens", 0))
     _update_session_stats(session_obj.id, token_info)
 
-    # 15. 即時模式：發新訊息（觸發推播）+ placeholder 改「✅」
+    # 15. 即時模式：發新訊息（觸發推播）+ 刪除 placeholder
     if placeholder_message_id and clean_output:
         try:
             from app.core.http_client import InternalAPIAsync
             await InternalAPIAsync.channel_send(msg.platform, msg.chat_id, clean_output[:4000])
-            await InternalAPIAsync.channel_send(msg.platform, msg.chat_id, "✅", placeholder_message_id)
+            # 刪除 placeholder 訊息（不再顯示 ✅）
+            try:
+                from .manager import channel_manager
+                ch = channel_manager.get_channel(msg.platform)
+                if ch and hasattr(ch, '_app'):
+                    await ch._app.bot.delete_message(chat_id=int(msg.chat_id), message_id=int(placeholder_message_id))
+            except Exception:
+                pass  # 刪除失敗不影響
         except Exception as e:
             logger.warning(f"[Chat] Failed to send final response: {e}")
             return clean_output  # fallback: 讓 Router 編輯 placeholder

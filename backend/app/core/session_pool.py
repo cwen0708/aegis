@@ -173,66 +173,45 @@ class ProcessPool:
             if mcp_path:
                 cmd.extend(["--mcp-config", mcp_path])
 
-        env = dict(os.environ)
-        env.pop("CLAUDECODE", None)
-        env["CLAUDE_CODE_ENTRYPOINT"] = "sdk"
-
+        # 重要：不傳 env= 參數（繼承完整環境）。
+        # 傳 env= 會導致 node cli.js 不輸出（原因不明但已驗證）。
+        # Claude CLI 從 ~/.claude/ 讀 OAuth session，不需要環境變數注入。
+        # extra_env（MCP AD 帳密等）透過臨時設定 os.environ 注入。
         auth_info = auth_info or {}
+        _injected_keys = []
         if auth_info.get("api_key"):
-            env["ANTHROPIC_API_KEY"] = auth_info["api_key"]
-        elif auth_info.get("oauth_token"):
-            env["CLAUDE_CODE_OAUTH_TOKEN"] = auth_info["oauth_token"]
-
+            os.environ["ANTHROPIC_API_KEY"] = auth_info["api_key"]
+            _injected_keys.append("ANTHROPIC_API_KEY")
         if extra_env:
-            env.update(extra_env)
+            for k, v in extra_env.items():
+                os.environ[k] = v
+                _injected_keys.append(k)
 
         logger.warning(f"[ProcessPool] Spawning: {' '.join(cmd[:5])}... for {chat_key}")
-        logger.warning(f"[ProcessPool] ENV: {sorted([k for k in env if 'CLAUDE' in k or 'ANTHROPIC' in k or 'PATH' in k or 'NODE' in k])}")
 
         proc = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env=env,
-            start_new_session=True,
+            # 不傳 env=（繼承完整環境，傳了會導致 node cli.js 不輸出）
         )
 
+        # 清理臨時注入的環境變數
+        for k in _injected_keys:
+            os.environ.pop(k, None)
+
         entry = ProcessEntry(proc=proc, chat_key=chat_key, model=model)
-        self._read_init(entry)
+        # 注意：不在這裡呼叫 _read_init()
+        # --input-format stream-json 需要先收到第一條 user message 才會初始化
+        # init 會在 _send_and_read 的第一次呼叫時自動處理
         return entry
 
-    def _read_init(self, entry: ProcessEntry):
-        """讀掉 init/system 行。"""
-        deadline = time.time() + 20
-        while time.time() < deadline:
-            if entry.proc.poll() is not None:
-                # 讀 stderr 看為什麼死了
-                stderr = ""
-                try:
-                    stderr = entry.proc.stderr.read().decode("utf-8", errors="replace")[:500]
-                except Exception:
-                    pass
-                logger.warning(f"[ProcessPool] Process died (rc={entry.proc.returncode}) for {entry.chat_key}: {stderr}")
-                break
-            raw = entry.proc.stdout.readline()
-            if not raw:
-                break
-            line = raw.decode("utf-8", errors="replace").strip()
-            if not line or not line.startswith("{"):
-                continue
-            try:
-                data = json.loads(line)
-                if data.get("type") == "system":
-                    entry.session_id = data.get("session_id", "")
-                    logger.warning(f"[ProcessPool] Init OK session={entry.session_id[:12]} for {entry.chat_key}")
-                    return
-            except json.JSONDecodeError:
-                continue
-        logger.warning(f"[ProcessPool] Init timeout for {entry.chat_key}")
+    # _read_init 已移除：--input-format stream-json 需要先收到 user message 才初始化，
+    # init 行在 _read_until_result(expect_init=True) 中處理。
 
     def _send_and_read(self, entry: ProcessEntry, message: str, on_line=None) -> Dict[str, Any]:
-        """送 user message + 讀到 result 行。"""
+        """送 user message + 讀到 result 行。第一次呼叫時會先處理 init 行。"""
         msg = {"type": "user", "message": {"role": "user", "content": message}}
         payload = json.dumps(msg, ensure_ascii=False) + "\n"
         entry.proc.stdin.write(payload.encode("utf-8"))
@@ -240,10 +219,10 @@ class ProcessPool:
         entry.last_active = time.time()
         logger.warning(f"[ProcessPool] Sent to {entry.chat_key} ({len(message)} chars)")
 
-        return self._read_until_result(entry, on_line)
+        return self._read_until_result(entry, on_line, expect_init=not entry.session_id)
 
-    def _read_until_result(self, entry: ProcessEntry, on_line=None) -> Dict[str, Any]:
-        """讀 stdout 直到 result 行。"""
+    def _read_until_result(self, entry: ProcessEntry, on_line=None, expect_init=False) -> Dict[str, Any]:
+        """讀 stdout 直到 result 行。expect_init=True 時先跳過 system/init 行。"""
         from app.core.stream_parsers import parse_stream_json_text, parse_stream_json_tokens
 
         result_text_parts = []
@@ -269,6 +248,17 @@ class ProcessPool:
                 continue
 
             msg_type = data.get("type", "")
+
+            # 處理 init 行（首次呼叫）
+            if msg_type == "system" and expect_init:
+                entry.session_id = data.get("session_id", "")
+                logger.warning(f"[ProcessPool] Init OK session={entry.session_id[:12]} for {entry.chat_key}")
+                expect_init = False
+                continue
+
+            # 跳過 rate_limit 等非核心行
+            if msg_type in ("rate_limit_event",):
+                continue
 
             if on_line:
                 try:

@@ -18,7 +18,7 @@ def _get_thinking_message():
         from pathlib import Path
         ver_file = Path(__file__).parent.parent.parent / "VERSION"
         version = ver_file.read_text().strip() if ver_file.exists() else "?"
-        return f"⏳ {version}"
+        return f"⏳ 請稍後... v{version}"
     except Exception:
         return "⏳ 請稍候..."
 
