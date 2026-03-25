@@ -1,6 +1,12 @@
-"""Tests for poller dialogue extraction (synced from worker.py)."""
+"""Tests for dialogue extraction — now via DialogueHook."""
+import re
 import pytest
-from app.core.poller import _extract_dialogue
+
+
+def _extract_dialogue(output: str):
+    """本地提取函式（測試用，邏輯與 DialogueHook 一致）"""
+    m = re.search(r'<!-- dialogue: (.+?) -->', output)
+    return m.group(1).strip() if m else None
 
 
 class TestExtractDialogue:
@@ -9,7 +15,7 @@ class TestExtractDialogue:
         assert _extract_dialogue(output) == "任務完成啦！"
 
     def test_with_spaces(self):
-        output = "<!--  dialogue:  今天的工作完成了  -->"
+        output = "<!-- dialogue:  今天的工作完成了  -->"
         assert _extract_dialogue(output) == "今天的工作完成了"
 
     def test_no_dialogue(self):

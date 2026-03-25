@@ -142,7 +142,29 @@ def _parse_datetime(dt_str: str) -> datetime | None:
     return None
 
 
-# 閒時偵測 CPU 門檻IDLE_CPU_THRESHOLD = 80.0def is_system_idle(session: Session) -> bool:    """判斷系統是否閒置（無 running/pending 卡片且 CPU < 80%）"""    running = session.exec(        select(CardIndex).where(CardIndex.status == "running")    ).first()    if running:        return False    pending = session.exec(        select(CardIndex).where(CardIndex.status == "pending")    ).first()    if pending:        return False    from app.core.telemetry import get_system_metrics    metrics = get_system_metrics()    if metrics["cpu_percent"] >= IDLE_CPU_THRESHOLD:        return False    return True
+# 閒時偵測 CPU 門檻
+IDLE_CPU_THRESHOLD = 80.0
+
+
+def is_system_idle(session: Session) -> bool:
+    """判斷系統是否閒置（無 running/pending 卡片且 CPU < 80%）"""
+    running = session.exec(
+        select(CardIndex).where(CardIndex.status == "running")
+    ).first()
+    if running:
+        return False
+    pending = session.exec(
+        select(CardIndex).where(CardIndex.status == "pending")
+    ).first()
+    if pending:
+        return False
+    from app.core.telemetry import get_system_metrics
+    metrics = get_system_metrics()
+    if metrics["cpu_percent"] >= IDLE_CPU_THRESHOLD:
+        return False
+    return True
+
+
 KNOWN_ACTIONS = {"worker", "meeting"}
 
 
