@@ -1552,10 +1552,11 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
             from app.core.onestack_connector import connector as _doc_conn
             if _doc_conn.enabled:
                 import asyncio as _doc_aio
-                _doc_output = result.get("output", "")
+                # 用解析後的 result_text（不是 raw stream-json）
+                _doc_output = token_info.get("result_text", "") or result.get("output", "")[:3000]
                 _doc_evt = "result" if new_status == "completed" else "error"
 
-                # 嘗試從 AI 輸出提取 JSON 結果
+                # 嘗試從 AI 回應提取 ```json``` 區塊
                 _doc_json_content = _doc_output
                 _json_match = _re_doc.search(r'```json\s*\n([\s\S]*?)\n```', _doc_output)
                 if _json_match:
