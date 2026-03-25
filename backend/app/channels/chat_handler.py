@@ -42,6 +42,8 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
     Returns:
         AI 回應文字，或 None
     """
+    logger.info(f"[Chat] handle_chat ENTER: user={bot_user.username} member_id={bot_user.default_member_id} platform={msg.platform} text={msg.text[:50]}")
+
     # 0. 基本檢查
     if not bot_user.is_active:
         return None

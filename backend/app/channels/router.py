@@ -114,6 +114,7 @@ class MessageRouter:
                 ))
         else:
             # P2: 非命令訊息 → AI 對話（先回再更新）
+            logger.info(f"[Router] → _handle_ai_chat: {msg.platform}:{msg.chat_id} user={bot_user.username}")
             await self._handle_ai_chat(msg, bot_user)
 
     async def _handle_ai_chat(self, msg: InboundMessage, bot_user):

@@ -116,6 +116,7 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
     """
     if use_process_pool and chat_key:
         from app.core.session_pool import process_pool
+        logger.info(f"[Runner] ProcessPool path: key={chat_key} model={model_override}")
         return await asyncio.to_thread(
             process_pool.send_message,
             chat_key=chat_key,
