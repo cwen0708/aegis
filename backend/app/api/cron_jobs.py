@@ -137,7 +137,7 @@ def trigger_cron_job(job_id: int, session: Session = Depends(get_session)):
 
 @router.post("/cron-jobs/{job_id}/execute")
 def execute_cron_job(job_id: int, session: Session = Depends(get_session)):
-    """建立 CronJob 的執行卡片（預設 API，由 cron_poller 呼叫）。"""
+    """網址 B：讀排程資料 → 建卡片。"""
     job = session.get(CronJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="CronJob not found")
@@ -147,6 +147,31 @@ def execute_cron_job(job_id: int, session: Session = Depends(get_session)):
     if error:
         raise HTTPException(status_code=409, detail=error)
     return {"ok": True, "card_id": card_id, "message": f"已觸發「{job.name}」"}
+
+
+@router.post("/cron-jobs/{job_id}/meeting")
+async def execute_meeting(job_id: int, session: Session = Depends(get_session)):
+    """網址 A：讀排程資料 → 組裝會議參數 → 呼叫 meeting API（A1）。"""
+    import json as _json
+    from datetime import timedelta
+
+    job = session.get(CronJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="CronJob not found")
+
+    # 從 prompt_template 讀取會議 JSON 參數
+    try:
+        body_str = (job.prompt_template or "{}").replace(
+            "${DATE}", datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d"),
+        )
+        meeting_params = _json.loads(body_str)
+    except _json.JSONDecodeError as e:
+        raise HTTPException(400, f"排程的 prompt_template 不是合法 JSON: {e}")
+
+    # 呼叫 meeting API（A1）
+    from app.api.agent_chat import start_meeting, MeetingRequest
+    req = MeetingRequest(**meeting_params)
+    return await start_meeting(req)
 
 
 @router.get("/cron-jobs/{job_id}")
