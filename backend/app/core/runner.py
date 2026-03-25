@@ -190,13 +190,13 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
                 if token_info.get("result_text"):
                     actual_output = token_info["result_text"]
                 # 後處理標記
+                for tl in actual_output.split("\n"):
+                    _intercept_channel_marker(tl.strip())
         elif provider_name == "openai" and config.get("json_output"):
             from app.core.stream_parsers import parse_openai_json
             token_info = parse_openai_json(output)
             if token_info.get("result_text"):
                 actual_output = token_info["result_text"]
-                for tl in actual_output.split("\n"):
-                    _intercept_channel_marker(tl.strip())
 
         return {
             "status": status,
