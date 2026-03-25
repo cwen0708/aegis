@@ -119,6 +119,44 @@ Phase 5（P3）：HUD + 存檔
   → 視情況
 ```
 
+## SkyOffice 分析（2026-03-25）
+
+**位置**：`G:\vendor\SkyOffice\`（MIT 授權）
+
+### 圖片差異
+
+| | SkyOffice | Aegis |
+|---|---|---|
+| Tile 大小 | **32×32**（原生） | **16×16**（3x 放大 → 模糊） |
+| 地板圖集 | `FloorAndGround.png` 2048×1280（2560 tiles） | `room_builder.png` 256×224（~200 tiles） |
+| 傢俱圖集 | `Modern_Office_Black_Shadow.png`（848 tiles，帶陰影） | 散裝 PNG（無陰影） |
+| 地圖編輯 | **Tiled Map Editor** | 自建 EditorScene |
+| 碰撞 | Tiled 設定 `collides: true` → Phaser 原生 | 無碰撞 |
+| Y-sort | `item.setDepth(item.y + item.height * 0.27)` | 無 |
+
+### 可直接使用的資產（MIT）
+
+```
+client/public/assets/
+├── map/FloorAndGround.png       2048×1280  地板+牆壁合併圖集
+├── map/map.json                            Tiled 地圖檔（40×30, 11 層）
+├── tileset/Modern_Office_Black_Shadow.png  辦公室傢俱（帶陰影）
+├── tileset/Generic.png                     通用物品
+├── tileset/Basement.png                    地下室風格
+├── tileset/Classroom_and_library.png       教室/圖書館
+├── items/chair.png                         椅子（23 種）
+├── items/computer.png                      電腦（5 種）
+└── items/whiteboard.png                    白板（3 種）
+```
+
+### 遷移方案
+
+1. 複製 SkyOffice 圖集 + map.json → Aegis assets
+2. OfficeScene 改用 `this.load.tilemapTiledJSON()` + `this.make.tilemap()`
+3. 碰撞自動帶入（Tiled 已配）
+4. EditorScene 暫停使用（改用 Tiled 外部編輯）
+5. 座標系調整（16→32 tile）
+
 ## 不需要改的
 
 | 元件 | 原因 |
