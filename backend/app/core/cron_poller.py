@@ -142,19 +142,31 @@ def _parse_datetime(dt_str: str) -> datetime | None:
     return None
 
 
+_KNOWN_ACTIONS = {"worker", "meeting"}
+
+
 async def _execute_job(session: Session, job, tz_name: str):
-    """時間到 → POST job.api_url。每個 URL 自己處理後續，poller 不判斷。"""
+    """時間到 → POST 對應的 API。
+
+    api_url 為 known action（worker/meeting）→ 組成 /api/v1/cron-jobs/{id}/{action}
+    api_url 為完整路徑                       → 直接使用
+    """
     import urllib.request
 
-    if not job.api_url:
-        logger.error(f"[Cron Poller] '{job.name}' (#{job.id}) 沒有 api_url，跳過")
+    action = job.api_url or "worker"
+
+    if action in _KNOWN_ACTIONS:
+        url = f"http://127.0.0.1:8899/api/v1/cron-jobs/{job.id}/{action}"
+    elif action.startswith("/") or action.startswith("http"):
+        url = action if action.startswith("http") else f"http://127.0.0.1:8899{action}"
+    else:
+        logger.error(f"[Cron Poller] '{job.name}' (#{job.id}) 未知 action: {action}")
         return
 
-    url = job.api_url if job.api_url.startswith("http") else f"http://127.0.0.1:8899{job.api_url}"
     try:
         req = urllib.request.Request(url, data=b"{}", headers={"Content-Type": "application/json"}, method="POST")
         with urllib.request.urlopen(req, timeout=300) as resp:
-            logger.info(f"[Cron Poller] '{job.name}' → {resp.status}")
+            logger.info(f"[Cron Poller] '{job.name}' → {action} → {resp.status}")
     except Exception as e:
         logger.error(f"[Cron Poller] '{job.name}' failed: {e}")
 

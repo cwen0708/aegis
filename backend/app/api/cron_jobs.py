@@ -131,13 +131,13 @@ def fix_cron_schedules(session: Session = Depends(get_session)):
 
 @router.post("/cron-jobs/{job_id}/trigger")
 def trigger_cron_job(job_id: int, session: Session = Depends(get_session)):
-    """手動觸發 CronJob — 向後相容，等同 execute"""
-    return execute_cron_job(job_id, session)
+    """手動觸發 CronJob — 向後相容"""
+    return execute_worker(job_id, session)
 
 
-@router.post("/cron-jobs/{job_id}/execute")
-def execute_cron_job(job_id: int, session: Session = Depends(get_session)):
-    """網址 B：讀排程資料 → 建卡片。"""
+@router.post("/cron-jobs/{job_id}/worker")
+def execute_worker(job_id: int, session: Session = Depends(get_session)):
+    """網址 B：讀排程資料 → 建卡片 → Worker 撿起執行。"""
     job = session.get(CronJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="CronJob not found")
