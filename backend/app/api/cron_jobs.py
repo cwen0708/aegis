@@ -136,48 +136,16 @@ def trigger_cron_job(job_id: int, session: Session = Depends(get_session)):
 
 @router.post("/cron-jobs/{job_id}/execute")
 def execute_cron_job(job_id: int, session: Session = Depends(get_session)):
-    """執行 CronJob — 依 metadata 決定行為。
-
-    - 有 api_url → 直接 HTTP POST 到該 URL
-    - 沒有 → 預設建卡片給 Worker（AI 任務）
-    """
-    import json as _json
+    """建立 CronJob 的執行卡片（預設 API，由 cron_poller 呼叫）。"""
     job = session.get(CronJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="CronJob not found")
 
-    meta = _json.loads(job.metadata_json) if job.metadata_json else {}
-    api_url = meta.get("api_url")
-
-    if api_url:
-        # API 呼叫模式
-        import urllib.request
-        from datetime import timedelta
-
-        url = api_url if api_url.startswith("http") else f"http://127.0.0.1:8899{api_url}"
-        body = meta.get("api_body", {})
-
-        tz = timezone(timedelta(hours=8))
-        today = datetime.now(tz).strftime("%Y-%m-%d")
-        body_str = _json.dumps(body, ensure_ascii=False).replace("${DATE}", today)
-
-        try:
-            req = urllib.request.Request(
-                url, data=body_str.encode("utf-8"),
-                headers={"Content-Type": "application/json"}, method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=300) as resp:
-                result = _json.loads(resp.read().decode("utf-8"))
-            return {"ok": True, "mode": "api_call", "result": result}
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"API 呼叫失敗: {e}")
-    else:
-        # 預設：建卡片
-        from app.core.cron_poller import create_card_for_cron_job
-        card_id, error = create_card_for_cron_job(session, job, update_next_time=False)
-        if error:
-            raise HTTPException(status_code=409, detail=error)
-        return {"ok": True, "mode": "card", "card_id": card_id, "message": f"已觸發「{job.name}」"}
+    from app.core.cron_poller import create_card_for_cron_job
+    card_id, error = create_card_for_cron_job(session, job, update_next_time=False)
+    if error:
+        raise HTTPException(status_code=409, detail=error)
+    return {"ok": True, "card_id": card_id, "message": f"已觸發「{job.name}」"}
 
 
 @router.get("/cron-jobs/{job_id}")

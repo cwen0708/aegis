@@ -143,19 +143,29 @@ def _parse_datetime(dt_str: str) -> datetime | None:
 
 
 async def _execute_job(session: Session, job, tz_name: str):
-    """統一排程執行入口 — 呼叫 /api/v1/cron-jobs/{id}/execute，由 API 決定行為。"""
+    """時間到 → 直接 POST api_url。沒設就打預設的建卡片 API。"""
     import urllib.request
 
-    url = f"http://127.0.0.1:8899/api/v1/cron-jobs/{job.id}/execute"
+    meta = json.loads(job.metadata_json) if job.metadata_json else {}
+    api_url = meta.get("api_url", f"/api/v1/cron-jobs/{job.id}/execute")
+    api_body = meta.get("api_body", {})
+
+    url = api_url if api_url.startswith("http") else f"http://127.0.0.1:8899{api_url}"
+
+    # ${DATE} 變數替換
+    tz = timezone(timedelta(hours=8))
+    today = datetime.now(tz).strftime("%Y-%m-%d")
+    body_str = json.dumps(api_body, ensure_ascii=False).replace("${DATE}", today)
+
     try:
-        req = urllib.request.Request(url, method="POST",
-                                     headers={"Content-Type": "application/json"},
-                                     data=b"{}")
+        req = urllib.request.Request(
+            url, data=body_str.encode("utf-8"),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
         with urllib.request.urlopen(req, timeout=300) as resp:
-            result = resp.read().decode("utf-8")
-            logger.info(f"[Cron Poller] Execute '{job.name}' → {resp.status}")
+            logger.info(f"[Cron Poller] '{job.name}' → {resp.status}")
     except Exception as e:
-        logger.error(f"[Cron Poller] Execute '{job.name}' failed: {e}")
+        logger.error(f"[Cron Poller] '{job.name}' failed: {e}")
 
     # 更新下次執行時間
     next_time = _calculate_next_time(job.cron_expression, tz_name)
