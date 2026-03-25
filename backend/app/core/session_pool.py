@@ -91,15 +91,16 @@ class ProcessPool:
         auth_info: Optional[Dict[str, str]] = None,
         extra_env: Optional[Dict[str, str]] = None,
         on_line: Optional[Callable[[str], None]] = None,
+        cwd: Optional[str] = None,
     ) -> Dict[str, Any]:
         """送訊息到持久進程。沒有進程或已死則自動 spawn。"""
-        entry = self._get_or_spawn(chat_key, model, member_id, auth_info, extra_env)
+        entry = self._get_or_spawn(chat_key, model, member_id, auth_info, extra_env, cwd=cwd)
 
         with entry.lock:
             if entry.proc.poll() is not None:
                 logger.warning(f"[ProcessPool] Dead process for {chat_key}, respawning")
                 self._remove(chat_key)
-                entry = self._get_or_spawn(chat_key, model, member_id, auth_info, extra_env)
+                entry = self._get_or_spawn(chat_key, model, member_id, auth_info, extra_env, cwd=cwd)
 
             try:
                 return self._send_and_read(entry, message, on_line)
@@ -133,13 +134,13 @@ class ProcessPool:
 
     # ── 內部方法 ──
 
-    def _get_or_spawn(self, chat_key, model, member_id, auth_info, extra_env) -> ProcessEntry:
+    def _get_or_spawn(self, chat_key, model, member_id, auth_info, extra_env, cwd=None) -> ProcessEntry:
         with self._pool_lock:
             entry = self._entries.get(chat_key)
             if entry and entry.proc.poll() is None:
                 return entry
 
-        entry = self._spawn(chat_key, model, member_id, auth_info, extra_env)
+        entry = self._spawn(chat_key, model, member_id, auth_info, extra_env, cwd=cwd)
         with self._pool_lock:
             existing = self._entries.get(chat_key)
             if existing and existing.proc.poll() is None:
@@ -148,7 +149,7 @@ class ProcessPool:
             self._entries[chat_key] = entry
         return entry
 
-    def _spawn(self, chat_key, model, member_id, auth_info, extra_env) -> ProcessEntry:
+    def _spawn(self, chat_key, model, member_id, auth_info, extra_env, cwd=None) -> ProcessEntry:
         """用 node cli.js 啟動持久 Claude CLI 進程。"""
         cli_js = _get_cli_js()
 
@@ -169,7 +170,8 @@ class ProcessPool:
         ])
 
         if member_id:
-            mcp_path = self._get_mcp_config(member_id)
+            from app.core.executor.auth import get_mcp_config_path
+            mcp_path = get_mcp_config_path(member_id)
             if mcp_path:
                 cmd.extend(["--mcp-config", mcp_path])
 
@@ -177,15 +179,9 @@ class ProcessPool:
         # 傳 env= 會導致 node cli.js 不輸出（原因不明但已驗證）。
         # Claude CLI 從 ~/.claude/ 讀 OAuth session，不需要環境變數注入。
         # extra_env（MCP AD 帳密等）透過臨時設定 os.environ 注入。
+        from app.core.executor.auth import inject_auth_to_os_environ, cleanup_os_environ
         auth_info = auth_info or {}
-        _injected_keys = []
-        if auth_info.get("api_key"):
-            os.environ["ANTHROPIC_API_KEY"] = auth_info["api_key"]
-            _injected_keys.append("ANTHROPIC_API_KEY")
-        if extra_env:
-            for k, v in extra_env.items():
-                os.environ[k] = v
-                _injected_keys.append(k)
+        _injected_keys = inject_auth_to_os_environ(auth_info, extra_env)
 
         logger.warning(f"[ProcessPool] Spawning: {' '.join(cmd[:5])}... for {chat_key}")
 
@@ -194,12 +190,12 @@ class ProcessPool:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            cwd=cwd,  # chat workspace 目錄（None = 繼承當前目錄）
             # 不傳 env=（繼承完整環境，傳了會導致 node cli.js 不輸出）
         )
 
         # 清理臨時注入的環境變數
-        for k in _injected_keys:
-            os.environ.pop(k, None)
+        cleanup_os_environ(_injected_keys)
 
         entry = ProcessEntry(proc=proc, chat_key=chat_key, model=model)
         # 注意：不在這裡呼叫 _read_init()
@@ -281,22 +277,6 @@ class ProcessPool:
                     "token_info": token_info,
                     "session_id": entry.session_id,
                 }
-
-    def _get_mcp_config(self, member_id: int) -> Optional[str]:
-        try:
-            from app.database import engine
-            from sqlmodel import Session, select
-            from app.models.core import Member
-            from app.core.member_profile import get_member_dir
-            with Session(engine) as session:
-                member = session.get(Member, member_id)
-                if member and member.slug:
-                    mcp_path = get_member_dir(member.slug) / "mcp.json"
-                    if mcp_path.exists():
-                        return str(mcp_path)
-        except Exception:
-            pass
-        return None
 
     def _remove(self, chat_key: str):
         with self._pool_lock:

@@ -1116,78 +1116,23 @@ async def _handle_aegis_command(command_type: str, payload: Dict) -> Dict:
         return result
 
     elif command_type == "chat":
-        # 即時對話：建一張 [chat] 卡片，由 Worker 統一執行
+        # 即時對話：走 Runner 路徑（ProcessPool 持久進程，零冷啟 + 上下文保留）
         member_slug = payload.get("member_slug", "aegis")
         message = payload.get("message", "")
         chat_id = payload.get("chat_id", f"os:{member_slug}")
-        logger.info(f"[OneStack] Chat → card: {member_slug} chat_id={chat_id}")
+        user_id = payload.get("user_id")
+        logger.info(f"[OneStack] Chat → Runner: {member_slug} chat_id={chat_id}")
 
         try:
-            from sqlmodel import Session as _Ses, select
-            from app.database import engine as _eng
-            from app.models.core import Member, StageList, CardIndex, Project
-            from app.core.card_file import CardData, write_card, card_file_path
-
-            with _Ses(_eng) as session:
-                member = session.exec(select(Member).where(Member.slug == member_slug)).first()
-                if not member:
-                    member = session.exec(select(Member).where(Member.slug == "aegis")).first()
-
-                inbox = session.exec(
-                    select(StageList).where(
-                        StageList.project_id == 1,
-                        StageList.member_id == member.id,
-                        StageList.is_ai_stage == True,
-                    )
-                ).first()
-
-                if not inbox:
-                    return {"ok": False, "error": f"No inbox for {member_slug}"}
-
-                project = session.exec(select(Project).where(Project.id == 1)).first()
-                project_path = project.path if project else "/home/cwen0708/projects/Aegis"
-
-                # 建卡片
-                max_id = session.exec(select(CardIndex.card_id).order_by(CardIndex.card_id.desc())).first() or 0
-                card_id = max_id + 1
-
-                # 組合卡片 content（歷史 + 用戶訊息）
-                content = await _build_chat_card_content(chat_id, message)
-                card_data = CardData(
-                    id=card_id,
-                    list_id=inbox.id,
-                    title=f"{member_slug}: {message[:30]}",
-                    description=None,
-                    content=content,
-                    status="pending",
-                    tags=["Chat"],
-                )
-
-                fp = card_file_path(project_path, card_id)
-                fp.parent.mkdir(parents=True, exist_ok=True)
-                write_card(fp, card_data)
-
-                # 寫索引
-                idx = CardIndex(
-                    card_id=card_id,
-                    project_id=1,
-                    list_id=inbox.id,
-                    title=card_data.title,
-                    status="pending",
-                    file_path=str(fp),
-                )
-                session.add(idx)
-                session.commit()
-
-            # 寫 stream: 用戶訊息（供歷史記憶用）
-            await connector.stream_event(card_id, "output", f"[用戶] {message}", member_slug, chat_id=chat_id)
-            # 寫 stream: 已接收
-            await connector.stream_event(card_id, "status", "pending", member_slug, chat_id=chat_id)
-
-            return {"ok": True, "card_id": card_id, "message": "Chat card created"}
-
+            from app.core.onestack_chat import handle_onestack_chat
+            return await handle_onestack_chat(
+                member_slug=member_slug,
+                message=message,
+                chat_id=chat_id,
+                user_id=user_id,
+            )
         except Exception as e:
-            logger.error(f"[OneStack] Chat card creation failed: {e}")
+            logger.error(f"[OneStack] Chat failed: {e}")
             await connector.stream_event(0, "error", str(e)[:500], member_slug, chat_id=chat_id)
             return {"ok": False, "error": str(e)[:500]}
 

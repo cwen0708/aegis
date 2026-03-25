@@ -12,11 +12,13 @@ Runner — 輕量 AI 呼叫器（僅供即時互動場景使用）
 """
 import asyncio
 import subprocess
-import json
 import re
 import logging
-import threading
 from typing import Dict, Any, Optional, Callable
+
+from app.core.executor import PROVIDERS, build_command
+from app.core.executor.providers import get_provider_config
+from app.core.executor.auth import inject_auth_env, get_mcp_config_path
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,7 @@ _CH_SEND_RE = re.compile(r'\[CH_SEND:([^:]+):([^:]+):(.*?)(?:\]|$)', re.DOTALL)
 from app.core.stream_parsers import (  # noqa: E402
     parse_stream_json_text as _parse_stream_json_text,
     parse_stream_json_tokens as _parse_stream_json_tokens,
+    parse_claude_json as _parse_claude_json,
 )
 
 
@@ -51,52 +54,6 @@ def _intercept_channel_marker(line: str):
         InternalAPI.channel_send_async(platform, chat_id, text, edit_id)
         return
 
-# 支援的 AI 提供者指令配置
-PROVIDERS = {
-    "gemini": {
-        "cmd_base": ["gemini"],
-        "args": ["-p", "{prompt}", "-y", "--model", "gemini-2.5-flash"],
-        "env": {},
-        "json_output": False,
-    },
-    "claude": {
-        "cmd_base": ["claude"],
-        "args": ["-p", "{prompt}", "--dangerously-skip-permissions", "--model", "opus", "--output-format", "stream-json", "--verbose"],
-        "env": {},
-        "json_output": True,  # 仍用 JSON 解析最終結果
-        "stream_json": True,
-    },
-    "ollama": {
-        "cmd_base": ["ollama", "run"],
-        "args": ["{model}"],
-        "env": {},
-        "json_output": False,
-        "default_model": "llama3.1:8b",
-        "stdin_prompt": True,
-    },
-}
-
-
-from app.core.stream_parsers import parse_claude_json as _parse_claude_json  # noqa: E402
-
-
-def _get_member_mcp_config(member_id: int) -> Optional[str]:
-    """查找成員的 mcp.json 路徑，存在則回傳絕對路徑"""
-    try:
-        from sqlmodel import Session
-        from app.database import engine
-        from app.models.core import Member
-        from app.core.member_profile import get_member_dir
-        with Session(engine) as session:
-            member = session.get(Member, member_id)
-            if member and member.slug:
-                mcp_path = get_member_dir(member.slug) / "mcp.json"
-                if mcp_path.exists():
-                    return str(mcp_path)
-    except Exception:
-        pass
-    return None
-
 
 async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
                       forced_provider: Optional[str] = None, card_title: str = "",
@@ -108,7 +65,8 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
                       on_stream: Optional[Callable[[str], None]] = None,
                       resume_session_id: Optional[str] = None,
                       use_process_pool: bool = False,
-                      chat_key: Optional[str] = None) -> Dict[str, Any]:
+                      chat_key: Optional[str] = None,
+                      cwd: Optional[str] = None) -> Dict[str, Any]:
     """
     執行單一 AI 呼叫（用於 chat / email 等即時場景）。
 
@@ -126,60 +84,33 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
             auth_info=auth_info,
             extra_env=extra_env,
             on_line=on_stream,
+            cwd=cwd,
         )
 
     provider_name = forced_provider if forced_provider and forced_provider in PROVIDERS else "claude"
-    config = PROVIDERS[provider_name]
+    config = get_provider_config(provider_name)
 
-    model = model_override or config.get("default_model", "")
-
-    cmd = list(config["cmd_base"])
-    for arg in config["args"]:
-        if "{prompt}" in arg:
-            cmd.append(arg.replace("{prompt}", prompt))
-        elif "{model}" in arg:
-            cmd.append(arg.replace("{model}", model))
-        else:
-            cmd.append(arg)
-
-    if model_override:
-        for i, arg in enumerate(cmd):
-            if arg == "--model" and i + 1 < len(cmd):
-                cmd[i + 1] = model_override
-                break
-
-    # 如果有成員且是 claude，注入 MCP 設定
-    if provider_name == "claude" and member_id:
-        mcp_config_path = _get_member_mcp_config(member_id)
-        if mcp_config_path:
-            cmd.extend(["--mcp-config", mcp_config_path])
-
-    # Session resume 支援（chat 對話延續）
-    if resume_session_id and provider_name == "claude":
-        cmd.extend(["--resume", resume_session_id])
-        logger.info(f"[Runner] Resuming session {resume_session_id[:8]}...")
-
-    stdin_prompt = config.get("stdin_prompt", False)
+    # 透過 executor 建構命令（統一 provider 設定）
+    mcp_path = get_mcp_config_path(member_id) if member_id and provider_name == "claude" else None
+    cmd, stdin_prompt = build_command(
+        provider=provider_name,
+        prompt=prompt,
+        model=model_override or "",
+        mode="chat",
+        mcp_config_path=mcp_path,
+        resume_session_id=resume_session_id,
+    )
 
     from app.core.sandbox import build_sanitized_env, get_popen_kwargs
     env = build_sanitized_env(project_id=project_id)
-    env.update(config.get("env", {}))
 
     # 注入額外環境變數（如 per-user AD 帳密 for MCP）
     if extra_env:
         env.update(extra_env)
 
-    # 注入 Account 認證資訊
+    # 透過 executor 注入認證（統一 auth 邏輯）
     auth_info = auth_info or {}
-    auth_type = auth_info.get('auth_type', 'cli')
-    if provider_name == "claude":
-        if auth_type == 'api_key' and auth_info.get('api_key'):
-            env["ANTHROPIC_API_KEY"] = auth_info['api_key']
-        elif auth_info.get('oauth_token'):
-            env["CLAUDE_CODE_OAUTH_TOKEN"] = auth_info['oauth_token']
-    elif provider_name == "gemini":
-        if auth_info.get('api_key'):
-            env["GEMINI_API_KEY"] = auth_info['api_key']
+    inject_auth_env(env, provider_name, auth_info)
 
     logger.info(f"[Runner] Executing {provider_name} (task_id={task_id}, phase={phase})")
 

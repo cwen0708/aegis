@@ -62,37 +62,47 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
     if len(msg.text) > MAX_MESSAGE_LENGTH:
         return f"⚠️ 訊息過長（最多 {MAX_MESSAGE_LENGTH} 字）"
 
-    # 2. 取得 Member
-    member = _get_member(bot_user.default_member_id)
-    if not member:
+    # 2. 取得 Member（統一由 executor.context 處理，單次 DB 查詢）
+    from app.core.executor.context import resolve_member_for_chat
+    ctx = resolve_member_for_chat(bot_user.default_member_id)
+    if not ctx.has_member:
         return "⚠️ 尚未設定 AI 角色，請聯繫管理員"
 
     # 3. 取得/建立 ChatSession
-    session_obj = _get_or_create_session(bot_user.id, member.id, msg.chat_id)
+    session_obj = _get_or_create_session(bot_user.id, ctx.member_id, msg.chat_id)
 
     # 4. 檢查 token 配額
     token_limit = MONTHLY_TOKEN_LIMIT_L2 if bot_user.level >= 2 else MONTHLY_TOKEN_LIMIT_L1
     if session_obj.total_output_tokens > token_limit:
         return "📊 本月 token 配額已用盡，請聯繫管理員"
 
-    # 5. 載入靈魂 + 技能（從預載快取，mtime 變動自動重讀）
-    from app.core.member_cache import member_cache
-    profile = member_cache.get(member.slug) if member.slug else None
-    soul = profile.soul if profile else ""
-    skill_texts = (profile.shared_skills + profile.skills) if profile else []
-    skills_content = "\n\n---\n\n".join(skill_texts) if skill_texts else ""
-
-    # 6. 載入最近對話歷史
-    history = _get_recent_messages(session_obj.id, limit=MAX_HISTORY_MESSAGES)
-
-    # 7. 取得用戶可存取的專案和身份上下文
+    # 5. 取得用戶上下文
     accessible_projects = get_user_projects(bot_user.id)
     user_context = None
     default_project = get_default_project(bot_user.id)
     if default_project:
         user_context = get_user_context(bot_user.id, default_project.id)
+    user_extra = get_user_extra(bot_user.id)
 
-    # 7.5 多模態：如果有附帶媒體，在訊息中加入檔案路徑
+    # 5.5 確保 chat workspace（CLAUDE.md + skills symlink + MCP symlink）
+    chat_session_key = f"{bot_user.platform}:{msg.chat_id}:{ctx.member_slug}"
+    ws_path = None
+    if ctx.member_slug:
+        from app.core.chat_workspace import ensure_chat_workspace
+        ws_path = ensure_chat_workspace(
+            member_slug=ctx.member_slug,
+            chat_key=chat_session_key,
+            bot_user_id=bot_user.id,
+            soul=ctx.soul,
+            user_context=user_context,
+            accessible_projects=accessible_projects,
+            user_level=bot_user.level,
+            chat_id=msg.chat_id,
+            platform=bot_user.platform,
+            user_extra=user_extra,
+        )
+
+    # 6. 組裝用戶訊息（只有訊息本身，不含 soul/skills/歷史）
     user_message = msg.text or ""
     if msg.media_type and msg.media_path:
         media_hint = f"\n\n[用戶傳送了{_media_type_label(msg.media_type)}，檔案路徑: {msg.media_path}]"
@@ -100,44 +110,12 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
             media_hint += f"\n[附帶說明: {msg.caption}]"
         user_message = (user_message + media_hint).strip()
 
-    # 7.6 取得用戶額外資料（供 AI/MCP 使用）
-    user_extra = get_user_extra(bot_user.id)
+    prompt = user_message
 
-    # 8. 建構 prompt（含用戶身份和專案範圍）
-    prompt = _build_chat_prompt(
-        soul=soul,
-        skills=skills_content,
-        member=member,
-        history=history,
-        user_message=user_message,
-        user_context=user_context,
-        accessible_projects=accessible_projects,
-        user_level=bot_user.level,
-        chat_id=msg.chat_id,
-        platform=bot_user.platform,
-        user_extra=user_extra,
-        placeholder_message_id=placeholder_message_id,
-    )
-
-    # 9. 取得 AI 帳號和模型
-    account, model = _get_primary_account(member.id)
-    provider = account.provider if account else "claude"
-
-    # 取得帳號認證資訊
-    auth_info = {}
-    if account:
-        auth_info = {
-            'auth_type': getattr(account, 'auth_type', 'cli'),
-            'oauth_token': getattr(account, 'oauth_token', '') or '',
-            'api_key': getattr(account, 'api_key', '') or '',
-        }
-
-    # Bot 聊天預設用快速模型（成員有設定則覆蓋）
-    if not model:
-        if provider == "gemini":
-            model = "gemini-flash"
-        elif provider == "claude":
-            model = "haiku"
+    # 9. 取得 AI 帳號和模型（從 MemberContext，fallback 由 effective_model 統一管理）
+    provider = ctx.primary_provider
+    model = ctx.effective_model("chat")
+    auth_info = ctx.primary_auth
 
     # 9.5 從 extra_json 建構 MCP 用的環境變數（如 AD 帳密）
     mcp_extra_env: dict[str, str] = {}
@@ -148,34 +126,16 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
         # 硬擋：沒有 AD 帳密就封鎖 NAS MCP
         mcp_extra_env["NAS_AUTH_BLOCKED"] = "1"
 
-    # 10. 即時回饋：on_stream callback 編輯 placeholder
-    _last_edit = [0.0, ""]  # [timestamp, last_text]
+    # 10. 建立 StreamEmitter（統一串流輸出）
+    from app.core.executor.emitter import StreamEmitter, PlatformTarget
 
-    async def _edit_placeholder(text: str):
-        if not placeholder_message_id or text == _last_edit[1]:
-            return
-        now = time.time()
-        if now - _last_edit[0] < 3.0:
-            return
-        _last_edit[0] = now
-        _last_edit[1] = text
-        try:
-            from app.core.http_client import InternalAPIAsync
-            await InternalAPIAsync.channel_send(msg.platform, msg.chat_id, text, placeholder_message_id)
-        except Exception:
-            pass
-
-    _loop = asyncio.get_event_loop()
-
-    def on_stream(raw_line: str):
-        from app.api.runner import _parse_tool_call
-        parsed = _parse_tool_call(raw_line)
-        if parsed and placeholder_message_id:
-            _, summary = parsed
-            asyncio.run_coroutine_threadsafe(_edit_placeholder(f"🤔 {summary}"), _loop)
+    targets = []
+    if placeholder_message_id:
+        _loop = asyncio.get_event_loop()
+        targets.append(PlatformTarget(msg.platform, msg.chat_id, placeholder_message_id, _loop))
+    emitter = StreamEmitter(targets=targets)
 
     # 11. 呼叫 AI（Process Pool 持久進程 or CLI fallback）
-    chat_session_key = f"{bot_user.platform}:{msg.chat_id}:{member.slug}"
     use_pool = provider == "claude"
     logger.info(f"[Chat] Calling AI: provider={provider} use_pool={use_pool} key={chat_session_key} model={model}")
 
@@ -188,13 +148,14 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
             forced_provider=provider,
             card_title=f"Chat with {bot_user.username or bot_user.platform_user_id}",
             project_name="Aegis Bot",
-            member_id=member.id,
+            member_id=ctx.member_id,
             model_override=model,
             auth_info=auth_info,
             extra_env=mcp_extra_env or None,
-            on_stream=on_stream if placeholder_message_id else None,
+            on_stream=emitter.emit_raw if targets else None,
             use_process_pool=use_pool,
             chat_key=chat_session_key if use_pool else None,
+            cwd=ws_path,
         )
     except Exception as e:
         logger.error(f"[Chat] AI task failed: {e}")

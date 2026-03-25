@@ -171,60 +171,31 @@ POLL_INTERVAL = 3  # 秒
 API_BASE = "http://127.0.0.1:8899/api/v1"
 MAX_WORKSTATIONS = 3  # 預設，啟動時從 DB 讀取
 
-PROVIDERS = {
-    "gemini": {
-        "cmd_base": ["gemini"],
-        "args": ["-p", "{prompt}", "-y", "--model", "gemini-3.1-pro-preview"],
-        "json_output": False,
-    },
-    "claude": {
-        "cmd_base": ["claude"],
-        # 使用 stream-json + verbose 實現即時串流輸出
-        "args": ["--dangerously-skip-permissions", "--model", "sonnet",
-                 "--output-format", "stream-json", "--verbose"],
-        "json_output": False,
-        "stream_json": True,  # 標記需要解析 stream-json
-        "stdin_prompt": True,  # 避免 prompt 中的 --- 被 CLI parser 誤解析
-    },
-    "ollama": {
-        "cmd_base": ["ollama", "run"],
-        "args": ["{model}"],
-        "json_output": False,
-        "default_model": "llama3.1:8b",
-        "stdin_prompt": True,
-    },
-}
+# Provider 設定統一由 executor 管理
+from app.core.executor import PROVIDERS, build_command
+from app.core.executor.providers import get_provider_config
+from app.core.executor.auth import inject_auth_env
+from app.core.executor.emitter import clean_ansi as _clean_ansi
 
 
 # ==========================================
 # HTTP 工具
 # ==========================================
+_broadcast_targets: dict[int, "WebSocketTarget"] = {}  # cache per card_id
+
+
 def broadcast_log(card_id: int, line: str):
-    """透過 HTTP 發送 log 給 FastAPI 廣播，同時寫入 BroadcastLog"""
-    try:
-        # 過濾掉 ANSI escape codes 和控制字符
-        import re
-        clean_line = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07?', '', line)
-        clean_line = ''.join(c for c in clean_line if c.isprintable() or c in '\n\r\t')
+    """透過 HTTP 發送 log 給 FastAPI 廣播，同時寫入 BroadcastLog。
 
-        if not clean_line.strip():
-            return  # 跳過空行
-
-        # 寫入 BroadcastLog（臨時表）
-        try:
-            with Session(engine) as session:
-                from app.models.core import BroadcastLog
-                session.add(BroadcastLog(card_id=card_id, line=clean_line))
-                session.commit()
-        except Exception:
-            pass  # 不影響廣播
-
-        logger.info(f"[Broadcast] card={card_id} len={len(clean_line)}")
-        from app.core.http_client import InternalAPI
-        InternalAPI.broadcast_log(card_id, clean_line)
-    except Exception as e:
-        logger.warning(f"[Broadcast] Failed: {e}")
-        pass
+    內部委託給 WebSocketTarget（統一 ANSI 清理 + DB + WS 邏輯）。
+    target 實例按 card_id cache，避免 hot path 每行 new 物件。
+    """
+    from app.core.executor.emitter import WebSocketTarget, StreamEvent
+    target = _broadcast_targets.get(card_id)
+    if target is None:
+        target = WebSocketTarget(card_id)
+        _broadcast_targets[card_id] = target
+    target.handle(StreamEvent(kind="output", content=line))
 
 
 def cleanup_broadcast_logs():
@@ -318,70 +289,8 @@ def get_pending_cards() -> list:
         return list(session.exec(stmt).all())
 
 
-def get_member_accounts(member_id: int) -> list:
-    """取得成員所有健康帳號（按 priority 排序），用於 fallback
-    回傳 [(provider, model, auth_info, account_name), ...]
-    """
-    with Session(engine) as session:
-        stmt = select(MemberAccount).where(
-            MemberAccount.member_id == member_id
-        ).order_by(MemberAccount.priority)
-        bindings = session.exec(stmt).all()
-
-        results = []
-        for binding in bindings:
-            account = session.get(Account, binding.account_id)
-            if account and account.is_healthy:
-                auth_info = {
-                    'auth_type': getattr(account, 'auth_type', 'cli'),
-                    'oauth_token': getattr(account, 'oauth_token', '') or '',
-                    'api_key': getattr(account, 'api_key', '') or '',
-                }
-                results.append((
-                    account.provider,
-                    binding.model or "",
-                    auth_info,
-                    account.name or f"account-{account.id}",
-                ))
-        return results
-
-
-def get_primary_provider(member_id: int) -> tuple:
-    """從成員的主帳號取得 provider、model 和認證資訊（向下相容）"""
-    accounts = get_member_accounts(member_id)
-    if accounts:
-        provider, model, auth_info, _ = accounts[0]
-        return provider, model, auth_info
-    return None, "", {}
-
-
-def resolve_member(stage_list_id: int, phase: str) -> tuple:
-    """解析任務應該由哪個成員執行
-    回傳 (member_id, accounts_list, member_slug)
-    accounts_list = [(provider, model, auth_info, account_name), ...]
-    """
-    with Session(engine) as session:
-        # 1. 列表級指派
-        stage_list = session.get(StageList, stage_list_id)
-        if stage_list and stage_list.member_id:
-            member = session.get(Member, stage_list.member_id)
-            if member:
-                accounts = get_member_accounts(member.id)
-                logger.info(f"[Router] List '{stage_list.name}' → {member.name} ({len(accounts)} accounts)")
-                return member.id, accounts, member.slug
-
-        # 2. 專案預設成員（Inbound/Scheduled 等系統列表 fallback）
-        if stage_list:
-            project = session.get(Project, stage_list.project_id)
-            if project and project.default_member_id:
-                member = session.get(Member, project.default_member_id)
-                if member:
-                    accounts = get_member_accounts(member.id)
-                    logger.info(f"[Router] Project '{project.name}' default → {member.name} ({len(accounts)} accounts)")
-                    return member.id, accounts, member.slug
-
-        # 3. 無指派
-        return None, [], None
+# 成員解析統一由 executor.context 管理
+from app.core.executor.context import resolve_member_for_task, MemberContext
 
 
 # ==========================================
@@ -737,46 +646,32 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
              forced_provider: Optional[str], forced_model: str, card_title: str,
              project_name: str, member_id: Optional[int],
              auth_info: Optional[Dict[str, str]] = None,
-             resume_session_id: Optional[str] = None) -> Dict[str, Any]:
+             resume_session_id: Optional[str] = None,
+             emitter=None) -> Dict[str, Any]:
     """執行單一 AI 任務（使用 PTY 實現即時輸出串流）
 
     auth_info: 帳號認證資訊
         - auth_type: 'cli' | 'api_key'
         - oauth_token: CLI OAuth Token
         - api_key: API Key
+    emitter: StreamEmitter（可選，None 則用 broadcast_log fallback）
     """
     auth_info = auth_info or {}
 
     provider_name = forced_provider if forced_provider and forced_provider in PROVIDERS else "claude"
-    config = PROVIDERS.get(provider_name, PROVIDERS["gemini"])
+    config = get_provider_config(provider_name)
 
-    # 建構命令，支援成員指定的模型
-    default_model = config.get("default_model", "")
-    model = forced_model if forced_model is not None else default_model
-    cmd_parts = list(config["cmd_base"])
-    model_replaced = False
-    for arg in config["args"]:
-        if "{prompt}" in arg:
-            cmd_parts.append(arg.replace("{prompt}", prompt))
-        elif "{model}" in arg:
-            cmd_parts.append(arg.replace("{model}", model))
-            model_replaced = True
-        else:
-            cmd_parts.append(arg)
-
-    # 如果成員有指定模型且 placeholder 未處理，替換 args 中的 --model 值
-    if forced_model is not None and not model_replaced:
-        for i, arg in enumerate(cmd_parts):
-            if arg == "--model" and i + 1 < len(cmd_parts):
-                cmd_parts[i + 1] = forced_model
-                break
-
-    # Session resume 支援（chat 對話延續）
-    if resume_session_id and provider_name == "claude":
-        cmd_parts.extend(["--resume", resume_session_id])
-        logger.info(f"[Worker] Resuming session {resume_session_id[:8]}... for card {card_id}")
-
-    stdin_prompt = config.get("stdin_prompt", False)
+    # 透過 executor 建構命令（統一 provider 設定）
+    from app.core.executor.auth import get_mcp_config_path as _get_mcp
+    mcp_path = _get_mcp(member_id) if member_id and provider_name == "claude" else None
+    cmd_parts, stdin_prompt = build_command(
+        provider=provider_name,
+        prompt=prompt,
+        model=forced_model or "",
+        mode="task",
+        mcp_config_path=mcp_path,
+        resume_session_id=resume_session_id,
+    )
 
     # 環境變數白名單隔離（透過 sandbox 模組）
     from app.core.sandbox import build_sanitized_env
@@ -802,23 +697,8 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
     if os.path.exists(ws_gitconfig):
         env["GIT_CONFIG_GLOBAL"] = ws_gitconfig
 
-    # 根據帳號認證資訊設定環境變數
-    auth_type = auth_info.get('auth_type', 'cli')
-    if provider_name == "claude":
-        if auth_type == 'api_key' and auth_info.get('api_key'):
-            env["ANTHROPIC_API_KEY"] = auth_info['api_key']
-            logger.info(f"[Task {card_id}] Using Anthropic API Key")
-        elif auth_info.get('oauth_token'):
-            env["CLAUDE_CODE_OAUTH_TOKEN"] = auth_info['oauth_token']
-            logger.info(f"[Task {card_id}] Using Claude OAuth Token")
-    elif provider_name == "gemini":
-        if auth_type == 'api_key' and auth_info.get('api_key'):
-            env["GEMINI_API_KEY"] = auth_info['api_key']
-            logger.info(f"[Task {card_id}] Using Gemini API Key")
-    elif provider_name == "openai":
-        if auth_info.get('api_key'):
-            env["OPENAI_API_KEY"] = auth_info['api_key']
-            logger.info(f"[Task {card_id}] Using OpenAI API Key")
+    # 透過 executor 注入認證（統一 auth 邏輯）
+    inject_auth_env(env, provider_name, auth_info, log_prefix=f"[Task {card_id}]")
 
     logger.info(f"[Task {card_id}] Executing {provider_name} in {project_path} (PTY mode)")
     logger.info(f"[Task {card_id}] Command: {' '.join(cmd_parts[:3])}...")
@@ -833,11 +713,6 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
 
     # OneStack stream 轉發由 FastAPI 端的 internal/broadcast-event 處理
 
-    # 如果 workspace 有 .gitconfig（GitHub PAT），注入環境變數
-    _ws_gitconfig = Path(project_path) / ".gitconfig"
-    if _ws_gitconfig.exists():
-        env["GIT_CONFIG_GLOBAL"] = str(_ws_gitconfig)
-
     start_time = time.time()
 
     # 嘗試使用 PTY，失敗則 fallback 到 subprocess
@@ -846,7 +721,7 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
             return run_task_pty_windows(
                 card_id, project_path, cmd_parts, stdin_prompt, prompt,
                 env, provider_name, card_title, project_name, member_id,
-                config, start_time
+                config, start_time, emitter=emitter
             )
         except Exception as e:
             logger.warning(f"[Task {card_id}] PTY failed, fallback to subprocess: {e}")
@@ -855,7 +730,7 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
     return run_task_subprocess(
         card_id, project_path, cmd_parts, stdin_prompt, prompt,
         env, provider_name, card_title, project_name, member_id,
-        config, start_time
+        config, start_time, emitter=emitter
     )
 
 
@@ -969,12 +844,13 @@ def _truncate_path(path: str, max_len: int = 50) -> str:
 def run_task_pty_windows(
     card_id: int, project_path: str, cmd_parts: list, stdin_prompt: bool,
     prompt: str, env: dict, provider_name: str, card_title: str,
-    project_name: str, member_id: Optional[int], config: dict, start_time: float
+    project_name: str, member_id: Optional[int], config: dict, start_time: float,
+    emitter=None
 ) -> Dict[str, Any]:
     """Windows PTY 執行（使用 pywinpty 實現即時輸出）"""
     from winpty import PtyProcess
     import re
-    import threading
+    from app.core.executor.heartbeat import heartbeat_monitor
 
     # 保存原始工作目錄
     original_cwd = os.getcwd()
@@ -988,20 +864,7 @@ def run_task_pty_windows(
     stream_json = config.get("stream_json", False)
     output_lines = []
     result_text_parts = []  # 收集實際的文字輸出
-
-    # 心跳機制：只有靜止超過 20 秒才發送
-    heartbeat_stop = threading.Event()
-    last_activity = time.time()
-    _idle_threshold = 20  # 秒
-
-    def heartbeat_worker():
-        while not heartbeat_stop.wait(5):
-            idle = time.time() - last_activity
-            if idle >= _idle_threshold:
-                broadcast_log(card_id, f"⏳ 處理中... ({int(idle)}s)\n")
-
-    heartbeat_thread = threading.Thread(target=heartbeat_worker, daemon=True)
-    heartbeat_thread.start()
+    _use_emitter = emitter is not None and stream_json  # stream_json 模式才用 emitter
 
     try:
         # 從 os.environ 中刪除 CLAUDE 相關變數（這是 PTY 關鍵！）
@@ -1020,48 +883,57 @@ def run_task_pty_windows(
         if stdin_prompt:
             pty_process.write(prompt + "\n")
 
-        # 使用 read() 讀取並按行處理
+        # 使用 read() 讀取並按行處理（heartbeat_monitor 管理心跳）
+        from app.core.executor.emitter import StreamEmitter as _SE, WebSocketTarget as _WST
+        _hb_emitter = emitter if _use_emitter else _SE(targets=[_WST(card_id)])
         buffer = ""
-        while pty_process.isalive():
-            try:
-                # 檢查 abort 信號
-                if is_abort_requested(card_id):
-                    logger.info(f"[Task {card_id}] Abort signal received, killing PTY process")
-                    try:
-                        import signal as _sig
-                        os.kill(pty_process.pid, _sig.SIGKILL)
-                    except Exception:
-                        pass
-                    clear_abort_signal(card_id)
-                    broadcast_log(card_id, "\n🛑 任務已被中止\n")
+        with heartbeat_monitor(_hb_emitter) as touch:
+            while pty_process.isalive():
+                try:
+                    # 檢查 abort 信號
+                    if is_abort_requested(card_id):
+                        logger.info(f"[Task {card_id}] Abort signal received, killing PTY process")
+                        try:
+                            import signal as _sig
+                            os.kill(pty_process.pid, _sig.SIGKILL)
+                        except Exception:
+                            pass
+                        clear_abort_signal(card_id)
+                        broadcast_log(card_id, "\n🛑 任務已被中止\n")
+                        break
+
+                    chunk = pty_process.read(512)
+                    if chunk:
+                        touch()
+                        output_lines.append(chunk)
+                        buffer += chunk
+
+                        # 按行處理
+                        while "\n" in buffer:
+                            line, buffer = buffer.split("\n", 1)
+
+                            if stream_json:
+                                clean_line = _clean_ansi(line)
+                                if clean_line.strip().startswith("{"):
+                                    if _use_emitter:
+                                        # 透過 emitter 統一處理（解析 + 分發到所有 target）
+                                        emitter.emit_raw(clean_line)
+                                        # 同時收集文字（向後相容 result_text_parts）
+                                        text = parse_stream_json_line(clean_line)
+                                        if text:
+                                            result_text_parts.append(text)
+                                    else:
+                                        text = parse_stream_json_line(clean_line)
+                                        if text:
+                                            result_text_parts.append(text)
+                                            broadcast_log(card_id, text)
+                            else:
+                                broadcast_log(card_id, line + "\n")
+                except EOFError:
                     break
-
-                chunk = pty_process.read(512)
-                if chunk:
-                    last_activity = time.time()
-                    output_lines.append(chunk)
-                    buffer += chunk
-
-                    # 按行處理
-                    while "\n" in buffer:
-                        line, buffer = buffer.split("\n", 1)
-
-                        if stream_json:
-                            # 解析 stream-json，提取文字
-                            # 先清理 ANSI codes
-                            clean_line = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07?', '', line)
-                            if clean_line.strip().startswith("{"):
-                                text = parse_stream_json_line(clean_line)
-                                if text:
-                                    result_text_parts.append(text)
-                                    broadcast_log(card_id, text)
-                        else:
-                            broadcast_log(card_id, line + "\n")
-            except EOFError:
-                break
-            except Exception as e:
-                logger.warning(f"[Task {card_id}] PTY read error: {e}")
-                time.sleep(0.05)
+                except Exception as e:
+                    logger.warning(f"[Task {card_id}] PTY read error: {e}")
+                    time.sleep(0.05)
 
         # 讀取剩餘輸出
         try:
@@ -1078,12 +950,18 @@ def run_task_pty_windows(
         if buffer:
             if stream_json:
                 for line in buffer.split("\n"):
-                    clean_line = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07?', '', line)
+                    clean_line = _clean_ansi(line)
                     if clean_line.strip().startswith("{"):
-                        text = parse_stream_json_line(clean_line)
-                        if text:
-                            result_text_parts.append(text)
-                            broadcast_log(card_id, text)
+                        if _use_emitter:
+                            emitter.emit_raw(clean_line)
+                            text = parse_stream_json_line(clean_line)
+                            if text:
+                                result_text_parts.append(text)
+                        else:
+                            text = parse_stream_json_line(clean_line)
+                            if text:
+                                result_text_parts.append(text)
+                                broadcast_log(card_id, text)
             else:
                 broadcast_log(card_id, buffer)
 
@@ -1092,8 +970,7 @@ def run_task_pty_windows(
         exit_code = pty_process.exitstatus or 0
 
     finally:
-        # 停止心跳線程
-        heartbeat_stop.set()
+        # heartbeat_monitor 在 with 結束時自動停止
 
         # 恢復環境
         os.chdir(original_cwd)
@@ -1138,24 +1015,15 @@ def run_task_pty_windows(
 def run_task_subprocess(
     card_id: int, project_path: str, cmd_parts: list, stdin_prompt: bool,
     prompt: str, env: dict, provider_name: str, card_title: str,
-    project_name: str, member_id: Optional[int], config: dict, start_time: float
+    project_name: str, member_id: Optional[int], config: dict, start_time: float,
+    emitter=None
 ) -> Dict[str, Any]:
     """一般 subprocess 執行（fallback）"""
-    import threading
+    from app.core.executor.heartbeat import heartbeat_monitor
 
-    # 心跳機制：只有靜止超過 20 秒才發送
-    heartbeat_stop = threading.Event()
-    last_activity = time.time()
-    _idle_threshold = 20
-
-    def heartbeat_worker():
-        while not heartbeat_stop.wait(5):
-            idle = time.time() - last_activity
-            if idle >= _idle_threshold:
-                broadcast_log(card_id, f"⏳ 處理中... ({int(idle)}s)\n")
-
-    heartbeat_thread = threading.Thread(target=heartbeat_worker, daemon=True)
-    heartbeat_thread.start()
+    # subprocess 心跳用 StreamEmitter fallback
+    from app.core.executor.emitter import StreamEmitter as _SE, WebSocketTarget as _WST
+    _hb_emitter = emitter or _SE(targets=[_WST(card_id)])
 
     try:
         from app.core.sandbox import get_popen_kwargs
@@ -1176,18 +1044,19 @@ def run_task_subprocess(
             proc.stdin.close()
 
         output_lines = []
-        for raw_line in proc.stdout:
-            last_activity = time.time()
-            line = raw_line.decode("utf-8", errors="replace")
-            output_lines.append(line)
-            broadcast_log(card_id, line)
-            # 檢查 abort 信號
-            if is_abort_requested(card_id):
-                logger.info(f"[Task {card_id}] Abort signal received, killing process")
-                proc.kill()
-                clear_abort_signal(card_id)
-                broadcast_log(card_id, "\n🛑 任務已被中止\n")
-                break
+        with heartbeat_monitor(_hb_emitter) as touch:
+            for raw_line in proc.stdout:
+                touch()
+                line = raw_line.decode("utf-8", errors="replace")
+                output_lines.append(line)
+                broadcast_log(card_id, line)
+                # 檢查 abort 信號
+                if is_abort_requested(card_id):
+                    logger.info(f"[Task {card_id}] Abort signal received, killing process")
+                    proc.kill()
+                    clear_abort_signal(card_id)
+                    broadcast_log(card_id, "\n🛑 任務已被中止\n")
+                    break
 
         proc.wait()
 
@@ -1219,15 +1088,16 @@ def run_task_subprocess(
         save_task_log(card_id, card_title, project_name, provider_name, member_id, "error", str(e), {})
         return {"status": "error", "output": str(e), "provider": provider_name}
 
-    finally:
-        heartbeat_stop.set()
-
 
 # ==========================================
 # 主處理迴圈
 # ==========================================
-def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, member_slug):
+def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
     """在 thread 中執行單張卡片任務（含 fallback、結果處理、清理）"""
+    # 從 MemberContext 解構（內部程式碼向後相容）
+    member_id = ctx.member_id
+    accounts_list = ctx.accounts_as_tuples()
+    member_slug = ctx.member_slug or ""
     # 讀取卡片內容
     with Session(engine) as session:
         idx_fresh = session.get(CardIndex, idx.card_id)
@@ -1310,6 +1180,21 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
         else:
             effective_prompt = card_data.content + _dialogue_hint
 
+    # 建立 StreamEmitter（統一串流輸出）
+    from app.core.executor.emitter import StreamEmitter, WebSocketTarget, OneStackTarget
+    _targets = [WebSocketTarget(card_id=idx.card_id)]
+    try:
+        from app.core.onestack_connector import connector
+        if connector.enabled:
+            _targets.append(OneStackTarget(
+                card_id=idx.card_id,
+                member_slug=member_slug,
+                chat_id=chat_id or "",
+            ))
+    except Exception:
+        pass
+    task_emitter = StreamEmitter(targets=_targets)
+
     # 執行任務（含 fallback 機制）
     if not accounts_list:
         accounts_list = [("claude", "", {}, "default")]
@@ -1332,6 +1217,7 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
             member_id=member_id,
             auth_info=acct_auth,
             resume_session_id=_resume_session_id if is_chat_mode else None,
+            emitter=task_emitter,
         )
 
         if result["status"] == "success":
@@ -1641,22 +1527,22 @@ def process_pending_cards():
             update_card_status(idx.card_id, "idle")
             continue
 
-        # 解析成員
-        member_id, accounts_list, member_slug = resolve_member(idx.list_id, list_name.upper())
+        # 解析成員（統一由 executor.context 處理）
+        ctx = resolve_member_for_task(idx.list_id)
 
         # 成員忙碌檢查
-        if member_id and is_member_busy(member_id):
-            logger.info(f"[Worker] Member {member_id} busy, skip card {idx.card_id}")
+        if ctx.member_id and is_member_busy(ctx.member_id):
+            logger.info(f"[Worker] Member {ctx.member_id} busy, skip card {idx.card_id}")
             continue
 
         # 標記為 running（在主線程做，防止下一輪重複撿取）
-        mark_card_running(idx.card_id, member_id)
+        mark_card_running(idx.card_id, ctx.member_id)
         logger.info(f"[Worker] Processing card {idx.card_id}: {idx.title} (threaded)")
 
         # 在獨立 thread 中執行任務
         t = threading.Thread(
             target=_execute_card_task,
-            args=(idx, list_name, stage_list, member_id, accounts_list, member_slug),
+            args=(idx, list_name, stage_list, ctx),
             name=f"card-{idx.card_id}",
             daemon=True,
         )

@@ -12,15 +12,8 @@ logger = logging.getLogger(__name__)
 _INSTALL_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 WORKSPACES_ROOT = _INSTALL_ROOT / ".aegis" / "workspaces"
 
-# Provider-specific file/dir names
-PROVIDER_CONFIG = {
-    "claude": {"config_file": "CLAUDE.md", "dot_dir": ".claude"},
-    "gemini": {"config_file": "Gemini.md", "dot_dir": ".gemini"},
-    # TODO: Codex 尚未驗證配置檔名，暫用類似 Claude 的格式
-    "codex": {"config_file": "CODEX.md", "dot_dir": ".codex"},
-    # Ollama 本地模型，使用通用 AI 配置
-    "ollama": {"config_file": "OLLAMA.md", "dot_dir": ".ollama"},
-}
+# Provider 設定檔映射統一由 executor 管理
+from app.core.executor.config_md import PROVIDER_CONFIG, get_config_filename, get_dot_dir
 
 
 def _build_config_content(
@@ -32,62 +25,18 @@ def _build_config_content(
     stage_description: str = "",
     stage_instruction: str = "",
 ) -> str:
-    """Assemble the CLAUDE.md / .gemini.md content."""
-    memory_path = get_member_memory_dir(member_slug)
-
-    # 階段說明區塊
-    stage_section = ""
-    if stage_name or stage_description or stage_instruction:
-        parts = [f"# 當前階段：{stage_name}" if stage_name else "# 當前階段"]
-        if stage_description:
-            parts.append(stage_description)
-        if stage_instruction:
-            parts.append(f"\n## 階段指令\n{stage_instruction}")
-        stage_section = "\n".join(parts) + "\n"
-
-    # 安全限制區塊
-    install_root = str(_INSTALL_ROOT)
-    security_section = f"""# 安全限制
-你只能在以下目錄操作：
-1. {project_path} — 專案目錄
-2. 當前工作區目錄（臨時）
-
-禁止存取：
-- Aegis 安裝目錄（{install_root}）
-- ~/.claude/、~/.ssh/、~/.config/
-- 任何 .env、*.db、credentials 檔案
-- 禁止執行 kill/pkill/killall/taskkill 等進程管理命令
-- 禁止修改系統設定或安裝全域套件
-"""
-
-    return f"""# 工作目錄
-你的工作目錄（cwd）是臨時工作區，專案檔案已透過 symlink 連結進來。
-可以直接用相對路徑操作（如 backend/worker.py），改動會直接反映在專案目錄。
-
-專案實際路徑：{project_path}
-git 操作在此目錄中可直接執行（.git 已連結）。
-
-# 你的身份
-{soul_content}
-
-{security_section}
-
-# 記憶
-你的個人記憶存放在：
-{memory_path}
-- short-term/ 短期記憶（近期任務摘要）
-- long-term/ 長期記憶（累積的經驗與模式）
-需要回憶時可以去讀取。
-
-{stage_section}
-# 本次任務
-{card_content}
-
-# 任務完成後
-請在你所有輸出的最末行，用你的角色語氣寫一句簡短的任務總結（70字以內），格式如下：
-<!-- dialogue: 你的總結 -->
-這句話會顯示在你的對話框中，請用自然、符合你性格的口吻。
-"""
+    """Assemble config content — 委託給 executor.config_md。"""
+    from app.core.executor.config_md import build_config_md
+    return build_config_md(
+        mode="task",
+        soul=soul_content,
+        member_slug=member_slug,
+        project_path=project_path,
+        card_content=card_content,
+        stage_name=stage_name,
+        stage_description=stage_description,
+        stage_instruction=stage_instruction,
+    )
 
 
 def prepare_workspace(
