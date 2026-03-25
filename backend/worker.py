@@ -792,8 +792,7 @@ def run_task_subprocess(
     from app.core.executor.heartbeat import heartbeat_monitor
 
     # subprocess 心跳用 StreamEmitter fallback
-    from app.core.executor.emitter import StreamEmitter as _SE, WebSocketTarget as _WST
-    _hb_emitter = emitter or _SE(targets=[_WST(card_id)])
+    # emitter 由 _execute_card_task 永遠傳入
 
     try:
         from app.core.sandbox import get_popen_kwargs
@@ -814,12 +813,12 @@ def run_task_subprocess(
             proc.stdin.close()
 
         output_lines = []
-        with heartbeat_monitor(_hb_emitter) as touch:
+        with heartbeat_monitor(emitter) as touch:
             for raw_line in proc.stdout:
                 touch()
                 line = raw_line.decode("utf-8", errors="replace")
                 output_lines.append(line)
-                if _has_emitter:
+                if emitter:
                     emitter.emit_output(line)
                 # 檢查 abort 信號
                 if is_abort_requested(card_id):

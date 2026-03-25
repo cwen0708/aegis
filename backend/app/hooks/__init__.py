@@ -100,7 +100,7 @@ def collect_hooks(source: str = "worker") -> list[Hook]:
         ]
     elif source == "chat":
         return [
-            PlatformHook(),     # DURING: Telegram/LINE placeholder edit
+            # PlatformHook 由 chat_handler 按需 insert（需要 platform/chat_id/placeholder_id）
             MemoryHook(),       # POST: 成員記憶
         ]
     elif source == "onestack":
