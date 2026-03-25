@@ -106,12 +106,27 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
                       auth_info: Optional[Dict[str, str]] = None,
                       extra_env: Optional[Dict[str, str]] = None,
                       on_stream: Optional[Callable[[str], None]] = None,
-                      resume_session_id: Optional[str] = None) -> Dict[str, Any]:
+                      resume_session_id: Optional[str] = None,
+                      use_process_pool: bool = False,
+                      chat_key: Optional[str] = None) -> Dict[str, Any]:
     """
     執行單一 AI 呼叫（用於 chat / email 等即時場景）。
 
     注意：卡片任務不走這裡，由 worker.py 負責。
     """
+    if use_process_pool and chat_key:
+        from app.core.session_pool import process_pool
+        return await asyncio.to_thread(
+            process_pool.send_message,
+            chat_key=chat_key,
+            message=prompt,
+            model=model_override or "haiku",
+            member_id=member_id,
+            auth_info=auth_info,
+            extra_env=extra_env,
+            on_line=on_stream,
+        )
+
     provider_name = forced_provider if forced_provider and forced_provider in PROVIDERS else "claude"
     config = PROVIDERS[provider_name]
 
