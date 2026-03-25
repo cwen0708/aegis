@@ -112,21 +112,12 @@ from app.core.executor.emitter import clean_ansi as _clean_ansi
 # ==========================================
 # HTTP 工具
 # ==========================================
-_broadcast_targets: dict[int, "WebSocketTarget"] = {}  # cache per card_id
-
-
 def broadcast_log(card_id: int, line: str):
-    """透過 HTTP 發送 log 給 FastAPI 廣播，同時寫入 BroadcastLog。
-
-    內部委託給 WebSocketTarget（統一 ANSI 清理 + DB + WS 邏輯）。
-    target 實例按 card_id cache，避免 hot path 每行 new 物件。
-    """
-    from app.core.executor.emitter import WebSocketTarget, StreamEvent
-    target = _broadcast_targets.get(card_id)
-    if target is None:
-        target = WebSocketTarget(card_id)
-        _broadcast_targets[card_id] = target
-    target.handle(StreamEvent(kind="output", content=line))
+    """透過 Hook 發送 log（向後相容，PTY non-emitter fallback 用）。"""
+    from app.hooks.websocket import WebSocketHook
+    from app.hooks import StreamEvent
+    hook = WebSocketHook(card_id=card_id)
+    hook.on_stream(StreamEvent(kind="output", content=line))
 
 
 def cleanup_broadcast_logs():
@@ -535,39 +526,6 @@ def _parse_cron_job_id(title: str) -> Optional[int]:
     m = re.match(r'\[cron_(\d+)\]', title)
     return int(m.group(1)) if m else None
 
-
-def _extract_dialogue(output: str) -> Optional[str]:
-    """從 AI 輸出中解析 <!-- dialogue: xxx --> 標記"""
-    import re
-    m = re.search(r'<!--\s*dialogue:\s*(.+?)\s*-->', output)
-    return m.group(1).strip() if m else None
-
-
-def _save_member_dialogue(member_id: int, card_id: int, card_title: str,
-                          project_name: str, dialogue_type: str, text: str):
-    """儲存成員對話到 DB 並透過 WebSocket 推送"""
-    try:
-        with Session(engine) as session:
-            d = MemberDialogue(
-                member_id=member_id,
-                card_id=card_id,
-                card_title=card_title,
-                project_name=project_name,
-                dialogue_type=dialogue_type,
-                text=text,
-                status="success" if dialogue_type == "task_complete" else "error",
-            )
-            session.add(d)
-            session.commit()
-        broadcast_event("member_dialogue", {
-            "member_id": member_id,
-            "text": text,
-            "dialogue_type": dialogue_type,
-            "card_title": card_title,
-        })
-        logger.info(f"[Dialogue] {dialogue_type}: {text[:40]}")
-    except Exception as e:
-        logger.warning(f"[Dialogue] Failed to save: {e}")
 
 
 # ==========================================
@@ -1052,20 +1010,35 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
         else:
             effective_prompt = card_data.content + _dialogue_hint
 
-    # 建立 StreamEmitter（統一串流輸出）
-    from app.core.executor.emitter import StreamEmitter, WebSocketTarget, OneStackTarget
-    _targets = [WebSocketTarget(card_id=idx.card_id)]
-    try:
-        from app.core.onestack_connector import connector
-        if connector.enabled:
-            _targets.append(OneStackTarget(
-                card_id=idx.card_id,
-                member_slug=member_slug,
-                chat_id=chat_id or "",
-            ))
-    except Exception:
-        pass
-    task_emitter = StreamEmitter(targets=_targets)
+    # 建立 Hook 驅動的 StreamEmitter
+    from app.hooks import collect_hooks
+    from app.hooks.websocket import WebSocketHook
+    from app.hooks.onestack import OneStackHook
+    from app.core.executor.emitter import StreamEmitter, parse_stream_event
+
+    task_hooks = collect_hooks("worker")
+    for h in task_hooks:
+        if isinstance(h, WebSocketHook):
+            h.card_id = idx.card_id
+        elif isinstance(h, OneStackHook):
+            h.card_id = idx.card_id
+            h.member_slug = member_slug
+            h.chat_id = chat_id or ""
+
+    # StreamEmitter 的 on_line callback 分發給所有 Hook.on_stream
+    from app.hooks import run_on_stream
+    class _HookEmitter(StreamEmitter):
+        def emit_raw(self, raw_line: str):
+            event = parse_stream_event(raw_line)
+            if not event:
+                return
+            if event.kind == "text":
+                self._text_parts.append(event.content)
+            if event.kind == "result" and event.token_info:
+                self._token_info = event.token_info
+            run_on_stream(task_hooks, event)
+
+    task_emitter = _HookEmitter(targets=[])
 
     # 執行任務（含 fallback 機制）
     if not accounts_list:

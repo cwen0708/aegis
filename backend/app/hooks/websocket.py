@@ -15,6 +15,21 @@ class WebSocketHook(Hook):
     def on_stream(self, event: StreamEvent) -> None:
         if event.kind == "result" or not self.card_id:
             return
+
+        # directive → 走 /internal/directive 路徑
+        if event.kind == "directive":
+            try:
+                from app.core.http_client import InternalAPI
+                directive_data = event.token_info  # {action, params, ...}
+                InternalAPI.post("/internal/directive", {
+                    "card_id": self.card_id,
+                    "action": directive_data.get("action", "notify"),
+                    "params": directive_data.get("params", {}),
+                })
+            except Exception as e:
+                logger.warning(f"[WebSocketHook] directive: {e}")
+            return
+
         clean = clean_ansi(event.content)
         if not clean.strip():
             return

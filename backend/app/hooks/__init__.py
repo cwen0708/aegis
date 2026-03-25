@@ -24,17 +24,9 @@ import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
+from app.core.executor.emitter import StreamEvent, parse_stream_event  # noqa: F401 — 唯一定義點
+
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class StreamEvent:
-    """串流事件（DURING 階段）"""
-    kind: str           # "tool_call" | "output" | "thinking" | "text" | "heartbeat" | "result"
-    content: str        # 人話摘要或原始文字
-    raw_line: str = ""
-    event_type: str = ""
-    token_info: dict = field(default_factory=dict)
 
 
 @dataclass
