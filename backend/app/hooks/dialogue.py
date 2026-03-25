@@ -17,7 +17,6 @@ class DialogueHook(Hook):
             from sqlmodel import Session
             from app.database import engine
             from app.models.core import MemberDialogue
-            from app.core.ws_manager import broadcast_event_sync
 
             dialogue_text = match.group(1).strip()
             with Session(engine) as s:
@@ -31,11 +30,17 @@ class DialogueHook(Hook):
                 ))
                 s.commit()
 
+            # 廣播到 WebSocket（走 HTTP，Worker 在獨立進程）
             try:
-                broadcast_event_sync("member_dialogue", {
-                    "member_id": ctx.member_id,
-                    "text": dialogue_text,
-                    "type": "task_complete" if ctx.status == "completed" else "task_failed",
+                from app.core.http_client import InternalAPI
+                InternalAPI.post("internal/broadcast-event", {
+                    "event": "member_dialogue",
+                    "payload": {
+                        "member_id": ctx.member_id,
+                        "text": dialogue_text,
+                        "dialogue_type": "task_complete" if ctx.status == "completed" else "task_failed",
+                        "card_title": ctx.card_title,
+                    },
                 })
             except Exception:
                 pass

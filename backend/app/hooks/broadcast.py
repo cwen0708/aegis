@@ -11,6 +11,6 @@ class BroadcastHook(Hook):
         payload = {"card_id": ctx.card_id, "status": ctx.status}
         try:
             from app.core.http_client import InternalAPI
-            InternalAPI.post("internal/broadcast-event", {"event": event, "data": payload})
+            InternalAPI.post("internal/broadcast-event", {"event": event, "payload": payload})
         except Exception as e:
             logger.debug(f"[BroadcastHook] {e}")
