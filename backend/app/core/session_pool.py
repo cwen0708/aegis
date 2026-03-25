@@ -138,8 +138,10 @@ class ProcessPool:
             if mcp_path:
                 cmd.extend(["--mcp-config", mcp_path])
 
-        from app.core.sandbox import build_sanitized_env, get_popen_kwargs
-        env = build_sanitized_env()
+        # ProcessPool 不用 sandbox 白名單（互動模式需要完整環境）
+        # 只注入 auth + extra_env
+        env = dict(os.environ)
+        env.pop("CLAUDECODE", None)  # 避免巢狀偵測
 
         auth_info = auth_info or {}
         if auth_info.get("api_key"):
@@ -150,7 +152,7 @@ class ProcessPool:
         if extra_env:
             env.update(extra_env)
 
-        popen_kwargs = get_popen_kwargs()
+        popen_kwargs = {}  # 不用 start_new_session（互動模式需要 TTY 繼承）
         logger.info(f"[ProcessPool] Spawning: {' '.join(cmd[:8])}... for {chat_key}")
 
         proc = subprocess.Popen(
