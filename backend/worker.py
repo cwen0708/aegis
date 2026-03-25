@@ -1000,6 +1000,12 @@ def run_task_pty_windows(
         token_info = parse_claude_json(output)
         token_info["duration_ms"] = duration_ms
         if token_info.get("result_text"):
+    elif provider_name == "openai" and config.get("json_output"):
+        from app.core.stream_parsers import parse_openai_json
+        token_info = parse_openai_json(output)
+        token_info["duration_ms"] = duration_ms
+        if token_info.get("result_text"):
+            actual_output = token_info["result_text"]
             actual_output = token_info["result_text"]
 
     save_task_log(card_id, card_title, project_name, provider_name, member_id, status, actual_output, token_info)
@@ -1076,6 +1082,12 @@ def run_task_subprocess(
 
         save_task_log(card_id, card_title, project_name, provider_name, member_id, status, actual_output, token_info)
 
+        elif provider_name == "openai" and config.get("json_output"):
+            from app.core.stream_parsers import parse_openai_json
+            token_info = parse_openai_json(output)
+            token_info["duration_ms"] = duration_ms
+            if token_info.get("result_text"):
+                actual_output = token_info["result_text"]
         return {
             "status": status,
             "output": actual_output,
