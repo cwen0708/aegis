@@ -935,206 +935,35 @@ def run_task_subprocess(
 # ==========================================
 # 主處理迴圈
 # ==========================================
+from app.core.task_result import (
+    handle_chat_result as _handle_chat_result_impl,
+    handle_cron_result as _handle_cron_result_impl,
+    handle_regular_result as _handle_regular_result_impl,
+    post_task_hooks as _post_task_hooks_impl,
+)
+
+
 def _handle_chat_result(idx, result, new_status, token_info, member_slug, chat_id):
-    """Chat 卡片結果處理：寫入 aegis_stream + 刪除卡片"""
-    raw_output = result.get("output", "")
-    output_text = token_info.get("result_text", "")
-    if not output_text:
-        try:
-            for line in raw_output.strip().split("\n"):
-                line = line.strip()
-                if line.startswith("{") and '"subtype":"result"' in line:
-                    output_text = json.loads(line).get("result", "")
-                    break
-            if not output_text:
-                texts = []
-                for line in raw_output.strip().split("\n"):
-                    line = line.strip()
-                    if not line.startswith("{"):
-                        continue
-                    try:
-                        d = json.loads(line)
-                        msg = d.get("message", {})
-                        for part in (msg.get("content", []) if isinstance(msg.get("content"), list) else []):
-                            if isinstance(part, dict) and part.get("type") == "text":
-                                texts.append(part["text"])
-                    except Exception:
-                        pass
-                if texts:
-                    output_text = "\n".join(texts)
-        except Exception:
-            pass
-    if not output_text:
-        output_text = raw_output[:3000]
-
-    # OneStack stream
-    try:
-        from app.core.onestack_connector import connector
-        if connector.enabled and chat_id:
-            import threading, asyncio as _aio
-            evt_type = "result" if new_status == "completed" else "error"
-            def _stream():
-                try:
-                    loop = _aio.new_event_loop()
-                    loop.run_until_complete(connector.stream_event(idx.card_id, evt_type, output_text[:3000], member_slug, chat_id=chat_id))
-                    loop.close()
-                except Exception:
-                    pass
-            threading.Thread(target=_stream, daemon=True).start()
-    except Exception:
-        pass
-
-    # 註冊 session
-    _new_sid = token_info.get("session_id")
-    if _new_sid and chat_id:
-        from app.core.session_pool import session_pool as _sp2
-        _sp2.register(chat_id, _new_sid)
-
-    delete_card_completely(idx.card_id)
-    logger.info(f"[Worker] Chat card {idx.card_id} {new_status}, deleted")
-    broadcast_event("task_completed" if new_status == "completed" else "task_failed",
-                    {"card_id": idx.card_id, "status": new_status})
+    _handle_chat_result_impl(idx, result, new_status, token_info, member_slug, chat_id,
+                             broadcast_event=broadcast_event, delete_card_completely=delete_card_completely)
 
 
 def _handle_cron_result(idx, result, new_status, token_info, card_data, project_name, member_id, cron_job_id):
-    """排程卡片結果處理：寫 CronLog + stage action"""
-    output_text = result.get("output", "")
-    error_msg = "" if new_status == "completed" else output_text
-
-    with Session(engine) as session:
-        from app.models.core import CronJob
-        cron_job = session.get(CronJob, cron_job_id)
-        cron_job_name = cron_job.name if cron_job else ""
-
-    applied_action = _apply_worker_stage_action(idx, new_status)
-    save_cron_log(
-        cron_job_id=cron_job_id, cron_job_name=cron_job_name,
-        card_id=idx.card_id, card_title=idx.title,
-        project_id=idx.project_id, project_name=project_name,
-        provider=result.get("provider", ""), member_id=member_id,
-        status="success" if new_status == "completed" else "error",
-        output=output_text, error_message=error_msg,
-        prompt_snapshot=card_data.content, token_info=token_info,
-        stage_action=applied_action,
-    )
+    _handle_cron_result_impl(idx, result, new_status, token_info, card_data, project_name, member_id, cron_job_id,
+                             save_cron_log=save_cron_log, apply_stage_action=_apply_worker_stage_action)
 
 
 def _handle_regular_result(idx, result, new_status, card_data, project_path, member_slug):
-    """一般卡片結果處理：追加輸出 + stage action + git + create_cards"""
-    if result["status"] == "success":
-        append_text = f"\n\n---\n\n### AI Output ({result['provider']})\n```\n{result['output'][:1000]}...\n```"
-    else:
-        append_text = f"\n\n---\n\n### Error ({result['provider']})\n{result['output']}"
-
-    # 檢查卡片是否在執行期間被移走
-    with Session(engine) as session:
-        current_card = session.get(CardIndex, idx.card_id)
-        card_relocated = current_card and (current_card.list_id != idx.list_id or current_card.status == "pending")
-
-    if card_relocated:
-        logger.info(f"[Worker] Card {idx.card_id}: relocated, skip status update")
-        return
-
-    update_card_status(idx.card_id, new_status, append_text)
-    _apply_worker_stage_action(idx, new_status)
-
-    # 自動 git
-    if project_path:
-        stage_auto_commit = False
-        try:
-            with Session(engine) as _s:
-                _sl = _s.get(StageList, idx.list_id)
-                stage_auto_commit = _sl.auto_commit if _sl else False
-        except Exception:
-            pass
-        if stage_auto_commit:
-            if new_status == "completed":
-                _auto_commit_on_success(project_path, idx.card_id, idx.title, member_slug)
-            else:
-                _auto_shelve_on_failure(project_path, idx.card_id, idx.title, member_slug)
-
-    # 解析 create_cards
-    output_text = result.get("output", "")
-    if "json:create_cards" in output_text:
-        try:
-            with Session(engine) as session:
-                created_ids = _parse_and_create_cards(
-                    output_text, idx.project_id, project_path, session,
-                    member_slug=member_slug, source_card_id=idx.card_id,
-                )
-                if created_ids:
-                    logger.info(f"[Worker] Card {idx.card_id} auto-created {len(created_ids)} cards: {created_ids}")
-        except Exception as e:
-            logger.warning(f"[Worker] Failed to parse create_cards: {e}")
+    _handle_regular_result_impl(idx, result, new_status, card_data, project_path, member_slug,
+                                update_card_status=update_card_status, apply_stage_action=_apply_worker_stage_action,
+                                auto_commit_on_success=_auto_commit_on_success, auto_shelve_on_failure=_auto_shelve_on_failure,
+                                parse_and_create_cards=_parse_and_create_cards)
 
 
 def _post_task_hooks(idx, result, new_status, token_info, card_data, project_name, member_id, member_slug, workspace_dir, cron_job_id):
-    """共用後處理：廣播 + dialogue + OneStack 回報 + 記憶 + 清理"""
-    broadcast_event(
-        "task_completed" if new_status == "completed" else "task_failed",
-        {"card_id": idx.card_id, "status": new_status},
-    )
-
-    # AVG 對話
-    if member_id:
-        dialogue_text = _extract_dialogue(result.get("output", ""))
-        if dialogue_text:
-            _save_member_dialogue(member_id, idx.card_id, idx.title, project_name,
-                                  "task_complete" if new_status == "completed" else "task_failed", dialogue_text)
-
-    # OneStack 任務完成回報
-    try:
-        from app.core.onestack_connector import connector as _os_connector
-        if _os_connector.enabled:
-            import asyncio
-            asyncio.run(_os_connector.report_task_completion(
-                card_id=idx.card_id, output=result.get("output", ""),
-                status=result.get("status", "error"),
-                duration_ms=token_info.get("duration_ms", 0),
-                cost_usd=token_info.get("total_cost_usd", 0),
-            ))
-    except Exception as e:
-        logger.debug(f"[OneStack] Report completion failed: {e}")
-
-    # OneStack 文件分析回報
-    import re as _re_doc
-    _doc_match = _re_doc.search(r'<!-- document_id: (.+?) -->', card_data.content or "")
-    if _doc_match:
-        _doc_id = _doc_match.group(1)
-        try:
-            from app.core.onestack_connector import connector as _doc_conn
-            if _doc_conn.enabled:
-                import asyncio as _doc_aio
-                _doc_output = token_info.get("result_text", "") or result.get("output", "")[:3000]
-                _doc_evt = "result" if new_status == "completed" else "error"
-                _doc_json_content = _doc_output
-                _json_match = _re_doc.search(r'```json\s*\n([\s\S]*?)\n```', _doc_output)
-                if _json_match:
-                    _doc_json_content = _json_match.group(1).strip()
-                _doc_aio.run(_doc_conn.stream_event(
-                    card_id=idx.card_id, event_type=_doc_evt, content=_doc_json_content[:5000],
-                    member_slug=member_slug, metadata={"document_id": _doc_id, "type": "file_result"},
-                    chat_id=f"doc:{_doc_id}",
-                ))
-                logger.info(f"[Worker] Document {_doc_id[:8]}... result sent to OneStack")
-        except Exception as e:
-            logger.debug(f"[OneStack] Document report failed: {e}")
-
-    # 成員記憶
-    if member_slug:
-        try:
-            write_member_short_term_memory(
-                member_slug,
-                f"## 任務: {idx.title}\n專案: {project_name}\n結果: {result['status']}\n\n{result.get('output', '')[:500]}"
-            )
-        except Exception as e:
-            logger.warning(f"[Memory] Failed: {e}")
-
-    # 清理工作區
-    if workspace_dir:
-        cleanup_workspace(idx.card_id)
-
-    logger.info(f"[Worker] Card {idx.card_id} {'cron_log' if cron_job_id else new_status}")
+    _post_task_hooks_impl(idx, result, new_status, token_info, card_data, project_name, member_id, member_slug, workspace_dir, cron_job_id,
+                          broadcast_event=broadcast_event, extract_dialogue=_extract_dialogue,
+                          save_member_dialogue=_save_member_dialogue, cleanup_workspace=cleanup_workspace)
 
 
 def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
