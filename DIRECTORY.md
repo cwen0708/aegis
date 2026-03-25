@@ -37,7 +37,7 @@
 │       │   └── .mcp.json → symlink
 │       ├── onestack:{user}:{slug}/       # OneStack 用戶對話
 │       ├── agent:{from}:{slug}/          # 其他 AI 成員的 ask_member 對話
-│       └── meeting/                      # 會議 session（唯一）
+│       └── meeting:{slug}/                # 會議 session（每成員唯一，ProcessPool 需帶 slug 區分進程）
 │           ├── CLAUDE.md
 │           ├── .claude/skills/ → symlink
 │           └── .mcp.json → symlink
@@ -73,7 +73,7 @@
 | Telegram 對話 | `telegram:{user_id}:{member_slug}` | `telegram:7362884113:xiao-mu` |
 | OneStack 對話 | `onestack:{user}:{slug}:{member_slug}` | `onestack:os:xiao-zhen:xiao-zhen` |
 | Agent 諮詢 | `agent:{from_slug}:{target_slug}` | `agent:xiao-mu:xiao-liang` |
-| 會議 | `meeting` | `meeting`（每成員唯一） |
+| 會議 | `meeting:{member_slug}` | `meeting:xiao-liang`（ProcessPool 需帶 slug） |
 | Web 對話 | `web:{user_id}:{member_slug}` | `web:1:xiao-mu` |
 
 ## 目錄生命週期

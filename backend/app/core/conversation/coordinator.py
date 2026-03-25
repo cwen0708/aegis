@@ -23,7 +23,7 @@ async def _speak(
 ) -> str:
     """讓一個成員在會議中發言。
 
-    底層用 ProcessPool（chat_key="meeting"），復用成員的永久 meeting session。
+    底層用 ProcessPool（chat_key=f"meeting:{ctx.member_slug}"），復用成員的永久 meeting session。
     """
     from app.core.executor.context import resolve_member_for_chat
     from app.core.chat_workspace import ensure_chat_workspace
@@ -37,7 +37,7 @@ async def _speak(
     # 確保 meeting workspace
     ws_path = ensure_chat_workspace(
         member_slug=ctx.member_slug,
-        chat_key="meeting",
+        chat_key=f"meeting:{ctx.member_slug}",
         bot_user_id=0,
         soul=ctx.soul,
     )
@@ -49,7 +49,7 @@ async def _speak(
     logger.info(f"[Meeting] {ctx.member_name} speaking in {room.meeting_id}...")
     result = await asyncio.to_thread(
         process_pool.send_message,
-        chat_key="meeting",
+        chat_key=f"meeting:{ctx.member_slug}",
         message=prompt,
         model=ctx.effective_model("chat"),
         member_id=ctx.member_id,
