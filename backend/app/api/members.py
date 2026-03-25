@@ -374,6 +374,18 @@ def task_stats(session: Session = Depends(get_session)):
 
 
 # ==========================================
+# Member Memory Search (BM25 + Time Decay)
+# ==========================================
+@router.get("/members/{slug}/memory/search")
+def search_member_memory(slug: str, q: str = "", top_k: int = 5):
+    """搜尋成員記憶：BM25 關鍵字搜尋 + 時間衰減"""
+    from app.core.memory_manager import search_member_memories
+    if not q.strip():
+        return []
+    return search_member_memories(slug, q.strip(), top_k=min(top_k, 20))
+
+
+# ==========================================
 # Member Task History
 # ==========================================
 @router.get("/members/{member_id}/history")

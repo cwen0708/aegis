@@ -1,5 +1,8 @@
 """Memory management for the AEGIS system -- short-term and long-term MD files."""
 import logging
+import math
+import re
+from collections import Counter
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
@@ -274,3 +277,122 @@ def cleanup_member_short_term(member_slug: str, retention_days: int = 30) -> int
             pass
 
     return deleted
+
+
+# ── BM25 + 時間衰減記憶搜尋 ──
+
+def _tokenize(text: str) -> list[str]:
+    """將文字拆分為小寫 token（支援中英文混合）。"""
+    return re.findall(r"[a-zA-Z0-9]+|[\u4e00-\u9fff]", text.lower())
+
+
+def _parse_file_date(path: Path) -> Optional[datetime]:
+    """從檔名解析日期，支援秒級與分鐘級格式。"""
+    for fmt in ("%Y-%m-%d-%H%M%S", "%Y-%m-%d-%H%M"):
+        try:
+            return datetime.strptime(path.stem, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+def search_member_memories(
+    member_slug: str,
+    query: str,
+    top_k: int = 5,
+) -> list[dict]:
+    """
+    搜尋成員記憶：BM25 評分 + 時間衰減（7 天半衰期）。
+
+    掃描 short-term 與 long-term 目錄的 .md 檔案，
+    以 BM25(k1=1.5, b=0.75) 計算相關性，再乘以時間衰減因子。
+    回傳 top_k 筆結果，每筆包含 file, score, snippet。
+    """
+    query_tokens = _tokenize(query)
+    if not query_tokens:
+        return []
+
+    # 收集所有記憶檔案
+    st_dir = _get_member_short_term_dir(member_slug)
+    lt_dir = _get_member_long_term_dir(member_slug)
+
+    docs: list[dict] = []
+    for d in (st_dir, lt_dir):
+        for f in d.glob("*.md"):
+            try:
+                content = f.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            tokens = _tokenize(content)
+            if not tokens:
+                continue
+            file_date = _parse_file_date(f) or datetime.fromtimestamp(
+                f.stat().st_mtime, tz=timezone.utc
+            )
+            docs.append({
+                "path": f,
+                "content": content,
+                "tokens": tokens,
+                "tf": Counter(tokens),
+                "date": file_date,
+            })
+
+    if not docs:
+        return []
+
+    # BM25 參數
+    k1 = 1.5
+    b = 0.75
+    n = len(docs)
+    avgdl = sum(len(d["tokens"]) for d in docs) / n
+
+    # 計算每個 query token 的 DF（出現在幾篇文件中）
+    df: dict[str, int] = Counter()
+    for d in docs:
+        unique = set(d["tokens"])
+        for t in query_tokens:
+            if t in unique:
+                df[t] += 1
+
+    now = datetime.now(timezone.utc)
+    half_life_days = 7.0
+    results: list[dict] = []
+
+    for d in docs:
+        dl = len(d["tokens"])
+        score = 0.0
+        for t in query_tokens:
+            if t not in d["tf"]:
+                continue
+            tf_val = d["tf"][t]
+            # IDF: log((N - n_t + 0.5) / (n_t + 0.5) + 1)
+            n_t = df.get(t, 0)
+            idf = math.log((n - n_t + 0.5) / (n_t + 0.5) + 1)
+            # BM25 TF 正規化
+            tf_norm = (tf_val * (k1 + 1)) / (tf_val + k1 * (1 - b + b * dl / avgdl))
+            score += idf * tf_norm
+
+        if score <= 0:
+            continue
+
+        # 時間衰減：score * 0.5^(days/7)
+        days_ago = max((now - d["date"]).total_seconds() / 86400, 0)
+        decay = 0.5 ** (days_ago / half_life_days)
+        final_score = score * decay
+
+        # snippet：取前 150 字元（去除 frontmatter）
+        raw = d["content"]
+        if raw.startswith("---"):
+            end = raw.find("---", 3)
+            if end != -1:
+                raw = raw[end + 3:]
+        snippet = raw.strip()[:150]
+
+        results.append({
+            "file": str(d["path"]),
+            "score": round(final_score, 4),
+            "snippet": snippet,
+        })
+
+    results.sort(key=lambda r: r["score"], reverse=True)
+    return results[:top_k]
