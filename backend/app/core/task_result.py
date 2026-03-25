@@ -139,7 +139,7 @@ def handle_regular_result(idx, result, new_status, card_data, project_path, memb
 def post_task_hooks(idx, result, new_status, token_info, card_data, project_name,
                     member_id, member_slug, workspace_dir, cron_job_id, **_kwargs):
     """共用後處理 — 委託給 Hook 機制（executor/hooks.py）"""
-    from app.core.executor.hooks import TaskContext, run_post_hooks
+    from app.hooks import TaskContext, run_hooks
 
     ctx = TaskContext(
         card_id=idx.card_id,
@@ -160,7 +160,7 @@ def post_task_hooks(idx, result, new_status, token_info, card_data, project_name
         cron_job_id=cron_job_id,
     )
 
-    run_post_hooks(ctx)
+    run_hooks(ctx)
 
 
 def _extract_chat_output(raw_output: str) -> str:
