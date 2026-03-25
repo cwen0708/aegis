@@ -374,6 +374,101 @@ def task_stats(session: Session = Depends(get_session)):
 
 
 # ==========================================
+# Usage Dashboard（Token 用量時間序列）
+# ==========================================
+@router.get("/usage-dashboard")
+def usage_dashboard(
+    days: int = 30,
+    group_by: str = "date",
+    session: Session = Depends(get_session),
+):
+    """Token 用量儀表板：依日期 / 成員 / provider 聚合"""
+    from sqlalchemy import func
+    from datetime import timedelta
+
+    if group_by not in ("date", "member", "provider"):
+        raise HTTPException(status_code=400, detail="group_by 必須是 date / member / provider")
+
+    # 日期範圍過濾
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max(days, 1))
+
+    base_aggs = [
+        func.count(TaskLog.id).label("tasks"),
+        func.coalesce(func.sum(TaskLog.input_tokens), 0).label("input_tokens"),
+        func.coalesce(func.sum(TaskLog.output_tokens), 0).label("output_tokens"),
+        func.coalesce(func.sum(TaskLog.cache_read_tokens), 0).label("cache_read_tokens"),
+        func.coalesce(func.sum(TaskLog.cache_creation_tokens), 0).label("cache_creation_tokens"),
+        func.coalesce(func.sum(TaskLog.cost_usd), 0).label("cost_usd"),
+    ]
+
+    if group_by == "date":
+        date_col = func.date(TaskLog.created_at).label("date")
+        rows = session.exec(
+            select(date_col, *base_aggs)
+            .where(TaskLog.created_at >= cutoff)
+            .group_by(date_col)
+            .order_by(date_col)
+        ).all()
+        items = [
+            {
+                "date": str(r[0]),
+                "tasks": int(r[1]),
+                "input_tokens": int(r[2]),
+                "output_tokens": int(r[3]),
+                "cache_read_tokens": int(r[4]),
+                "cache_creation_tokens": int(r[5]),
+                "cost_usd": float(r[6]),
+            }
+            for r in rows
+        ]
+
+    elif group_by == "member":
+        rows = session.exec(
+            select(TaskLog.member_id, Member.name, *base_aggs)
+            .outerjoin(Member, TaskLog.member_id == Member.id)
+            .where(TaskLog.created_at >= cutoff)
+            .group_by(TaskLog.member_id, Member.name)
+            .order_by(func.coalesce(func.sum(TaskLog.cost_usd), 0).desc())
+        ).all()
+        items = [
+            {
+                "member_id": r[0],
+                "member_name": r[1] or "unknown",
+                "tasks": int(r[2]),
+                "input_tokens": int(r[3]),
+                "output_tokens": int(r[4]),
+                "cache_read_tokens": int(r[5]),
+                "cache_creation_tokens": int(r[6]),
+                "cost_usd": float(r[7]),
+            }
+            for r in rows
+        ]
+
+    else:  # provider
+        provider_col = func.coalesce(TaskLog.provider, "unknown").label("provider")
+        rows = session.exec(
+            select(provider_col, *base_aggs)
+            .where(TaskLog.created_at >= cutoff)
+            .group_by(provider_col)
+            .order_by(provider_col)
+        ).all()
+        items = [
+            {
+                "provider": str(r[0]),
+                "tasks": int(r[1]),
+                "input_tokens": int(r[2]),
+                "output_tokens": int(r[3]),
+                "cache_read_tokens": int(r[4]),
+                "cache_creation_tokens": int(r[5]),
+                "cost_usd": float(r[6]),
+            }
+            for r in rows
+        ]
+
+    return {"group_by": group_by, "days": days, "items": items}
+
+
+# ==========================================
 # Member Memory Search (BM25 + Time Decay)
 # ==========================================
 @router.get("/members/{slug}/memory/search")
