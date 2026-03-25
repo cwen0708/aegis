@@ -36,6 +36,7 @@ const teamRoleDefs = [
   { key: 'tech', label: '技術主管', icon: '🔧' },
   { key: 'finance', label: '財務主管', icon: '💰' },
   { key: 'marketing', label: '行銷經理', icon: '📣' },
+  { key: 'doc', label: '文管', icon: '🧠' },
 ]
 const teamRoles = ref<Record<string, string>>({})
 const members = ref<{ id: number; name: string; slug: string; avatar: string }[]>([])
