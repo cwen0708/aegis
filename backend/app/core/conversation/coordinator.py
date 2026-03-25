@@ -91,26 +91,19 @@ def resolve_member_for_chat_by_slug(slug: str):
 
 async def run_round_robin(
     room: ConversationRoom,
-    moderator: str,           # 主持人 slug（開場 + 總結）
-    speakers: list[str],      # 發言者 slug 列表（不含主持人）
-    rounds: int = 1,
+    moderator: str,
+    speakers: list[str],
+    rounds: int | list[str] = 1,
     opening: str = "",
     on_spoke: Optional[Callable] = None,
 ) -> ConversationRoom:
     """輪流制會議。
 
-    流程：主持人開場 → 每位依序發言 × rounds 輪 → 主持人總結
+    rounds 可以是：
+    - int: 每輪用預設提示「（第 N/M 輪）」
+    - list[str]: 每輪的自訂指令（長度 = 輪數）
 
-    Args:
-        room: 會議室
-        moderator: 主持人 slug
-        speakers: 發言者列表
-        rounds: 每人發言幾輪
-        opening: 開場白（寫入檔案）
-        on_spoke: 每人發言完的回呼 (slug, name, content)
-
-    Returns:
-        room（含完整歷史）
+    流程：主持人開場 → 每位依序發言 × 每輪 → 主持人總結
     """
     # 建立檔案
     room.create_file(opening)
@@ -120,16 +113,21 @@ async def run_round_robin(
         ctx = resolve_member_for_chat_by_slug(moderator)
         room.append(ctx.member_name or moderator, moderator, opening)
 
+    # 解析 rounds
+    if isinstance(rounds, list):
+        round_instructions = rounds
+    else:
+        round_instructions = [f"（第 {r+1}/{rounds} 輪）" for r in range(rounds)]
+
     # 多輪發言
-    for r in range(rounds):
+    for r, instruction in enumerate(round_instructions):
         for slug in speakers:
-            round_hint = f"（第 {r+1}/{rounds} 輪）" if rounds > 1 else ""
-            await _speak(room, slug, instruction=round_hint, on_spoke=on_spoke)
+            await _speak(room, slug, instruction=instruction, on_spoke=on_spoke)
 
     # 主持人總結
     await _speak(
         room, moderator,
-        instruction="請總結本次會議的重點，列出具體的 Action Items（格式：- [ ] 內容）。",
+        instruction="請總結本次會議的重點，列出具體的 Action Items（格式：- [ ] 內容）。如果成員提出了需要建立的卡片且獲得共識，請用 aegis-api skill 建立。",
         on_spoke=on_spoke,
     )
 

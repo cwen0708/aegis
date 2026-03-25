@@ -123,7 +123,7 @@ class MeetingRequest(BaseModel):
     moderator: str                      # 主持人 slug
     speakers: list[str]                 # 發言者 slug 列表
     mode: str = "round_robin"           # "round_robin" | "moderated"
-    rounds: int = 1                     # 輪流制的輪數
+    rounds: int | list[str] = 1         # int=輪數, list[str]=每輪自訂指令
     max_turns: int = 10                 # 主持人制的最大輪數
     opening: str = ""                   # 開場白
 
