@@ -130,9 +130,31 @@ def fix_cron_schedules(session: Session = Depends(get_session)):
 
 
 @router.post("/cron-jobs/{job_id}/trigger")
-def trigger_cron_job(job_id: int, session: Session = Depends(get_session)):
-    """手動觸發 CronJob — 向後相容"""
-    return execute_worker(job_id, session)
+async def trigger_cron_job(job_id: int, session: Session = Depends(get_session)):
+    """手動觸發 CronJob — 跟 Poller 走同一條路。"""
+    import urllib.request
+    from app.core.cron_poller import _KNOWN_ACTIONS
+
+    job = session.get(CronJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="CronJob not found")
+
+    action = job.api_url or "worker"
+    if action in _KNOWN_ACTIONS:
+        url = f"http://127.0.0.1:8899/api/v1/cron-jobs/{job.id}/{action}"
+    elif action.startswith("/") or action.startswith("http"):
+        url = action if action.startswith("http") else f"http://127.0.0.1:8899{action}"
+    else:
+        raise HTTPException(400, f"未知 action: {action}")
+
+    try:
+        req = urllib.request.Request(url, data=b"{}", headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            import json as _json
+            result = _json.loads(resp.read().decode("utf-8"))
+        return {"ok": True, "action": action, "result": result}
+    except Exception as e:
+        raise HTTPException(500, f"觸發失敗: {e}")
 
 
 @router.post("/cron-jobs/{job_id}/worker")
