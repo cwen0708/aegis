@@ -142,31 +142,45 @@ def _parse_datetime(dt_str: str) -> datetime | None:
     return None
 
 
-_KNOWN_ACTIONS = {"worker", "meeting"}
+KNOWN_ACTIONS = {"worker", "meeting"}
+
+
+def resolve_cron_url(job) -> str:
+    """將 CronJob.api_url 解析為完整 HTTP URL。
+
+    - "worker" / "meeting" → /api/v1/cron-jobs/{id}/{action}
+    - "/api/..." → 補上 host
+    - "http://..." → 直接用
+    """
+    action = job.api_url or "worker"
+    if action in KNOWN_ACTIONS:
+        return f"http://127.0.0.1:8899/api/v1/cron-jobs/{job.id}/{action}"
+    if action.startswith("http"):
+        return action
+    if action.startswith("/"):
+        return f"http://127.0.0.1:8899{action}"
+    raise ValueError(f"未知 action: {action}")
 
 
 async def _execute_job(session: Session, job, tz_name: str):
-    """時間到 → POST 對應的 API。
-
-    api_url 為 known action（worker/meeting）→ 組成 /api/v1/cron-jobs/{id}/{action}
-    api_url 為完整路徑                       → 直接使用
-    """
+    """時間到 → POST resolve_cron_url(job)。blocking 呼叫丟到 thread pool。"""
+    import asyncio
     import urllib.request
 
-    action = job.api_url or "worker"
-
-    if action in _KNOWN_ACTIONS:
-        url = f"http://127.0.0.1:8899/api/v1/cron-jobs/{job.id}/{action}"
-    elif action.startswith("/") or action.startswith("http"):
-        url = action if action.startswith("http") else f"http://127.0.0.1:8899{action}"
-    else:
-        logger.error(f"[Cron Poller] '{job.name}' (#{job.id}) 未知 action: {action}")
+    try:
+        url = resolve_cron_url(job)
+    except ValueError as e:
+        logger.error(f"[Cron Poller] '{job.name}' (#{job.id}): {e}")
         return
 
-    try:
+    def _post():
         req = urllib.request.Request(url, data=b"{}", headers={"Content-Type": "application/json"}, method="POST")
         with urllib.request.urlopen(req, timeout=300) as resp:
-            logger.info(f"[Cron Poller] '{job.name}' → {action} → {resp.status}")
+            return resp.status
+
+    try:
+        status = await asyncio.to_thread(_post)
+        logger.info(f"[Cron Poller] '{job.name}' → {job.api_url or 'worker'} → {status}")
     except Exception as e:
         logger.error(f"[Cron Poller] '{job.name}' failed: {e}")
 

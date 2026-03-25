@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlmodel import Session, select
 from sqlalchemy import func as sa_func
@@ -131,35 +133,40 @@ def fix_cron_schedules(session: Session = Depends(get_session)):
 
 @router.post("/cron-jobs/{job_id}/trigger")
 async def trigger_cron_job(job_id: int, session: Session = Depends(get_session)):
-    """手動觸發 CronJob — 跟 Poller 走同一條路。"""
-    import urllib.request
-    from app.core.cron_poller import _KNOWN_ACTIONS
+    """手動觸發 CronJob — 直接呼叫對應函式（不走 HTTP，無死鎖風險）。"""
+    from app.core.cron_poller import KNOWN_ACTIONS
 
     job = session.get(CronJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="CronJob not found")
 
     action = job.api_url or "worker"
-    if action in _KNOWN_ACTIONS:
-        url = f"http://127.0.0.1:8899/api/v1/cron-jobs/{job.id}/{action}"
+
+    if action == "worker":
+        return execute_worker(job_id, session)
+    elif action == "meeting":
+        return await execute_meeting(job_id, session)
     elif action.startswith("/") or action.startswith("http"):
+        # 只有自訂 URL 才走 HTTP
+        import asyncio
+        import urllib.request
         url = action if action.startswith("http") else f"http://127.0.0.1:8899{action}"
+        try:
+            def _post():
+                req = urllib.request.Request(url, data=b"{}", headers={"Content-Type": "application/json"}, method="POST")
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+            result = await asyncio.to_thread(_post)
+            return {"ok": True, "action": action, "result": result}
+        except Exception as e:
+            raise HTTPException(500, f"觸發失敗: {e}")
     else:
         raise HTTPException(400, f"未知 action: {action}")
-
-    try:
-        req = urllib.request.Request(url, data=b"{}", headers={"Content-Type": "application/json"}, method="POST")
-        with urllib.request.urlopen(req, timeout=300) as resp:
-            import json as _json
-            result = _json.loads(resp.read().decode("utf-8"))
-        return {"ok": True, "action": action, "result": result}
-    except Exception as e:
-        raise HTTPException(500, f"觸發失敗: {e}")
 
 
 @router.post("/cron-jobs/{job_id}/worker")
 def execute_worker(job_id: int, session: Session = Depends(get_session)):
-    """網址 B：讀排程資料 → 建卡片 → Worker 撿起執行。"""
+    """建卡片 → Worker 撿起執行。"""
     job = session.get(CronJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="CronJob not found")
@@ -173,27 +180,23 @@ def execute_worker(job_id: int, session: Session = Depends(get_session)):
 
 @router.post("/cron-jobs/{job_id}/meeting")
 async def execute_meeting(job_id: int, session: Session = Depends(get_session)):
-    """網址 A：讀排程資料 → 組裝會議參數 → 呼叫 meeting API（A1）。"""
-    import json as _json
+    """讀排程資料 → 組裝會議參數 → 呼叫 meeting API。"""
     from datetime import timedelta
 
     job = session.get(CronJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="CronJob not found")
 
-    # 從 prompt_template 讀取會議 JSON 參數
     try:
         body_str = (job.prompt_template or "{}").replace(
             "${DATE}", datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d"),
         )
-        meeting_params = _json.loads(body_str)
-    except _json.JSONDecodeError as e:
+        meeting_params = json.loads(body_str)
+    except json.JSONDecodeError as e:
         raise HTTPException(400, f"排程的 prompt_template 不是合法 JSON: {e}")
 
-    # 呼叫 meeting API（A1）
     from app.api.agent_chat import start_meeting, MeetingRequest
-    req = MeetingRequest(**meeting_params)
-    return await start_meeting(req)
+    return await start_meeting(MeetingRequest(**meeting_params))
 
 
 @router.get("/cron-jobs/{job_id}")
