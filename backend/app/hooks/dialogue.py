@@ -1,12 +1,12 @@
 """DialogueHook — 從 AI 輸出提取 AVG 對話並儲存"""
 import re
 import logging
-from app.hooks import TaskContext
+from app.hooks import Hook, TaskContext
 
 logger = logging.getLogger(__name__)
 
 
-class DialogueHook:
+class DialogueHook(Hook):
     def on_complete(self, ctx: TaskContext) -> None:
         if not ctx.member_id:
             return

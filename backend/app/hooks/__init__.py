@@ -1,23 +1,45 @@
 """
-Task Lifecycle Hooks — 前中後處理的解耦介面
+Task Lifecycle Hooks — DURING + POST 統一介面
 
-每個 Hook 獨立一個檔案，所有路徑（Worker/Chat/Meeting）共用。
+每個 Hook 可選擇實作：
+- on_stream(event): DURING — 每行串流輸出都呼叫（高頻）
+- on_complete(ctx): POST — 任務完成後呼叫一次
+
 新增 Hook 只需：
-1. 在 app/hooks/ 下新增 xxx.py，實作 on_complete(ctx)
-2. 在 HOOK_REGISTRY 加一行
+1. 在 app/hooks/ 下新增 xxx.py
+2. 在 collect_hooks() 註冊
 
-DURING 階段已由 StreamEmitter + StreamTarget 處理，不在此範圍。
+使用方式：
+    hooks = collect_hooks("worker")
+
+    # DURING（PTY read loop 每行）
+    for hook in hooks:
+        hook.on_stream(event)
+
+    # POST（任務完成）
+    for hook in hooks:
+        hook.on_complete(ctx)
 """
 import logging
 from dataclasses import dataclass, field
-from typing import Optional, Protocol, runtime_checkable
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
+class StreamEvent:
+    """串流事件（DURING 階段）"""
+    kind: str           # "tool_call" | "output" | "thinking" | "text" | "heartbeat" | "result"
+    content: str        # 人話摘要或原始文字
+    raw_line: str = ""
+    event_type: str = ""
+    token_info: dict = field(default_factory=dict)
+
+
+@dataclass
 class TaskContext:
-    """任務上下文 — 一次建好，所有 Hook 共用"""
+    """任務上下文（POST 階段）"""
     card_id: int = 0
     card_title: str = ""
     project_id: int = 0
@@ -49,51 +71,74 @@ class TaskContext:
     source: str = ""           # "worker" | "chat" | "meeting" | "onestack"
 
 
-@runtime_checkable
-class TaskHook(Protocol):
-    """Hook 介面 — 實作 on_complete 即可"""
-    def on_complete(self, ctx: TaskContext) -> None: ...
+class Hook:
+    """Hook 基底類 — 預設空實作，子類覆寫需要的方法即可"""
+
+    def on_stream(self, event: StreamEvent) -> None:
+        """DURING — 每行串流輸出（預設不做事）"""
+        pass
+
+    def on_complete(self, ctx: TaskContext) -> None:
+        """POST — 任務完成後（預設不做事）"""
+        pass
 
 
-# ── Hook 註冊表（按順序執行，cleanup 永遠最後）──
+# ── 向後相容 ──
+TaskHook = Hook
 
-def collect_hooks(source: str = "worker") -> list[TaskHook]:
-    """收集適用於指定來源的 Hook。
 
-    source: "worker" | "chat" | "meeting" | "onestack"
-    """
+def collect_hooks(source: str = "worker") -> list[Hook]:
+    """收集適用於指定來源的 Hook。"""
     from app.hooks.broadcast import BroadcastHook
     from app.hooks.dialogue import DialogueHook
     from app.hooks.onestack import OneStackHook
     from app.hooks.memory import MemoryHook
     from app.hooks.cleanup import CleanupHook
+    from app.hooks.websocket import WebSocketHook
+    from app.hooks.platform import PlatformHook
 
     if source == "worker":
         return [
-            BroadcastHook(),
-            DialogueHook(),
-            OneStackHook(),
-            MemoryHook(),
-            CleanupHook(),
+            WebSocketHook(),    # DURING: Kanban log
+            OneStackHook(),     # DURING: aegis_stream + POST: 任務回報
+            BroadcastHook(),    # POST: task_completed 事件
+            DialogueHook(),     # POST: AVG 對話
+            MemoryHook(),       # POST: 成員記憶
+            CleanupHook(),      # POST: 清理（永遠最後）
         ]
-    elif source in ("chat", "onestack"):
+    elif source == "chat":
         return [
-            MemoryHook(),
+            PlatformHook(),     # DURING: Telegram/LINE placeholder edit
+            MemoryHook(),       # POST: 成員記憶
+        ]
+    elif source == "onestack":
+        return [
+            OneStackHook(),     # DURING: aegis_stream
+            MemoryHook(),       # POST: 成員記憶
         ]
     elif source == "meeting":
         return [
-            MemoryHook(),
+            MemoryHook(),       # POST: 成員記憶
         ]
     else:
         return [MemoryHook()]
 
 
-def run_hooks(ctx: TaskContext, hooks: list[TaskHook] = None) -> None:
-    """依序執行所有 Hook，任一失敗不影響後續"""
+def run_on_stream(hooks: list[Hook], event: StreamEvent) -> None:
+    """DURING — 分發串流事件給所有 Hook"""
+    for hook in hooks:
+        try:
+            hook.on_stream(event)
+        except Exception as e:
+            logger.warning(f"[Hook] {type(hook).__name__}.on_stream failed: {e}")
+
+
+def run_hooks(ctx: TaskContext, hooks: list[Hook] = None) -> None:
+    """POST — 依序執行所有 Hook 的 on_complete"""
     if hooks is None:
-        hooks = collect_hooks()
+        hooks = collect_hooks(ctx.source or "worker")
     for hook in hooks:
         try:
             hook.on_complete(ctx)
         except Exception as e:
-            logger.warning(f"[Hook] {type(hook).__name__} failed: {e}")
+            logger.warning(f"[Hook] {type(hook).__name__}.on_complete failed: {e}")

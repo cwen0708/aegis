@@ -1,12 +1,58 @@
-"""OneStackHook — 任務回報 + 文件分析結果推送到 OneStack"""
+"""OneStackHook — DURING 串流 + POST 任務回報（OneStack 邏輯集中管理）"""
 import re
+import time
 import logging
-from app.hooks import TaskContext
+from app.hooks import Hook, StreamEvent, TaskContext
 
 logger = logging.getLogger(__name__)
 
 
-class OneStackHook:
+class OneStackHook(Hook):
+    """OneStack 整合 — 串流推送 + 任務完成回報 + 文件分析結果
+
+    DURING: aegis_stream Supabase Realtime（tool_call / output，2 秒節流）
+    POST: report_task_completion + document report
+    """
+
+    def __init__(self, card_id: int = 0, member_slug: str = "", chat_id: str = ""):
+        self.card_id = card_id
+        self.member_slug = member_slug
+        self.chat_id = chat_id
+        self._last_stream_time = 0.0
+        self._throttle = 2.0
+
+    # ── DURING ──
+
+    def on_stream(self, event: StreamEvent) -> None:
+        if event.kind not in ("tool_call", "output"):
+            return
+        if not self.card_id:
+            return
+        now = time.time()
+        if now - self._last_stream_time < self._throttle:
+            return
+        self._last_stream_time = now
+        try:
+            import asyncio
+            from app.core.onestack_connector import connector
+            if not connector.enabled:
+                return
+            loop = asyncio.get_event_loop()
+            asyncio.run_coroutine_threadsafe(
+                connector.stream_event(
+                    self.card_id,
+                    event.event_type or event.kind,
+                    event.content,
+                    self.member_slug,
+                    chat_id=self.chat_id,
+                ),
+                loop,
+            )
+        except Exception:
+            pass
+
+    # ── POST ──
+
     def on_complete(self, ctx: TaskContext) -> None:
         self._report_completion(ctx)
         self._report_document(ctx)

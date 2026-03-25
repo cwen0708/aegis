@@ -1,11 +1,11 @@
 """MemoryHook — 寫入成員短期記憶"""
 import logging
-from app.hooks import TaskContext
+from app.hooks import Hook, TaskContext
 
 logger = logging.getLogger(__name__)
 
 
-class MemoryHook:
+class MemoryHook(Hook):
     def on_complete(self, ctx: TaskContext) -> None:
         if not ctx.member_slug:
             return
