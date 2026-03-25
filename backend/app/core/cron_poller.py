@@ -143,27 +143,25 @@ def _parse_datetime(dt_str: str) -> datetime | None:
 
 
 async def _execute_job(session: Session, job, tz_name: str):
-    """時間到 → POST api_url（或預設建卡片 API）。prompt_template 當 body。"""
+    """時間到 → 直接 POST job.api_url（或預設的建卡片 API）。
+
+    網址 A：job.api_url 有值（如 /api/v1/agent-chat/meeting）→ prompt_template 當 body
+    網址 B：job.api_url 沒值 → POST /cron-jobs/{id}/execute → 建卡片 → Worker 撿起
+    """
     import urllib.request
 
-    api_url = job.api_url or f"/api/v1/cron-jobs/{job.id}/execute"
-    url = api_url if api_url.startswith("http") else f"http://127.0.0.1:8899{api_url}"
-
-    # 有 api_url → prompt_template 當 body（JSON，支援 ${DATE}）
-    # 沒有 → 建卡片 API 不需要 body
     if job.api_url:
-        body_str = job.prompt_template or "{}"
-        tz = timezone(timedelta(hours=8))
-        today = datetime.now(tz).strftime("%Y-%m-%d")
-        body_str = body_str.replace("${DATE}", today)
+        url = job.api_url if job.api_url.startswith("http") else f"http://127.0.0.1:8899{job.api_url}"
+        body_str = (job.prompt_template or "{}").replace(
+            "${DATE}", datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
+        )
     else:
+        url = f"http://127.0.0.1:8899/api/v1/cron-jobs/{job.id}/execute"
         body_str = "{}"
 
     try:
-        req = urllib.request.Request(
-            url, data=body_str.encode("utf-8"),
-            headers={"Content-Type": "application/json"}, method="POST",
-        )
+        req = urllib.request.Request(url, data=body_str.encode("utf-8"),
+                                     headers={"Content-Type": "application/json"}, method="POST")
         with urllib.request.urlopen(req, timeout=300) as resp:
             logger.info(f"[Cron Poller] '{job.name}' → {resp.status}")
     except Exception as e:
