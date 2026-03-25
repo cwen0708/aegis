@@ -143,75 +143,19 @@ def _parse_datetime(dt_str: str) -> datetime | None:
 
 
 async def _execute_job(session: Session, job, tz_name: str):
-    """統一排程執行入口。
-
-    metadata 有 api_url → 直接 HTTP POST（會議、webhook 等）
-    metadata 沒有 api_url → 預設建卡片（AI 任務）
-    """
-    meta = json.loads(job.metadata_json) if job.metadata_json else {}
-    api_url = meta.get("api_url")
-
-    if api_url:
-        await _execute_api_call(session, job, api_url, meta, tz_name)
-    else:
-        # 預設：建卡片給 Worker 執行
-        ops_tag = session.exec(select(Tag).where(Tag.name == "Ops")).first()
-        if not ops_tag:
-            ops_tag = Tag(name="Ops", color="purple")
-            session.add(ops_tag)
-            session.commit()
-            session.refresh(ops_tag)
-
-        card_id, error = create_card_for_cron_job(session, job, ops_tag, update_next_time=True)
-        if error:
-            logger.info(f"[Cron Poller] Skip {job.name}: {error}")
-        elif card_id:
-            logger.info(f"[Cron Poller] Created card {card_id} for '{job.name}'")
-
-
-async def _execute_api_call(session: Session, job, api_url: str, meta: dict, tz_name: str):
-    """直接呼叫 API（不建卡片，不耗 AI token）。"""
+    """統一排程執行入口 — 呼叫 /api/v1/cron-jobs/{id}/execute，由 API 決定行為。"""
     import urllib.request
 
-    url = api_url if api_url.startswith("http") else f"http://127.0.0.1:8899{api_url}"
-    body = meta.get("api_body", {})
-
-    # 支援 ${DATE} 變數替換
-    tz = timezone(timedelta(hours=8))
-    today = datetime.now(tz).strftime("%Y-%m-%d")
-    body_str = json.dumps(body, ensure_ascii=False).replace("${DATE}", today)
-
+    url = f"http://127.0.0.1:8899/api/v1/cron-jobs/{job.id}/execute"
     try:
-        req = urllib.request.Request(
-            url,
-            data=body_str.encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
+        req = urllib.request.Request(url, method="POST",
+                                     headers={"Content-Type": "application/json"},
+                                     data=b"{}")
         with urllib.request.urlopen(req, timeout=300) as resp:
             result = resp.read().decode("utf-8")
-            logger.info(f"[Cron Poller] API '{job.name}' → {resp.status} ({len(result)} chars)")
-
-        from app.models.core import CronLog
-        session.add(CronLog(
-            cron_job_id=job.id, cron_job_name=job.name,
-            card_id=0, card_title=f"[api] {job.name}",
-            project_id=job.project_id, project_name="",
-            member_slug="", member_id=None,
-            status="success", output=result[:2000], error="",
-            stage_action="", token_info_json="{}",
-        ))
+            logger.info(f"[Cron Poller] Execute '{job.name}' → {resp.status}")
     except Exception as e:
-        logger.error(f"[Cron Poller] API '{job.name}' failed: {e}")
-        from app.models.core import CronLog
-        session.add(CronLog(
-            cron_job_id=job.id, cron_job_name=job.name,
-            card_id=0, card_title=f"[api] {job.name}",
-            project_id=job.project_id, project_name="",
-            member_slug="", member_id=None,
-            status="error", output="", error=str(e)[:500],
-            stage_action="", token_info_json="{}",
-        ))
+        logger.error(f"[Cron Poller] Execute '{job.name}' failed: {e}")
 
     # 更新下次執行時間
     next_time = _calculate_next_time(job.cron_expression, tz_name)
