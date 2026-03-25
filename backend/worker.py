@@ -672,6 +672,9 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
         mcp_config_path=mcp_path,
         resume_session_id=resume_session_id,
     )
+    # 加上 -- 終止符，防止 prompt 中 --- 被 CLI parser 誤解析
+    if provider_name == "claude" and "--" not in cmd_parts:
+        cmd_parts.append("--")
 
     # 環境變數組裝（透過統一的 EnvironmentBuilder API）
     from app.core.env_builder import EnvironmentBuilder
