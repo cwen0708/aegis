@@ -158,7 +158,7 @@ class ProcessPool:
             cmd = ["claude"]
             logger.warning("[ProcessPool] cli.js not found, falling back to claude command")
 
-        logger.info(f"[ProcessPool] cli_js={cli_js or 'NOT FOUND'}")
+        logger.warning(f"[ProcessPool] cli_js={cli_js or 'NOT FOUND'}")
 
         cmd.extend([
             "--input-format", "stream-json",
@@ -186,8 +186,8 @@ class ProcessPool:
         if extra_env:
             env.update(extra_env)
 
-        logger.info(f"[ProcessPool] Spawning: {' '.join(cmd[:5])}... for {chat_key}")
-        logger.info(f"[ProcessPool] ENV keys: {sorted([k for k in env if 'CLAUDE' in k or 'ANTHROPIC' in k or 'PATH' in k or 'NODE' in k])}")
+        logger.warning(f"[ProcessPool] Spawning: {' '.join(cmd[:5])}... for {chat_key}")
+        logger.warning(f"[ProcessPool] ENV: {sorted([k for k in env if 'CLAUDE' in k or 'ANTHROPIC' in k or 'PATH' in k or 'NODE' in k])}")
 
         proc = subprocess.Popen(
             cmd,
@@ -225,7 +225,7 @@ class ProcessPool:
                 data = json.loads(line)
                 if data.get("type") == "system":
                     entry.session_id = data.get("session_id", "")
-                    logger.info(f"[ProcessPool] Init OK session={entry.session_id[:12]} for {entry.chat_key}")
+                    logger.warning(f"[ProcessPool] Init OK session={entry.session_id[:12]} for {entry.chat_key}")
                     return
             except json.JSONDecodeError:
                 continue
@@ -238,7 +238,7 @@ class ProcessPool:
         entry.proc.stdin.write(payload.encode("utf-8"))
         entry.proc.stdin.flush()
         entry.last_active = time.time()
-        logger.info(f"[ProcessPool] Sent to {entry.chat_key} ({len(message)} chars)")
+        logger.warning(f"[ProcessPool] Sent to {entry.chat_key} ({len(message)} chars)")
 
         return self._read_until_result(entry, on_line)
 

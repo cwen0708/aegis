@@ -1544,7 +1544,8 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
         logger.debug(f"[OneStack] Report completion failed: {e}")
 
     # OneStack 文件分析回報（偵測 document_id 標記）
-    _doc_match = re.search(r'<!-- document_id: (.+?) -->', card_data.content or "")
+    import re as _re_doc
+    _doc_match = _re_doc.search(r'<!-- document_id: (.+?) -->', card_data.content or "")
     if _doc_match:
         _doc_id = _doc_match.group(1)
         try:
@@ -1556,7 +1557,7 @@ def _execute_card_task(idx, list_name, stage_list, member_id, accounts_list, mem
 
                 # 嘗試從 AI 輸出提取 JSON 結果
                 _doc_json_content = _doc_output
-                _json_match = re.search(r'```json\s*\n([\s\S]*?)\n```', _doc_output)
+                _json_match = _re_doc.search(r'```json\s*\n([\s\S]*?)\n```', _doc_output)
                 if _json_match:
                     _doc_json_content = _json_match.group(1).strip()
 
