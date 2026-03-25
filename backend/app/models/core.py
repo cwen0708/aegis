@@ -83,6 +83,7 @@ class CardIndex(SQLModel, table=True):
     description: Optional[str] = None
     tags_json: str = Field(default="[]")
     model: Optional[str] = Field(default=None)  # 卡片級模型指定（如 haiku / sonnet / opus）
+    parent_id: Optional[int] = Field(default=None, index=True)  # 父卡片 ID（Leader-Worker）
     is_archived: bool = Field(default=False, index=True)  # 封存後在看板隱藏
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

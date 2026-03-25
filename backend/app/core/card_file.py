@@ -44,6 +44,7 @@ class CardData:
     status: str
     tags: list[str] = field(default_factory=list)
     model: Optional[str] = None  # 卡片級模型指定（如 haiku / sonnet / opus）
+    parent_id: Optional[int] = None  # 父卡片 ID（Leader-Worker 子任務追蹤）
     is_archived: bool = False
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -68,6 +69,8 @@ def serialize_card(card: CardData) -> str:
         "created_at": card.created_at.isoformat(),
         "updated_at": card.updated_at.isoformat(),
     }
+    if card.parent_id is not None:
+        metadata["parent_id"] = card.parent_id
     post = frontmatter.Post(card.content, **metadata)
     return frontmatter.dumps(post) + "\n"
 
@@ -117,6 +120,7 @@ def read_card(file_path: Path) -> CardData:
         status=meta["status"],
         tags=meta.get("tags", []),
         model=meta.get("model") or None,
+        parent_id=meta.get("parent_id"),
         is_archived=meta.get("is_archived", False),
         created_at=parse_dt(meta.get("created_at", datetime.now(timezone.utc))),
         updated_at=parse_dt(meta.get("updated_at", datetime.now(timezone.utc))),

@@ -37,6 +37,7 @@ def create_card(
     description: Optional[str] = None,
     status: str = "idle",
     tags: Optional[list[str]] = None,
+    parent_id: Optional[int] = None,
 ) -> Optional[CardData]:
     """建立卡片（MD 檔 + CardIndex），回傳 CardData 或 None
 
@@ -60,6 +61,7 @@ def create_card(
                 content=content,
                 status=status,
                 tags=tags or [],
+                parent_id=parent_id,
                 is_archived=False,
                 created_at=now,
                 updated_at=now,
@@ -120,3 +122,25 @@ def create_chat_card(
     except Exception as e:
         logger.error(f"[CardFactory] Failed to create chat card: {e}")
         return None
+
+
+def spawn_subtask(
+    parent_card_id: int,
+    project_id: int,
+    list_id: int,
+    title: str,
+    content: str = "",
+    tags: list[str] | None = None,
+) -> Optional[CardData]:
+    """建立子任務卡片，自動設定 parent_id 指向父卡片。
+
+    用於 Leader-Worker 架構：Leader 拆分任務後呼叫此函式建立 Worker 子卡片。
+    """
+    return create_card(
+        project_id=project_id,
+        list_id=list_id,
+        title=title,
+        content=content,
+        tags=tags,
+        parent_id=parent_card_id,
+    )

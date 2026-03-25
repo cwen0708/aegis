@@ -97,3 +97,32 @@ def test_multiline_content(tmp_project):
     loaded = read_card(fpath)
     # python-frontmatter strips trailing newline from content
     assert loaded.content == content.rstrip("\n")
+
+
+# ── parent_id ──
+
+def test_parent_id_roundtrip(tmp_project):
+    """parent_id 序列化後能正確反序列化回來"""
+    card = _make_card(id=100, parent_id=42)
+    fpath = card_file_path(str(tmp_project), 100)
+    write_card(fpath, card)
+    loaded = read_card(fpath)
+    assert loaded.parent_id == 42
+
+
+def test_parent_id_none_not_in_yaml(tmp_project):
+    """parent_id 為 None 時不應出現在 YAML metadata 中"""
+    card = _make_card(id=101, parent_id=None)
+    raw = serialize_card(card)
+    assert "parent_id" not in raw
+
+    fpath = card_file_path(str(tmp_project), 101)
+    write_card(fpath, card)
+    loaded = read_card(fpath)
+    assert loaded.parent_id is None
+
+
+def test_parent_id_default_none():
+    """CardData 不帶 parent_id 時預設為 None"""
+    card = _make_card()
+    assert card.parent_id is None
