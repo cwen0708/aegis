@@ -41,14 +41,24 @@ async def handle_onestack_chat(
     if not ctx.has_member:
         return {"ok": False, "error": "Member context failed"}
 
-    # 2. Chat workspace
+    # 2. Chat workspace（OneStack 用戶 = 管理者，有完整控制權）
     from app.core.chat_workspace import ensure_chat_workspace
+
+    # 簡易 user_context：OneStack 用戶預設為管理者
+    class _AdminContext:
+        display_name = "管理者"
+        description = "OneStack 管理者，對此 Aegis 節點有完整控制權"
+
     chat_key = f"onestack:{user_id or chat_id}:{ctx.member_slug}"
     ws_path = ensure_chat_workspace(
         member_slug=ctx.member_slug,
         chat_key=chat_key,
-        bot_user_id=0,  # OneStack 沒有 BotUser
+        bot_user_id=0,
         soul=ctx.soul,
+        user_context=_AdminContext(),
+        user_level=3,
+        chat_id=chat_id,
+        platform="onestack",
     )
 
     # 3. Emitter（只推 OneStack aegis_stream）
