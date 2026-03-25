@@ -1222,6 +1222,10 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
             ]
             logger.info(f"[Worker] Card {idx.card_id}: tag-based model route → {tag_model}")
 
+    # Prompt Hardening：附加安全規則提醒，防止長對話稀釋安全限制
+    from app.core.prompt_hardening import harden_prompt
+    effective_prompt = harden_prompt(effective_prompt, project_path)
+
     result = None
     for attempt_idx, (acct_provider, acct_model, acct_auth, acct_name) in enumerate(accounts_list):
         if attempt_idx > 0:
