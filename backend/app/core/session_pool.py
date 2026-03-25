@@ -153,10 +153,12 @@ class ProcessPool:
         cli_js = _get_cli_js()
 
         if cli_js:
-            cmd = ["node", cli_js]
+            cmd = ["node", "--no-warnings", cli_js]
         else:
             cmd = ["claude"]
             logger.warning("[ProcessPool] cli.js not found, falling back to claude command")
+
+        logger.info(f"[ProcessPool] cli_js={cli_js or 'NOT FOUND'}")
 
         cmd.extend([
             "--input-format", "stream-json",
@@ -184,7 +186,8 @@ class ProcessPool:
         if extra_env:
             env.update(extra_env)
 
-        logger.info(f"[ProcessPool] Spawning {'node cli.js' if cli_js else 'claude'} for {chat_key}")
+        logger.info(f"[ProcessPool] Spawning: {' '.join(cmd[:5])}... for {chat_key}")
+        logger.info(f"[ProcessPool] ENV keys: {sorted([k for k in env if 'CLAUDE' in k or 'ANTHROPIC' in k or 'PATH' in k or 'NODE' in k])}")
 
         proc = subprocess.Popen(
             cmd,
@@ -204,7 +207,13 @@ class ProcessPool:
         deadline = time.time() + 20
         while time.time() < deadline:
             if entry.proc.poll() is not None:
-                logger.warning(f"[ProcessPool] Process died during init for {entry.chat_key}")
+                # 讀 stderr 看為什麼死了
+                stderr = ""
+                try:
+                    stderr = entry.proc.stderr.read().decode("utf-8", errors="replace")[:500]
+                except Exception:
+                    pass
+                logger.warning(f"[ProcessPool] Process died (rc={entry.proc.returncode}) for {entry.chat_key}: {stderr}")
                 break
             raw = entry.proc.stdout.readline()
             if not raw:
