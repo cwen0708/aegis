@@ -143,19 +143,21 @@ def _parse_datetime(dt_str: str) -> datetime | None:
 
 
 async def _execute_job(session: Session, job, tz_name: str):
-    """時間到 → 直接 POST api_url。沒設就打預設的建卡片 API。"""
+    """時間到 → POST api_url（或預設建卡片 API）。prompt_template 當 body。"""
     import urllib.request
 
-    meta = json.loads(job.metadata_json) if job.metadata_json else {}
-    api_url = meta.get("api_url", f"/api/v1/cron-jobs/{job.id}/execute")
-    api_body = meta.get("api_body", {})
-
+    api_url = job.api_url or f"/api/v1/cron-jobs/{job.id}/execute"
     url = api_url if api_url.startswith("http") else f"http://127.0.0.1:8899{api_url}"
 
-    # ${DATE} 變數替換
-    tz = timezone(timedelta(hours=8))
-    today = datetime.now(tz).strftime("%Y-%m-%d")
-    body_str = json.dumps(api_body, ensure_ascii=False).replace("${DATE}", today)
+    # 有 api_url → prompt_template 當 body（JSON，支援 ${DATE}）
+    # 沒有 → 建卡片 API 不需要 body
+    if job.api_url:
+        body_str = job.prompt_template or "{}"
+        tz = timezone(timedelta(hours=8))
+        today = datetime.now(tz).strftime("%Y-%m-%d")
+        body_str = body_str.replace("${DATE}", today)
+    else:
+        body_str = "{}"
 
     try:
         req = urllib.request.Request(

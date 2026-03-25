@@ -22,6 +22,7 @@ class CronJobUpdate(BaseModel):
     prompt_template: Optional[str] = None
     is_enabled: Optional[bool] = None
     target_list_id: Optional[int] = None  # 0 = 清除（回到預設 Scheduled）
+    api_url: Optional[str] = None         # 有值 → API 呼叫模式；空字串 = 清除
 
 class CronJobCreateRequest(BaseModel):
     project_id: int

@@ -103,8 +103,9 @@ class CronJob(SQLModel, table=True):
     is_enabled: bool = Field(default=True)
     is_system: bool = Field(default=False)  # 系統排程，前端禁止刪除
     target_list_id: Optional[int] = Field(default=None, foreign_key="stagelist.id")  # 目標列表，None=Scheduled
+    api_url: Optional[str] = Field(default=None)  # 有值 → 時間到直接 POST（會議等）；None → 建卡片
     next_scheduled_at: Optional[datetime] = None
-    
+
     # 存放原本 Supabase 裡的 metadata (field_id, event_type 等)，用 JSON 字串存
     metadata_json: str = Field(default="{}")
 

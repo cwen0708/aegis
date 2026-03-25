@@ -158,6 +158,7 @@ function startEdit() {
     cron_expression: job.value.cron_expression,
     prompt_template: job.value.prompt_template,
     target_list_id: job.value.target_list_id || null,
+    api_url: job.value.api_url || '',
   }
   editing.value = true
   if (job.value.project_id) fetchStageLists(job.value.project_id)
@@ -271,7 +272,17 @@ watch(jobId, async () => {
               <p class="text-[10px] text-slate-500 mt-1">指定卡片建立後要放入的列表，會依該列表的行為設定執行</p>
             </div>
             <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1">提示詞模板</label>
+              <label class="block text-xs font-medium text-slate-400 mb-1">API URL（留空 = 建卡片）</label>
+              <input v-model="editForm.api_url" type="text" placeholder="/api/v1/agent-chat/meeting"
+                class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-blue-400 font-mono text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+              <p class="text-[10px] text-slate-500 mt-1">
+                {{ editForm.api_url ? '⚡ API 模式：下方內容為 JSON body，時間到直接 POST' : '🤖 AI 模式：下方內容為 AI 提示詞，時間到建卡片' }}
+              </p>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">
+                {{ editForm.api_url ? '請求內容（JSON）' : '提示詞模板' }}
+              </label>
               <textarea v-model="editForm.prompt_template" rows="8" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 font-mono text-sm focus:ring-2 focus:ring-emerald-500 outline-none"></textarea>
             </div>
           </div>
