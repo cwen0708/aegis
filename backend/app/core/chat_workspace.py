@@ -56,6 +56,7 @@ def ensure_chat_workspace(
     claude_md = ws / "CLAUDE.md"
     content = _build_chat_claude_md(
         soul=soul,
+        member_slug=member_slug,
         user_context=user_context,
         accessible_projects=accessible_projects or [],
         user_level=user_level,
@@ -85,6 +86,7 @@ def ensure_chat_workspace(
 
 def _build_chat_claude_md(
     soul: str,
+    member_slug: str = "",
     user_context=None,
     accessible_projects: list = None,
     user_level: int = 0,
@@ -97,6 +99,7 @@ def _build_chat_claude_md(
     return build_config_md(
         mode="chat",
         soul=soul,
+        member_slug=member_slug,
         user_context=user_context,
         accessible_projects=accessible_projects,
         user_level=user_level,

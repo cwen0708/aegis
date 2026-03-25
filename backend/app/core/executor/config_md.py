@@ -73,6 +73,7 @@ def build_config_md(
     else:
         return _build_chat_md(
             soul=soul,
+            member_slug=member_slug,
             user_context=user_context,
             accessible_projects=accessible_projects or [],
             user_level=user_level,
@@ -90,6 +91,7 @@ build_claude_md = build_config_md
 
 def _build_chat_md(
     soul: str,
+    member_slug: str = "",
     user_context=None,
     accessible_projects: list = None,
     user_level: int = 0,
@@ -103,6 +105,17 @@ def _build_chat_md(
     # 身份
     if soul:
         lines.append(soul.strip())
+        lines.append("")
+
+    # 記憶（讓 AI 知道自己有長短期記憶可讀取）
+    if member_slug:
+        from app.core.member_profile import get_member_memory_dir
+        memory_path = get_member_memory_dir(member_slug)
+        lines.append("# 記憶")
+        lines.append(f"你的個人記憶存放在：{memory_path}")
+        lines.append("- short-term/ 短期記憶（近期任務摘要）")
+        lines.append("- long-term/ 長期記憶（累積的經驗與模式）")
+        lines.append("回答問題或參加會議前，可以先讀取近期記憶來回顧最近做了什麼。")
         lines.append("")
 
     # 用戶身份
