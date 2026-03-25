@@ -164,6 +164,24 @@ def main():
             resume_worker()
             return 1
 
+        # 同步 dev worktree（AI 開發分支）到最新 main
+        DEV_WORKTREE = Path("/home/cwen0708/projects/Aegis-dev")
+        if DEV_WORKTREE.exists():
+            try:
+                # 先 fetch（共用 .git，main worktree 已 fetch 過）
+                # 再 rebase dev onto main
+                ret_rb, _, err_rb = run_command(
+                    ["git", "rebase", "main"], cwd=str(DEV_WORKTREE)
+                )
+                if ret_rb != 0:
+                    # rebase 衝突 → abort，保持 dev 不動（不影響部署）
+                    run_command(["git", "rebase", "--abort"], cwd=str(DEV_WORKTREE))
+                    logger.warning(f"[HotUpdate] Dev rebase conflict, skipped: {err_rb}")
+                else:
+                    logger.info("[HotUpdate] Dev worktree rebased onto main")
+            except Exception as e:
+                logger.warning(f"[HotUpdate] Dev rebase failed: {e}")
+
         update_status("building", 30, "正在安裝 Python 依賴...")
 
         # Pip install
