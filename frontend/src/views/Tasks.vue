@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { Zap, History, CheckCircle, XCircle, Clock, Loader2 } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 import { useProjectSelector } from '../composables/useProjectSelector'
@@ -44,6 +44,27 @@ interface TaskLogItem {
 
 const taskLogs = ref<TaskLogItem[]>([])
 const logsLoading = ref(false)
+const expandedLogId = ref<number | null>(null)
+const expandedLogOutput = ref<string>('')
+const logDetailLoading = ref(false)
+
+async function toggleLog(logId: number) {
+  if (expandedLogId.value === logId) {
+    expandedLogId.value = null
+    return
+  }
+  expandedLogId.value = logId
+  expandedLogOutput.value = ''
+  if (!auth.isAuthenticated) return
+  logDetailLoading.value = true
+  try {
+    const data = await apiClient.get<any>(`/api/v1/task-logs/${logId}`)
+    expandedLogOutput.value = data.output || data.error_message || '（無輸出）'
+  } catch {
+    expandedLogOutput.value = '載入失敗'
+  }
+  logDetailLoading.value = false
+}
 
 async function fetchTaskLogs() {
   logsLoading.value = true
@@ -79,6 +100,11 @@ onMounted(() => {
 watch(selectedProjectId, () => {
   if (!auth.isAdmin) fetchTaskLogs()
 })
+
+// 任務完成/失敗時自動刷新列表
+function _onTaskEvent() { fetchTaskLogs() }
+onMounted(() => window.addEventListener('aegis:task-event', _onTaskEvent))
+onUnmounted(() => window.removeEventListener('aegis:task-event', _onTaskEvent))
 </script>
 
 <template>
@@ -138,31 +164,45 @@ watch(selectedProjectId, () => {
         </div>
 
         <div v-else class="space-y-1.5">
-          <div
-            v-for="log in taskLogs"
-            :key="log.id"
-            class="flex items-center gap-3 px-3 py-2 bg-slate-800/40 rounded-lg border border-slate-700/30 hover:border-slate-600/50 transition"
-          >
-            <!-- 狀態 icon -->
-            <CheckCircle v-if="log.status === 'success'" class="w-4 h-4 text-emerald-400 shrink-0" />
-            <XCircle v-else-if="log.status === 'error'" class="w-4 h-4 text-red-400 shrink-0" />
-            <Clock v-else class="w-4 h-4 text-amber-400 shrink-0" />
+          <div v-for="log in taskLogs" :key="log.id">
+            <div
+              @click="auth.isAuthenticated ? toggleLog(log.id) : null"
+              :class="[
+                'flex items-center gap-3 px-3 py-2 bg-slate-800/40 rounded-lg border transition',
+                auth.isAuthenticated ? 'cursor-pointer hover:border-slate-500/50' : '',
+                expandedLogId === log.id ? 'border-cyan-500/30' : 'border-slate-700/30 hover:border-slate-600/50',
+              ]"
+            >
+              <!-- 狀態 icon -->
+              <CheckCircle v-if="log.status === 'success'" class="w-4 h-4 text-emerald-400 shrink-0" />
+              <XCircle v-else-if="log.status === 'error'" class="w-4 h-4 text-red-400 shrink-0" />
+              <Clock v-else class="w-4 h-4 text-amber-400 shrink-0" />
 
-            <!-- 標題 + 專案 -->
-            <div class="flex-1 min-w-0">
-              <div class="text-sm text-slate-200 truncate">{{ log.card_title }}</div>
-              <div class="text-[11px] text-slate-500">{{ log.project_name }}</div>
+              <!-- 標題 + 專案 -->
+              <div class="flex-1 min-w-0">
+                <div class="text-sm text-slate-200 truncate">{{ log.card_title }}</div>
+                <div class="text-[11px] text-slate-500">{{ log.project_name }}</div>
+              </div>
+
+              <!-- Provider + Duration -->
+              <div class="text-right shrink-0">
+                <div class="text-xs text-slate-400">{{ formatDuration(log.duration_ms) }}</div>
+                <div class="text-[10px] text-slate-600">{{ log.provider }}{{ log.model ? `/${log.model}` : '' }}</div>
+              </div>
+
+              <!-- 時間 -->
+              <div class="text-[11px] text-slate-500 shrink-0 w-20 text-right">
+                {{ formatTime(log.created_at) }}
+              </div>
             </div>
 
-            <!-- Provider + Duration -->
-            <div class="text-right shrink-0">
-              <div class="text-xs text-slate-400">{{ formatDuration(log.duration_ms) }}</div>
-              <div class="text-[10px] text-slate-600">{{ log.provider }}{{ log.model ? `/${log.model}` : '' }}</div>
-            </div>
-
-            <!-- 時間 -->
-            <div class="text-[11px] text-slate-500 shrink-0 w-20 text-right">
-              {{ formatTime(log.created_at) }}
+            <!-- 展開：輸出內容 -->
+            <div v-if="expandedLogId === log.id && auth.isAuthenticated"
+              class="mt-1 bg-slate-900/60 rounded-lg border border-slate-700/30 p-3 max-h-64 overflow-auto">
+              <div v-if="logDetailLoading" class="flex items-center gap-2 text-slate-500 text-sm">
+                <Loader2 class="w-4 h-4 animate-spin" /> 載入中...
+              </div>
+              <pre v-else class="text-xs text-slate-300 font-mono whitespace-pre-wrap">{{ expandedLogOutput }}</pre>
             </div>
           </div>
         </div>
