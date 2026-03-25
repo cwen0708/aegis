@@ -1,8 +1,7 @@
-"""Process Pool — 持久 Claude CLI 進程池（stdin pipe 多輪對話）。
+"""Process Pool — 持久 Claude CLI 進程池（PTY + stdin pipe 多輪對話）。
 
-驗證結果：Claude CLI 支援 --input-format stream-json 多輪對話。
-stdin 格式：{"type": "user", "message": {"role": "user", "content": "..."}} + \\n
-不 close stdin → 進程持續活著 → 下一輪零冷啟。
+Claude CLI 的 --input-format stream-json 互動模式需要 PTY。
+用 ptyprocess.PtyProcess 啟動，stdin 寫 JSON 行，stdout 讀 stream-json。
 
 用法：
     from app.core.session_pool import process_pool
@@ -14,11 +13,9 @@ stdin 格式：{"type": "user", "message": {"role": "user", "content": "..."}} +
         member_id=4,
         auth_info={"auth_type": "cli", "oauth_token": "..."},
     )
-    # result = {"status": "success", "output": "...", "token_info": {...}}
 """
 import json
 import os
-import subprocess
 import threading
 import time
 import logging
@@ -33,16 +30,21 @@ CLEANUP_INTERVAL = 60
 
 @dataclass
 class ProcessEntry:
-    proc: subprocess.Popen
+    pty: Any  # PtyProcess
     chat_key: str
     model: str = ""
     session_id: str = ""
     last_active: float = field(default_factory=time.time)
     lock: threading.Lock = field(default_factory=threading.Lock)
+    _buffer: str = ""  # 未處理的 stdout 殘留
+
+
+# 前向宣告 type hint
+from typing import Any
 
 
 class ProcessPool:
-    """持久 Claude CLI 進程池。每個 chat_key 一個活著的進程。"""
+    """持久 Claude CLI 進程池（PTY 模式）。"""
 
     def __init__(self, ttl: int = PROCESS_TTL):
         self._entries: dict[str, ProcessEntry] = {}
@@ -65,7 +67,7 @@ class ProcessPool:
         entry = self._get_or_spawn(chat_key, model, member_id, auth_info, extra_env)
 
         with entry.lock:
-            if entry.proc.poll() is not None:
+            if not entry.pty.isalive():
                 logger.warning(f"[ProcessPool] Dead process for {chat_key}, respawning")
                 self._remove(chat_key)
                 entry = self._get_or_spawn(chat_key, model, member_id, auth_info, extra_env)
@@ -79,7 +81,6 @@ class ProcessPool:
                 return {"status": "error", "output": str(e), "token_info": {}}
 
     def kill(self, chat_key: str):
-        """手動殺進程。"""
         with self._pool_lock:
             entry = self._entries.pop(chat_key, None)
         if entry:
@@ -90,39 +91,38 @@ class ProcessPool:
         with self._pool_lock:
             return len(self._entries)
 
-    # ── 向後相容（worker.py --resume 路徑用的舊介面）──
-
+    # 向後相容（worker.py --resume 路徑）
     def get_or_create(self, chat_id: str):
-        """向後相容：回傳 (session_id_or_None, is_new)。"""
         with self._pool_lock:
             entry = self._entries.get(chat_id)
-            if entry and entry.proc.poll() is None and entry.session_id:
+            if entry and entry.pty.isalive() and entry.session_id:
                 return entry.session_id, False
         return None, True
 
     def register(self, chat_id: str, session_id: str):
-        """向後相容：worker 的 --resume 路徑用。"""
-        pass  # ProcessPool 內部管理 session_id，不需要外部註冊
+        pass
 
     # ── 內部方法 ──
 
     def _get_or_spawn(self, chat_key, model, member_id, auth_info, extra_env) -> ProcessEntry:
         with self._pool_lock:
             entry = self._entries.get(chat_key)
-            if entry and entry.proc.poll() is None:
+            if entry and entry.pty.isalive():
                 return entry
 
         entry = self._spawn(chat_key, model, member_id, auth_info, extra_env)
         with self._pool_lock:
             existing = self._entries.get(chat_key)
-            if existing and existing.proc.poll() is None:
+            if existing and existing.pty.isalive():
                 self._kill_entry(entry)
                 return existing
             self._entries[chat_key] = entry
         return entry
 
     def _spawn(self, chat_key, model, member_id, auth_info, extra_env) -> ProcessEntry:
-        """啟動新的 Claude CLI 持久進程。"""
+        """用 PTY 啟動 Claude CLI 持久進程。"""
+        from ptyprocess import PtyProcess
+
         cmd = [
             "claude",
             "--input-format", "stream-json",
@@ -132,16 +132,13 @@ class ProcessPool:
             "--model", model or "haiku",
         ]
 
-        # MCP 注入
         if member_id:
             mcp_path = self._get_mcp_config(member_id)
             if mcp_path:
                 cmd.extend(["--mcp-config", mcp_path])
 
-        # ProcessPool 不用 sandbox 白名單（互動模式需要完整環境）
-        # 只注入 auth + extra_env
         env = dict(os.environ)
-        env.pop("CLAUDECODE", None)  # 避免巢狀偵測
+        env.pop("CLAUDECODE", None)
 
         auth_info = auth_info or {}
         if auth_info.get("api_key"):
@@ -152,107 +149,127 @@ class ProcessPool:
         if extra_env:
             env.update(extra_env)
 
-        popen_kwargs = {}  # 不用 start_new_session（互動模式需要 TTY 繼承）
-        logger.info(f"[ProcessPool] Spawning: {' '.join(cmd[:8])}... for {chat_key}")
+        logger.info(f"[ProcessPool] PTY Spawning: {' '.join(cmd[:8])}... for {chat_key}")
 
-        proc = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=env,
-            **popen_kwargs,
-        )
-
-        entry = ProcessEntry(proc=proc, chat_key=chat_key, model=model)
+        pty = PtyProcess.spawn(cmd, dimensions=(50, 200), env=env)
+        entry = ProcessEntry(pty=pty, chat_key=chat_key, model=model)
         self._read_init(entry)
         return entry
 
     def _read_init(self, entry: ProcessEntry):
-        """讀掉 spawn 後的 init/system 行。"""
-        deadline = time.time() + 15
+        """讀掉 init/system 行。"""
+        deadline = time.time() + 20
+        buf = ""
         while time.time() < deadline:
-            if entry.proc.poll() is not None:
-                logger.warning(f"[ProcessPool] Process died during init for {entry.chat_key}")
+            if not entry.pty.isalive():
+                logger.warning(f"[ProcessPool] PTY died during init for {entry.chat_key}")
                 break
-            raw = entry.proc.stdout.readline()
-            if not raw:
-                break
-            line = raw.decode("utf-8", errors="replace").strip()
-            if not line or not line.startswith("{"):
-                continue
             try:
-                data = json.loads(line)
-                if data.get("type") == "system":
-                    entry.session_id = data.get("session_id", "")
-                    logger.info(f"[ProcessPool] Init OK session={entry.session_id[:12]} for {entry.chat_key}")
-                    return
-            except json.JSONDecodeError:
-                continue
+                chunk = entry.pty.read_nonblocking(65536, timeout=1)
+                if chunk:
+                    buf += chunk
+                    # 逐行解析
+                    while "\n" in buf:
+                        line, buf = buf.split("\n", 1)
+                        line = line.strip()
+                        if not line or not line.startswith("{"):
+                            continue
+                        try:
+                            data = json.loads(line)
+                            if data.get("type") == "system":
+                                entry.session_id = data.get("session_id", "")
+                                entry._buffer = buf
+                                logger.info(f"[ProcessPool] Init OK session={entry.session_id[:12]} for {entry.chat_key}")
+                                return
+                        except json.JSONDecodeError:
+                            continue
+            except EOFError:
+                break
+            except Exception:
+                time.sleep(0.1)
+
+        entry._buffer = buf
         logger.warning(f"[ProcessPool] Init timeout for {entry.chat_key}")
 
     def _send_and_read(self, entry: ProcessEntry, message: str, on_line=None) -> Dict[str, Any]:
         """送 user message + 讀到 result 行。"""
-        # Happy 格式：{"type": "user", "message": {"role": "user", "content": "..."}}
         msg = {"type": "user", "message": {"role": "user", "content": message}}
         payload = json.dumps(msg, ensure_ascii=False) + "\n"
-        entry.proc.stdin.write(payload.encode("utf-8"))
-        entry.proc.stdin.flush()
+        entry.pty.write(payload.encode("utf-8"))
         entry.last_active = time.time()
-        logger.info(f"[ProcessPool] Sent message to {entry.chat_key} ({len(message)} chars)")
+        logger.info(f"[ProcessPool] Sent to {entry.chat_key} ({len(message)} chars)")
 
         return self._read_until_result(entry, on_line)
 
     def _read_until_result(self, entry: ProcessEntry, on_line=None) -> Dict[str, Any]:
-        """讀 stdout 直到 result 行。"""
+        """讀 PTY stdout 直到 result 行。"""
         from app.core.stream_parsers import parse_stream_json_text, parse_stream_json_tokens
 
         result_text_parts = []
         token_info = {}
+        buf = entry._buffer
+        deadline = time.time() + 600  # 10 分鐘超時
 
-        while True:
-            raw = entry.proc.stdout.readline()
-            if not raw:
-                logger.warning(f"[ProcessPool] EOF for {entry.chat_key}")
+        while time.time() < deadline:
+            if not entry.pty.isalive():
+                logger.warning(f"[ProcessPool] PTY EOF for {entry.chat_key}")
                 return {
                     "status": "error",
                     "output": "".join(result_text_parts) or "Process exited",
                     "token_info": token_info,
                 }
 
-            line = raw.decode("utf-8", errors="replace").strip()
-            if not line or not line.startswith("{"):
-                continue
-
             try:
-                data = json.loads(line)
-            except json.JSONDecodeError:
+                chunk = entry.pty.read_nonblocking(65536, timeout=1)
+                if chunk:
+                    buf += chunk
+            except EOFError:
+                break
+            except Exception:
                 continue
 
-            msg_type = data.get("type", "")
+            # 逐行解析
+            while "\n" in buf:
+                line, buf = buf.split("\n", 1)
+                line = line.strip()
+                if not line or not line.startswith("{"):
+                    continue
 
-            if on_line:
                 try:
-                    on_line(line)
-                except Exception:
-                    pass
+                    data = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
 
-            if msg_type == "assistant":
-                text = parse_stream_json_text(line)
-                if text:
-                    result_text_parts.append(text)
+                msg_type = data.get("type", "")
 
-            if msg_type == "result":
-                token_info = parse_stream_json_tokens(line)
-                entry.session_id = token_info.get("session_id") or entry.session_id
-                entry.last_active = time.time()
-                break
+                if on_line:
+                    try:
+                        on_line(line)
+                    except Exception:
+                        pass
 
+                if msg_type == "assistant":
+                    text = parse_stream_json_text(line)
+                    if text:
+                        result_text_parts.append(text)
+
+                if msg_type == "result":
+                    token_info = parse_stream_json_tokens(line)
+                    entry.session_id = token_info.get("session_id") or entry.session_id
+                    entry.last_active = time.time()
+                    entry._buffer = buf
+                    return {
+                        "status": "success",
+                        "output": "".join(result_text_parts),
+                        "token_info": token_info,
+                        "session_id": entry.session_id,
+                    }
+
+        entry._buffer = buf
         return {
-            "status": "success",
-            "output": "".join(result_text_parts),
+            "status": "error",
+            "output": "".join(result_text_parts) or "Timeout",
             "token_info": token_info,
-            "session_id": entry.session_id,
         }
 
     def _get_mcp_config(self, member_id: int) -> Optional[str]:
@@ -277,10 +294,8 @@ class ProcessPool:
 
     def _kill_entry(self, entry: ProcessEntry):
         try:
-            if entry.proc.poll() is None:
-                entry.proc.stdin.close()
-                entry.proc.kill()
-                entry.proc.wait(timeout=5)
+            if entry.pty.isalive():
+                entry.pty.terminate(force=True)
         except Exception:
             pass
 
@@ -291,7 +306,7 @@ class ProcessPool:
                 now = time.time()
                 with self._pool_lock:
                     expired = [k for k, v in self._entries.items()
-                               if now - v.last_active > self._ttl or v.proc.poll() is not None]
+                               if now - v.last_active > self._ttl or not v.pty.isalive()]
                 for key in expired:
                     with self._pool_lock:
                         entry = self._entries.pop(key, None)
@@ -304,4 +319,4 @@ class ProcessPool:
 
 # 全域 singleton
 process_pool = ProcessPool()
-session_pool = process_pool  # 向後相容
+session_pool = process_pool
