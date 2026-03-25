@@ -23,6 +23,7 @@ from app.api import cron_jobs as cron_jobs_routes, members as members_routes
 from app.api import profile_page
 from app.api import graph as graph_routes
 from app.api import sprite_gen as sprite_gen_routes
+from app.api import agent_chat as agent_chat_routes
 from app.core.telemetry import get_system_metrics
 from app.core.cron_poller import start_cron_poller
 from app.core.usage_poller import start_usage_poller
@@ -507,6 +508,7 @@ app.include_router(sprite_gen_routes.router, prefix="/api/v1")
 app.include_router(webhooks.router, prefix="/api/v1")
 app.include_router(files.router, prefix="/api/v1")
 app.include_router(tags_routes.router, prefix="/api/v1")
+app.include_router(agent_chat_routes.router, prefix="/api/v1")
 
 # ==========================================
 # SPA Frontend (serve from frontend/dist)
