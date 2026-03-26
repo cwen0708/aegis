@@ -65,7 +65,7 @@ def clear_abort_signal(card_id: int):
     if f.exists():
         f.unlink(missing_ok=True)
 from app.core.telemetry import is_system_overloaded
-from app.core.model_router import resolve_model
+from app.core.model_router import resolve_model, get_failover_chain, get_failover_model
 from app.core.task_workspace import prepare_workspace, cleanup_workspace
 from app.core.poller import _parse_and_create_cards
 
@@ -1113,6 +1113,37 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
             break
 
         logger.warning(f"[Worker] Card {idx.card_id}: account '{acct_name}' failed (exit={result.get('exit_code')})")
+
+    # Provider Failover — 所有帳號都失敗時，嘗試備援 provider（最多 1 次）
+    if result and result["status"] != "success":
+        failover_chain = get_failover_chain(primary_provider)
+        for fo_provider in failover_chain:
+            fo_model = get_failover_model(fo_provider)
+            if not fo_model:
+                continue
+            logger.info(f"[Worker] Card {idx.card_id}: provider failover → {fo_provider} ({fo_model})")
+            task_emitter.emit_output(f"\n🔄 Provider failover: {primary_provider} → {fo_provider} ({fo_model})\n")
+
+            result = run_task(
+                card_id=idx.card_id,
+                project_path=effective_cwd,
+                prompt=effective_prompt,
+                phase=list_name.upper(),
+                forced_provider=fo_provider,
+                forced_model=fo_model,
+                card_title=idx.title,
+                project_name=project_name,
+                member_id=member_id,
+                auth_info={},
+                resume_session_id=_resume_session_id if is_chat_mode else None,
+                emitter=task_emitter,
+            )
+
+            if result["status"] == "success":
+                logger.info(f"[Worker] Card {idx.card_id}: succeeded with provider failover → {fo_provider}")
+                break
+
+            logger.warning(f"[Worker] Card {idx.card_id}: provider failover '{fo_provider}' failed (exit={result.get('exit_code')})")
 
     # result 一定有值（accounts_list 至少有 default）
     new_status = "completed" if result["status"] == "success" else "failed"

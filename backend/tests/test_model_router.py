@@ -1,10 +1,13 @@
-"""模型路由單元測試 — tag-based + complexity-based。"""
+"""模型路由單元測試 — tag-based + complexity-based + provider failover。"""
 
 from app.core.model_router import (
     resolve_model_by_tags,
     assess_complexity,
     resolve_model,
     MODEL_TIER,
+    PROVIDER_FAILOVER,
+    get_failover_chain,
+    get_failover_model,
 )
 
 
@@ -145,3 +148,39 @@ class TestResolveModel:
     def test_mixed_tags_with_prompt(self):
         """有 tag 匹配時忽略 prompt 複雜度。"""
         assert resolve_model(["AI-Sonnet"], "架構設計很重要") == "sonnet"
+
+
+class TestProviderFailover:
+    """Provider Failover Chain 測試。"""
+
+    def test_claude_failover_chain(self):
+        assert get_failover_chain("claude") == ["gemini", "openai"]
+
+    def test_gemini_failover_chain(self):
+        assert get_failover_chain("gemini") == ["claude", "openai"]
+
+    def test_openai_failover_chain(self):
+        assert get_failover_chain("openai") == ["claude", "gemini"]
+
+    def test_unknown_provider_returns_empty(self):
+        assert get_failover_chain("unknown") == []
+
+    def test_failover_model_claude(self):
+        assert get_failover_model("claude") == "sonnet"
+
+    def test_failover_model_gemini(self):
+        assert get_failover_model("gemini") == "gemini-2.0-flash"
+
+    def test_failover_model_openai(self):
+        assert get_failover_model("openai") == "gpt-4o-mini"
+
+    def test_failover_model_unknown_returns_empty(self):
+        assert get_failover_model("unknown") == ""
+
+    def test_failover_dict_has_all_providers(self):
+        assert set(PROVIDER_FAILOVER.keys()) == {"claude", "gemini", "openai"}
+
+    def test_no_self_reference_in_chain(self):
+        """每個 provider 的 failover chain 不包含自己。"""
+        for provider, chain in PROVIDER_FAILOVER.items():
+            assert provider not in chain
