@@ -11,9 +11,9 @@ from app.hooks import Hook, TaskContext
 
 logger = logging.getLogger(__name__)
 
-# 解析 <!-- send_file: path --> 或 <!-- send_file: path | caption -->
+# 解析 <!-- send_file: path --> 或變體（send_image, sendimage, sendfile 等）
 _SEND_FILE_RE = re.compile(
-    r'<!--\s*send_file:\s*(.+?)\s*-->',
+    r'<!--\s*send[_\s]?(?:file|image):\s*(.+?)\s*-->',
     re.IGNORECASE,
 )
 
