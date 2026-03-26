@@ -32,11 +32,11 @@ const form = ref({
 
 // 團隊角色對應
 const teamRoleDefs = [
-  { key: 'pm', label: '專案主管', icon: '📋' },
-  { key: 'tech', label: '技術主管', icon: '🔧' },
-  { key: 'finance', label: '財務主管', icon: '💰' },
   { key: 'marketing', label: '行銷經理', icon: '📣' },
-  { key: 'doc', label: '文管', icon: '🧠' },
+  { key: 'finance', label: '財務主管', icon: '💰' },
+  { key: 'pm', label: '專案經理', icon: '📋' },
+  { key: 'tech', label: '技術主管', icon: '🔧' },
+  { key: 'doc', label: '文管專員', icon: '🧠' },
 ]
 const teamRoles = ref<Record<string, string>>({})
 const members = ref<{ id: number; name: string; slug: string; avatar: string }[]>([])

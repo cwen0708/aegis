@@ -912,6 +912,9 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
 
     try:
         card_data = read_card(Path(idx.file_path))
+        # description fallback：content 為空時，把 description 當作任務提示詞
+        if not card_data.content.strip() and card_data.description:
+            card_data.content = card_data.description
     except Exception as e:
         logger.error(f"[Worker] Failed to read card {idx.card_id}: {e}")
         cron_job_id = _parse_cron_job_id(idx.title)
