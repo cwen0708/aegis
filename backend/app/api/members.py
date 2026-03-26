@@ -469,6 +469,45 @@ def usage_dashboard(
 
 
 # ==========================================
+# Member Memory CRUD
+# ==========================================
+class MemoryUpdateRequest(BaseModel):
+    content: str
+    category: Optional[str] = None
+
+
+@router.get("/members/{slug}/memories")
+def list_member_memories_api(slug: str, type: str = "all"):
+    """列出成員的記憶檔案"""
+    from app.core.memory_manager import list_member_memories
+    if type not in ("short-term", "long-term", "all"):
+        raise HTTPException(status_code=400, detail="type 必須是 short-term / long-term / all")
+    return list_member_memories(slug, memory_type=type)
+
+
+@router.delete("/members/{slug}/memories/{filename}")
+def delete_member_memory_api(slug: str, filename: str):
+    """刪除指定的成員記憶檔案"""
+    from app.core.memory_manager import delete_member_memory
+    if not filename or ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    ok = delete_member_memory(slug, filename)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Memory file not found")
+    return {"ok": True, "deleted": filename}
+
+
+@router.put("/members/{slug}/memories/{filename}")
+def update_member_memory_api(slug: str, filename: str, data: MemoryUpdateRequest):
+    """更新長期記憶內容"""
+    from app.core.memory_manager import update_member_long_term_memory
+    if not filename or ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    path = update_member_long_term_memory(slug, filename, data.content, data.category)
+    return {"ok": True, "path": str(path)}
+
+
+# ==========================================
 # Member Memory Search (BM25 + Time Decay)
 # ==========================================
 @router.get("/members/{slug}/memory/search")

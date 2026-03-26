@@ -209,16 +209,17 @@ def _get_member_long_term_dir(member_slug: str) -> Path:
     return d
 
 
-def write_member_short_term_memory(member_slug: str, content: str, timestamp: datetime = None) -> Path:
+def write_member_short_term_memory(member_slug: str, content: str, timestamp: datetime = None, category: str = None) -> Path:
     """Write a short-term memory file for a specific member."""
     if timestamp is None:
         timestamp = datetime.now(timezone.utc)
     filename = timestamp.strftime("%Y-%m-%d-%H%M%S") + ".md"
     fpath = _get_member_short_term_dir(member_slug) / filename
 
+    cat_line = f'\ncategory: "{category}"' if category else ""
     frontmatter = f"""---
 timestamp: "{timestamp.isoformat()}"
-member: "{member_slug}"
+member: "{member_slug}"{cat_line}
 ---
 
 """
@@ -277,6 +278,102 @@ def cleanup_member_short_term(member_slug: str, retention_days: int = 30) -> int
             pass
 
     return deleted
+
+
+# ── 結構化 CRUD 操作 ──
+
+def _parse_frontmatter(text: str) -> dict:
+    """解析 Markdown frontmatter，回傳 key-value dict。"""
+    meta: dict = {}
+    if not text.startswith("---"):
+        return meta
+    end = text.find("---", 3)
+    if end == -1:
+        return meta
+    for line in text[3:end].strip().splitlines():
+        if ":" not in line:
+            continue
+        key, _, val = line.partition(":")
+        meta[key.strip()] = val.strip().strip('"')
+    return meta
+
+
+def list_member_memories(member_slug: str, memory_type: str = "all") -> list[dict]:
+    """列出成員的記憶檔案（含 frontmatter 解析）。
+
+    memory_type: "short-term", "long-term", "all"
+    """
+    results: list[dict] = []
+    dirs: list[tuple[str, Path]] = []
+    if memory_type in ("short-term", "all"):
+        dirs.append(("short-term", _get_member_short_term_dir(member_slug)))
+    if memory_type in ("long-term", "all"):
+        dirs.append(("long-term", _get_member_long_term_dir(member_slug)))
+
+    for mtype, d in dirs:
+        for f in sorted(d.glob("*.md")):
+            try:
+                text = f.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            meta = _parse_frontmatter(text)
+            # 取得 body（frontmatter 之後）
+            body = text
+            if text.startswith("---"):
+                end = text.find("---", 3)
+                if end != -1:
+                    body = text[end + 3:].strip()
+            results.append({
+                "filename": f.name,
+                "type": mtype,
+                "topic": meta.get("topic", ""),
+                "timestamp": meta.get("timestamp", ""),
+                "category": meta.get("category", ""),
+                "snippet": body[:150],
+            })
+    return results
+
+
+def delete_member_memory(member_slug: str, filename: str) -> bool:
+    """刪除指定的成員記憶檔案（支援 short-term 和 long-term）。"""
+    if not filename or ".." in filename or "/" in filename or "\\" in filename:
+        return False
+    for d in (_get_member_short_term_dir(member_slug), _get_member_long_term_dir(member_slug)):
+        fpath = d / filename
+        if fpath.exists():
+            fpath.unlink()
+            logger.info(f"Deleted member memory: {fpath}")
+            return True
+    return False
+
+
+def update_member_long_term_memory(member_slug: str, filename: str, content: str, category: str = None) -> Path:
+    """更新指定長期記憶的內容，保留或更新 frontmatter。"""
+    if not filename.endswith(".md"):
+        filename += ".md"
+    fpath = _get_member_long_term_dir(member_slug) / filename
+
+    # 讀取既有 frontmatter
+    old_meta: dict = {}
+    if fpath.exists():
+        try:
+            old_meta = _parse_frontmatter(fpath.read_text(encoding="utf-8"))
+        except OSError:
+            pass
+
+    topic = old_meta.get("topic", filename.replace(".md", ""))
+    cat_line = f'\ncategory: "{category}"' if category else (
+        f'\ncategory: "{old_meta["category"]}"' if old_meta.get("category") else ""
+    )
+    frontmatter = f"""---
+topic: "{topic}"
+updated_at: "{datetime.now(timezone.utc).isoformat()}"{cat_line}
+---
+
+"""
+    fpath.write_text(frontmatter + content, encoding="utf-8")
+    logger.info(f"Updated member long-term memory: {fpath}")
+    return fpath
 
 
 # ── MMR 重排序輔助函式 ──
