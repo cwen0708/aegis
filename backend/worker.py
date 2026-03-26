@@ -46,7 +46,7 @@ from app.models.core import (
     Member, MemberAccount, Account, TaskLog, CronLog, MemberDialogue
 )
 from app.core.card_file import CardData, read_card, write_card
-from app.core.card_index import sync_card_to_index, remove_card_from_index
+from app.core.card_index import sync_card_to_index, remove_card_from_index, block_similar_cards
 
 # Abort 信號目錄
 _INSTALL_ROOT = Path(__file__).resolve().parent
@@ -257,6 +257,11 @@ def mark_card_running(card_id: int, member_id: Optional[int]):
                 write_card(file_path, card_data)
             except Exception as e:
                 logger.warning(f"[Card {card_id}] Failed to update MD to running: {e}")
+
+            # 封鎖同 milestone 中標題相似的待辦卡片
+            blocked = block_similar_cards(card_id, idx.title, session)
+            if blocked:
+                logger.info(f"[Card {card_id}] Blocked similar cards: {blocked}")
 
         orm_card = session.get(Card, card_id)
         if orm_card:
