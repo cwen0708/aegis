@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted } from 'vue'
-import { Zap, Square, Pencil, X, GitBranch } from 'lucide-vue-next'
+import { Zap, Square, Pencil, X, GitBranch, Package } from 'lucide-vue-next'
 import TerminalViewer from './TerminalViewer.vue'
 import ExecutionFlowDiagram from './ExecutionFlowDiagram.vue'
 import { useAegisStore } from '../stores/aegis'
+import { marked } from 'marked'
 
 const store = useAegisStore()
 
@@ -20,7 +21,49 @@ const emit = defineEmits<{
 }>()
 
 const isEditing = ref(false)
-const cardDetailTab = ref<'description' | 'prompt' | 'result' | 'flow'>('description')
+const cardDetailTab = ref<'description' | 'prompt' | 'result' | 'flow' | 'artifacts'>('description')
+
+// Artifacts state
+interface ArtifactItem {
+  name: string
+  path: string
+  type: string
+  size: number
+  preview_type: 'html' | 'image' | 'markdown' | 'pdf' | 'unknown'
+}
+const artifacts = ref<ArtifactItem[]>([])
+const selectedArtifact = ref<ArtifactItem | null>(null)
+const artifactMarkdown = ref('')
+
+function artifactRawUrl(item: ArtifactItem): string {
+  return `/api/v1/cards/${props.card.id}/artifacts/raw?path=${encodeURIComponent(item.path)}`
+}
+
+async function loadArtifacts() {
+  try {
+    const res = await fetch(`/api/v1/cards/${props.card.id}/artifacts`)
+    if (res.ok) artifacts.value = await res.json()
+  } catch { /* silent */ }
+}
+
+async function selectArtifact(item: ArtifactItem) {
+  selectedArtifact.value = item
+  if (item.preview_type === 'markdown') {
+    try {
+      const res = await fetch(artifactRawUrl(item))
+      if (res.ok) {
+        const text = await res.text()
+        artifactMarkdown.value = marked(text) as string
+      }
+    } catch { artifactMarkdown.value = '<p>載入失敗</p>' }
+  }
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
 
 // Escape 關閉對話框
 function handleKeydown(e: KeyboardEvent) {
@@ -177,6 +220,14 @@ watch(() => props.card.status, (newStatus) => {
           <GitBranch class="w-3 h-3 inline mr-1" />流程
           <div v-if="cardDetailTab === 'flow'" class="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400" />
         </button>
+        <button
+          @click="cardDetailTab = 'artifacts'; loadArtifacts()"
+          class="flex-1 px-4 py-2 text-xs font-medium transition-colors relative"
+          :class="cardDetailTab === 'artifacts' ? 'text-emerald-400' : 'text-slate-400 hover:text-slate-200'"
+        >
+          <Package class="w-3 h-3 inline mr-1" />產出物
+          <div v-if="cardDetailTab === 'artifacts'" class="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400" />
+        </button>
       </div>
 
       <!-- Body -->
@@ -196,6 +247,54 @@ watch(() => props.card.status, (newStatus) => {
         <!-- Tab 4: 執行流程圖 -->
         <div v-else-if="cardDetailTab === 'flow'" class="h-full bg-slate-900/50">
           <ExecutionFlowDiagram :card-id="card.id" />
+        </div>
+
+        <!-- Tab 5: 產出物 -->
+        <div v-else-if="cardDetailTab === 'artifacts'" class="h-full flex">
+          <!-- 左側檔案清單 -->
+          <div class="w-56 shrink-0 border-r border-slate-700 overflow-y-auto custom-scrollbar">
+            <div v-if="artifacts.length === 0" class="p-4 text-xs text-slate-500 text-center">
+              尚無產出物。
+            </div>
+            <button
+              v-for="item in artifacts" :key="item.path"
+              @click="selectArtifact(item)"
+              class="w-full text-left px-3 py-2 text-xs border-b border-slate-700/50 transition-colors"
+              :class="selectedArtifact?.path === item.path ? 'bg-slate-700/60 text-emerald-400' : 'text-slate-300 hover:bg-slate-700/30'"
+            >
+              <div class="truncate font-medium">{{ item.name }}</div>
+              <div class="text-[10px] text-slate-500 mt-0.5">{{ item.type.toUpperCase() }} · {{ formatFileSize(item.size) }}</div>
+            </button>
+          </div>
+          <!-- 右側預覽區 -->
+          <div class="flex-1 overflow-hidden">
+            <div v-if="!selectedArtifact" class="h-full flex items-center justify-center text-xs text-slate-500">
+              選擇左側檔案進行預覽
+            </div>
+            <!-- HTML → sandboxed iframe -->
+            <iframe
+              v-else-if="selectedArtifact.preview_type === 'html'"
+              :src="artifactRawUrl(selectedArtifact)"
+              sandbox="allow-scripts"
+              class="w-full h-full border-0 bg-white"
+            />
+            <!-- 圖片 -->
+            <div v-else-if="selectedArtifact.preview_type === 'image'" class="h-full flex items-center justify-center p-4 overflow-auto bg-[#0c0e14]">
+              <img :src="artifactRawUrl(selectedArtifact)" :alt="selectedArtifact.name" class="max-w-full max-h-full object-contain rounded-lg" />
+            </div>
+            <!-- Markdown -->
+            <div v-else-if="selectedArtifact.preview_type === 'markdown'" class="h-full overflow-y-auto custom-scrollbar p-6 prose prose-invert prose-sm max-w-none" v-html="artifactMarkdown"></div>
+            <!-- PDF -->
+            <iframe
+              v-else-if="selectedArtifact.preview_type === 'pdf'"
+              :src="artifactRawUrl(selectedArtifact)"
+              class="w-full h-full border-0"
+            />
+            <!-- 不支援 -->
+            <div v-else class="h-full flex items-center justify-center text-xs text-slate-500">
+              不支援此格式的預覽
+            </div>
+          </div>
         </div>
 
         <!-- Tab 3: 執行結果 -->
