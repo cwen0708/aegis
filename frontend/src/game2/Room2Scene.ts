@@ -101,6 +101,9 @@ export default class Room2Scene extends Phaser.Scene {
     this.cameras.main.setZoom(1.5)
     this.cameras.main.centerOn(mapWidth / 2, mapHeight / 2)
 
+    // 攝影機取整（防止 tile bleeding 黑線）
+    this.cameras.main.setRoundPixels(true)
+
     // 拖曳
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
       if (pointer.isDown) {
@@ -109,10 +112,13 @@ export default class Room2Scene extends Phaser.Scene {
       }
     })
 
-    // 滾輪縮放
+    // 滾輪縮放（限制為整數倍避免子像素）
     this.input.on('wheel', (_p: unknown, _g: unknown, _dx: number, _dy: number, dz: number) => {
       const cam = this.cameras.main
-      cam.setZoom(Phaser.Math.Clamp(cam.zoom - dz * 0.001, 0.5, 3))
+      const raw = cam.zoom - dz * 0.001
+      // 取整到 0.5 的倍數（1.0, 1.5, 2.0, 2.5, 3.0）避免非整數 zoom 產生 tile bleeding
+      const snapped = Math.round(raw * 2) / 2
+      cam.setZoom(Phaser.Math.Clamp(snapped, 0.5, 3))
     })
   }
 
@@ -174,6 +180,7 @@ export function createRoom2Game(parent: string): Phaser.Game {
     width: window.innerWidth,
     height: window.innerHeight,
     pixelArt: true,
+    roundPixels: true,
     physics: {
       default: 'arcade',
       arcade: { debug: false },
