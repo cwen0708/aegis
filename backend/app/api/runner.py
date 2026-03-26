@@ -257,6 +257,57 @@ async def internal_channel_send(req: ChannelSendRequest):
 
 
 # ==========================================
+# Channel Send File（檔案發送）
+# ==========================================
+_IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'}
+_ALLOWED_FILE_PREFIXES = ('/tmp/user.log/', '/tmp/')
+
+
+class ChannelSendFileRequest(BaseModel):
+    platform: str
+    chat_id: str
+    file_path: str
+    caption: str = ""
+    type: str = "auto"   # "auto" | "photo" | "document"
+
+
+@router.post("/internal/channel-send-file")
+async def internal_channel_send_file(req: ChannelSendFileRequest):
+    """發送檔案到 channel（Telegram/LINE）— 供 Hook 或 AI 技能呼叫"""
+    import os
+    from app.channels.manager import channel_manager
+    from app.channels.bus import OutboundMessage
+    from app.channels.types import Attachment
+
+    # 安全檢查：只允許 /tmp/ 下的檔案
+    if not any(req.file_path.startswith(p) for p in _ALLOWED_FILE_PREFIXES):
+        return {"ok": False, "error": f"File path not allowed: {req.file_path}"}
+
+    if not os.path.exists(req.file_path):
+        return {"ok": False, "error": f"File not found: {req.file_path}"}
+
+    channel = channel_manager.get_channel(req.platform)
+    if not channel:
+        return {"ok": False, "error": f"Channel {req.platform} not found"}
+
+    # 自動偵測檔案類型
+    ext = os.path.splitext(req.file_path)[1].lower()
+    if req.type == "auto":
+        file_type = "photo" if ext in _IMAGE_EXTS else "document"
+    else:
+        file_type = req.type
+
+    msg = OutboundMessage(
+        chat_id=req.chat_id,
+        platform=req.platform,
+        text=req.caption or "",
+        attachments=[Attachment(type=file_type, path=req.file_path, caption=req.caption)],
+    )
+    message_id = await channel.send(msg)
+    return {"ok": True, "message_id": message_id, "type": file_type}
+
+
+# ==========================================
 # Cron Toggle
 # ==========================================
 class CronToggleRequest(BaseModel):

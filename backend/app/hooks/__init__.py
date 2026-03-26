@@ -88,6 +88,7 @@ def collect_hooks(source: str = "worker") -> list[Hook]:
     from app.hooks.cleanup import CleanupHook
     from app.hooks.websocket import WebSocketHook
     from app.hooks.platform import PlatformHook
+    from app.hooks.media import MediaHook
 
     if source == "worker":
         return [
@@ -95,12 +96,14 @@ def collect_hooks(source: str = "worker") -> list[Hook]:
             OneStackHook(),     # DURING: aegis_stream + POST: 任務回報
             BroadcastHook(),    # POST: task_completed 事件
             DialogueHook(),     # POST: AVG 對話
+            MediaHook(),        # POST: send_file 標記 → 頻道發送
             MemoryHook(),       # POST: 成員記憶
             CleanupHook(),      # POST: 清理（永遠最後）
         ]
     elif source == "chat":
         return [
             # PlatformHook 由 chat_handler 按需 insert（需要 platform/chat_id/placeholder_id）
+            MediaHook(),        # POST: send_file 標記 → 頻道發送
             MemoryHook(),       # POST: 成員記憶
         ]
     elif source == "onestack":

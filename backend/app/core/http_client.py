@@ -52,6 +52,12 @@ class InternalAPI:
         InternalAPI.post("internal/channel-send", data, timeout=10)
 
     @staticmethod
+    def channel_send_file(platform: str, chat_id: str, file_path: str, caption: str = ""):
+        """發送檔案到 channel（同步，適用 Worker thread / Hook）"""
+        data = {"platform": platform, "chat_id": chat_id, "file_path": file_path, "caption": caption}
+        InternalAPI.post("internal/channel-send-file", data, timeout=30)
+
+    @staticmethod
     def channel_send_async(platform: str, chat_id: str, text: str, edit_message_id: str = None):
         """非阻塞發送（用 thread，適用 Runner stdout 讀取迴圈）"""
         threading.Thread(
