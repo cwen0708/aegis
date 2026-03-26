@@ -189,6 +189,18 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
             output = re.sub(r'\[CREATE_TASK:[^\]]+\]', '', output).strip()
             output += "\n\n⚠️ 你沒有該專案的存取權限。"
 
+    # 12.5 執行 POST hooks（MediaHook 等需要完整 output）
+    from app.hooks import run_hooks, TaskContext as _TC
+    _chat_ctx = _TC(
+        output=output,
+        chat_id=msg.chat_id,
+        is_chat=True,
+        source="chat",
+        member_slug=ctx.member_slug or "",
+        status="completed",
+    )
+    run_hooks(_chat_ctx, chat_hooks)
+
     # 13. 清理輸出中的 channel 標記（向下相容）
     clean_output = re.sub(r'\[CH_(?:SEND|EDIT):[^\]]*\]', '', output).strip()
 
