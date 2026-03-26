@@ -31,6 +31,31 @@ _SONNET_KEYWORDS = re.compile(
 )
 
 
+# Provider Failover Chain — 當某 provider 所有帳號都失敗時，依序嘗試的備援 provider
+PROVIDER_FAILOVER: dict[str, list[str]] = {
+    "claude": ["gemini", "openai"],
+    "gemini": ["claude", "openai"],
+    "openai": ["claude", "gemini"],
+}
+
+# 各 provider 的預設 failover 模型
+_FAILOVER_DEFAULT_MODEL: dict[str, str] = {
+    "claude": "sonnet",
+    "gemini": "gemini-2.0-flash",
+    "openai": "gpt-4o-mini",
+}
+
+
+def get_failover_chain(provider: str) -> list[str]:
+    """回傳指定 provider 的備援 provider 列表。未知 provider 回傳空列表。"""
+    return PROVIDER_FAILOVER.get(provider, [])
+
+
+def get_failover_model(provider: str) -> str:
+    """回傳 failover provider 應使用的預設模型。未知 provider 回傳空字串。"""
+    return _FAILOVER_DEFAULT_MODEL.get(provider, "")
+
+
 def assess_complexity(prompt: str) -> str:
     """根據 prompt 長度與內容評估複雜度，回傳建議模型等級。
 
