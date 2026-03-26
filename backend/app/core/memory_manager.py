@@ -193,6 +193,26 @@ def cleanup_short_term(aegis_path: str, retention_days: int = 30) -> int:
     return deleted
 
 
+# ── 背景 Embedding 寫入 ──
+
+def _background_embed(entity_type: str, entity_key: str, content: str, member_slug: str):
+    """在背景執行 embed_and_store，不阻塞主流程。"""
+    import asyncio
+    import threading
+
+    async def _run():
+        try:
+            from app.core.embedding import embed_and_store
+            await embed_and_store(entity_type, entity_key, content, member_slug)
+        except Exception as e:
+            logger.warning(f"[background_embed] {e}")
+
+    def _thread():
+        asyncio.run(_run())
+
+    threading.Thread(target=_thread, daemon=True).start()
+
+
 # ── Member-level memory (delegates to member_profile for paths) ──
 
 def _get_member_short_term_dir(member_slug: str) -> Path:
@@ -225,6 +245,7 @@ member: "{member_slug}"{cat_line}
 """
     fpath.write_text(frontmatter + content, encoding="utf-8")
     logger.info(f"Member short-term memory written: {fpath}")
+    _background_embed("memory", str(fpath), content, member_slug)
     return fpath
 
 
@@ -373,6 +394,7 @@ updated_at: "{datetime.now(timezone.utc).isoformat()}"{cat_line}
 """
     fpath.write_text(frontmatter + content, encoding="utf-8")
     logger.info(f"Updated member long-term memory: {fpath}")
+    _background_embed("memory", str(fpath), content, member_slug)
     return fpath
 
 
@@ -461,16 +483,21 @@ def search_member_memories(
     query: str,
     top_k: int = 5,
     diversity: float = 0.5,
+    mode: str = "bm25",
 ) -> list[dict]:
     """
-    搜尋成員記憶：BM25 評分 + 時間衰減（7 天半衰期）+ MMR 多樣性重排。
+    搜尋成員記憶，支援三種模式：
 
-    掃描 short-term 與 long-term 目錄的 .md 檔案，
-    以 BM25(k1=1.5, b=0.75) 計算相關性，再乘以時間衰減因子。
-    diversity > 0 時，取 top_k*3 候選用 MMR 重排到 top_k。
-    diversity=0 時跳過 MMR（向後相容）。
+    - mode="bm25"：BM25 評分 + 時間衰減 + MMR 多樣性重排（預設）
+    - mode="vector"：語義向量搜尋（需 OpenAI API Key）
+    - mode="hybrid"：兩者都跑，用 RRF 合併排名
+
     回傳 top_k 筆結果，每筆包含 file, score, snippet。
     """
+    if mode == "vector":
+        return _search_vector(member_slug, query, top_k)
+    if mode == "hybrid":
+        return _search_hybrid(member_slug, query, top_k, diversity)
     query_tokens = _tokenize(query)
     if not query_tokens:
         return []
@@ -578,3 +605,71 @@ def search_member_memories(
         return [{"file": r["file"], "score": r["score"], "snippet": r["snippet"]} for r in reranked]
 
     return results[:top_k]
+
+
+# ── 向量搜尋輔助函式 ──
+
+def _search_vector(member_slug: str, query: str, top_k: int) -> list[dict]:
+    """純向量語義搜尋。"""
+    import asyncio
+    from app.core.embedding import get_embedding, search_similar
+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                query_vec = pool.submit(
+                    asyncio.run, get_embedding(query)
+                ).result(timeout=15)
+        else:
+            query_vec = loop.run_until_complete(get_embedding(query))
+    except Exception:
+        query_vec = asyncio.run(get_embedding(query))
+
+    if not query_vec:
+        return []
+
+    results = search_similar(query_vec, member_slug, top_k=top_k)
+    # 補上 snippet（從檔案讀取）
+    for r in results:
+        r["file"] = r.pop("entity_key", "")
+        try:
+            text = Path(r["file"]).read_text(encoding="utf-8")
+            if text.startswith("---"):
+                end = text.find("---", 3)
+                if end != -1:
+                    text = text[end + 3:]
+            r["snippet"] = text.strip()[:150]
+        except OSError:
+            r["snippet"] = ""
+    return results
+
+
+def _search_hybrid(member_slug: str, query: str, top_k: int, diversity: float) -> list[dict]:
+    """混合搜尋：BM25 + Vector，用 Reciprocal Rank Fusion 合併。"""
+    bm25_results = search_member_memories(member_slug, query, top_k=top_k * 2, diversity=diversity, mode="bm25")
+    vector_results = _search_vector(member_slug, query, top_k=top_k * 2)
+
+    # RRF 合併（k=60）
+    k = 60
+    rrf_scores: dict[str, float] = {}
+    snippets: dict[str, str] = {}
+
+    for rank, r in enumerate(bm25_results):
+        key = r["file"]
+        rrf_scores[key] = rrf_scores.get(key, 0) + 1.0 / (k + rank + 1)
+        snippets[key] = r.get("snippet", "")
+
+    for rank, r in enumerate(vector_results):
+        key = r["file"]
+        rrf_scores[key] = rrf_scores.get(key, 0) + 1.0 / (k + rank + 1)
+        if key not in snippets:
+            snippets[key] = r.get("snippet", "")
+
+    merged = [
+        {"file": key, "score": round(score, 4), "snippet": snippets.get(key, "")}
+        for key, score in rrf_scores.items()
+    ]
+    merged.sort(key=lambda r: r["score"], reverse=True)
+    return merged[:top_k]

@@ -472,6 +472,21 @@ class InviteCode(SQLModel, table=True):
     note: str = ""          # "給客戶A用"
 
 
+# ==========================================
+# Embedding 向量儲存
+# ==========================================
+class EmbeddingRecord(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    entity_type: str = Field(index=True)          # "memory" | "card" | "document"
+    entity_key: str = Field(index=True)            # 檔案路徑或唯一識別碼
+    member_slug: Optional[str] = Field(default=None, index=True)
+    content_hash: str = ""                         # SHA256 of content
+    vector_json: str = ""                          # JSON array of floats
+    model_name: str = "text-embedding-3-small"
+    dimension: int = 1536
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class ChatSession(SQLModel, table=True):
     """對話 Session（User × Member × Channel）"""
     __table_args__ = (

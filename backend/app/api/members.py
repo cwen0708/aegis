@@ -511,12 +511,14 @@ def update_member_memory_api(slug: str, filename: str, data: MemoryUpdateRequest
 # Member Memory Search (BM25 + Time Decay)
 # ==========================================
 @router.get("/members/{slug}/memory/search")
-def search_member_memory(slug: str, q: str = "", top_k: int = 5):
-    """搜尋成員記憶：BM25 關鍵字搜尋 + 時間衰減"""
+def search_member_memory(slug: str, q: str = "", top_k: int = 5, mode: str = "bm25"):
+    """搜尋成員記憶：支援 bm25 / vector / hybrid 三種模式"""
     from app.core.memory_manager import search_member_memories
     if not q.strip():
         return []
-    return search_member_memories(slug, q.strip(), top_k=min(top_k, 20))
+    if mode not in ("bm25", "vector", "hybrid"):
+        raise HTTPException(status_code=400, detail="mode 必須是 bm25 / vector / hybrid")
+    return search_member_memories(slug, q.strip(), top_k=min(top_k, 20), mode=mode)
 
 
 # ==========================================
