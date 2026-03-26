@@ -140,3 +140,25 @@ def restore(text: str, mapping: Dict[str, str]) -> str:
     for placeholder, original in mapping.items():
         result = result.replace(placeholder, original)
     return result
+
+
+class SecurityBlock(Exception):
+    """S3 等級資料阻擋例外"""
+    pass
+
+
+def guard_for_ai(text: str) -> Tuple[str, Dict[str, str]]:
+    """送往 AI API 前的安全閘門。
+
+    - S1: 原文放行
+    - S2: sanitize 去敏化後放行
+    - S3: 拋出 SecurityBlock 阻擋
+    """
+    level = classify(text)
+    if level == SecurityLevel.S3:
+        matches = scan(text)
+        s3_types = [m.pattern_name for m in matches if m.level == SecurityLevel.S3]
+        raise SecurityBlock(f"S3 data detected: {s3_types}")
+    if level == SecurityLevel.S2:
+        return sanitize(text)
+    return text, {}

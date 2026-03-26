@@ -1035,6 +1035,16 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
     from app.core.prompt_hardening import harden_prompt
     effective_prompt = harden_prompt(effective_prompt, project_path)
 
+    # Data Classification Guard：送往 AI 前掃描敏感資料
+    from app.core.data_classifier import guard_for_ai, SecurityBlock
+    try:
+        effective_prompt, _redact_map = guard_for_ai(effective_prompt)
+    except SecurityBlock as e:
+        logger.warning(f"[Worker] Card {idx.card_id}: Prompt blocked by security guard: {e}")
+        update_card_status(idx.card_id, "failed", f"\n\n---\n\n### Error\n安全閘門阻擋：偵測到 S3 等級敏感資料，prompt 未送出。\n{e}")
+        broadcast_event("task_failed", {"card_id": idx.card_id, "reason": f"SecurityBlock: {e}"})
+        return
+
     result = None
     for attempt_idx, (acct_provider, acct_model, acct_auth, acct_name) in enumerate(accounts_list):
         if attempt_idx > 0:
