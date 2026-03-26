@@ -18,8 +18,8 @@ PROVIDERS = {
         "json_output": False,
     },
     "openai": {
-        "cmd_base": ["python", "scripts/openai_chat.py"],
-        "json_output": True,
+        "cmd_base": ["python", "scripts/openai_stream_chat.py"],
+        "stream_json": True,
         "default_model": "gpt-4o",
     },
     "ollama": {
@@ -58,6 +58,12 @@ def build_command(
     elif provider == "gemini":
         cmd = _build_gemini_cmd(cmd, prompt, model, mode)
         return cmd, False
+
+    elif provider == "openai":
+        resolved_model = model or config.get("default_model", "gpt-4o")
+        cmd.extend(["--model", resolved_model])
+        # prompt 從 stdin 傳入（避免 shell 特殊字元問題）
+        return cmd, True
 
     elif provider == "ollama":
         resolved_model = model or config.get("default_model", "llama3.1:8b")
