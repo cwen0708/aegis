@@ -764,6 +764,12 @@ def run_task_pty_windows(
         token_info["duration_ms"] = duration_ms
         if token_info.get("result_text"):
             actual_output = token_info["result_text"]
+    elif provider_name == "openai" and config.get("stream_json"):
+        # OpenAI stream_json 模式：與 Claude 相同的 stream-json 解析路徑
+        if result_text_parts:
+            actual_output = "".join(result_text_parts)
+        token_info = emitter.token_info if emitter else {}
+        token_info["duration_ms"] = duration_ms
     elif provider_name == "openai" and config.get("json_output"):
         from app.core.stream_parsers import parse_openai_json
         token_info = parse_openai_json(output)
@@ -813,19 +819,29 @@ def run_task_subprocess(
             proc.stdin.close()
 
         output_lines = []
+        result_text_parts = []
+        stream_json = config.get("stream_json", False)
         with heartbeat_monitor(emitter) as touch:
             for raw_line in proc.stdout:
                 touch()
                 line = raw_line.decode("utf-8", errors="replace")
                 output_lines.append(line)
-                if emitter:
+                if stream_json:
+                    clean = line.strip()
+                    if clean.startswith("{") and emitter:
+                        emitter.emit_raw(clean)
+                        text = parse_stream_json_text(clean)
+                        if text:
+                            result_text_parts.append(text)
+                elif emitter:
                     emitter.emit_output(line)
                 # 檢查 abort 信號
                 if is_abort_requested(card_id):
                     logger.info(f"[Task {card_id}] Abort signal received, killing process")
                     proc.kill()
                     clear_abort_signal(card_id)
-                    emitter.emit_output("\n🛑 任務已被中止\n")
+                    if emitter:
+                        emitter.emit_output("\n🛑 任務已被中止\n")
                     break
 
         proc.wait()
@@ -837,7 +853,11 @@ def run_task_subprocess(
 
         token_info = {}
         actual_output = output
-        if provider_name == "claude" and config.get("json_output"):
+        if stream_json and result_text_parts:
+            actual_output = "".join(result_text_parts)
+            token_info = emitter.token_info if emitter else {}
+            token_info["duration_ms"] = duration_ms
+        elif provider_name == "claude" and config.get("json_output"):
             token_info = parse_claude_json(output)
             token_info["duration_ms"] = duration_ms
             if token_info.get("result_text"):
@@ -992,6 +1012,7 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
     from app.hooks import collect_hooks
     from app.hooks.websocket import WebSocketHook
     from app.hooks.onestack import OneStackHook
+    from app.hooks.event_log import EventLogHook
     from app.core.executor.emitter import HookEmitter
 
     task_hooks = collect_hooks("worker")
@@ -1002,6 +1023,9 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
             h.card_id = idx.card_id
             h.member_slug = member_slug
             h.chat_id = chat_id or ""
+        elif isinstance(h, EventLogHook):
+            h.card_id = idx.card_id
+            h.project_path = project_path
 
     task_emitter = HookEmitter(task_hooks)
 
