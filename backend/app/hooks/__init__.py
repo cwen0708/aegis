@@ -88,10 +88,12 @@ def collect_hooks(source: str = "worker") -> list[Hook]:
     from app.hooks.cleanup import CleanupHook
     from app.hooks.websocket import WebSocketHook
     from app.hooks.platform import PlatformHook
+    from app.hooks.event_log import EventLogHook
 
     if source == "worker":
         return [
             WebSocketHook(),    # DURING: Kanban log
+            EventLogHook(),     # DURING: 事件記錄 → JSONL（Playback 回放）
             OneStackHook(),     # DURING: aegis_stream + POST: 任務回報
             BroadcastHook(),    # POST: task_completed 事件
             DialogueHook(),     # POST: AVG 對話
