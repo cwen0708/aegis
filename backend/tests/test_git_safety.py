@@ -84,3 +84,23 @@ def test_rollback_hard(tmp_repo):
     mgr.rollback_hard()
     assert mgr.is_clean() is True
     assert not (tmp_repo / "bad.txt").exists()
+
+
+def test_auto_backup_clean_repo(tmp_repo):
+    mgr = GitSafetyManager(str(tmp_repo))
+    result = mgr.auto_backup()
+    assert result["committed"] is False
+    assert result["reason"] == "no changes"
+
+
+def test_auto_backup_with_changes(tmp_repo):
+    (tmp_repo / "backup_test.txt").write_text("some work")
+    (tmp_repo / "another.txt").write_text("more work")
+    mgr = GitSafetyManager(str(tmp_repo))
+    result = mgr.auto_backup()
+    assert result["committed"] is True
+    assert result["files_changed"] == 2
+    assert result["sha"] and len(result["sha"]) == 8
+    assert "backup: auto-save" in result["message"]
+    # repo 應該是乾淨的
+    assert mgr.is_clean() is True
