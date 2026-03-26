@@ -87,6 +87,10 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
             cwd=cwd,
         )
 
+    # Prompt Hardening: 非 pool 路徑也注入安全提醒
+    from app.core.prompt_hardening import harden_prompt
+    prompt = harden_prompt(prompt, project_path)
+
     provider_name = forced_provider if forced_provider and forced_provider in PROVIDERS else "claude"
     config = get_provider_config(provider_name)
 
