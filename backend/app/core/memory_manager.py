@@ -279,6 +279,69 @@ def cleanup_member_short_term(member_slug: str, retention_days: int = 30) -> int
     return deleted
 
 
+# ── MMR 重排序輔助函式 ──
+
+def _jaccard_similarity(tokens_a: list[str], tokens_b: list[str]) -> float:
+    """計算兩組 token 集合的 Jaccard 相似度（0~1）。"""
+    set_a = set(tokens_a)
+    set_b = set(tokens_b)
+    if not set_a and not set_b:
+        return 1.0
+    intersection = len(set_a & set_b)
+    union = len(set_a | set_b)
+    return intersection / union if union else 0.0
+
+
+def _mmr_rerank(
+    candidates: list[dict],
+    query_tokens: list[str],
+    top_k: int,
+    lambda_param: float = 0.5,
+) -> list[dict]:
+    """
+    MMR（Maximal Marginal Relevance）重排序。
+
+    每次迭代從候選中選出 lambda*relevance - (1-lambda)*max_similarity 最高的文件，
+    兼顧相關性與多樣性。
+
+    candidates 每筆需含 tokens（list[str]）與 score（float，BM25+decay 分數）。
+    """
+    if not candidates:
+        return []
+
+    # 正規化分數（最高分為 1）
+    max_score = max(c["score"] for c in candidates)
+    if max_score <= 0:
+        return candidates[:top_k]
+
+    selected: list[dict] = []
+    remaining = list(candidates)
+
+    for _ in range(min(top_k, len(candidates))):
+        best_idx = -1
+        best_mmr = float("-inf")
+
+        for i, cand in enumerate(remaining):
+            relevance = cand["score"] / max_score
+
+            # 計算與已選文件的最大相似度
+            max_sim = 0.0
+            for sel in selected:
+                sim = _jaccard_similarity(cand["tokens"], sel["tokens"])
+                if sim > max_sim:
+                    max_sim = sim
+
+            mmr = lambda_param * relevance - (1 - lambda_param) * max_sim
+
+            if mmr > best_mmr:
+                best_mmr = mmr
+                best_idx = i
+
+        selected.append(remaining.pop(best_idx))
+
+    return selected
+
+
 # ── BM25 + 時間衰減記憶搜尋 ──
 
 def _tokenize(text: str) -> list[str]:
@@ -300,12 +363,15 @@ def search_member_memories(
     member_slug: str,
     query: str,
     top_k: int = 5,
+    diversity: float = 0.5,
 ) -> list[dict]:
     """
-    搜尋成員記憶：BM25 評分 + 時間衰減（7 天半衰期）。
+    搜尋成員記憶：BM25 評分 + 時間衰減（7 天半衰期）+ MMR 多樣性重排。
 
     掃描 short-term 與 long-term 目錄的 .md 檔案，
     以 BM25(k1=1.5, b=0.75) 計算相關性，再乘以時間衰減因子。
+    diversity > 0 時，取 top_k*3 候選用 MMR 重排到 top_k。
+    diversity=0 時跳過 MMR（向後相容）。
     回傳 top_k 筆結果，每筆包含 file, score, snippet。
     """
     query_tokens = _tokenize(query)
@@ -395,4 +461,23 @@ def search_member_memories(
         })
 
     results.sort(key=lambda r: r["score"], reverse=True)
+
+    # MMR 重排序：diversity > 0 時啟用
+    if diversity > 0 and len(results) > 1:
+        # 建立候選清單（含 tokens 供 MMR 計算相似度）
+        doc_map = {str(d["path"]): d for d in docs}
+        mmr_candidates = []
+        for r in results[:top_k * 3]:
+            doc = doc_map.get(r["file"])
+            if doc:
+                mmr_candidates.append({
+                    "file": r["file"],
+                    "score": r["score"],
+                    "snippet": r["snippet"],
+                    "tokens": doc["tokens"],
+                })
+
+        reranked = _mmr_rerank(mmr_candidates, query_tokens, top_k, lambda_param=1 - diversity)
+        return [{"file": r["file"], "score": r["score"], "snippet": r["snippet"]} for r in reranked]
+
     return results[:top_k]
