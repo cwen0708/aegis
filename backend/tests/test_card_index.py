@@ -11,6 +11,8 @@ from app.core.card_index import (
     query_archived,
     rebuild_index,
     next_card_id,
+    title_similarity,
+    block_similar_cards,
 )
 
 
@@ -147,3 +149,83 @@ def test_next_card_id_increments(db_session, tmp_project):
     sync_card_to_index(db_session, card, project_id=1, file_path=str(fpath))
     db_session.commit()
     assert next_card_id(db_session) == 43
+
+
+# ==========================================
+# title_similarity 測試
+# ==========================================
+
+def test_title_similarity_exact_match():
+    assert title_similarity("Backlog 分派加入任務鎖定", "Backlog 分派加入任務鎖定") == 1.0
+
+
+def test_title_similarity_different():
+    score = title_similarity("Backlog 分派加入任務鎖定", "API endpoint health check")
+    assert score < 0.3
+
+
+def test_title_similarity_similar():
+    score = title_similarity("Backlog 分派加入任務鎖定機制", "Backlog 分派任務鎖定")
+    assert score >= 0.5
+
+
+def test_title_similarity_prefix_strip():
+    score = title_similarity("feat: 新增任務鎖定", "fix: 新增任務鎖定")
+    assert score == 1.0
+
+
+# ==========================================
+# block_similar_cards 測試
+# ==========================================
+
+def test_block_similar_cards(db_session, tmp_project):
+    """同 milestone 且標題相似的 idle 卡片應被標記 Blocked"""
+    # 建立 running 卡片（觸發者）
+    c1 = _make_card(1, status="running", title="Backlog 分派加入任務鎖定",
+                    tags=["M11008"])
+    f1 = card_file_path(str(tmp_project), 1)
+    write_card(f1, c1)
+    sync_card_to_index(db_session, c1, project_id=1, file_path=str(f1))
+
+    # 建立相似的 idle 卡片（同 milestone）
+    c2 = _make_card(2, status="idle", title="Backlog 分派任務鎖定",
+                    tags=["M11008"])
+    f2 = card_file_path(str(tmp_project), 2)
+    write_card(f2, c2)
+    sync_card_to_index(db_session, c2, project_id=1, file_path=str(f2))
+
+    # 建立不相似的 idle 卡片（同 milestone）
+    c3 = _make_card(3, status="idle", title="API health check endpoint",
+                    tags=["M11008"])
+    f3 = card_file_path(str(tmp_project), 3)
+    write_card(f3, c3)
+    sync_card_to_index(db_session, c3, project_id=1, file_path=str(f3))
+
+    db_session.commit()
+
+    blocked = block_similar_cards(1, c1.title, db_session)
+    db_session.commit()
+
+    assert 2 in blocked
+    assert 3 not in blocked
+
+    # 確認 card 2 的 tags_json 包含 Blocked
+    idx2 = db_session.get(CardIndex, 2)
+    assert "Blocked" in json.loads(idx2.tags_json)
+
+
+def test_block_similar_cards_no_milestone(db_session, tmp_project):
+    """無 milestone tag 時不封鎖任何卡片"""
+    c1 = _make_card(1, status="running", title="Some task", tags=["Bug"])
+    f1 = card_file_path(str(tmp_project), 1)
+    write_card(f1, c1)
+    sync_card_to_index(db_session, c1, project_id=1, file_path=str(f1))
+
+    c2 = _make_card(2, status="idle", title="Some task", tags=["Bug"])
+    f2 = card_file_path(str(tmp_project), 2)
+    write_card(f2, c2)
+    sync_card_to_index(db_session, c2, project_id=1, file_path=str(f2))
+    db_session.commit()
+
+    blocked = block_similar_cards(1, c1.title, db_session)
+    assert blocked == []
