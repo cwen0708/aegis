@@ -208,6 +208,10 @@ class ProcessPool:
 
     def _send_and_read(self, entry: ProcessEntry, message: str, on_line=None) -> Dict[str, Any]:
         """送 user message + 讀到 result 行。第一次呼叫時會先處理 init 行。"""
+        # Prompt Hardening: 每則訊息注入精簡版安全提醒
+        from app.core.prompt_hardening import harden_message
+        message = harden_message(message)
+
         msg = {"type": "user", "message": {"role": "user", "content": message}}
         payload = json.dumps(msg, ensure_ascii=False) + "\n"
         entry.proc.stdin.write(payload.encode("utf-8"))
