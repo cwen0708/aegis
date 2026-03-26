@@ -6,6 +6,8 @@ from app.core.data_classifier import (
     scan,
     sanitize,
     restore,
+    guard_for_ai,
+    SecurityBlock,
 )
 
 
@@ -152,3 +154,36 @@ class TestNoFalsePositive:
         """URL 中的長數字不應被誤判為信用卡號。"""
         text = "https://example.com/page/12345"
         assert classify(text) == SecurityLevel.S1
+
+
+class TestGuardForAi:
+    """guard_for_ai() 安全閘門測試。"""
+
+    def test_guard_s1_passthrough(self):
+        """S1 普通文字應原文放行。"""
+        text = "今天天氣真好，我們來討論一下專案進度"
+        result_text, mapping = guard_for_ai(text)
+        assert result_text == text
+        assert mapping == {}
+
+    def test_guard_s2_sanitized(self):
+        """S2 含 email 的文字應被去敏化。"""
+        text = "請聯繫 admin@corp.com 取得詳細資訊"
+        result_text, mapping = guard_for_ai(text)
+        assert "admin@corp.com" not in result_text
+        assert len(mapping) > 0
+
+    def test_guard_s3_blocked(self):
+        """S3 含 API key 的文字應拋出 SecurityBlock。"""
+        text = "my key is sk-abc123def456ghi789jkl012mno"
+        with pytest.raises(SecurityBlock, match="S3 data detected"):
+            guard_for_ai(text)
+
+    def test_guard_integration_with_harden(self):
+        """guard_for_ai + harden_prompt 協作正確：先 harden 再 guard。"""
+        from app.core.prompt_hardening import harden_prompt
+        prompt = "請幫我查看 user@example.com 的帳號狀態"
+        hardened = harden_prompt(prompt, "/tmp/test")
+        result_text, mapping = guard_for_ai(hardened)
+        assert "user@example.com" not in result_text
+        assert len(mapping) > 0

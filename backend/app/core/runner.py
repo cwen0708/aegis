@@ -91,6 +91,14 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
     from app.core.prompt_hardening import harden_prompt
     prompt = harden_prompt(prompt, project_path)
 
+    # Data Classification Guard：送往 AI 前掃描敏感資料
+    from app.core.data_classifier import guard_for_ai, SecurityBlock
+    try:
+        prompt, _redact_map = guard_for_ai(prompt)
+    except SecurityBlock as e:
+        logger.warning(f"[Runner] Prompt blocked by security guard: {e}")
+        return {"status": "error", "output": f"SecurityBlock: {e}", "provider": forced_provider or "claude"}
+
     provider_name = forced_provider if forced_provider and forced_provider in PROVIDERS else "claude"
     config = get_provider_config(provider_name)
 

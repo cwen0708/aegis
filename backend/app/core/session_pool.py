@@ -212,6 +212,14 @@ class ProcessPool:
         from app.core.prompt_hardening import harden_message
         message = harden_message(message)
 
+        # Data Classification Guard：送往 AI 前掃描敏感資料
+        from app.core.data_classifier import guard_for_ai, SecurityBlock
+        try:
+            message, _redact_map = guard_for_ai(message)
+        except SecurityBlock as e:
+            logger.warning(f"[ProcessPool] Message blocked by security guard: {e}")
+            return {"status": "error", "output": f"SecurityBlock: {e}", "token_info": {}}
+
         msg = {"type": "user", "message": {"role": "user", "content": message}}
         payload = json.dumps(msg, ensure_ascii=False) + "\n"
         entry.proc.stdin.write(payload.encode("utf-8"))
