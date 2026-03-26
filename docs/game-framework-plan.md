@@ -157,6 +157,24 @@ client/public/assets/
 4. EditorScene 暫停使用（改用 Tiled 外部編輯）
 5. 座標系調整（16→32 tile）
 
+## Room2 下一步（待做）
+
+### 從 OfficeScene 搬過來的功能
+1. **角色精靈**：成員 sprite sheet（128×256）載入 + 動畫建立
+2. **漫步 AI**：A* 尋路，但 tile 改 32×32（pathfinding.ts 已支援任意 tile size）
+3. **角色狀態同步**：10 秒輪詢成員/任務 → 忙碌坐在桌前 / 閒置漫步
+4. **點擊互動**：點角色 → 開 CharacterDialog（AVG 對話框 + TTS）
+5. **對話泡泡**：角色頭上顯示最近任務摘要
+
+### 不需要的
+- 玩家控制（WASD 移動）→ 我們的角色全自動
+- 多人同步（Colyseus）→ AI 成員由後端驅動
+
+### 要注意的
+- 座標系從 16×16×3 倍放大 → 32×32 原生
+- SkyOffice 的 `Chair` object 有 `direction` 屬性，可用來決定坐下朝向
+- Y-sort 已在 Room2Scene 實作，角色也要加入 depth sorting
+
 ## 不需要改的
 
 | 元件 | 原因 |
