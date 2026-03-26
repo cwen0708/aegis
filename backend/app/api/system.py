@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlmodel import Session, select
 from app.database import get_session
-from app.models.core import SystemSetting
+from app.models.core import Project, SystemSetting
 from app.core.usage_poller import get_cached_claude_usage, get_cached_gemini_usage, get_last_updated
 from app.core.default_office_layout import get_default_office_layout_json
 import app.core.cron_poller as cron_module
@@ -239,3 +240,37 @@ def update_settings(data: dict, session: Session = Depends(get_session)):
         except (ValueError, TypeError):
             raise HTTPException(status_code=400, detail="max_workstations 必須為正整數")
     return get_settings(session=session)
+
+
+# ==========================================
+# Git Backup
+# ==========================================
+class GitBackupRequest(BaseModel):
+    project_id: int | None = None
+
+
+@router.post("/system/git-backup")
+def git_backup(body: GitBackupRequest = GitBackupRequest(), session: Session = Depends(get_session)):
+    """自動備份：commit 指定專案所有未提交的變更"""
+    from app.core.git_safety import GitSafetyManager
+
+    if body.project_id is not None:
+        project = session.get(Project, body.project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        repo_path = project.path
+    else:
+        # 預設使用系統專案
+        stmt = select(Project).where(Project.is_system == True)
+        project = session.exec(stmt).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="No system project found")
+        repo_path = project.path
+
+    try:
+        mgr = GitSafetyManager(repo_path)
+        result = mgr.auto_backup()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return result

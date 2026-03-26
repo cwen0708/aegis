@@ -1,5 +1,6 @@
 import git
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 import logging
 
@@ -36,6 +37,22 @@ class GitSafetyManager:
         current_branch = self.repo.active_branch.name
         self.repo.git.checkout('-b', branch_name)
         return current_branch
+
+    def auto_backup(self) -> dict:
+        """定時自動備份：commit 所有未提交的變更"""
+        if self.is_clean():
+            return {"committed": False, "reason": "no changes"}
+
+        changed = len(self.repo.index.diff(None)) + len(self.repo.untracked_files)
+
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        message = f"backup: auto-save {now} ({changed} files changed)"
+
+        self.repo.git.add("-A")
+        self.repo.git.commit("-m", message)
+        commit_sha = self.repo.head.commit.hexsha[:8]
+
+        return {"committed": True, "message": message, "sha": commit_sha, "files_changed": changed}
 
     def commit_changes(self, message: str):
         """提交 AI 的變更"""
