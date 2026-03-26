@@ -176,11 +176,11 @@ def main():
                 if ret_rb != 0:
                     # rebase 衝突 → abort，保持 dev 不動（不影響部署）
                     run_command(["git", "rebase", "--abort"], cwd=str(DEV_WORKTREE))
-                    logger.warning(f"[HotUpdate] Dev rebase conflict, skipped: {err_rb}")
+                    print(f"[HotUpdate] Dev rebase conflict, skipped: {err_rb}")
                 else:
-                    logger.info("[HotUpdate] Dev worktree rebased onto main")
+                    print("[HotUpdate] Dev worktree rebased onto main")
             except Exception as e:
-                logger.warning(f"[HotUpdate] Dev rebase failed: {e}")
+                print(f"[HotUpdate] Dev rebase failed: {e}")
 
         update_status("building", 30, "正在安裝 Python 依賴...")
 
