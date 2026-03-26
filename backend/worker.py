@@ -603,23 +603,40 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
 
     start_time = time.time()
 
-    # 嘗試使用 PTY，失敗則 fallback 到 subprocess
-    if platform.system() == "Windows":
-        try:
-            return run_task_pty_windows(
+    # LLM 審計日誌 — 包裝整個 LLM 呼叫
+    from app.core.llm_audit import LLMAuditContext
+    audit = LLMAuditContext(
+        provider=provider_name,
+        card_id=card_id,
+        member_id=member_id,
+    )
+
+    with audit:
+        # 嘗試使用 PTY，失敗則 fallback 到 subprocess
+        result = None
+        if platform.system() == "Windows":
+            try:
+                result = run_task_pty_windows(
+                    card_id, project_path, cmd_parts, stdin_prompt, prompt,
+                    env, provider_name, card_title, project_name, member_id,
+                    config, start_time, emitter=emitter
+                )
+            except Exception as e:
+                logger.warning(f"[Task {card_id}] PTY failed, fallback to subprocess: {e}")
+
+        if result is None:
+            # Fallback: 使用一般 subprocess
+            result = run_task_subprocess(
                 card_id, project_path, cmd_parts, stdin_prompt, prompt,
                 env, provider_name, card_title, project_name, member_id,
                 config, start_time, emitter=emitter
             )
-        except Exception as e:
-            logger.warning(f"[Task {card_id}] PTY failed, fallback to subprocess: {e}")
 
-    # Fallback: 使用一般 subprocess
-    return run_task_subprocess(
-        card_id, project_path, cmd_parts, stdin_prompt, prompt,
-        env, provider_name, card_title, project_name, member_id,
-        config, start_time, emitter=emitter
-    )
+        # 從結果填入 token 用量
+        audit.record.status = result.get("status", "error")
+        audit.fill_from_token_info(result.get("token_info", {}))
+
+    return result
 
 
 
