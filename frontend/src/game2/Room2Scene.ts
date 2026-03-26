@@ -1,31 +1,46 @@
 /**
- * Room2Scene — 基於 SkyOffice 圖集 + Tiled 地圖的 Phaser 場景
- *
- * 特色：
- * - 32×32 原生 tile（不放大）
- * - Tiled JSON 載入（Phaser 原生 tilemap）
- * - 碰撞自動從 Tiled 屬性讀取
- * - Y-sort 深度排序
+ * Room2Scene — SkyOffice 圖集 + Tiled 地圖
  */
 import Phaser from 'phaser'
 
 const ASSET_BASE = 'assets/office2'
 
+// tileset name → spritesheet key 映射
+const TILESET_KEY_MAP: Record<string, string> = {
+  'FloorAndGround': 'tiles_floor',
+  'Modern_Office_Black_Shadow': 'tiles_office',
+  'Generic': 'tiles_generic',
+  'Basement': 'tiles_basement',
+  'chair': 'chairs',
+  'computer': 'computers',
+  'whiteboard': 'whiteboards',
+  'vendingmachine': 'vendingmachines',
+}
+
+// tileset 資訊（preload 後由 create 填入）
+interface TilesetInfo {
+  name: string
+  firstgid: number
+  lastgid: number  // firstgid + tilecount - 1
+  spriteKey: string
+}
+
 export default class Room2Scene extends Phaser.Scene {
   private map!: Phaser.Tilemaps.Tilemap
+  private tilesetInfos: TilesetInfo[] = []
 
   constructor() {
     super('room2')
   }
 
   preload() {
-    // 地圖
     this.load.tilemapTiledJSON('tilemap2', `${ASSET_BASE}/map.json`)
 
-    // 瓷磚圖集（spritesheet 方式載入，讓 Phaser 自動切幀）
+    // 地板+牆壁
     this.load.spritesheet('tiles_floor', `${ASSET_BASE}/FloorAndGround.png`, {
       frameWidth: 32, frameHeight: 32,
     })
+    // 辦公傢俱（32×32 tiles）
     this.load.spritesheet('tiles_office', `${ASSET_BASE}/tileset/Modern_Office_Black_Shadow.png`, {
       frameWidth: 32, frameHeight: 32,
     })
@@ -35,8 +50,7 @@ export default class Room2Scene extends Phaser.Scene {
     this.load.spritesheet('tiles_basement', `${ASSET_BASE}/tileset/Basement.png`, {
       frameWidth: 32, frameHeight: 32,
     })
-
-    // 物件圖集
+    // 物件（非 32×32）
     this.load.spritesheet('chairs', `${ASSET_BASE}/items/chair.png`, {
       frameWidth: 32, frameHeight: 64,
     })
@@ -52,46 +66,32 @@ export default class Room2Scene extends Phaser.Scene {
   }
 
   create() {
-    // 建立 tilemap
     this.map = this.make.tilemap({ key: 'tilemap2' })
 
-    // 綁定 tileset 名稱 → 載入的圖片 key
+    // 註冊 tilesets
     const floorTileset = this.map.addTilesetImage('FloorAndGround', 'tiles_floor')!
     const officeTileset = this.map.addTilesetImage('Modern_Office_Black_Shadow', 'tiles_office')!
     const genericTileset = this.map.addTilesetImage('Generic', 'tiles_generic')!
     const basementTileset = this.map.addTilesetImage('Basement', 'tiles_basement')!
 
-    const allTilesets = [floorTileset, officeTileset, genericTileset, basementTileset]
+    // 建立 tileset 查找表（從 map.json 的 tilesets 資料）
+    this._buildTilesetInfos()
 
-    // 建立 tile layers
+    // 地板 tile layer
+    const allTilesets = [floorTileset, officeTileset, genericTileset, basementTileset]
     const groundLayer = this.map.createLayer('Ground', allTilesets)
     if (groundLayer) {
       groundLayer.setCollisionByProperty({ collides: true })
     }
 
-    // 建立 object layers（椅子、電腦等）
-    this._createObjectLayer('Chair', 'chairs')
-    this._createObjectLayer('Computer', 'computers')
-    this._createObjectLayer('Whiteboard', 'whiteboards')
-    this._createObjectLayer('VendingMachine', 'vendingmachines')
-
-    // 嘗試建立其他 tile layers（如果存在）
-    for (const layerName of ['Wall', 'Objects', 'ObjectsOnCollide', 'GenericObjects', 'GenericObjectsOnCollide', 'Basement']) {
-      const layer = this.map.getObjectLayer(layerName)
-      if (layer) {
-        const group = this.physics.add.staticGroup()
-        layer.objects.forEach((obj) => {
-          if (obj.gid) {
-            const sprite = group.create(
-              obj.x! + (obj.width || 0) / 2,
-              obj.y! - (obj.height || 0) / 2,
-            )
-            // Y-sort 深度
-            sprite.setDepth(obj.y!)
-            sprite.setVisible(false) // 碰撞用，不顯示（tilemap 已渲染）
-          }
-        })
-      }
+    // 所有 object layers — 統一用 gid 解析渲染
+    const objectLayerNames = [
+      'Wall', 'Chair', 'Objects', 'ObjectsOnCollide',
+      'GenericObjects', 'GenericObjectsOnCollide',
+      'Computer', 'Whiteboard', 'Basement', 'VendingMachine',
+    ]
+    for (const name of objectLayerNames) {
+      this._renderObjectLayer(name)
     }
 
     // 攝影機
@@ -110,38 +110,59 @@ export default class Room2Scene extends Phaser.Scene {
     })
 
     // 滾輪縮放
-    this.input.on('wheel', (_pointer: unknown, _go: unknown, _dx: number, _dy: number, dz: number) => {
+    this.input.on('wheel', (_p: unknown, _g: unknown, _dx: number, _dy: number, dz: number) => {
       const cam = this.cameras.main
-      const newZoom = Phaser.Math.Clamp(cam.zoom - dz * 0.001, 0.5, 3)
-      cam.setZoom(newZoom)
+      cam.setZoom(Phaser.Math.Clamp(cam.zoom - dz * 0.001, 0.5, 3))
     })
   }
 
-  private _createObjectLayer(layerName: string, spriteKey: string) {
+  /** 從 map 的 tilesets 建立 gid 查找表 */
+  private _buildTilesetInfos() {
+    this.tilesetInfos = this.map.tilesets.map((ts) => {
+      const spriteKey = TILESET_KEY_MAP[ts.name] || ts.name
+      return {
+        name: ts.name,
+        firstgid: ts.firstgid,
+        lastgid: ts.firstgid + ts.total - 1,
+        spriteKey,
+      }
+    })
+    // 按 firstgid 降序排（查找時大 gid 先匹配）
+    this.tilesetInfos.sort((a, b) => b.firstgid - a.firstgid)
+  }
+
+  /** 根據 gid 找到對應的 spritesheet key + frame index */
+  private _resolveGid(gid: number): { key: string; frame: number } | null {
+    for (const info of this.tilesetInfos) {
+      if (gid >= info.firstgid && gid <= info.lastgid) {
+        return { key: info.spriteKey, frame: gid - info.firstgid }
+      }
+    }
+    return null
+  }
+
+  /** 渲染一個 object layer 裡的所有物件 */
+  private _renderObjectLayer(layerName: string) {
     const layer = this.map.getObjectLayer(layerName)
     if (!layer) return
 
     layer.objects.forEach((obj) => {
       if (!obj.gid) return
+
+      const resolved = this._resolveGid(obj.gid)
+      if (!resolved) return
+
+      // Tiled object 的 (x, y) 是左下角，Phaser sprite 的 origin 是中心
       const sprite = this.add.sprite(
         obj.x! + (obj.width || 0) / 2,
         obj.y! - (obj.height || 0) / 2,
-        spriteKey,
-        obj.gid - this._getFirstGid(spriteKey),
+        resolved.key,
+        resolved.frame,
       )
-      // Y-sort
+
+      // Y-sort 深度排序
       sprite.setDepth(obj.y! + (obj.height || 0) * 0.27)
     })
-  }
-
-  private _getFirstGid(tilesetName: string): number {
-    // 從 map.json 的 tilesets 找 firstgid
-    const tileset = this.map.tilesets.find(t => {
-      // spritesheet key 可能跟 tileset name 不同，用 contains 匹配
-      const n = t.name.toLowerCase()
-      return tilesetName.toLowerCase().includes(n) || n.includes(tilesetName.toLowerCase())
-    })
-    return tileset?.firstgid ?? 0
   }
 }
 
