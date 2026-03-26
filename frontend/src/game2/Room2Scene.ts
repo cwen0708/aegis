@@ -84,14 +84,14 @@ export default class Room2Scene extends Phaser.Scene {
       groundLayer.setCollisionByProperty({ collides: true })
     }
 
-    // 所有 object layers — 統一用 gid 解析渲染
-    const objectLayerNames = [
-      'Wall', 'Chair', 'Objects', 'ObjectsOnCollide',
-      'GenericObjects', 'GenericObjectsOnCollide',
-      'Computer', 'Whiteboard', 'Basement', 'VendingMachine',
-    ]
-    for (const name of objectLayerNames) {
-      this._renderObjectLayer(name)
+    // Object layers 分兩組渲染：
+    // 1. 底層物件（椅子、地下室裝飾）— 不做 Y-sort，永遠在下面
+    for (const name of ['Chair', 'Basement']) {
+      this._renderObjectLayer(name, false)
+    }
+    // 2. 上層物件（桌子、電腦等）— Y-sort depth，會蓋住椅子和角色
+    for (const name of ['Wall', 'Objects', 'ObjectsOnCollide', 'GenericObjects', 'GenericObjectsOnCollide', 'Computer', 'Whiteboard', 'VendingMachine']) {
+      this._renderObjectLayer(name, true)
     }
 
     // 攝影機
@@ -148,7 +148,7 @@ export default class Room2Scene extends Phaser.Scene {
   }
 
   /** 渲染一個 object layer 裡的所有物件 */
-  private _renderObjectLayer(layerName: string) {
+  private _renderObjectLayer(layerName: string, useDepthSort: boolean) {
     const layer = this.map.getObjectLayer(layerName)
     if (!layer) return
 
@@ -158,7 +158,6 @@ export default class Room2Scene extends Phaser.Scene {
       const resolved = this._resolveGid(obj.gid)
       if (!resolved) return
 
-      // Tiled object 的 (x, y) 是左下角，Phaser sprite 的 origin 是中心
       const sprite = this.add.sprite(
         obj.x! + (obj.width || 0) / 2,
         obj.y! - (obj.height || 0) / 2,
@@ -166,8 +165,13 @@ export default class Room2Scene extends Phaser.Scene {
         resolved.frame,
       )
 
-      // Y-sort 深度排序
-      sprite.setDepth(obj.y! + (obj.height || 0) * 0.27)
+      if (useDepthSort) {
+        // Y-sort：y 越大（越靠下）depth 越高，會蓋住上面的物件
+        sprite.setDepth(obj.y! + (obj.height || 0) * 0.27)
+      } else {
+        // 底層物件：固定低 depth（被桌子和角色蓋住）
+        sprite.setDepth(0)
+      }
     })
   }
 }
