@@ -450,6 +450,22 @@ def delegate_card(card_id: int, req: DelegateRequest, session: Session = Depends
         created_at=now, updated_at=now,
     )
     session.add(orm_card)
+
+    # 記錄委派訊息
+    from app.models.core import MemberMessage
+    desc_summary = (req.content or "")[:100]
+    msg_content = f"委派子任務: {req.title}"
+    if desc_summary:
+        msg_content += f" — {desc_summary}"
+    delegate_msg = MemberMessage(
+        from_member_id=parent_idx.member_id or 0,
+        to_member_id=req.target_member_id,
+        card_id=card_id,
+        message_type="delegate",
+        content=msg_content,
+    )
+    session.add(delegate_msg)
+
     session.commit()
     session.refresh(orm_card)
 

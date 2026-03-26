@@ -225,6 +225,17 @@ class MemberDialogue(SQLModel, table=True):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class MemberMessage(SQLModel, table=True):
+    """成員間訊息記錄（AI 成員透明通訊）"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    from_member_id: int = Field(index=True)
+    to_member_id: Optional[int] = Field(default=None, index=True)
+    card_id: Optional[int] = Field(default=None, index=True)
+    message_type: str = Field(default="info")  # delegate / report / question / info
+    content: str = Field(default="")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class MemberAccount(SQLModel, table=True):
     """成員-帳號綁定（含優先順序與模型設定）"""
     id: Optional[int] = Field(default=None, primary_key=True)
