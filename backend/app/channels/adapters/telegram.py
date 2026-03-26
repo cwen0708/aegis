@@ -271,7 +271,7 @@ class TelegramChannel(ChannelBase):
             all_buttons = msg.buttons or parsed_buttons
             if all_buttons:
                 keyboard = []
-                for row in msg.buttons:
+                for row in all_buttons:
                     kb_row = []
                     for btn in row:
                         if btn.url:
@@ -344,13 +344,21 @@ class TelegramChannel(ChannelBase):
         """
         from ..types import Button
 
+        # 支援多種格式：<!--actions ... --> 或 ```\n<!--actions\n...\n-->\n```
+        # 先清理可能包裹的 code block
+        cleaned = re.sub(r'```\s*\n?(<!--\s*actions)', r'\1', text)
+        cleaned = re.sub(r'(-->)\s*\n?```', r'\1', cleaned)
+
         pattern = r'<!--\s*actions\s*\n(.*?)\n\s*-->'
-        match = re.search(pattern, text, re.DOTALL)
+        match = re.search(pattern, cleaned, re.DOTALL)
         if not match:
+            has_hint = '<!--' in text and 'actions' in text
+            if has_hint:
+                logger.warning(f"[Telegram] actions hint found but regex no match. text tail: {text[-200:]!r}")
             return text, []
 
         actions_block = match.group(1)
-        clean_text = text[:match.start()].rstrip()
+        clean_text = cleaned[:match.start()].rstrip()
 
         buttons = []
         btn_pattern = r'\[([^\]]+)\]\(([^)]+)\)'
@@ -369,6 +377,7 @@ class TelegramChannel(ChannelBase):
                 if row:
                     buttons.append(row)
 
+        logger.info(f"[Telegram] parsed {len(buttons)} action buttons")
         return clean_text, buttons
 
     async def _send_attachment(self, chat_id: int, att: Attachment):
