@@ -190,6 +190,7 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
             output += "\n\n⚠️ 你沒有該專案的存取權限。"
 
     # 12.5 執行 POST hooks（MediaHook 等需要完整 output）
+    logger.info(f"[Chat] Output length={len(output)}, has_send_file={'send_file' in output or 'sendfile' in output or 'send_image' in output}")
     from app.hooks import run_hooks, TaskContext as _TC
     _chat_ctx = _TC(
         output=output,
@@ -527,16 +528,23 @@ def extract_attachments(output: str) -> tuple[str, list[dict]]:
 
     attachments = []
 
-    # 偵測 <!-- send_image: /path/to/file.png --> 或 <!-- send_document: /path/to/file.pdf -->
-    pattern = r'<!--\s*send_(image|document|photo|file)\s*:\s*(.+?)\s*-->'
+    # 偵測 <!-- send_file: path --> 及變體（send_image, sendfile, sendimage 等）
+    pattern = r'<!--\s*send[_\s]?(image|document|photo|file)\s*:\s*(.+?)\s*-->'
     matches = re.findall(pattern, output, re.IGNORECASE)
 
-    for send_type, path in matches:
-        path = path.strip()
-        if os.path.exists(path):
+    for send_type, raw_path in matches:
+        # 支援 path | caption 格式
+        parts = raw_path.split('|', 1)
+        fpath = parts[0].strip()
+        caption = parts[1].strip() if len(parts) > 1 else ""
+        if os.path.exists(fpath):
             att_type = "photo" if send_type in ("image", "photo") else "document"
-            attachments.append({"type": att_type, "path": path, "caption": ""})
-            logger.info(f"[Chat] Detected attachment: {att_type} → {path}")
+            # file 類型根據副檔名自動判斷
+            if send_type == "file":
+                img_exts = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'}
+                att_type = "photo" if os.path.splitext(fpath)[1].lower() in img_exts else "document"
+            attachments.append({"type": att_type, "path": fpath, "caption": caption})
+            logger.info(f"[Chat] Detected attachment: {att_type} → {fpath}")
 
     # 清除標記
     cleaned = re.sub(pattern, '', output).strip()
