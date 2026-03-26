@@ -169,6 +169,25 @@ def _build_chat_md(
     # 回應風格
     lines.append("# 回應風格")
     lines.append("請以你的角色身份回應（簡潔、友善、專業）。")
+    lines.append("")
+
+    # 下一步操作建議（Telegram 顯示為按鈕）
+    if platform in ("telegram", "line", "discord"):
+        lines.append("# 下一步操作建議")
+        lines.append("每次回應後，思考用戶接下來最可能想做什麼，提供 2-4 個操作選項。")
+        lines.append("在回應文字的**最後**加上 `<!--actions-->` 區塊：")
+        lines.append("")
+        lines.append("```")
+        lines.append("<!--actions")
+        lines.append("[按鈕文字](https://url)     ← URL 按鈕（開連結）")
+        lines.append("[按鈕文字](callback:動作名)  ← 回調按鈕")
+        lines.append("-->")
+        lines.append("```")
+        lines.append("")
+        lines.append("範例：找到檔案後 → `[📄 打開文件](分享連結URL)` `[🔍 搜尋更多](callback:search)`")
+        lines.append("分析完成後 → `[📨 發送報告](callback:send)` `[🔄 重新分析](callback:rerun)`")
+        lines.append("不是每次都要加，只在有明確下一步時才加。每行 1 個按鈕，最多 4 行。")
+        lines.append("")
 
     return "\n".join(lines)
 
