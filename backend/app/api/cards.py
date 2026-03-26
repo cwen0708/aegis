@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from sqlmodel import Session, select
 from sqlalchemy import func as sa_func
 from typing import List, Optional
@@ -8,9 +9,11 @@ from app.database import get_session
 from app.models.core import Project, Card, StageList, CardIndex
 from app.core.card_file import CardData, read_card as read_card_md, write_card, card_file_path
 from app.core.card_index import sync_card_to_index, remove_card_from_index, next_card_id
+from app.core.paths import WORKSPACES_ROOT
 from app.api.deps import get_card_lock, get_project_for_list
 from pathlib import Path
 import asyncio
+import mimetypes
 
 router = APIRouter(tags=["Cards"])
 
@@ -499,6 +502,73 @@ def get_subtasks(card_id: int, session: Session = Depends(get_session)):
         }
         for s in subtasks
     ]
+
+
+# ==========================================
+# Artifacts — workspace 產出物預覽
+# ==========================================
+_PREVIEW_EXTENSIONS = {
+    ".html", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp",
+    ".md", ".mermaid", ".pdf",
+}
+_EXCLUDED_DIRS = {".claude", "node_modules", "__pycache__", ".git", ".venv", "venv", ".aegis"}
+
+_EXTENSION_TO_PREVIEW: dict[str, str] = {
+    ".html": "html", ".svg": "image", ".png": "image", ".jpg": "image",
+    ".jpeg": "image", ".gif": "image", ".webp": "image",
+    ".md": "markdown", ".mermaid": "markdown", ".pdf": "pdf",
+}
+
+
+def _scan_artifacts(workspace: Path) -> list[dict]:
+    """遞迴掃描 workspace 目錄下的可預覽檔案"""
+    results: list[dict] = []
+    if not workspace.is_dir():
+        return results
+    for p in workspace.rglob("*"):
+        if not p.is_file():
+            continue
+        # 排除系統目錄
+        rel = p.relative_to(workspace)
+        if any(part in _EXCLUDED_DIRS for part in rel.parts):
+            continue
+        if p.suffix.lower() not in _PREVIEW_EXTENSIONS:
+            continue
+        results.append({
+            "name": p.name,
+            "path": str(rel),
+            "type": p.suffix.lower().lstrip("."),
+            "size": p.stat().st_size,
+            "preview_type": _EXTENSION_TO_PREVIEW.get(p.suffix.lower(), "unknown"),
+        })
+    # 按名稱排序
+    results.sort(key=lambda x: x["name"])
+    return results
+
+
+@router.get("/cards/{card_id}/artifacts")
+def list_artifacts(card_id: int):
+    """掃描卡片 workspace 目錄下的可預覽產出物"""
+    workspace = WORKSPACES_ROOT / f"task-{card_id}"
+    return _scan_artifacts(workspace)
+
+
+@router.get("/cards/{card_id}/artifacts/raw")
+def get_artifact_raw(card_id: int, path: str = Query(..., description="workspace 內相對路徑")):
+    """取得 workspace 內的原始檔案（供前端 iframe/img 使用）"""
+    workspace = WORKSPACES_ROOT / f"task-{card_id}"
+    # 安全檢查：解析後路徑必須在 workspace 內
+    try:
+        target = (workspace / path).resolve()
+    except (ValueError, OSError):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    if not str(target).startswith(str(workspace.resolve())):
+        raise HTTPException(status_code=403, detail="Path traversal denied")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    media_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+    return FileResponse(target, media_type=media_type)
 
 
 @router.get("/cards/{card_id}/broadcast-logs")
