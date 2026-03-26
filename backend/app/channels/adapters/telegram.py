@@ -8,6 +8,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     MessageHandler,
+    CallbackQueryHandler,
     filters,
     ContextTypes,
 )
@@ -64,6 +65,9 @@ class TelegramChannel(ChannelBase):
             | filters.VOICE | filters.AUDIO | filters.Document.ALL,
             self._on_message
         ))
+
+        # 註冊 callback query handler（inline button 點擊）
+        self._app.add_handler(CallbackQueryHandler(self._on_callback_query))
 
         # 初始化並啟動
         await self._app.initialize()
@@ -177,6 +181,35 @@ class TelegramChannel(ChannelBase):
             caption=update.message.caption,
         )
 
+        await message_bus.publish_inbound(msg)
+
+    async def _on_callback_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """處理 inline button 點擊：將按鈕文字作為用戶訊息發送"""
+        query = update.callback_query
+        if not query:
+            return
+
+        # 回應 Telegram（移除按鈕上的 loading 狀態）
+        await query.answer()
+
+        # 把按鈕文字當作用戶訊息
+        btn_text = query.data or ""
+        if not btn_text:
+            return
+
+        msg = InboundMessage(
+            id=str(query.id),
+            platform=self.PLATFORM,
+            user_id=str(query.from_user.id),
+            chat_id=str(query.message.chat_id),
+            text=btn_text,
+            timestamp=datetime.now(timezone.utc),
+            message_type=MessageType.TEXT,
+            user_name=query.from_user.full_name,
+            raw_data={"callback_query_id": query.id},
+        )
+
+        logger.info(f"[Telegram] Callback button clicked: {btn_text}")
         await message_bus.publish_inbound(msg)
 
     async def _download_file(self, tg_file, filename: str) -> str:
