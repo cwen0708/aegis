@@ -208,12 +208,42 @@ class TelegramChannel(ChannelBase):
 
             # 編輯現有訊息
             if msg.edit_message_id:
-                await self._app.bot.edit_message_text(
-                    chat_id=int(msg.chat_id),
-                    message_id=int(msg.edit_message_id),
-                    text=msg.text,
-                    parse_mode=parse_mode,
-                )
+                # 解析 actions 標記
+                clean_text, parsed_buttons = self._parse_actions_markup(msg.text)
+
+                if parsed_buttons:
+                    # 有按鈕：先 edit 文字（去掉 actions 標記），再發新訊息帶按鈕
+                    await self._app.bot.edit_message_text(
+                        chat_id=int(msg.chat_id),
+                        message_id=int(msg.edit_message_id),
+                        text=clean_text,
+                        parse_mode=parse_mode,
+                    )
+                    # 組裝 inline keyboard
+                    keyboard = []
+                    for row in parsed_buttons:
+                        kb_row = []
+                        for btn in row:
+                            if btn.url:
+                                kb_row.append(InlineKeyboardButton(text=btn.text, url=btn.url))
+                            elif btn.callback_data:
+                                kb_row.append(InlineKeyboardButton(text=btn.text, callback_data=btn.callback_data))
+                        if kb_row:
+                            keyboard.append(kb_row)
+                    if keyboard:
+                        # 發一則空白提示 + 按鈕
+                        await self._app.bot.send_message(
+                            chat_id=int(msg.chat_id),
+                            text="👇 快速操作",
+                            reply_markup=InlineKeyboardMarkup(keyboard),
+                        )
+                else:
+                    await self._app.bot.edit_message_text(
+                        chat_id=int(msg.chat_id),
+                        message_id=int(msg.edit_message_id),
+                        text=msg.text,
+                        parse_mode=parse_mode,
+                    )
                 # 附件在 edit 後仍需發送（edit_message_text 不支援附件）
                 for att in msg.attachments:
                     try:
