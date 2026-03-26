@@ -201,8 +201,9 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
     )
     run_hooks(_chat_ctx, chat_hooks)
 
-    # 13. 清理輸出中的 channel 標記（向下相容）
+    # 13. 清理輸出中的 channel 標記（向下相容）+ 抽取附件
     clean_output = re.sub(r'\[CH_(?:SEND|EDIT):[^\]]*\]', '', output).strip()
+    clean_output, chat_attachments = extract_attachments(clean_output)
 
     # 14. 儲存對話
     _save_message(session_obj.id, "user", msg.text, token_info.get("input_tokens", 0), 0)
@@ -214,6 +215,11 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
         try:
             from app.core.http_client import InternalAPIAsync
             await InternalAPIAsync.channel_send(msg.platform, msg.chat_id, clean_output[:4000])
+            # 發送附件（圖片/檔案）
+            if chat_attachments:
+                from app.core.http_client import InternalAPI
+                for att in chat_attachments:
+                    InternalAPI.channel_send_file(msg.platform, msg.chat_id, att["path"], att.get("caption", ""))
             # 刪除 placeholder 訊息（不再顯示 ✅）
             try:
                 from .manager import channel_manager
