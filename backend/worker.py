@@ -65,7 +65,7 @@ def clear_abort_signal(card_id: int):
     if f.exists():
         f.unlink(missing_ok=True)
 from app.core.telemetry import is_system_overloaded
-from app.core.model_router import resolve_model_by_tags
+from app.core.model_router import resolve_model
 from app.core.task_workspace import prepare_workspace, cleanup_workspace
 from app.core.poller import _parse_and_create_cards
 
@@ -1056,18 +1056,18 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
         ]
         logger.info(f"[Worker] Card {idx.card_id}: card-level model override → {card_model}")
     else:
-        # Tag-based 模型路由：卡片未指定 model 時，根據 tags 自動選擇
+        # 成本感知模型路由：tag-based > complexity-based > 帳號預設
         try:
             card_tags = json.loads(getattr(idx, "tags_json", "[]") or "[]")
         except (json.JSONDecodeError, TypeError):
             card_tags = []
-        tag_model = resolve_model_by_tags(card_tags)
-        if tag_model:
+        routed_model = resolve_model(card_tags, effective_prompt)
+        if routed_model:
             accounts_list = [
-                (provider, tag_model, auth, name)
+                (provider, routed_model, auth, name)
                 for provider, _model, auth, name in accounts_list
             ]
-            logger.info(f"[Worker] Card {idx.card_id}: tag-based model route → {tag_model}")
+            logger.info(f"[Worker] Card {idx.card_id}: model route → {routed_model}")
 
     # Prompt Hardening：附加安全規則提醒，防止長對話稀釋安全限制
     from app.core.prompt_hardening import harden_prompt
