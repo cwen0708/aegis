@@ -30,9 +30,10 @@ class ParseMode(str, Enum):
 
 @dataclass
 class Button:
-    """互動按鈕"""
+    """互動按鈕（URL 或 callback 二選一）"""
     text: str
-    callback_data: str
+    callback_data: str = ""
+    url: str = ""
 
 
 @dataclass

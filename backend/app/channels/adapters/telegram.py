@@ -3,7 +3,8 @@ Telegram 頻道適配器
 
 使用 python-telegram-bot v21+ (polling 模式)
 """
-from telegram import Update
+import re
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     MessageHandler,
@@ -232,6 +233,26 @@ class TelegramChannel(ChannelBase):
             if not msg.text and msg.attachments:
                 return "attachment_sent"
 
+            # 解析 <!--actions ... --> 標記，轉成按鈕
+            msg.text, parsed_buttons = self._parse_actions_markup(msg.text)
+
+            # 組裝 inline keyboard（API 傳入的 buttons 優先，否則用解析出的）
+            reply_markup = None
+            all_buttons = msg.buttons or parsed_buttons
+            if all_buttons:
+                keyboard = []
+                for row in msg.buttons:
+                    kb_row = []
+                    for btn in row:
+                        if btn.url:
+                            kb_row.append(InlineKeyboardButton(text=btn.text, url=btn.url))
+                        elif btn.callback_data:
+                            kb_row.append(InlineKeyboardButton(text=btn.text, callback_data=btn.callback_data))
+                    if kb_row:
+                        keyboard.append(kb_row)
+                if keyboard:
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+
             result = await self._app.bot.send_message(
                 chat_id=int(msg.chat_id),
                 text=msg.text,
@@ -239,6 +260,7 @@ class TelegramChannel(ChannelBase):
                 reply_to_message_id=(
                     int(msg.reply_to_id) if msg.reply_to_id else None
                 ),
+                reply_markup=reply_markup,
             )
             return str(result.message_id)
 
@@ -283,6 +305,41 @@ class TelegramChannel(ChannelBase):
             # 此方法只是為了符合介面
             if False:
                 yield  # type: ignore
+
+    @staticmethod
+    def _parse_actions_markup(text: str) -> tuple[str, list]:
+        """
+        解析 <!--actions ... --> 標記，回傳 (清理後文字, 按鈕列表)。
+        格式：每行一個 [按鈕文字](url 或 callback:data)
+        """
+        from ..types import Button
+
+        pattern = r'<!--\s*actions\s*\n(.*?)\n\s*-->'
+        match = re.search(pattern, text, re.DOTALL)
+        if not match:
+            return text, []
+
+        actions_block = match.group(1)
+        clean_text = text[:match.start()].rstrip()
+
+        buttons = []
+        btn_pattern = r'\[([^\]]+)\]\(([^)]+)\)'
+        for line in actions_block.strip().split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            btn_match = re.findall(btn_pattern, line)
+            if btn_match:
+                row = []
+                for btn_text, btn_target in btn_match:
+                    if btn_target.startswith('callback:'):
+                        row.append(Button(text=btn_text, callback_data=btn_target[9:]))
+                    else:
+                        row.append(Button(text=btn_text, url=btn_target))
+                if row:
+                    buttons.append(row)
+
+        return clean_text, buttons
 
     async def _send_attachment(self, chat_id: int, att: Attachment):
         """發送附件到 Telegram"""

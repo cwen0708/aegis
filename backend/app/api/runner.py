@@ -216,27 +216,41 @@ async def internal_directive(req: DirectiveRequest):
 # ==========================================
 # Channel Send（AI 即時回應用）
 # ==========================================
+class ChannelSendButton(BaseModel):
+    text: str
+    url: str = ""
+    callback_data: str = ""
+
 class ChannelSendRequest(BaseModel):
     platform: str
     chat_id: str
     text: str
     edit_message_id: Optional[str] = None
+    buttons: Optional[list[list[ChannelSendButton]]] = None
 
 @router.post("/internal/channel-send")
 async def internal_channel_send(req: ChannelSendRequest):
     """AI runner 呼叫：透過 channel 發送/編輯訊息"""
     from app.channels.manager import channel_manager
     from app.channels.bus import OutboundMessage
+    from app.channels.types import Button
 
     channel = channel_manager.get_channel(req.platform)
     if not channel:
         return {"ok": False, "error": f"Channel {req.platform} not found"}
+
+    # 轉換按鈕格式
+    buttons = []
+    if req.buttons:
+        for row in req.buttons:
+            buttons.append([Button(text=b.text, url=b.url, callback_data=b.callback_data) for b in row])
 
     msg = OutboundMessage(
         chat_id=req.chat_id,
         platform=req.platform,
         text=req.text,
         edit_message_id=req.edit_message_id or None,
+        buttons=buttons,
     )
     message_id = await channel.send(msg)
     return {"ok": True, "message_id": message_id}
