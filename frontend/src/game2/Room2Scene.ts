@@ -459,25 +459,37 @@ export default class Room2Scene extends Phaser.Scene {
       : `char_${spriteIndex % this.charCount}`
     if (!this.textures.exists(charKey)) charKey = 'char_0'
 
+    const hasTexture = this.textures.exists(charKey)
+
     // 陰影
     const shadow = this.add.graphics()
     shadow.fillStyle(0x000000, 0.2)
-    shadow.fillEllipse(0, 2, 12 * ZOOM, 4 * ZOOM)
+    shadow.fillEllipse(0, 2, hasTexture ? 12 * ZOOM : 6, hasTexture ? 4 * ZOOM : 4)
 
-    // 精靈
-    const memberScale = this.memberSpriteScales.get(memberId)
-    const charScale = legacyCharKeys.has(charKey)
-      ? ZOOM
-      : ZOOM * (memberScale || CHAR_BASE_SCALE)
-    const sprite = this.add.sprite(0, 0, charKey).setScale(charScale).setOrigin(0.5, 1)
+    let sprite: Phaser.GameObjects.Sprite | null = null
+    let dot: Phaser.GameObjects.Graphics | null = null
 
-    if (mode === 'working') {
-      sprite.play(`${charKey}_work_${workDir}`)
+    if (hasTexture) {
+      // 精靈
+      const memberScale = this.memberSpriteScales.get(memberId)
+      const charScale = legacyCharKeys.has(charKey)
+        ? ZOOM
+        : ZOOM * (memberScale || CHAR_BASE_SCALE)
+      sprite = this.add.sprite(0, 0, charKey).setScale(charScale).setOrigin(0.5, 1)
+
+      if (mode === 'working') {
+        sprite.play(`${charKey}_work_${workDir}`)
+      } else {
+        sprite.play(`${charKey}_idle`)
+      }
+      container.add([shadow, sprite])
     } else {
-      sprite.play(`${charKey}_idle`)
+      // 找不到精靈 → 小紅點替代
+      dot = this.add.graphics()
+      dot.fillStyle(0xff4444, 1)
+      dot.fillCircle(0, -6, 6)
+      container.add([shadow, dot])
     }
-
-    container.add([shadow, sprite])
 
     // 名字標籤
     const provColor = provider === 'claude' ? '#fb923c' : provider === 'gemini' ? '#60a5fa' : '#94a3b8'
@@ -500,8 +512,9 @@ export default class Room2Scene extends Phaser.Scene {
     container.setDepth(cy)
 
     // 點擊互動
-    sprite.setInteractive({ useHandCursor: true })
-    sprite.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+    const clickTarget = sprite || dot!
+    clickTarget.setInteractive({ useHandCursor: true })
+    clickTarget.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (pointer.leftButtonDown()) {
         this.events.emit('character-clicked', { memberId, name, provider })
       }
