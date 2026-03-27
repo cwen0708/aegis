@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Request
+from fastapi.responses import FileResponse, JSONResponse
 from sqlmodel import Session, select
 from typing import List, Optional
 from pydantic import BaseModel
@@ -510,6 +510,23 @@ def update_member_memory_api(slug: str, filename: str, data: MemoryUpdateRequest
 # ==========================================
 # Member Memory Search (BM25 + Time Decay)
 # ==========================================
+@router.post("/members/backfill-embeddings")
+async def backfill_embeddings_api(background_tasks: BackgroundTasks):
+    """批次補建所有成員記憶的 embedding 向量（背景執行）"""
+    import asyncio
+
+    async def _run_backfill():
+        from scripts.backfill_embeddings import backfill
+        await backfill(dry_run=False)
+
+    def _bg():
+        asyncio.run(_run_backfill())
+
+    import threading
+    threading.Thread(target=_bg, daemon=True).start()
+    return JSONResponse(status_code=202, content={"status": "accepted", "message": "Backfill started in background"})
+
+
 @router.get("/members/{slug}/memory/search")
 def search_member_memory(slug: str, q: str = "", top_k: int = 5, mode: str = "bm25"):
     """搜尋成員記憶：支援 bm25 / vector / hybrid 三種模式"""
