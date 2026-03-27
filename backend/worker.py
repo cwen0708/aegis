@@ -1123,9 +1123,9 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
     effective_prompt = harden_prompt(effective_prompt, project_path)
 
     # Data Classification Guard：送往 AI 前掃描敏感資料
-    from app.core.data_classifier import guard_for_ai, SecurityBlock
+    from app.core.data_classifier import guard_for_ai, restore as redact_restore, SecurityBlock
     try:
-        effective_prompt, _redact_map = guard_for_ai(effective_prompt)
+        effective_prompt, redact_map = guard_for_ai(effective_prompt)
     except SecurityBlock as e:
         logger.warning(f"[Worker] Card {idx.card_id}: Prompt blocked by security guard: {e}")
         update_card_status(idx.card_id, "failed", f"\n\n---\n\n### Error\n安全閘門阻擋：偵測到 S3 等級敏感資料，prompt 未送出。\n{e}")
@@ -1194,6 +1194,10 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
                 break
 
             logger.warning(f"[Worker] Card {idx.card_id}: provider failover '{fo_provider}' failed (exit={result.get('exit_code')})")
+
+    # Data Classification Restore：還原 S2 佔位符為原始值
+    if redact_map and result and result.get("output"):
+        result["output"] = redact_restore(result["output"], redact_map)
 
     # result 一定有值（accounts_list 至少有 default）
     new_status = "completed" if result["status"] == "success" else "failed"

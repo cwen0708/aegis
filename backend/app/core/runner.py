@@ -92,9 +92,9 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
     prompt = harden_prompt(prompt, project_path)
 
     # Data Classification Guard：送往 AI 前掃描敏感資料
-    from app.core.data_classifier import guard_for_ai, SecurityBlock
+    from app.core.data_classifier import guard_for_ai, restore, SecurityBlock
     try:
-        prompt, _redact_map = guard_for_ai(prompt)
+        prompt, redact_map = guard_for_ai(prompt)
     except SecurityBlock as e:
         logger.warning(f"[Runner] Prompt blocked by security guard: {e}")
         return {"status": "error", "output": f"SecurityBlock: {e}", "provider": forced_provider or "claude"}
@@ -213,6 +213,10 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
                 token_info = parse_openai_json(output)
                 if token_info.get("result_text"):
                     actual_output = token_info["result_text"]
+
+        # Data Classification Restore：還原 S2 佔位符為原始值
+        if redact_map:
+            actual_output = restore(actual_output, redact_map)
 
         return {
             "status": status,

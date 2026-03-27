@@ -213,9 +213,9 @@ class ProcessPool:
         message = harden_message(message)
 
         # Data Classification Guard：送往 AI 前掃描敏感資料
-        from app.core.data_classifier import guard_for_ai, SecurityBlock
+        from app.core.data_classifier import guard_for_ai, restore as redact_restore, SecurityBlock
         try:
-            message, _redact_map = guard_for_ai(message)
+            message, redact_map = guard_for_ai(message)
         except SecurityBlock as e:
             logger.warning(f"[ProcessPool] Message blocked by security guard: {e}")
             return {"status": "error", "output": f"SecurityBlock: {e}", "token_info": {}}
@@ -227,7 +227,13 @@ class ProcessPool:
         entry.last_active = time.time()
         logger.warning(f"[ProcessPool] Sent to {entry.chat_key} ({len(message)} chars)")
 
-        return self._read_until_result(entry, on_line, expect_init=not entry.session_id)
+        result = self._read_until_result(entry, on_line, expect_init=not entry.session_id)
+
+        # Data Classification Restore：還原 S2 佔位符為原始值
+        if redact_map and result.get("output"):
+            result["output"] = redact_restore(result["output"], redact_map)
+
+        return result
 
     def _read_until_result(self, entry: ProcessEntry, on_line=None, expect_init=False) -> Dict[str, Any]:
         """讀 stdout 直到 result 行。expect_init=True 時先跳過 system/init 行。"""
