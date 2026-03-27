@@ -84,6 +84,10 @@ def _seed_shared_skills():
     if not line_send_file.exists():
         line_send_file.write_text(_read_seed_file("shared_line-send.md"), encoding="utf-8")
 
+    media_file = shared_dir / "media-response.md"
+    if not media_file.exists():
+        media_file.write_text(_read_seed_file("shared_media-response.md"), encoding="utf-8")
+
 
 def _setup_dev_directory(install_root: Path) -> Path:
     """建立自我進化用的開發目錄（與運行環境分離）。
