@@ -102,6 +102,7 @@ def _handle_shutdown(signum, frame):
 POLL_INTERVAL = 3  # 秒
 API_BASE = "http://127.0.0.1:8899/api/v1"
 MAX_WORKSTATIONS = 3  # 預設，啟動時從 DB 讀取
+DEFAULT_TASK_TIMEOUT = 3600  # 任務執行時間上限（秒），預設 60 分鐘
 
 # Provider 設定統一由 executor 管理
 from app.core.executor import PROVIDERS, build_command
@@ -534,7 +535,8 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
              project_name: str, member_id: Optional[int],
              auth_info: Optional[Dict[str, str]] = None,
              resume_session_id: Optional[str] = None,
-             emitter=None) -> Dict[str, Any]:
+             emitter=None,
+             max_duration: int = DEFAULT_TASK_TIMEOUT) -> Dict[str, Any]:
     """執行單一 AI 任務（使用 PTY 實現即時輸出串流）
 
     auth_info: 帳號認證資訊
@@ -624,7 +626,8 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
                 result = run_task_pty_windows(
                     card_id, project_path, cmd_parts, stdin_prompt, prompt,
                     env, provider_name, card_title, project_name, member_id,
-                    config, start_time, emitter=emitter
+                    config, start_time, emitter=emitter,
+                    max_duration=max_duration
                 )
             except Exception as e:
                 logger.warning(f"[Task {card_id}] PTY failed, fallback to subprocess: {e}")
@@ -634,7 +637,8 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
             result = run_task_subprocess(
                 card_id, project_path, cmd_parts, stdin_prompt, prompt,
                 env, provider_name, card_title, project_name, member_id,
-                config, start_time, emitter=emitter
+                config, start_time, emitter=emitter,
+                max_duration=max_duration
             )
 
         # 從結果填入 token 用量
@@ -649,7 +653,7 @@ def run_task_pty_windows(
     card_id: int, project_path: str, cmd_parts: list, stdin_prompt: bool,
     prompt: str, env: dict, provider_name: str, card_title: str,
     project_name: str, member_id: Optional[int], config: dict, start_time: float,
-    emitter=None
+    emitter=None, max_duration: int = DEFAULT_TASK_TIMEOUT
 ) -> Dict[str, Any]:
     """Windows PTY 執行（使用 pywinpty 實現即時輸出）"""
     from winpty import PtyProcess
@@ -703,6 +707,27 @@ def run_task_pty_windows(
                         clear_abort_signal(card_id)
                         emitter.emit_output("\n🛑 任務已被中止\n")
                         break
+
+                    # 檢查執行時間上限
+                    if time.time() - start_time > max_duration:
+                        logger.warning(f"[Task {card_id}] Timeout after {max_duration}s, killing PTY process")
+                        try:
+                            import signal as _sig
+                            os.kill(pty_process.pid, _sig.SIGKILL)
+                        except Exception:
+                            pass
+                        if emitter:
+                            emitter.emit_output(f"\n⏰ 任務超時（已執行 {max_duration} 秒），強制終止\n")
+                        output = "".join(output_lines)
+                        duration_ms = int((time.time() - start_time) * 1000)
+                        save_task_log(card_id, card_title, project_name, provider_name, member_id, "timeout", output, {"duration_ms": duration_ms})
+                        return {
+                            "status": "timeout",
+                            "output": output,
+                            "provider": provider_name,
+                            "exit_code": -1,
+                            "token_info": {"duration_ms": duration_ms},
+                        }
 
                     chunk = pty_process.read(512)
                     if chunk:
@@ -814,7 +839,7 @@ def run_task_subprocess(
     card_id: int, project_path: str, cmd_parts: list, stdin_prompt: bool,
     prompt: str, env: dict, provider_name: str, card_title: str,
     project_name: str, member_id: Optional[int], config: dict, start_time: float,
-    emitter=None
+    emitter=None, max_duration: int = DEFAULT_TASK_TIMEOUT
 ) -> Dict[str, Any]:
     """一般 subprocess 執行（fallback）"""
     from app.core.executor.heartbeat import heartbeat_monitor
@@ -865,6 +890,24 @@ def run_task_subprocess(
                     if emitter:
                         emitter.emit_output("\n🛑 任務已被中止\n")
                     break
+
+                # 檢查執行時間上限
+                if time.time() - start_time > max_duration:
+                    logger.warning(f"[Task {card_id}] Timeout after {max_duration}s, killing process")
+                    proc.kill()
+                    if emitter:
+                        emitter.emit_output(f"\n⏰ 任務超時（已執行 {max_duration} 秒），強制終止\n")
+                    proc.wait()
+                    output = "".join(output_lines)
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    save_task_log(card_id, card_title, project_name, provider_name, member_id, "timeout", output, {"duration_ms": duration_ms})
+                    return {
+                        "status": "timeout",
+                        "output": output,
+                        "provider": provider_name,
+                        "exit_code": -1,
+                        "token_info": {"duration_ms": duration_ms},
+                    }
 
         proc.wait()
 
@@ -1114,10 +1157,14 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
                 logger.info(f"[Worker] Card {idx.card_id}: succeeded with fallback account '{acct_name}'")
             break
 
+        if result["status"] == "timeout":
+            break  # 超時不做帳號 fallback
+
         logger.warning(f"[Worker] Card {idx.card_id}: account '{acct_name}' failed (exit={result.get('exit_code')})")
 
     # Provider Failover — 所有帳號都失敗時，嘗試備援 provider（最多 1 次）
-    if result and result["status"] != "success":
+    # 超時不做 failover（不是帳號問題）
+    if result and result["status"] not in ("success", "timeout"):
         failover_chain = get_failover_chain(primary_provider)
         for fo_provider in failover_chain:
             fo_model = get_failover_model(fo_provider)
@@ -1150,6 +1197,16 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
     # result 一定有值（accounts_list 至少有 default）
     new_status = "completed" if result["status"] == "success" else "failed"
     token_info = result.get("token_info", {})
+
+    # 超時直接標記失敗，不重試（超時不是暫時性錯誤）
+    if result["status"] == "timeout":
+        duration_s = result.get("token_info", {}).get("duration_ms", 0) // 1000
+        timeout_msg = f"\n\n---\n\n### ⏰ 任務超時\n執行時間超過 {duration_s} 秒上限，已強制終止。請考慮拆分任務或調整超時設定。"
+        update_card_status(idx.card_id, "failed", timeout_msg)
+        broadcast_event("task_failed", {"card_id": idx.card_id, "reason": "timeout"})
+        if workspace_dir:
+            cleanup_workspace(idx.card_id)
+        return
 
     # 自動重試
     if new_status == "failed" and "### Error" not in card_data.content:
