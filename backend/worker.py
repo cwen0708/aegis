@@ -1211,11 +1211,19 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
             cleanup_workspace(idx.card_id)
         return
 
-    # 自動重試
+    # 自動重試（含錯誤分類）
     if new_status == "failed" and "### Error" not in card_data.content:
-        logger.info(f"[Worker] Card {idx.card_id}: first failure, scheduling retry")
-        update_card_status(idx.card_id, "pending", f"\n\n### Error (retry scheduled)\n{result.get('output', '')[:200]}")
-        broadcast_event("task_failed", {"card_id": idx.card_id, "status": "retrying"})
+        from app.core.error_classifier import classify_error
+        classification = classify_error(result.get("output", ""), result.get("exit_code", 1))
+        error_info = f"錯誤類型: {classification.category.value} | 建議: {classification.suggested_action}"
+        if classification.retryable:
+            logger.info(f"[Worker] Card {idx.card_id}: retryable error ({classification.category.value}), scheduling retry")
+            update_card_status(idx.card_id, "pending", f"\n\n### Error (retry scheduled)\n{error_info}\n{result.get('output', '')[:200]}")
+            broadcast_event("task_failed", {"card_id": idx.card_id, "status": "retrying"})
+        else:
+            logger.info(f"[Worker] Card {idx.card_id}: non-retryable error ({classification.category.value}), marking failed")
+            update_card_status(idx.card_id, "failed", f"\n\n### Error\n{error_info}\n{result.get('output', '')[:200]}")
+            broadcast_event("task_failed", {"card_id": idx.card_id, "reason": classification.category.value})
         if workspace_dir:
             cleanup_workspace(idx.card_id)
         return
