@@ -14,7 +14,7 @@ import { extractWorkSlots, type TiledWorkSlot } from './tiledSlots'
 const ASSET_BASE = 'assets/office2'
 const TILE_SIZE = 32
 // 角色縮放：舊房間 ZOOM=3，Room2 地圖較小所以縮 60%
-const ZOOM = 3 * 0.6  // 1.8
+const ZOOM = 2
 const CHAR_BASE_SCALE = CHAR_LEGACY_W / CHAR_FRAME_W  // 16/128 = 0.125
 
 // tileset name → spritesheet key 映射
@@ -477,6 +477,18 @@ export default class Room2Scene extends Phaser.Scene {
     }
 
     container.add([shadow, sprite])
+
+    // 如果 texture 真的是 __MISSING（完全找不到圖），換成小紅點
+    if (sprite.texture.key === '__MISSING') {
+      sprite.setVisible(false)
+      shadow.clear()
+      shadow.fillStyle(0x000000, 0.2)
+      shadow.fillEllipse(0, 2, 6, 4)
+      const dot = this.add.graphics()
+      dot.fillStyle(0xff4444, 1)
+      dot.fillCircle(0, -6, 6)
+      container.add(dot)
+    }
 
     // 名字標籤
     const provColor = provider === 'claude' ? '#fb923c' : provider === 'gemini' ? '#60a5fa' : '#94a3b8'
