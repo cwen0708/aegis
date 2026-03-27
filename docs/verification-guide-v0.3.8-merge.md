@@ -158,9 +158,9 @@ curl "http://localhost:8899/api/v1/members/aegis/memory/search?q=部署&mode=vec
 
 | 端點 | 功能 |
 |------|------|
-| `GET /api/v1/members/{slug}/memory` | 列出所有記憶檔案 |
-| `DELETE /api/v1/members/{slug}/memory/{filename}` | 刪除指定記憶 |
-| `PUT /api/v1/members/{slug}/memory/{filename}` | 更新記憶內容 |
+| `GET /api/v1/members/{slug}/memories` | 列出所有記憶檔案 |
+| `DELETE /api/v1/members/{slug}/memories/{filename}` | 刪除指定記憶 |
+| `PUT /api/v1/members/{slug}/memories/{filename}` | 更新記憶內容 |
 
 **驗證方式**（curl）：
 ```bash
@@ -330,6 +330,8 @@ curl -X POST "http://localhost:8899/api/v1/cards/100/delegate" \
 - 產生一筆 MemberMessage 記錄委派關係
 
 **查詢子任務**：`GET /api/v1/cards/100/subtasks`
+
+> 注意：委派功能目前只有 API，前端尚無對應 UI 按鈕，需透過 curl 或由 AI 成員透過 skill 呼叫。
 
 ---
 

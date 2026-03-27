@@ -46,6 +46,9 @@ backend/uploads/*
 backend/uploads/portraits/*
 !backend/uploads/portraits/example_*.png
 !backend/uploads/portraits/aegis*.png
+!backend/uploads/sprites/
+backend/uploads/sprites/*/
+!backend/uploads/sprites/*/sheet_*.png
 backend/portraits/
 
 # Environment files
