@@ -13,10 +13,8 @@ import { extractWorkSlots, type TiledWorkSlot } from './tiledSlots'
 
 const ASSET_BASE = 'assets/office2'
 const TILE_SIZE = 32
-// 角色縮放：與舊房間一致（ZOOM=3）
-// 新版 128x256: 3 * (16/128) = 0.375 → 48px 寬、96px 高
-// 舊版 16x32:  3 → 48px 寬、96px 高
-const ZOOM = 3
+// 角色縮放：舊房間 ZOOM=3，Room2 地圖較小所以縮 60%
+const ZOOM = 3 * 0.6  // 1.8
 const CHAR_BASE_SCALE = CHAR_LEGACY_W / CHAR_FRAME_W  // 16/128 = 0.125
 
 // tileset name → spritesheet key 映射
