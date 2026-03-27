@@ -93,6 +93,7 @@ async def test_handle_change_deleted_removes_index(db_session, tmp_project):
 
     # Delete the file
     fpath.unlink()
+    _internal_writes.clear()  # 清除 write_card 的 suppression 標記
 
     with patch("app.core.card_watcher.engine", db_session.get_bind()):
         with patch("app.core.ws_manager.broadcast_event", new_callable=AsyncMock):
