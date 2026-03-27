@@ -13,9 +13,11 @@ import { extractWorkSlots, type TiledWorkSlot } from './tiledSlots'
 
 const ASSET_BASE = 'assets/office2'
 const TILE_SIZE = 32
-// 角色縮放：128px frame → ~40px 顯示（配合 32px tile）
-const CHAR_SCALE = TILE_SIZE / CHAR_FRAME_W * 2.5  // ≈ 0.625 → 角色寬 80px ≈ 2.5 tiles
-const CHAR_LEGACY_SCALE = TILE_SIZE / CHAR_LEGACY_W * 2.5  // 舊版同比例
+// 角色縮放：與舊房間一致（ZOOM=3）
+// 新版 128x256: 3 * (16/128) = 0.375 → 48px 寬、96px 高
+// 舊版 16x32:  3 → 48px 寬、96px 高
+const ZOOM = 3
+const CHAR_BASE_SCALE = CHAR_LEGACY_W / CHAR_FRAME_W  // 16/128 = 0.125
 
 // tileset name → spritesheet key 映射
 const TILESET_KEY_MAP: Record<string, string> = {
@@ -302,8 +304,8 @@ export default class Room2Scene extends Phaser.Scene {
 
     const memberScale = this.memberSpriteScales.get(memberId)
     const charScale = legacyCharKeys.has(charKey)
-      ? CHAR_LEGACY_SCALE
-      : (memberScale || 1) * CHAR_SCALE
+      ? ZOOM
+      : ZOOM * (memberScale || CHAR_BASE_SCALE)
     sprite.setTexture(charKey)
     sprite.setScale(charScale)
     sprite.play(`${charKey}_idle`)
@@ -460,13 +462,13 @@ export default class Room2Scene extends Phaser.Scene {
     // 陰影
     const shadow = this.add.graphics()
     shadow.fillStyle(0x000000, 0.2)
-    shadow.fillEllipse(0, 2, 20, 8)
+    shadow.fillEllipse(0, 2, 12 * ZOOM, 4 * ZOOM)
 
     // 精靈
     const memberScale = this.memberSpriteScales.get(memberId)
     const charScale = legacyCharKeys.has(charKey)
-      ? CHAR_LEGACY_SCALE
-      : (memberScale || 1) * CHAR_SCALE
+      ? ZOOM
+      : ZOOM * (memberScale || CHAR_BASE_SCALE)
     const sprite = this.add.sprite(0, 0, charKey).setScale(charScale).setOrigin(0.5, 1)
 
     if (mode === 'working') {
@@ -480,17 +482,17 @@ export default class Room2Scene extends Phaser.Scene {
     // 名字標籤
     const provColor = provider === 'claude' ? '#fb923c' : provider === 'gemini' ? '#60a5fa' : '#94a3b8'
     const nameColor = mode === 'working' ? provColor : '#94a3b8'
-    const nameText = this.add.text(0, 10, name, {
-      fontFamily: '"Press Start 2P"', fontSize: '8px', color: nameColor,
+    const nameText = this.add.text(0, 16, name, {
+      fontFamily: '"Press Start 2P"', fontSize: '16px', color: nameColor,
     }).setOrigin(0.5, 0.5)
 
-    const pw = nameText.width + 8
-    const ph = nameText.height + 6
+    const pw = nameText.width + 16
+    const ph = nameText.height + 12
     const nameBox = this.add.graphics()
     nameBox.fillStyle(0x1a1a2e, 0.85)
-    nameBox.fillRoundedRect(-pw / 2, -ph / 2 + 10, pw, ph, 3)
+    nameBox.fillRoundedRect(-pw / 2, -ph / 2 + 16, pw, ph, 4)
     nameBox.lineStyle(1, parseInt(nameColor.replace('#', '0x')), 0.6)
-    nameBox.strokeRoundedRect(-pw / 2, -ph / 2 + 10, pw, ph, 3)
+    nameBox.strokeRoundedRect(-pw / 2, -ph / 2 + 16, pw, ph, 4)
 
     container.add([nameBox, nameText])
 
@@ -618,14 +620,14 @@ export default class Room2Scene extends Phaser.Scene {
       const pos = this._findChar(memberId)
       if (!pos) return
 
-      const bubble = this.add.container(pos.x, pos.y - 40)
+      const bubble = this.add.container(pos.x, pos.y - CHAR_LEGACY_W * 2 * ZOOM - 6)
       bubble.setDepth(999)
 
       const t = this.add.text(0, 0, text, {
-        fontFamily: '"Press Start 2P"', fontSize: '10px', color: '#ffd700',
+        fontFamily: '"Press Start 2P"', fontSize: '21px', color: '#ffd700',
       }).setOrigin(0.5, 0.5)
 
-      const bw = t.width + 8, bh = t.height + 6
+      const bw = t.width + 12, bh = t.height + 8
       const bg = this.add.graphics()
       bg.fillStyle(0x1a1a2e, 0.92)
       bg.fillRect(-bw / 2, -bh / 2, bw, bh)
@@ -655,7 +657,7 @@ export default class Room2Scene extends Phaser.Scene {
       const pos = this._findChar(memberId)
       if (pos) {
         bubble.x = pos.x
-        bubble.y = pos.y - 40
+        bubble.y = pos.y - CHAR_LEGACY_W * 2 * ZOOM - 6
       }
     })
   }
