@@ -184,7 +184,7 @@ class TelegramChannel(ChannelBase):
         await message_bus.publish_inbound(msg)
 
     async def _on_callback_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """處理 inline button 點擊：將按鈕文字作為用戶訊息發送"""
+        """處理 inline button 點擊：編輯原訊息移除按鈕 + 將按鈕文字作為用戶訊息發送"""
         query = update.callback_query
         if not query:
             return
@@ -196,6 +196,20 @@ class TelegramChannel(ChannelBase):
         btn_text = query.data or ""
         if not btn_text:
             return
+
+        # 編輯原訊息：移除所有按鈕，附加使用者的選擇
+        try:
+            original_text = query.message.text or query.message.caption or ""
+            # 移除 <!--actions--> 區塊（如果殘留在文字中）
+            import re
+            clean_text = re.sub(r'<!--actions.*?-->', '', original_text, flags=re.DOTALL).strip()
+            selected_text = f"{clean_text}\n\n✅ {btn_text}"
+            await query.edit_message_text(
+                text=selected_text[:4096],
+                reply_markup=None,  # 移除按鈕
+            )
+        except Exception as e:
+            logger.debug(f"[Telegram] Failed to edit callback message: {e}")
 
         msg = InboundMessage(
             id=str(query.id),

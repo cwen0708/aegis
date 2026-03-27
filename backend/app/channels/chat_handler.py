@@ -212,15 +212,11 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
     _update_session_stats(session_obj.id, token_info)
 
     # 15. 即時模式：發新訊息（觸發推播）+ 刪除 placeholder
+    # 注意：附件已由 MediaHook (step 12.5) 發送，這裡不重複發送
     if placeholder_message_id and clean_output:
         try:
             from app.core.http_client import InternalAPIAsync
             await InternalAPIAsync.channel_send(msg.platform, msg.chat_id, clean_output[:4000])
-            # 發送附件（圖片/檔案）
-            if chat_attachments:
-                from app.core.http_client import InternalAPI
-                for att in chat_attachments:
-                    InternalAPI.channel_send_file(msg.platform, msg.chat_id, att["path"], att.get("caption", ""))
             # 刪除 placeholder 訊息（不再顯示 ✅）
             try:
                 from .manager import channel_manager
