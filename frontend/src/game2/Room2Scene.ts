@@ -454,41 +454,42 @@ export default class Room2Scene extends Phaser.Scene {
     container.setData('memberId', memberId)
     container.setData('spriteIndex', spriteIndex)
 
+    // 優先用成員自訂精靈，其次用預設角色，最後 fallback char_0
     let charKey = this.memberCharAvailable.has(memberId)
       ? `mchar_${memberId}`
       : `char_${spriteIndex % this.charCount}`
     if (!this.textures.exists(charKey)) charKey = 'char_0'
 
-    const hasTexture = this.textures.exists(charKey)
-
     // 陰影
     const shadow = this.add.graphics()
     shadow.fillStyle(0x000000, 0.2)
-    shadow.fillEllipse(0, 2, hasTexture ? 12 * ZOOM : 6, hasTexture ? 4 * ZOOM : 4)
+    shadow.fillEllipse(0, 2, 12 * ZOOM, 4 * ZOOM)
 
-    let sprite: Phaser.GameObjects.Sprite | null = null
-    let dot: Phaser.GameObjects.Graphics | null = null
+    // 精靈（永遠建立，即使 texture 還在載入中 Phaser 也會用 placeholder）
+    const memberScale = this.memberSpriteScales.get(memberId)
+    const charScale = legacyCharKeys.has(charKey)
+      ? ZOOM
+      : ZOOM * (memberScale || CHAR_BASE_SCALE)
+    const sprite = this.add.sprite(0, 0, charKey).setScale(charScale).setOrigin(0.5, 1)
 
-    if (hasTexture) {
-      // 精靈
-      const memberScale = this.memberSpriteScales.get(memberId)
-      const charScale = legacyCharKeys.has(charKey)
-        ? ZOOM
-        : ZOOM * (memberScale || CHAR_BASE_SCALE)
-      sprite = this.add.sprite(0, 0, charKey).setScale(charScale).setOrigin(0.5, 1)
-
-      if (mode === 'working') {
-        sprite.play(`${charKey}_work_${workDir}`)
-      } else {
-        sprite.play(`${charKey}_idle`)
-      }
-      container.add([shadow, sprite])
+    if (mode === 'working') {
+      sprite.play(`${charKey}_work_${workDir}`)
     } else {
-      // 找不到精靈 → 小紅點替代
-      dot = this.add.graphics()
+      sprite.play(`${charKey}_idle`)
+    }
+
+    container.add([shadow, sprite])
+
+    // 如果 texture 真的是 __MISSING（完全找不到圖），換成小紅點
+    if (sprite.texture.key === '__MISSING') {
+      sprite.setVisible(false)
+      shadow.clear()
+      shadow.fillStyle(0x000000, 0.2)
+      shadow.fillEllipse(0, 2, 6, 4)
+      const dot = this.add.graphics()
       dot.fillStyle(0xff4444, 1)
       dot.fillCircle(0, -6, 6)
-      container.add([shadow, dot])
+      container.add(dot)
     }
 
     // 名字標籤
@@ -512,9 +513,8 @@ export default class Room2Scene extends Phaser.Scene {
     container.setDepth(cy)
 
     // 點擊互動
-    const clickTarget = sprite || dot!
-    clickTarget.setInteractive({ useHandCursor: true })
-    clickTarget.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+    sprite.setInteractive({ useHandCursor: true })
+    sprite.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (pointer.leftButtonDown()) {
         this.events.emit('character-clicked', { memberId, name, provider })
       }
