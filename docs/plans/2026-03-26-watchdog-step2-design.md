@@ -102,22 +102,32 @@ MAX_RETRIES = 3
 
 **重試計數器綁定 card_id**，卡片完成或 idle 狀態時重置。
 
-### 2.3 重啟前 pre-check
+### 2.3 重啟前 pre-check（三階段判斷）
 
-在觸發重啟前，Watchdog 必須執行以下檢查以排除誤判：
+在觸發重啟前，Watchdog 必須依序執行三階段檢查以排除誤判。
+任一階段判定為「活躍」即中止檢查、重置 SUSPECTED 計數並 return False。
+
+```
+Stage 1: Heartbeat     Stage 2: Conversation    Stage 3: last_activity
+  活躍？                  活躍？                    綜合判斷
+  ├─ 是 → return False   ├─ 是 → return False     ├─ 有活動 → return False
+  └─ 否 → 繼續 ──────────└─ 否 → 繼續 ────────────└─ 無活動 → return True (RESTART)
+```
 
 ```python
-def pre_restart_check(card: CardIndex, session: Session) -> tuple[bool, str]:
-    """回傳 (should_restart, reason)"""
+def pre_restart_check(
+    card: CardIndex,
+    session: Session,
+    watchdog_state: WatchdogState,
+) -> tuple[bool, str]:
+    """三階段 pre-check，回傳 (should_restart, reason)"""
 
-    # 1. 確認卡片仍在 running（可能已被其他機制處理）
+    # ── Stage 0: 基本前置確認 ──
     fresh = session.get(CardIndex, card.card_id)
     if not fresh or fresh.status != "running":
         return False, "card no longer running"
 
-    # 2. 檢查是否為已知長時間操作
-    #    - 卡片 content 含 git clone / npm install / pip install 等關鍵字
-    #    - 且執行時間 < 10 分鐘
+    # 檢查是否為已知長時間操作
     long_ops = ["git clone", "npm install", "pip install", "docker build"]
     content = (fresh.content or "").lower()
     if any(op in content for op in long_ops):
@@ -125,12 +135,70 @@ def pre_restart_check(card: CardIndex, session: Session) -> tuple[bool, str]:
         if running_time < 600:  # 10 分鐘內
             return False, f"long operation detected, running {running_time:.0f}s"
 
-    # 3. 檢查進程是否仍存活（ProcessPool 層級）
-    #    如果進程已死，直接重啟不需冷卻
-    # （由呼叫端額外處理）
+    now = time.time()
 
-    return True, "heartbeat timeout confirmed"
+    # ── Stage 1: Heartbeat 檢查 ──
+    # 讀取 executor/heartbeat.py 的 last_activity 時間戳
+    last_hb = get_heartbeat_last_activity(fresh.card_id)
+    if last_hb and (now - last_hb) < HEARTBEAT_TIMEOUT:  # 60s
+        watchdog_state.retry_counts.pop(fresh.card_id, None)
+        return False, f"heartbeat alive ({now - last_hb:.0f}s ago)"
+
+    # ── Stage 2: Conversation 活躍對話檢查 ──
+    # 查詢 conversation/coordinator.py 是否有該 card 相關的活躍對話 room
+    active_room = get_active_conversation_room(fresh.card_id, session)
+    if active_room and active_room.last_message_at:
+        room_idle = now - active_room.last_message_at.timestamp()
+        if room_idle < 300:  # 近 5 分鐘有活動
+            watchdog_state.retry_counts.pop(fresh.card_id, None)
+            return False, f"conversation active ({room_idle:.0f}s ago)"
+
+    # ── Stage 3: last_activity_timestamp 綜合判斷 ──
+    # 檢查卡片關聯的 last_activity_timestamp（見 2.3.1 更新點定義）
+    last_act = get_last_activity_timestamp(fresh.card_id)
+    if last_act and (now - last_act) < HEARTBEAT_TIMEOUT:
+        watchdog_state.retry_counts.pop(fresh.card_id, None)
+        return False, f"last_activity recent ({now - last_act:.0f}s ago)"
+
+    # 三階段皆無活動，確認進入 RESTART
+    return True, "all 3 stages confirm: no activity detected"
 ```
+
+**各階段說明**：
+
+| 階段 | 檢查目標 | 活躍閾值 | 資料來源 |
+|------|---------|---------|---------|
+| Stage 1 | Heartbeat 心跳 | 距今 < 60s | `executor/heartbeat.py` → `last_activity` |
+| Stage 2 | 對話 room 活動 | 距今 < 300s (5min) | `conversation/coordinator.py` → `ChatSession.last_message_at` |
+| Stage 3 | 綜合活動時戳 | 距今 < 60s | `last_activity_timestamp`（多來源聚合） |
+
+### 2.3.1 last_activity_timestamp 更新點定義
+
+`last_activity_timestamp` 是各活動來源中最晚的時間戳，由以下 4 個觸發點更新：
+
+| # | 觸發點 | 更新時機 | 說明 |
+|---|--------|---------|------|
+| 1 | **LLM chunk 回應** | executor 收到 streaming output 時 | 每個 chunk 都更新，確保 streaming 期間持續有活動記錄 |
+| 2 | **Tool call 完成** | MCP 或內建 tool 執行回傳時 | tool 執行結果寫回後更新 |
+| 3 | **DB 寫入** | card_index sync、memory write 等 | 任何對 DB 的修改操作都視為有效活動 |
+| 4 | **MCP tool call 發起** | MCP tool call 開始執行時 | 避免長時間 MCP 呼叫（如外部 API）的空窗期被誤判為卡死 |
+
+**實作建議**：
+
+```python
+# 在 executor context 或 emitter 中維護
+def touch_last_activity(card_id: int, source: str):
+    """更新 last_activity_timestamp，source 用於 debug log"""
+    _last_activity[card_id] = time.time()
+
+# 各觸發點呼叫範例：
+# 1. LLM streaming:  touch_last_activity(card_id, "llm_chunk")
+# 2. Tool 完成:       touch_last_activity(card_id, "tool_complete")
+# 3. DB 寫入:         touch_last_activity(card_id, "db_write")
+# 4. MCP 發起:        touch_last_activity(card_id, "mcp_start")
+```
+
+> **設計原則**：觸發點 4（MCP 發起時）是防禦性更新 — 當 MCP tool 呼叫外部服務需要較長時間（如 API 回應慢），發起時就更新時戳可避免等待期間被 Watchdog 誤判。
 
 ### 2.4 重啟執行流程
 
@@ -140,6 +208,63 @@ def pre_restart_check(card: CardIndex, session: Session) -> tuple[bool, str]:
 3. 終止當前進程：ProcessPool.kill(chat_key)
 4. 重置 card status 為 "pending"（重新進入 worker 排程）
 5. 啟動冷卻計時器
+```
+
+### 2.5 邊界案例預期行為
+
+以下定義三個容易與 Watchdog 機制衝突的邊界案例及其預期行為：
+
+#### Case A: Worker 等 LLM streaming 超過 timeout
+
+**情境**：LLM 回應延遲或斷線，卡片在 streaming 階段超過 timeout（由 card-011719 timeout 機制處理）。
+
+**預期行為**：
+- **timeout 機制優先**：`card-011719` 的 timeout 邏輯先將卡片標記為 `failed`
+- **Watchdog 退讓**：pre-check Stage 0 發現 `fresh.status != "running"`（已被 timeout 標為 `failed`），直接 return False
+- **不重複處理**：避免 Watchdog 與 timeout 雙重處理同一張卡片，造成重複 broadcast 或狀態衝突
+
+```
+時間線：
+  T+0s   LLM streaming 開始
+  T+60s  Heartbeat timeout → Watchdog 進入 SUSPECTED
+  T+90s  Timeout 機制觸發 → card.status = "failed"
+  T+72s  Watchdog pre-check → status != "running" → 中止，不介入
+```
+
+#### Case B: Error Classifier 標記 retryable 正在重試
+
+**情境**：Worker 的 error classifier 將錯誤標記為 retryable，worker 自身的 retry 機制正在執行中。
+
+**預期行為**：
+- **識別 retry 中狀態**：卡片 `status == "pending"` 且 `retry_count > 0` 表示 worker 正在重試
+- **Watchdog 跳過**：pre-check Stage 0 發現 `status != "running"`，自動跳過
+- **Watchdog 不干預 retry 流程**：等 worker retry 完成或耗盡重試次數後，若卡片再次進入 `running` 且卡死，才由 Watchdog 接管
+
+```python
+# 在 pre_restart_check Stage 0 中，已有的 status 檢查自然排除此情境：
+if not fresh or fresh.status != "running":
+    return False, "card no longer running"
+# retry 中的卡片 status 為 "pending"，不會通過此檢查
+```
+
+#### Case C: 連續 RESTART 3 次進 fallback 後新任務進來
+
+**情境**：某張卡片觸發 3 次 RESTART 後進入 fallback（Chapter 3），此時新卡片被分派進來。
+
+**預期行為**：
+- **fallback 後自動復位**：fallback 流程完成後，worker 狀態恢復為 IDLE，可正常接收新任務
+- **計數器獨立**：新卡片擁有獨立的 `retry_counts` 和 `cooldown_until`，前一張卡片的 fallback 計數器不影響新任務
+- **fallback 計數器歸零**：`WatchdogState.retry_counts[old_card_id]` 在 fallback 完成後清除
+
+```python
+# fallback 完成後的狀態清理
+def on_fallback_complete(card_id: int, watchdog_state: WatchdogState):
+    """fallback 流程完成後，清除該卡片的 watchdog 狀態"""
+    watchdog_state.retry_counts.pop(card_id, None)
+    watchdog_state.last_heartbeat.pop(card_id, None)
+    watchdog_state.cooldown_until.pop(card_id, None)
+    # worker 狀態自動回到 IDLE，可接收新任務
+    # 新卡片的 retry_counts 從 0 開始，與前一張卡片完全獨立
 ```
 
 ---
