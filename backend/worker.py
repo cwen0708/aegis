@@ -46,7 +46,7 @@ from app.models.core import (
     Member, MemberAccount, Account, TaskLog, CronLog, MemberDialogue
 )
 from app.core.card_file import CardData, read_card, write_card
-from app.core.card_index import sync_card_to_index, remove_card_from_index
+from app.core.card_index import sync_card_to_index, remove_card_from_index, block_similar_cards
 
 # Abort 信號目錄
 _INSTALL_ROOT = Path(__file__).resolve().parent
@@ -65,7 +65,7 @@ def clear_abort_signal(card_id: int):
     if f.exists():
         f.unlink(missing_ok=True)
 from app.core.telemetry import is_system_overloaded
-from app.core.model_router import resolve_model_by_tags
+from app.core.model_router import resolve_model, get_failover_chain, get_failover_model
 from app.core.task_workspace import prepare_workspace, cleanup_workspace
 from app.core.poller import _parse_and_create_cards
 
@@ -102,6 +102,7 @@ def _handle_shutdown(signum, frame):
 POLL_INTERVAL = 3  # 秒
 API_BASE = "http://127.0.0.1:8899/api/v1"
 MAX_WORKSTATIONS = 3  # 預設，啟動時從 DB 讀取
+DEFAULT_TASK_TIMEOUT = 3600  # 任務執行時間上限（秒），預設 60 分鐘
 
 # Provider 設定統一由 executor 管理
 from app.core.executor import PROVIDERS, build_command
@@ -257,6 +258,11 @@ def mark_card_running(card_id: int, member_id: Optional[int]):
                 write_card(file_path, card_data)
             except Exception as e:
                 logger.warning(f"[Card {card_id}] Failed to update MD to running: {e}")
+
+            # 封鎖同 milestone 中標題相似的待辦卡片
+            blocked = block_similar_cards(card_id, idx.title, session)
+            if blocked:
+                logger.info(f"[Card {card_id}] Blocked similar cards: {blocked}")
 
         orm_card = session.get(Card, card_id)
         if orm_card:
@@ -529,7 +535,8 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
              project_name: str, member_id: Optional[int],
              auth_info: Optional[Dict[str, str]] = None,
              resume_session_id: Optional[str] = None,
-             emitter=None) -> Dict[str, Any]:
+             emitter=None,
+             max_duration: int = DEFAULT_TASK_TIMEOUT) -> Dict[str, Any]:
     """執行單一 AI 任務（使用 PTY 實現即時輸出串流）
 
     auth_info: 帳號認證資訊
@@ -603,23 +610,42 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
 
     start_time = time.time()
 
-    # 嘗試使用 PTY，失敗則 fallback 到 subprocess
-    if platform.system() == "Windows":
-        try:
-            return run_task_pty_windows(
+    # LLM 審計日誌 — 包裝整個 LLM 呼叫
+    from app.core.llm_audit import LLMAuditContext
+    audit = LLMAuditContext(
+        provider=provider_name,
+        card_id=card_id,
+        member_id=member_id,
+    )
+
+    with audit:
+        # 嘗試使用 PTY，失敗則 fallback 到 subprocess
+        result = None
+        if platform.system() == "Windows":
+            try:
+                result = run_task_pty_windows(
+                    card_id, project_path, cmd_parts, stdin_prompt, prompt,
+                    env, provider_name, card_title, project_name, member_id,
+                    config, start_time, emitter=emitter,
+                    max_duration=max_duration
+                )
+            except Exception as e:
+                logger.warning(f"[Task {card_id}] PTY failed, fallback to subprocess: {e}")
+
+        if result is None:
+            # Fallback: 使用一般 subprocess
+            result = run_task_subprocess(
                 card_id, project_path, cmd_parts, stdin_prompt, prompt,
                 env, provider_name, card_title, project_name, member_id,
-                config, start_time, emitter=emitter
+                config, start_time, emitter=emitter,
+                max_duration=max_duration
             )
-        except Exception as e:
-            logger.warning(f"[Task {card_id}] PTY failed, fallback to subprocess: {e}")
 
-    # Fallback: 使用一般 subprocess
-    return run_task_subprocess(
-        card_id, project_path, cmd_parts, stdin_prompt, prompt,
-        env, provider_name, card_title, project_name, member_id,
-        config, start_time, emitter=emitter
-    )
+        # 從結果填入 token 用量
+        audit.record.status = result.get("status", "error")
+        audit.fill_from_token_info(result.get("token_info", {}))
+
+    return result
 
 
 
@@ -627,7 +653,7 @@ def run_task_pty_windows(
     card_id: int, project_path: str, cmd_parts: list, stdin_prompt: bool,
     prompt: str, env: dict, provider_name: str, card_title: str,
     project_name: str, member_id: Optional[int], config: dict, start_time: float,
-    emitter=None
+    emitter=None, max_duration: int = DEFAULT_TASK_TIMEOUT
 ) -> Dict[str, Any]:
     """Windows PTY 執行（使用 pywinpty 實現即時輸出）"""
     from winpty import PtyProcess
@@ -674,13 +700,32 @@ def run_task_pty_windows(
                     if is_abort_requested(card_id):
                         logger.info(f"[Task {card_id}] Abort signal received, killing PTY process")
                         try:
-                            import signal as _sig
-                            os.kill(pty_process.pid, _sig.SIGKILL)
+                            pty_process.terminate(force=True)
                         except Exception:
                             pass
                         clear_abort_signal(card_id)
                         emitter.emit_output("\n🛑 任務已被中止\n")
                         break
+
+                    # 檢查執行時間上限
+                    if time.time() - start_time > max_duration:
+                        logger.warning(f"[Task {card_id}] Timeout after {max_duration}s, killing PTY process")
+                        try:
+                            pty_process.terminate(force=True)
+                        except Exception:
+                            pass
+                        if emitter:
+                            emitter.emit_output(f"\n⏰ 任務超時（已執行 {max_duration} 秒），強制終止\n")
+                        output = "".join(output_lines)
+                        duration_ms = int((time.time() - start_time) * 1000)
+                        save_task_log(card_id, card_title, project_name, provider_name, member_id, "timeout", output, {"duration_ms": duration_ms})
+                        return {
+                            "status": "timeout",
+                            "output": output,
+                            "provider": provider_name,
+                            "exit_code": -1,
+                            "token_info": {"duration_ms": duration_ms},
+                        }
 
                     chunk = pty_process.read(512)
                     if chunk:
@@ -764,6 +809,12 @@ def run_task_pty_windows(
         token_info["duration_ms"] = duration_ms
         if token_info.get("result_text"):
             actual_output = token_info["result_text"]
+    elif provider_name == "openai" and config.get("stream_json"):
+        # OpenAI stream_json 模式：與 Claude 相同的 stream-json 解析路徑
+        if result_text_parts:
+            actual_output = "".join(result_text_parts)
+        token_info = emitter.token_info if emitter else {}
+        token_info["duration_ms"] = duration_ms
     elif provider_name == "openai" and config.get("json_output"):
         from app.core.stream_parsers import parse_openai_json
         token_info = parse_openai_json(output)
@@ -786,7 +837,7 @@ def run_task_subprocess(
     card_id: int, project_path: str, cmd_parts: list, stdin_prompt: bool,
     prompt: str, env: dict, provider_name: str, card_title: str,
     project_name: str, member_id: Optional[int], config: dict, start_time: float,
-    emitter=None
+    emitter=None, max_duration: int = DEFAULT_TASK_TIMEOUT
 ) -> Dict[str, Any]:
     """一般 subprocess 執行（fallback）"""
     from app.core.executor.heartbeat import heartbeat_monitor
@@ -813,20 +864,48 @@ def run_task_subprocess(
             proc.stdin.close()
 
         output_lines = []
+        result_text_parts = []
+        stream_json = config.get("stream_json", False)
         with heartbeat_monitor(emitter) as touch:
             for raw_line in proc.stdout:
                 touch()
                 line = raw_line.decode("utf-8", errors="replace")
                 output_lines.append(line)
-                if emitter:
+                if stream_json:
+                    clean = line.strip()
+                    if clean.startswith("{") and emitter:
+                        emitter.emit_raw(clean)
+                        text = parse_stream_json_text(clean)
+                        if text:
+                            result_text_parts.append(text)
+                elif emitter:
                     emitter.emit_output(line)
                 # 檢查 abort 信號
                 if is_abort_requested(card_id):
                     logger.info(f"[Task {card_id}] Abort signal received, killing process")
                     proc.kill()
                     clear_abort_signal(card_id)
-                    emitter.emit_output("\n🛑 任務已被中止\n")
+                    if emitter:
+                        emitter.emit_output("\n🛑 任務已被中止\n")
                     break
+
+                # 檢查執行時間上限
+                if time.time() - start_time > max_duration:
+                    logger.warning(f"[Task {card_id}] Timeout after {max_duration}s, killing process")
+                    proc.kill()
+                    if emitter:
+                        emitter.emit_output(f"\n⏰ 任務超時（已執行 {max_duration} 秒），強制終止\n")
+                    proc.wait()
+                    output = "".join(output_lines)
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    save_task_log(card_id, card_title, project_name, provider_name, member_id, "timeout", output, {"duration_ms": duration_ms})
+                    return {
+                        "status": "timeout",
+                        "output": output,
+                        "provider": provider_name,
+                        "exit_code": -1,
+                        "token_info": {"duration_ms": duration_ms},
+                    }
 
         proc.wait()
 
@@ -837,7 +916,11 @@ def run_task_subprocess(
 
         token_info = {}
         actual_output = output
-        if provider_name == "claude" and config.get("json_output"):
+        if stream_json and result_text_parts:
+            actual_output = "".join(result_text_parts)
+            token_info = emitter.token_info if emitter else {}
+            token_info["duration_ms"] = duration_ms
+        elif provider_name == "claude" and config.get("json_output"):
             token_info = parse_claude_json(output)
             token_info["duration_ms"] = duration_ms
             if token_info.get("result_text"):
@@ -992,6 +1075,7 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
     from app.hooks import collect_hooks
     from app.hooks.websocket import WebSocketHook
     from app.hooks.onestack import OneStackHook
+    from app.hooks.event_log import EventLogHook
     from app.core.executor.emitter import HookEmitter
 
     task_hooks = collect_hooks("worker")
@@ -1002,6 +1086,9 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
             h.card_id = idx.card_id
             h.member_slug = member_slug
             h.chat_id = chat_id or ""
+        elif isinstance(h, EventLogHook):
+            h.card_id = idx.card_id
+            h.project_path = project_path
 
     task_emitter = HookEmitter(task_hooks)
 
@@ -1018,22 +1105,32 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
         ]
         logger.info(f"[Worker] Card {idx.card_id}: card-level model override → {card_model}")
     else:
-        # Tag-based 模型路由：卡片未指定 model 時，根據 tags 自動選擇
+        # 成本感知模型路由：tag-based > complexity-based > 帳號預設
         try:
             card_tags = json.loads(getattr(idx, "tags_json", "[]") or "[]")
         except (json.JSONDecodeError, TypeError):
             card_tags = []
-        tag_model = resolve_model_by_tags(card_tags)
-        if tag_model:
+        routed_model = resolve_model(card_tags, effective_prompt)
+        if routed_model:
             accounts_list = [
-                (provider, tag_model, auth, name)
+                (provider, routed_model, auth, name)
                 for provider, _model, auth, name in accounts_list
             ]
-            logger.info(f"[Worker] Card {idx.card_id}: tag-based model route → {tag_model}")
+            logger.info(f"[Worker] Card {idx.card_id}: model route → {routed_model}")
 
     # Prompt Hardening：附加安全規則提醒，防止長對話稀釋安全限制
     from app.core.prompt_hardening import harden_prompt
     effective_prompt = harden_prompt(effective_prompt, project_path)
+
+    # Data Classification Guard：送往 AI 前掃描敏感資料
+    from app.core.data_classifier import guard_for_ai, SecurityBlock
+    try:
+        effective_prompt, _redact_map = guard_for_ai(effective_prompt)
+    except SecurityBlock as e:
+        logger.warning(f"[Worker] Card {idx.card_id}: Prompt blocked by security guard: {e}")
+        update_card_status(idx.card_id, "failed", f"\n\n---\n\n### Error\n安全閘門阻擋：偵測到 S3 等級敏感資料，prompt 未送出。\n{e}")
+        broadcast_event("task_failed", {"card_id": idx.card_id, "reason": f"SecurityBlock: {e}"})
+        return
 
     result = None
     for attempt_idx, (acct_provider, acct_model, acct_auth, acct_name) in enumerate(accounts_list):
@@ -1061,17 +1158,70 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
                 logger.info(f"[Worker] Card {idx.card_id}: succeeded with fallback account '{acct_name}'")
             break
 
+        if result["status"] == "timeout":
+            break  # 超時不做帳號 fallback
+
         logger.warning(f"[Worker] Card {idx.card_id}: account '{acct_name}' failed (exit={result.get('exit_code')})")
+
+    # Provider Failover — 所有帳號都失敗時，嘗試備援 provider（最多 1 次）
+    # 超時不做 failover（不是帳號問題）
+    if result and result["status"] not in ("success", "timeout"):
+        failover_chain = get_failover_chain(primary_provider)
+        for fo_provider in failover_chain:
+            fo_model = get_failover_model(fo_provider)
+            if not fo_model:
+                continue
+            logger.info(f"[Worker] Card {idx.card_id}: provider failover → {fo_provider} ({fo_model})")
+            task_emitter.emit_output(f"\n🔄 Provider failover: {primary_provider} → {fo_provider} ({fo_model})\n")
+
+            result = run_task(
+                card_id=idx.card_id,
+                project_path=effective_cwd,
+                prompt=effective_prompt,
+                phase=list_name.upper(),
+                forced_provider=fo_provider,
+                forced_model=fo_model,
+                card_title=idx.title,
+                project_name=project_name,
+                member_id=member_id,
+                auth_info={},
+                resume_session_id=_resume_session_id if is_chat_mode else None,
+                emitter=task_emitter,
+            )
+
+            if result["status"] == "success":
+                logger.info(f"[Worker] Card {idx.card_id}: succeeded with provider failover → {fo_provider}")
+                break
+
+            logger.warning(f"[Worker] Card {idx.card_id}: provider failover '{fo_provider}' failed (exit={result.get('exit_code')})")
 
     # result 一定有值（accounts_list 至少有 default）
     new_status = "completed" if result["status"] == "success" else "failed"
     token_info = result.get("token_info", {})
 
-    # 自動重試
+    # 超時直接標記失敗，不重試（超時不是暫時性錯誤）
+    if result["status"] == "timeout":
+        duration_s = result.get("token_info", {}).get("duration_ms", 0) // 1000
+        timeout_msg = f"\n\n---\n\n### ⏰ 任務超時\n執行時間超過 {duration_s} 秒上限，已強制終止。請考慮拆分任務或調整超時設定。"
+        update_card_status(idx.card_id, "failed", timeout_msg)
+        broadcast_event("task_failed", {"card_id": idx.card_id, "reason": "timeout"})
+        if workspace_dir:
+            cleanup_workspace(idx.card_id)
+        return
+
+    # 自動重試（含錯誤分類）
     if new_status == "failed" and "### Error" not in card_data.content:
-        logger.info(f"[Worker] Card {idx.card_id}: first failure, scheduling retry")
-        update_card_status(idx.card_id, "pending", f"\n\n### Error (retry scheduled)\n{result.get('output', '')[:200]}")
-        broadcast_event("task_failed", {"card_id": idx.card_id, "status": "retrying"})
+        from app.core.error_classifier import classify_error
+        classification = classify_error(result.get("output", ""), result.get("exit_code", 1))
+        error_info = f"錯誤類型: {classification.category.value} | 建議: {classification.suggested_action}"
+        if classification.retryable:
+            logger.info(f"[Worker] Card {idx.card_id}: retryable error ({classification.category.value}), scheduling retry")
+            update_card_status(idx.card_id, "pending", f"\n\n### Error (retry scheduled)\n{error_info}\n{result.get('output', '')[:200]}")
+            broadcast_event("task_failed", {"card_id": idx.card_id, "status": "retrying"})
+        else:
+            logger.info(f"[Worker] Card {idx.card_id}: non-retryable error ({classification.category.value}), marking failed")
+            update_card_status(idx.card_id, "failed", f"\n\n### Error\n{error_info}\n{result.get('output', '')[:200]}")
+            broadcast_event("task_failed", {"card_id": idx.card_id, "reason": classification.category.value})
         if workspace_dir:
             cleanup_workspace(idx.card_id)
         return

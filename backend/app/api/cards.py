@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from sqlmodel import Session, select
 from sqlalchemy import func as sa_func
 from typing import List, Optional
@@ -8,9 +9,11 @@ from app.database import get_session
 from app.models.core import Project, Card, StageList, CardIndex
 from app.core.card_file import CardData, read_card as read_card_md, write_card, card_file_path
 from app.core.card_index import sync_card_to_index, remove_card_from_index, next_card_id
+from app.core.paths import WORKSPACES_ROOT
 from app.api.deps import get_card_lock, get_project_for_list
 from pathlib import Path
 import asyncio
+import mimetypes
 
 router = APIRouter(tags=["Cards"])
 
@@ -27,6 +30,7 @@ class CardCreateRequest(BaseModel):
     content: Optional[str] = None  # 卡片內容（會被當作 AI prompt）
     status: Optional[str] = None  # idle (default) or pending
     tags: Optional[List[str]] = None  # 標籤名稱列表
+    parent_id: Optional[int] = None  # 父卡片 ID（Leader-Worker 委派）
 
 class CardUpdateRequest(BaseModel):
     list_id: Optional[int] = None
@@ -80,7 +84,8 @@ def create_card(card_in: CardCreateRequest, session: Session = Depends(get_sessi
     card_data = CardData(
         id=new_id, list_id=card_in.list_id, title=card_in.title,
         description=card_in.description, content=card_in.content or "", status=initial_status,
-        tags=card_in.tags or [], created_at=now, updated_at=now,
+        tags=card_in.tags or [], parent_id=card_in.parent_id,
+        created_at=now, updated_at=now,
     )
 
     # Write MD file
@@ -373,6 +378,197 @@ def unarchive_card(card_id: int, session: Session = Depends(get_session)):
     sync_card_to_index(session, cd, project_id=idx.project_id, file_path=idx.file_path)
     session.commit()
     return {"ok": True}
+
+
+# ==========================================
+# Leader-Worker: Delegate & Subtasks
+# ==========================================
+class DelegateRequest(BaseModel):
+    target_member_id: int
+    title: str
+    content: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+
+@router.post("/cards/{card_id}/delegate")
+def delegate_card(card_id: int, req: DelegateRequest, session: Session = Depends(get_session)):
+    """Leader 委派子任務給指定成員（自動建立子卡片並觸發）"""
+    from app.models.core import Member, StageList
+
+    # 驗證父卡片存在
+    parent_idx = session.get(CardIndex, card_id)
+    if not parent_idx:
+        raise HTTPException(status_code=404, detail="Parent card not found")
+
+    # 驗證目標成員存在
+    member = session.get(Member, req.target_member_id)
+    if not member:
+        raise HTTPException(status_code=404, detail="Target member not found")
+
+    # 查詢目標成員的 AI inbox（is_member_bound + member_id 綁定的列表）
+    inbox = session.exec(
+        select(StageList).where(
+            StageList.project_id == parent_idx.project_id,
+            StageList.member_id == req.target_member_id,
+            StageList.is_member_bound == True,  # noqa: E712
+        )
+    ).first()
+    if not inbox:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No inbox list found for member {member.name}"
+        )
+
+    # 取得專案資訊
+    project = session.get(Project, parent_idx.project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # 建立子卡片
+    new_id = next_card_id(session)
+    old_max_id = session.exec(select(sa_func.max(Card.id))).one()
+    if old_max_id is not None:
+        new_id = max(new_id, old_max_id + 1)
+
+    now = datetime.now(timezone.utc)
+    card_data = CardData(
+        id=new_id, list_id=inbox.id, title=req.title,
+        description=None, content=req.content or "", status="pending",
+        tags=req.tags or [], parent_id=card_id,
+        created_at=now, updated_at=now,
+    )
+
+    # 寫入 MD 檔案
+    fpath = card_file_path(project.path, new_id)
+    fpath.parent.mkdir(parents=True, exist_ok=True)
+    write_card(fpath, card_data)
+
+    # 同步到 index
+    sync_card_to_index(session, card_data, project_id=project.id, file_path=str(fpath))
+
+    # Dual-write: 建立舊 ORM 記錄
+    orm_card = Card(
+        id=new_id, list_id=inbox.id, title=req.title,
+        description=None, status="pending",
+        created_at=now, updated_at=now,
+    )
+    session.add(orm_card)
+
+    # 記錄委派訊息
+    from app.models.core import MemberMessage
+    desc_summary = (req.content or "")[:100]
+    msg_content = f"委派子任務: {req.title}"
+    if desc_summary:
+        msg_content += f" — {desc_summary}"
+    delegate_msg = MemberMessage(
+        from_member_id=parent_idx.member_id or 0,
+        to_member_id=req.target_member_id,
+        card_id=card_id,
+        message_type="delegate",
+        content=msg_content,
+    )
+    session.add(delegate_msg)
+
+    session.commit()
+    session.refresh(orm_card)
+
+    return {
+        "ok": True,
+        "card": {
+            "id": new_id,
+            "list_id": inbox.id,
+            "title": req.title,
+            "status": "pending",
+            "parent_id": card_id,
+            "target_member": member.name,
+        }
+    }
+
+
+@router.get("/cards/{card_id}/subtasks")
+def get_subtasks(card_id: int, session: Session = Depends(get_session)):
+    """查詢卡片的所有子任務"""
+    subtasks = session.exec(
+        select(CardIndex).where(CardIndex.parent_id == card_id)
+    ).all()
+    return [
+        {
+            "card_id": s.card_id,
+            "title": s.title,
+            "status": s.status,
+            "list_id": s.list_id,
+            "created_at": s.created_at,
+            "updated_at": s.updated_at,
+        }
+        for s in subtasks
+    ]
+
+
+# ==========================================
+# Artifacts — workspace 產出物預覽
+# ==========================================
+_PREVIEW_EXTENSIONS = {
+    ".html", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp",
+    ".md", ".mermaid", ".pdf",
+}
+_EXCLUDED_DIRS = {".claude", "node_modules", "__pycache__", ".git", ".venv", "venv", ".aegis"}
+
+_EXTENSION_TO_PREVIEW: dict[str, str] = {
+    ".html": "html", ".svg": "image", ".png": "image", ".jpg": "image",
+    ".jpeg": "image", ".gif": "image", ".webp": "image",
+    ".md": "markdown", ".mermaid": "markdown", ".pdf": "pdf",
+}
+
+
+def _scan_artifacts(workspace: Path) -> list[dict]:
+    """遞迴掃描 workspace 目錄下的可預覽檔案"""
+    results: list[dict] = []
+    if not workspace.is_dir():
+        return results
+    for p in workspace.rglob("*"):
+        if not p.is_file():
+            continue
+        # 排除系統目錄
+        rel = p.relative_to(workspace)
+        if any(part in _EXCLUDED_DIRS for part in rel.parts):
+            continue
+        if p.suffix.lower() not in _PREVIEW_EXTENSIONS:
+            continue
+        results.append({
+            "name": p.name,
+            "path": str(rel),
+            "type": p.suffix.lower().lstrip("."),
+            "size": p.stat().st_size,
+            "preview_type": _EXTENSION_TO_PREVIEW.get(p.suffix.lower(), "unknown"),
+        })
+    # 按名稱排序
+    results.sort(key=lambda x: x["name"])
+    return results
+
+
+@router.get("/cards/{card_id}/artifacts")
+def list_artifacts(card_id: int):
+    """掃描卡片 workspace 目錄下的可預覽產出物"""
+    workspace = WORKSPACES_ROOT / f"task-{card_id}"
+    return _scan_artifacts(workspace)
+
+
+@router.get("/cards/{card_id}/artifacts/raw")
+def get_artifact_raw(card_id: int, path: str = Query(..., description="workspace 內相對路徑")):
+    """取得 workspace 內的原始檔案（供前端 iframe/img 使用）"""
+    workspace = WORKSPACES_ROOT / f"task-{card_id}"
+    # 安全檢查：解析後路徑必須在 workspace 內
+    try:
+        target = (workspace / path).resolve()
+    except (ValueError, OSError):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    if not str(target).startswith(str(workspace.resolve())):
+        raise HTTPException(status_code=403, detail="Path traversal denied")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    media_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+    return FileResponse(target, media_type=media_type)
 
 
 @router.get("/cards/{card_id}/broadcast-logs")

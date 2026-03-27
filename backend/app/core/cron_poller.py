@@ -10,6 +10,7 @@ from app.models.core import Card, StageList, Project, Tag, CardTagLink, CronJob,
 from app.core.card_file import CardData, write_card, card_file_path
 from app.core.card_index import sync_card_to_index, next_card_id
 from app.core.telemetry import get_system_metrics
+from app.core.idle_detector import is_system_idle
 from croniter import croniter
 
 logger = logging.getLogger(__name__)
@@ -140,29 +141,6 @@ def _parse_datetime(dt_str: str) -> datetime | None:
         except ValueError:
             continue
     return None
-
-
-# 閒時偵測 CPU 門檻
-IDLE_CPU_THRESHOLD = 80.0
-
-
-def is_system_idle(session: Session) -> bool:
-    """判斷系統是否閒置（無 running/pending 卡片且 CPU < 80%）"""
-    running = session.exec(
-        select(CardIndex).where(CardIndex.status == "running")
-    ).first()
-    if running:
-        return False
-    pending = session.exec(
-        select(CardIndex).where(CardIndex.status == "pending")
-    ).first()
-    if pending:
-        return False
-    from app.core.telemetry import get_system_metrics
-    metrics = get_system_metrics()
-    if metrics["cpu_percent"] >= IDLE_CPU_THRESHOLD:
-        return False
-    return True
 
 
 KNOWN_ACTIONS = {"worker", "meeting"}

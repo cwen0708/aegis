@@ -16,7 +16,7 @@ from app.models.core import (
 )
 from app.core.card_file import CardData, write_card, card_file_path
 from app.core.card_index import sync_card_to_index, next_card_id
-from app.core.member_profile import get_soul_content, list_skills, get_skill_content
+from app.core.conversation_manager import get_chat_history, format_history_block
 from app.core.runner import run_ai_task
 from .types import InboundMessage
 from .bot_user import get_user_projects, get_user_context, get_default_project, get_user_extra
@@ -110,7 +110,10 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
             media_hint += f"\n[附帶說明: {msg.caption}]"
         user_message = (user_message + media_hint).strip()
 
-    prompt = user_message
+    # 7. 注入對話歷史到 prompt
+    history = get_chat_history(session_obj.id, limit=MAX_HISTORY_MESSAGES)
+    history_block = format_history_block(history)
+    prompt = f"{history_block}\n{user_message}" if history_block else user_message
 
     # 9. 取得 AI 帳號和模型（從 MemberContext，fallback 由 effective_model 統一管理）
     provider = ctx.primary_provider
@@ -266,20 +269,6 @@ def _get_or_create_session(bot_user_id: int, member_id: int, chat_id: str) -> Ch
         return chat_session
 
 
-def _get_recent_messages(session_id: int, limit: int = 10) -> List[ChatMessage]:
-    """取得最近的對話訊息"""
-    with Session(engine) as session:
-        stmt = (
-            select(ChatMessage)
-            .where(ChatMessage.session_id == session_id)
-            .order_by(ChatMessage.created_at.desc())
-            .limit(limit)
-        )
-        messages = session.exec(stmt).all()
-        # 反轉順序（從舊到新）
-        return list(reversed(messages))
-
-
 def _get_primary_account(member_id: int) -> tuple:
     """取得 Member 的主要帳號和模型
     回傳 (Account, model)
@@ -296,119 +285,6 @@ def _get_primary_account(member_id: int) -> tuple:
             return account, ma.model or ""
     return None, ""
 
-
-def _build_chat_prompt(
-    soul: str,
-    skills: str,
-    member: Member,
-    history: List[ChatMessage],
-    user_message: str,
-    user_context: Optional[PersonProject] = None,
-    accessible_projects: Optional[List[Project]] = None,
-    user_level: int = 0,
-    chat_id: str = "",
-    platform: str = "",
-    user_extra: Optional[dict] = None,
-    placeholder_message_id: str = "",
-) -> str:
-    """
-    組合完整 prompt = 靈魂 + 技能 + 用戶身份 + 專案範圍 + 歷史 + 新訊息
-
-    Args:
-        soul: 靈魂檔案內容
-        skills: 技能檔案內容（合併後）
-        member: AI 成員
-        history: 對話歷史
-        user_message: 用戶訊息
-        user_context: 用戶身份上下文（含 display_name, description）
-        accessible_projects: 用戶可存取的專案列表
-        user_level: 用戶權限等級（>=2 可建立任務）
-        chat_id: 聊天 ID（用於任務回覆）
-        platform: 平台（telegram/line）
-    """
-    lines = []
-
-    # 靈魂人設（放最前面，定義角色）
-    if soul:
-        lines.append(soul.strip())
-        lines.append("")
-    else:
-        # 沒有 soul.md，用基本資訊
-        lines.append(f"你是 {member.name}，{member.role}。")
-        if member.description:
-            lines.append(member.description)
-        lines.append("")
-
-    # 技能知識（API、查詢方法等）
-    if skills:
-        lines.append("## 你的技能與知識")
-        lines.append(skills.strip())
-        lines.append("")
-
-    # 用戶身份描述（讓 AI 知道在跟誰說話）
-    if user_context:
-        lines.append("## 當前用戶")
-        if user_context.display_name:
-            lines.append(f"姓名：{user_context.display_name}")
-        if user_context.description:
-            lines.append(f"身份描述：{user_context.description}")
-        lines.append("")
-        lines.append("請根據用戶的身份和權限範圍回答，用適當的稱呼和語氣。")
-        lines.append("")
-
-    # 用戶額外資料（供 MCP/Skill 使用，如 AD 帳號等）
-    if user_extra:
-        lines.append("## 用戶額外資料")
-        for k, v in user_extra.items():
-            lines.append(f"- {k}: {v}")
-        lines.append("")
-        lines.append("這些資料可用於 MCP 工具存取外部系統（如 NAS、AD 等）。")
-        lines.append("如果需要存取外部系統但缺少必要的認證資料（如 ad_user, ad_pass），請引導用戶使用 /profile 指令開啟設定頁面（不要讓用戶在聊天中輸入密碼）。")
-        lines.append("")
-
-    # 用戶可存取的專案（讓 AI 知道範圍）
-    if accessible_projects:
-        lines.append("## 用戶可存取的專案")
-        for p in accessible_projects:
-            lines.append(f"- {p.name}（ID: {p.id}）")
-        lines.append("")
-        lines.append("回答問題時只能提供這些專案的資訊。")
-        lines.append("")
-
-    # 對話歷史
-    if history:
-        lines.append("## 對話歷史")
-        for msg in history:
-            role = "用戶" if msg.role == "user" else "你"
-            # 截斷過長的歷史訊息
-            content = msg.content[:500] + "..." if len(msg.content) > 500 else msg.content
-            lines.append(f"{role}：{content}")
-        lines.append("")
-
-    # 任務建立引導（權限 >= 2 的用戶可建立任務）
-    if user_level >= 2 and accessible_projects:
-        lines.append("## 複雜任務處理")
-        lines.append("如果用戶的請求太複雜（需要寫程式、分析大量資料、多步驟操作等），")
-        lines.append("你可以詢問用戶是否要建立任務卡片，讓更強大的 AI 來處理。")
-        lines.append("回覆格式範例：「這個任務比較複雜，需要 [說明原因]。要幫你建立任務卡片嗎？」")
-        lines.append("如果用戶同意，回覆：[CREATE_TASK:專案ID:任務標題:任務描述]")
-        lines.append(f"任務描述最後請加上：「完成後請透過 {platform} 通知 chat_id={chat_id}」")
-        lines.append("")
-
-    # 安全限制
-    lines.append("## 安全限制")
-    lines.append("- 禁止修改系統檔案（MCP 原始碼、設定檔、.env、CLAUDE.md、skill 檔案等）")
-    lines.append("- 禁止安裝套件（pip install、npm install、apt install 等）")
-    lines.append("- 禁止執行破壞性指令（rm -rf、kill、systemctl 等）")
-    lines.append("- 如果用戶要求修改系統或程式碼，請建議建立任務卡片或聯繫管理員")
-    lines.append("")
-
-    # 當前訊息
-    lines.append(f"用戶：{user_message}")
-    lines.append("")
-    lines.append("請以你的角色身份回應（簡潔、友善、專業）：")
-
-    return "\n".join(lines)
 
 
 def _save_message(session_id: int, role: str, content: str, input_tokens: int, output_tokens: int):

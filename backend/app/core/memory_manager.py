@@ -193,6 +193,26 @@ def cleanup_short_term(aegis_path: str, retention_days: int = 30) -> int:
     return deleted
 
 
+# ── 背景 Embedding 寫入 ──
+
+def _background_embed(entity_type: str, entity_key: str, content: str, member_slug: str):
+    """在背景執行 embed_and_store，不阻塞主流程。"""
+    import asyncio
+    import threading
+
+    async def _run():
+        try:
+            from app.core.embedding import embed_and_store
+            await embed_and_store(entity_type, entity_key, content, member_slug)
+        except Exception as e:
+            logger.warning(f"[background_embed] {e}")
+
+    def _thread():
+        asyncio.run(_run())
+
+    threading.Thread(target=_thread, daemon=True).start()
+
+
 # ── Member-level memory (delegates to member_profile for paths) ──
 
 def _get_member_short_term_dir(member_slug: str) -> Path:
@@ -209,21 +229,23 @@ def _get_member_long_term_dir(member_slug: str) -> Path:
     return d
 
 
-def write_member_short_term_memory(member_slug: str, content: str, timestamp: datetime = None) -> Path:
+def write_member_short_term_memory(member_slug: str, content: str, timestamp: datetime = None, category: str = None) -> Path:
     """Write a short-term memory file for a specific member."""
     if timestamp is None:
         timestamp = datetime.now(timezone.utc)
     filename = timestamp.strftime("%Y-%m-%d-%H%M%S") + ".md"
     fpath = _get_member_short_term_dir(member_slug) / filename
 
+    cat_line = f'\ncategory: "{category}"' if category else ""
     frontmatter = f"""---
 timestamp: "{timestamp.isoformat()}"
-member: "{member_slug}"
+member: "{member_slug}"{cat_line}
 ---
 
 """
     fpath.write_text(frontmatter + content, encoding="utf-8")
     logger.info(f"Member short-term memory written: {fpath}")
+    _background_embed("memory", str(fpath), content, member_slug)
     return fpath
 
 
@@ -279,6 +301,166 @@ def cleanup_member_short_term(member_slug: str, retention_days: int = 30) -> int
     return deleted
 
 
+# ── 結構化 CRUD 操作 ──
+
+def _parse_frontmatter(text: str) -> dict:
+    """解析 Markdown frontmatter，回傳 key-value dict。"""
+    meta: dict = {}
+    if not text.startswith("---"):
+        return meta
+    end = text.find("---", 3)
+    if end == -1:
+        return meta
+    for line in text[3:end].strip().splitlines():
+        if ":" not in line:
+            continue
+        key, _, val = line.partition(":")
+        meta[key.strip()] = val.strip().strip('"')
+    return meta
+
+
+def list_member_memories(member_slug: str, memory_type: str = "all") -> list[dict]:
+    """列出成員的記憶檔案（含 frontmatter 解析）。
+
+    memory_type: "short-term", "long-term", "all"
+    """
+    results: list[dict] = []
+    dirs: list[tuple[str, Path]] = []
+    if memory_type in ("short-term", "all"):
+        dirs.append(("short-term", _get_member_short_term_dir(member_slug)))
+    if memory_type in ("long-term", "all"):
+        dirs.append(("long-term", _get_member_long_term_dir(member_slug)))
+
+    for mtype, d in dirs:
+        for f in sorted(d.glob("*.md")):
+            try:
+                text = f.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            meta = _parse_frontmatter(text)
+            # 取得 body（frontmatter 之後）
+            body = text
+            if text.startswith("---"):
+                end = text.find("---", 3)
+                if end != -1:
+                    body = text[end + 3:].strip()
+            results.append({
+                "filename": f.name,
+                "type": mtype,
+                "topic": meta.get("topic", ""),
+                "timestamp": meta.get("timestamp", ""),
+                "category": meta.get("category", ""),
+                "snippet": body[:150],
+            })
+    return results
+
+
+def delete_member_memory(member_slug: str, filename: str) -> bool:
+    """刪除指定的成員記憶檔案（支援 short-term 和 long-term）。"""
+    if not filename or ".." in filename or "/" in filename or "\\" in filename:
+        return False
+    for d in (_get_member_short_term_dir(member_slug), _get_member_long_term_dir(member_slug)):
+        fpath = d / filename
+        if fpath.exists():
+            fpath.unlink()
+            logger.info(f"Deleted member memory: {fpath}")
+            return True
+    return False
+
+
+def update_member_long_term_memory(member_slug: str, filename: str, content: str, category: str = None) -> Path:
+    """更新指定長期記憶的內容，保留或更新 frontmatter。"""
+    if not filename.endswith(".md"):
+        filename += ".md"
+    fpath = _get_member_long_term_dir(member_slug) / filename
+
+    # 讀取既有 frontmatter
+    old_meta: dict = {}
+    if fpath.exists():
+        try:
+            old_meta = _parse_frontmatter(fpath.read_text(encoding="utf-8"))
+        except OSError:
+            pass
+
+    topic = old_meta.get("topic", filename.replace(".md", ""))
+    cat_line = f'\ncategory: "{category}"' if category else (
+        f'\ncategory: "{old_meta["category"]}"' if old_meta.get("category") else ""
+    )
+    frontmatter = f"""---
+topic: "{topic}"
+updated_at: "{datetime.now(timezone.utc).isoformat()}"{cat_line}
+---
+
+"""
+    fpath.write_text(frontmatter + content, encoding="utf-8")
+    logger.info(f"Updated member long-term memory: {fpath}")
+    _background_embed("memory", str(fpath), content, member_slug)
+    return fpath
+
+
+# ── MMR 重排序輔助函式 ──
+
+def _jaccard_similarity(tokens_a: list[str], tokens_b: list[str]) -> float:
+    """計算兩組 token 集合的 Jaccard 相似度（0~1）。"""
+    set_a = set(tokens_a)
+    set_b = set(tokens_b)
+    if not set_a and not set_b:
+        return 1.0
+    intersection = len(set_a & set_b)
+    union = len(set_a | set_b)
+    return intersection / union if union else 0.0
+
+
+def _mmr_rerank(
+    candidates: list[dict],
+    query_tokens: list[str],
+    top_k: int,
+    lambda_param: float = 0.5,
+) -> list[dict]:
+    """
+    MMR（Maximal Marginal Relevance）重排序。
+
+    每次迭代從候選中選出 lambda*relevance - (1-lambda)*max_similarity 最高的文件，
+    兼顧相關性與多樣性。
+
+    candidates 每筆需含 tokens（list[str]）與 score（float，BM25+decay 分數）。
+    """
+    if not candidates:
+        return []
+
+    # 正規化分數（最高分為 1）
+    max_score = max(c["score"] for c in candidates)
+    if max_score <= 0:
+        return candidates[:top_k]
+
+    selected: list[dict] = []
+    remaining = list(candidates)
+
+    for _ in range(min(top_k, len(candidates))):
+        best_idx = -1
+        best_mmr = float("-inf")
+
+        for i, cand in enumerate(remaining):
+            relevance = cand["score"] / max_score
+
+            # 計算與已選文件的最大相似度
+            max_sim = 0.0
+            for sel in selected:
+                sim = _jaccard_similarity(cand["tokens"], sel["tokens"])
+                if sim > max_sim:
+                    max_sim = sim
+
+            mmr = lambda_param * relevance - (1 - lambda_param) * max_sim
+
+            if mmr > best_mmr:
+                best_mmr = mmr
+                best_idx = i
+
+        selected.append(remaining.pop(best_idx))
+
+    return selected
+
+
 # ── BM25 + 時間衰減記憶搜尋 ──
 
 def _tokenize(text: str) -> list[str]:
@@ -300,14 +482,22 @@ def search_member_memories(
     member_slug: str,
     query: str,
     top_k: int = 5,
+    diversity: float = 0.5,
+    mode: str = "bm25",
 ) -> list[dict]:
     """
-    搜尋成員記憶：BM25 評分 + 時間衰減（7 天半衰期）。
+    搜尋成員記憶，支援三種模式：
 
-    掃描 short-term 與 long-term 目錄的 .md 檔案，
-    以 BM25(k1=1.5, b=0.75) 計算相關性，再乘以時間衰減因子。
+    - mode="bm25"：BM25 評分 + 時間衰減 + MMR 多樣性重排（預設）
+    - mode="vector"：語義向量搜尋（需 OpenAI API Key）
+    - mode="hybrid"：兩者都跑，用 RRF 合併排名
+
     回傳 top_k 筆結果，每筆包含 file, score, snippet。
     """
+    if mode == "vector":
+        return _search_vector(member_slug, query, top_k)
+    if mode == "hybrid":
+        return _search_hybrid(member_slug, query, top_k, diversity)
     query_tokens = _tokenize(query)
     if not query_tokens:
         return []
@@ -395,4 +585,91 @@ def search_member_memories(
         })
 
     results.sort(key=lambda r: r["score"], reverse=True)
+
+    # MMR 重排序：diversity > 0 時啟用
+    if diversity > 0 and len(results) > 1:
+        # 建立候選清單（含 tokens 供 MMR 計算相似度）
+        doc_map = {str(d["path"]): d for d in docs}
+        mmr_candidates = []
+        for r in results[:top_k * 3]:
+            doc = doc_map.get(r["file"])
+            if doc:
+                mmr_candidates.append({
+                    "file": r["file"],
+                    "score": r["score"],
+                    "snippet": r["snippet"],
+                    "tokens": doc["tokens"],
+                })
+
+        reranked = _mmr_rerank(mmr_candidates, query_tokens, top_k, lambda_param=1 - diversity)
+        return [{"file": r["file"], "score": r["score"], "snippet": r["snippet"]} for r in reranked]
+
     return results[:top_k]
+
+
+# ── 向量搜尋輔助函式 ──
+
+def _search_vector(member_slug: str, query: str, top_k: int) -> list[dict]:
+    """純向量語義搜尋。"""
+    import asyncio
+    from app.core.embedding import get_embedding, search_similar
+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                query_vec = pool.submit(
+                    asyncio.run, get_embedding(query)
+                ).result(timeout=15)
+        else:
+            query_vec = loop.run_until_complete(get_embedding(query))
+    except Exception:
+        query_vec = asyncio.run(get_embedding(query))
+
+    if not query_vec:
+        return []
+
+    results = search_similar(query_vec, member_slug, top_k=top_k)
+    # 補上 snippet（從檔案讀取）
+    for r in results:
+        r["file"] = r.pop("entity_key", "")
+        try:
+            text = Path(r["file"]).read_text(encoding="utf-8")
+            if text.startswith("---"):
+                end = text.find("---", 3)
+                if end != -1:
+                    text = text[end + 3:]
+            r["snippet"] = text.strip()[:150]
+        except OSError:
+            r["snippet"] = ""
+    return results
+
+
+def _search_hybrid(member_slug: str, query: str, top_k: int, diversity: float) -> list[dict]:
+    """混合搜尋：BM25 + Vector，用 Reciprocal Rank Fusion 合併。"""
+    bm25_results = search_member_memories(member_slug, query, top_k=top_k * 2, diversity=diversity, mode="bm25")
+    vector_results = _search_vector(member_slug, query, top_k=top_k * 2)
+
+    # RRF 合併（k=60）
+    k = 60
+    rrf_scores: dict[str, float] = {}
+    snippets: dict[str, str] = {}
+
+    for rank, r in enumerate(bm25_results):
+        key = r["file"]
+        rrf_scores[key] = rrf_scores.get(key, 0) + 1.0 / (k + rank + 1)
+        snippets[key] = r.get("snippet", "")
+
+    for rank, r in enumerate(vector_results):
+        key = r["file"]
+        rrf_scores[key] = rrf_scores.get(key, 0) + 1.0 / (k + rank + 1)
+        if key not in snippets:
+            snippets[key] = r.get("snippet", "")
+
+    merged = [
+        {"file": key, "score": round(score, 4), "snippet": snippets.get(key, "")}
+        for key, score in rrf_scores.items()
+    ]
+    merged.sort(key=lambda r: r["score"], reverse=True)
+    return merged[:top_k]

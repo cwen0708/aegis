@@ -225,6 +225,17 @@ class MemberDialogue(SQLModel, table=True):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class MemberMessage(SQLModel, table=True):
+    """成員間訊息記錄（AI 成員透明通訊）"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    from_member_id: int = Field(index=True)
+    to_member_id: Optional[int] = Field(default=None, index=True)
+    card_id: Optional[int] = Field(default=None, index=True)
+    message_type: str = Field(default="info")  # delegate / report / question / info
+    content: str = Field(default="")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class MemberAccount(SQLModel, table=True):
     """成員-帳號綁定（含優先順序與模型設定）"""
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -459,6 +470,21 @@ class InviteCode(SQLModel, table=True):
     created_by: Optional[int] = Field(default=None, foreign_key="botuser.id")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     note: str = ""          # "給客戶A用"
+
+
+# ==========================================
+# Embedding 向量儲存
+# ==========================================
+class EmbeddingRecord(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    entity_type: str = Field(index=True)          # "memory" | "card" | "document"
+    entity_key: str = Field(index=True)            # 檔案路徑或唯一識別碼
+    member_slug: Optional[str] = Field(default=None, index=True)
+    content_hash: str = ""                         # SHA256 of content
+    vector_json: str = ""                          # JSON array of floats
+    model_name: str = "text-embedding-3-small"
+    dimension: int = 1536
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class ChatSession(SQLModel, table=True):

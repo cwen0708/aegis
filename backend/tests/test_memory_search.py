@@ -4,7 +4,9 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from app.core.memory_manager import search_member_memories, _tokenize
+from app.core.memory_manager import (
+    search_member_memories, _tokenize, _jaccard_similarity, _mmr_rerank,
+)
 
 
 # ── Helpers ──
@@ -375,3 +377,138 @@ class TestBM25VsSubstring:
         assert len(results) == 3
         assert "deploy" in results[0]["snippet"].lower()
         assert "error" in results[0]["snippet"].lower()
+
+
+# ── Jaccard 相似度 ──
+
+class TestJaccardSimilarity:
+    def test_identical_tokens(self):
+        assert _jaccard_similarity(["a", "b", "c"], ["a", "b", "c"]) == 1.0
+
+    def test_disjoint_tokens(self):
+        assert _jaccard_similarity(["a", "b"], ["c", "d"]) == 0.0
+
+    def test_partial_overlap(self):
+        # {a, b} ∩ {b, c} = {b}, union = {a, b, c} → 1/3
+        sim = _jaccard_similarity(["a", "b"], ["b", "c"])
+        assert abs(sim - 1 / 3) < 1e-9
+
+    def test_both_empty(self):
+        assert _jaccard_similarity([], []) == 1.0
+
+    def test_one_empty(self):
+        assert _jaccard_similarity(["a"], []) == 0.0
+
+    def test_duplicates_ignored(self):
+        # 集合化後 {a, b} vs {a, b} → 1.0
+        assert _jaccard_similarity(["a", "a", "b"], ["a", "b", "b"]) == 1.0
+
+
+# ── MMR 重排序 ──
+
+class TestMMRRerank:
+    def test_mmr_promotes_diversity(self):
+        """MMR 應將不同內容的文件提前，而非全部選相似文件。"""
+        candidates = [
+            {"tokens": ["deploy", "server", "error"], "score": 10.0},
+            {"tokens": ["deploy", "server", "crash"], "score": 9.5},
+            {"tokens": ["deploy", "server", "fail"], "score": 9.0},
+            {"tokens": ["database", "migration", "schema"], "score": 5.0},
+        ]
+        query_tokens = ["deploy", "error"]
+
+        # lambda=0.5（平衡相關性與多樣性）
+        reranked = _mmr_rerank(candidates, query_tokens, top_k=3, lambda_param=0.5)
+        assert len(reranked) == 3
+
+        # 第一筆應是最高分
+        assert reranked[0]["score"] == 10.0
+
+        # 不同內容的 database 文件應被選入（因為多樣性加分）
+        tokens_in_result = [set(r["tokens"]) for r in reranked]
+        has_database = any("database" in t for t in tokens_in_result)
+        assert has_database, "MMR 應選入不同主題的文件以增加多樣性"
+
+    def test_mmr_lambda_1_equals_pure_relevance(self):
+        """lambda=1 時，MMR 退化為純相關性排序。"""
+        candidates = [
+            {"tokens": ["a", "b"], "score": 10.0},
+            {"tokens": ["a", "b"], "score": 8.0},
+            {"tokens": ["c", "d"], "score": 6.0},
+        ]
+        reranked = _mmr_rerank(candidates, ["a"], top_k=3, lambda_param=1.0)
+        # 應與原始分數排序一致
+        scores = [r["score"] for r in reranked]
+        assert scores == [10.0, 8.0, 6.0]
+
+    def test_mmr_empty_candidates(self):
+        assert _mmr_rerank([], ["a"], top_k=5) == []
+
+
+# ── MMR 整合到 search_member_memories ──
+
+class TestMMRIntegration:
+    def test_diversity_improves_variety(self, tmp_path):
+        """啟用 diversity 時，相似記憶不會佔滿所有結果。"""
+        st_dir = tmp_path / "memory" / "short-term"
+        lt_dir = tmp_path / "memory" / "long-term"
+
+        now = datetime.now(timezone.utc)
+
+        # 3 篇高度相似的 deploy 記憶
+        for i in range(3):
+            fname = (now - timedelta(seconds=i)).strftime("%Y-%m-%d-%H%M%S") + ".md"
+            _write_memory(st_dir, fname, f"deploy server production release version {i}")
+
+        # 1 篇不同主題但也包含 deploy
+        f4 = (now - timedelta(seconds=5)).strftime("%Y-%m-%d-%H%M%S") + ".md"
+        _write_memory(st_dir, f4, "deploy database migration schema upgrade completed")
+
+        lt_dir.mkdir(parents=True, exist_ok=True)
+
+        with patch("app.core.memory_manager._get_member_short_term_dir", return_value=st_dir), \
+             patch("app.core.memory_manager._get_member_long_term_dir", return_value=lt_dir):
+            results = search_member_memories("test-member", "deploy", top_k=3, diversity=0.5)
+
+        assert len(results) == 3
+        # 不同主題的 database 記憶應被包含在前 3 名
+        snippets = " ".join(r["snippet"].lower() for r in results)
+        assert "database" in snippets, "MMR 應將不同主題的記憶提升排名"
+
+    def test_diversity_zero_skips_mmr(self, tmp_path):
+        """diversity=0 時行為與原本一致（不進行 MMR 重排）。"""
+        st_dir = tmp_path / "memory" / "short-term"
+        lt_dir = tmp_path / "memory" / "long-term"
+
+        now = datetime.now(timezone.utc)
+
+        for i in range(5):
+            fname = (now - timedelta(seconds=i)).strftime("%Y-%m-%d-%H%M%S") + ".md"
+            _write_memory(st_dir, fname, f"deploy attempt {i} on production server")
+
+        lt_dir.mkdir(parents=True, exist_ok=True)
+
+        with patch("app.core.memory_manager._get_member_short_term_dir", return_value=st_dir), \
+             patch("app.core.memory_manager._get_member_long_term_dir", return_value=lt_dir):
+            results_no_mmr = search_member_memories("test-member", "deploy", top_k=3, diversity=0)
+            results_default = search_member_memories("test-member", "deploy", top_k=3, diversity=0)
+
+        # 兩次結果應完全一致
+        assert [r["file"] for r in results_no_mmr] == [r["file"] for r in results_default]
+
+    def test_diversity_default_backward_compatible(self, tmp_path):
+        """預設 diversity=0.5 不應讓既有測試失敗（仍回傳正確結果）。"""
+        st_dir = tmp_path / "memory" / "short-term"
+        lt_dir = tmp_path / "memory" / "long-term"
+
+        now = datetime.now(timezone.utc)
+        fname = now.strftime("%Y-%m-%d-%H%M%S") + ".md"
+        _write_memory(st_dir, fname, "deploy completed successfully")
+        lt_dir.mkdir(parents=True, exist_ok=True)
+
+        with patch("app.core.memory_manager._get_member_short_term_dir", return_value=st_dir), \
+             patch("app.core.memory_manager._get_member_long_term_dir", return_value=lt_dir):
+            results = search_member_memories("test-member", "deploy", top_k=5)
+
+        assert len(results) == 1
+        assert results[0]["score"] > 0

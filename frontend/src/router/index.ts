@@ -80,6 +80,7 @@ const router = createRouter({
         { path: 'team/:id/sprite', component: () => import('../views/settings/SettingsSpriteGen.vue') },
         { path: 'agents', component: Agents },
         { path: 'status', component: Dashboard },
+        { path: 'usage', component: () => import('../views/UsageDashboard.vue') },
         { path: 'onestack', component: SettingsOneStack },
         { path: 'update', component: SettingsUpdate },
         { path: 'terminal', component: SettingsTerminal },

@@ -87,6 +87,18 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
             cwd=cwd,
         )
 
+    # Prompt Hardening: 非 pool 路徑也注入安全提醒
+    from app.core.prompt_hardening import harden_prompt
+    prompt = harden_prompt(prompt, project_path)
+
+    # Data Classification Guard：送往 AI 前掃描敏感資料
+    from app.core.data_classifier import guard_for_ai, SecurityBlock
+    try:
+        prompt, _redact_map = guard_for_ai(prompt)
+    except SecurityBlock as e:
+        logger.warning(f"[Runner] Prompt blocked by security guard: {e}")
+        return {"status": "error", "output": f"SecurityBlock: {e}", "provider": forced_provider or "claude"}
+
     provider_name = forced_provider if forced_provider and forced_provider in PROVIDERS else "claude"
     config = get_provider_config(provider_name)
 
@@ -192,11 +204,15 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
                 # 後處理標記
                 for tl in actual_output.split("\n"):
                     _intercept_channel_marker(tl.strip())
-        elif provider_name == "openai" and config.get("json_output"):
-            from app.core.stream_parsers import parse_openai_json
-            token_info = parse_openai_json(output)
-            if token_info.get("result_text"):
-                actual_output = token_info["result_text"]
+        elif provider_name == "openai":
+            if is_stream_json and result_text_parts:
+                actual_output = "".join(result_text_parts)
+                token_info = stream_token_info
+            elif config.get("json_output"):
+                from app.core.stream_parsers import parse_openai_json
+                token_info = parse_openai_json(output)
+                if token_info.get("result_text"):
+                    actual_output = token_info["result_text"]
 
         return {
             "status": status,

@@ -1,6 +1,14 @@
-"""Tag-based 模型路由單元測試。"""
+"""模型路由單元測試 — tag-based + complexity-based + provider failover。"""
 
-from app.core.model_router import resolve_model_by_tags, MODEL_TIER
+from app.core.model_router import (
+    resolve_model_by_tags,
+    assess_complexity,
+    resolve_model,
+    MODEL_TIER,
+    PROVIDER_FAILOVER,
+    get_failover_chain,
+    get_failover_model,
+)
 
 
 class TestResolveModelByTags:
@@ -58,3 +66,121 @@ class TestModelTier:
 
     def test_all_tiers_defined(self):
         assert set(MODEL_TIER.keys()) == {"haiku", "sonnet", "opus"}
+
+
+class TestAssessComplexity:
+    """assess_complexity 函式測試。"""
+
+    def test_short_prompt_returns_haiku(self):
+        assert assess_complexity("你好") == "haiku"
+
+    def test_short_prompt_under_500(self):
+        assert assess_complexity("請幫我看一下這個檔案") == "haiku"
+
+    def test_medium_prompt_by_length(self):
+        """500-2000 字元回傳 sonnet。"""
+        prompt = "a" * 600
+        assert assess_complexity(prompt) == "sonnet"
+
+    def test_long_prompt_returns_opus(self):
+        """超過 2000 字元回傳 opus。"""
+        prompt = "a" * 2500
+        assert assess_complexity(prompt) == "opus"
+
+    def test_sonnet_keyword_in_short_prompt(self):
+        """短 prompt 含程式碼修改關鍵字 → sonnet。"""
+        assert assess_complexity("修改這個函式") == "sonnet"
+
+    def test_sonnet_keyword_implement(self):
+        assert assess_complexity("implement a new endpoint") == "sonnet"
+
+    def test_opus_keyword_architecture(self):
+        """含架構設計關鍵字 → opus，不論長度。"""
+        assert assess_complexity("架構設計") == "opus"
+
+    def test_opus_keyword_design_pattern(self):
+        assert assess_complexity("design pattern for this module") == "opus"
+
+    def test_opus_keyword_step_by_step(self):
+        assert assess_complexity("step by step analysis") == "opus"
+
+    def test_opus_keyword_tradeoff(self):
+        assert assess_complexity("比較兩種方案的優缺點") == "opus"
+
+    def test_opus_keyword_overrides_short_length(self):
+        """即使是短 prompt，opus 關鍵字仍生效。"""
+        assert assess_complexity("多步驟推理") == "opus"
+
+    def test_empty_prompt(self):
+        assert assess_complexity("") == "haiku"
+
+
+class TestResolveModel:
+    """resolve_model 統一入口測試。"""
+
+    def test_tag_priority_over_complexity(self):
+        """Tag-based 路由優先於 complexity-based。"""
+        long_prompt = "a" * 3000  # 會被 assess_complexity 判為 opus
+        assert resolve_model(["AI-Haiku"], long_prompt) == "haiku"
+
+    def test_complexity_fallback_when_no_tag(self):
+        """無匹配 tag 時，fallback 到 complexity-based。"""
+        assert resolve_model(["P0", "Feature"], "修改這個函式") == "sonnet"
+
+    def test_complexity_fallback_opus(self):
+        long_prompt = "a" * 3000
+        assert resolve_model([], long_prompt) == "opus"
+
+    def test_complexity_fallback_haiku(self):
+        assert resolve_model([], "你好") == "haiku"
+
+    def test_default_when_no_prompt(self):
+        """無 tag 無 prompt 時回傳 default。"""
+        assert resolve_model([], "", default="sonnet") == "sonnet"
+
+    def test_none_when_no_match_no_default(self):
+        """無 tag 無 prompt 無 default → None。"""
+        assert resolve_model([], "") is None
+
+    def test_tag_with_empty_prompt_uses_tag(self):
+        assert resolve_model(["AI-Opus"], "") == "opus"
+
+    def test_mixed_tags_with_prompt(self):
+        """有 tag 匹配時忽略 prompt 複雜度。"""
+        assert resolve_model(["AI-Sonnet"], "架構設計很重要") == "sonnet"
+
+
+class TestProviderFailover:
+    """Provider Failover Chain 測試。"""
+
+    def test_claude_failover_chain(self):
+        assert get_failover_chain("claude") == ["gemini", "openai"]
+
+    def test_gemini_failover_chain(self):
+        assert get_failover_chain("gemini") == ["claude", "openai"]
+
+    def test_openai_failover_chain(self):
+        assert get_failover_chain("openai") == ["claude", "gemini"]
+
+    def test_unknown_provider_returns_empty(self):
+        assert get_failover_chain("unknown") == []
+
+    def test_failover_model_claude(self):
+        assert get_failover_model("claude") == "sonnet"
+
+    def test_failover_model_gemini(self):
+        assert get_failover_model("gemini") == "gemini-2.0-flash"
+
+    def test_failover_model_openai(self):
+        assert get_failover_model("openai") == "gpt-4o-mini"
+
+    def test_failover_model_unknown_returns_empty(self):
+        assert get_failover_model("unknown") == ""
+
+    def test_failover_dict_has_all_providers(self):
+        assert set(PROVIDER_FAILOVER.keys()) == {"claude", "gemini", "openai"}
+
+    def test_no_self_reference_in_chain(self):
+        """每個 provider 的 failover chain 不包含自己。"""
+        for provider, chain in PROVIDER_FAILOVER.items():
+            assert provider not in chain
