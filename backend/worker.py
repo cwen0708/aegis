@@ -102,6 +102,7 @@ def _handle_shutdown(signum, frame):
 POLL_INTERVAL = 3  # 秒
 API_BASE = "http://127.0.0.1:8899/api/v1"
 MAX_WORKSTATIONS = 3  # 預設，啟動時從 DB 讀取
+MAX_RETRY_ATTEMPTS = 3  # 自動重試上限
 DEFAULT_TASK_TIMEOUT = 3600  # 任務執行時間上限（秒），預設 60 分鐘
 
 # Provider 設定統一由 executor 管理
@@ -525,6 +526,10 @@ def _parse_cron_job_id(title: str) -> Optional[int]:
     m = re.match(r'\[cron_(\d+)\]', title)
     return int(m.group(1)) if m else None
 
+
+def _count_retry_attempts(content: str) -> int:
+    """計算 content 中已發生的重試次數（以 '### Error (retry' 出現次數為準）"""
+    return content.count("### Error (retry")
 
 
 # ==========================================
@@ -1214,18 +1219,29 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
         return
 
     # 自動重試（含錯誤分類）
-    if new_status == "failed" and "### Error" not in card_data.content:
+    retry_count = _count_retry_attempts(card_data.content or "")
+    if new_status == "failed" and retry_count < MAX_RETRY_ATTEMPTS:
         from app.core.error_classifier import classify_error
         classification = classify_error(result.get("output", ""), result.get("exit_code", 1))
         error_info = f"錯誤類型: {classification.category.value} | 建議: {classification.suggested_action}"
+        next_attempt = retry_count + 1
         if classification.retryable:
-            logger.info(f"[Worker] Card {idx.card_id}: retryable error ({classification.category.value}), scheduling retry")
-            update_card_status(idx.card_id, "pending", f"\n\n### Error (retry scheduled)\n{error_info}\n{result.get('output', '')[:200]}")
-            broadcast_event("task_failed", {"card_id": idx.card_id, "status": "retrying"})
+            logger.info(f"[Worker] Card {idx.card_id}: retryable error ({classification.category.value}), scheduling retry {next_attempt}/{MAX_RETRY_ATTEMPTS}")
+            update_card_status(idx.card_id, "pending", f"\n\n### Error (retry {next_attempt}/{MAX_RETRY_ATTEMPTS})\n{error_info}\n{result.get('output', '')[:200]}")
+            broadcast_event("task_failed", {"card_id": idx.card_id, "status": "retrying", "attempt": next_attempt})
         else:
             logger.info(f"[Worker] Card {idx.card_id}: non-retryable error ({classification.category.value}), marking failed")
             update_card_status(idx.card_id, "failed", f"\n\n### Error\n{error_info}\n{result.get('output', '')[:200]}")
             broadcast_event("task_failed", {"card_id": idx.card_id, "reason": classification.category.value})
+        if workspace_dir:
+            cleanup_workspace(idx.card_id)
+        return
+
+    # 重試次數已達上限，標記最終失敗
+    if new_status == "failed" and retry_count >= MAX_RETRY_ATTEMPTS:
+        logger.warning(f"[Worker] Card {idx.card_id}: retry limit reached ({retry_count}/{MAX_RETRY_ATTEMPTS}), marking final failure")
+        update_card_status(idx.card_id, "failed", f"\n\n### Error (max retries reached: {retry_count}/{MAX_RETRY_ATTEMPTS})\n已達重試上限，任務最終失敗。\n{result.get('output', '')[:200]}")
+        broadcast_event("task_failed", {"card_id": idx.card_id, "reason": "max_retries_reached", "attempts": retry_count})
         if workspace_dir:
             cleanup_workspace(idx.card_id)
         return
