@@ -480,18 +480,6 @@ export default class Room2Scene extends Phaser.Scene {
 
     container.add([shadow, sprite])
 
-    // 如果 texture 真的是 __MISSING（完全找不到圖），換成小紅點
-    if (sprite.texture.key === '__MISSING') {
-      sprite.setVisible(false)
-      shadow.clear()
-      shadow.fillStyle(0x000000, 0.2)
-      shadow.fillEllipse(0, 2, 6, 4)
-      const dot = this.add.graphics()
-      dot.fillStyle(0xff4444, 1)
-      dot.fillCircle(0, -6, 6)
-      container.add(dot)
-    }
-
     // 名字標籤
     const provColor = provider === 'claude' ? '#fb923c' : provider === 'gemini' ? '#60a5fa' : '#94a3b8'
     const nameColor = mode === 'working' ? provColor : '#94a3b8'
