@@ -16,6 +16,7 @@ from app.models.core import (
 )
 from app.core.card_file import CardData, write_card, card_file_path
 from app.core.card_index import sync_card_to_index, next_card_id
+from app.core.conversation_manager import get_chat_history, format_history_block
 from app.core.member_profile import get_soul_content, list_skills, get_skill_content
 from app.core.runner import run_ai_task
 from .types import InboundMessage
@@ -110,7 +111,10 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
             media_hint += f"\n[附帶說明: {msg.caption}]"
         user_message = (user_message + media_hint).strip()
 
-    prompt = user_message
+    # 7. 注入對話歷史到 prompt
+    history = get_chat_history(session_obj.id, limit=MAX_HISTORY_MESSAGES)
+    history_block = format_history_block(history)
+    prompt = f"{history_block}\n{user_message}" if history_block else user_message
 
     # 9. 取得 AI 帳號和模型（從 MemberContext，fallback 由 effective_model 統一管理）
     provider = ctx.primary_provider
@@ -266,20 +270,6 @@ def _get_or_create_session(bot_user_id: int, member_id: int, chat_id: str) -> Ch
         return chat_session
 
 
-def _get_recent_messages(session_id: int, limit: int = 10) -> List[ChatMessage]:
-    """取得最近的對話訊息"""
-    with Session(engine) as session:
-        stmt = (
-            select(ChatMessage)
-            .where(ChatMessage.session_id == session_id)
-            .order_by(ChatMessage.created_at.desc())
-            .limit(limit)
-        )
-        messages = session.exec(stmt).all()
-        # 反轉順序（從舊到新）
-        return list(reversed(messages))
-
-
 def _get_primary_account(member_id: int) -> tuple:
     """取得 Member 的主要帳號和模型
     回傳 (Account, model)
@@ -301,8 +291,8 @@ def _build_chat_prompt(
     soul: str,
     skills: str,
     member: Member,
-    history: List[ChatMessage],
     user_message: str,
+    session_id: int = 0,
     user_context: Optional[PersonProject] = None,
     accessible_projects: Optional[List[Project]] = None,
     user_level: int = 0,
@@ -318,8 +308,8 @@ def _build_chat_prompt(
         soul: 靈魂檔案內容
         skills: 技能檔案內容（合併後）
         member: AI 成員
-        history: 對話歷史
         user_message: 用戶訊息
+        session_id: ChatSession ID（用於查詢對話歷史）
         user_context: 用戶身份上下文（含 display_name, description）
         accessible_projects: 用戶可存取的專案列表
         user_level: 用戶權限等級（>=2 可建立任務）
@@ -375,15 +365,12 @@ def _build_chat_prompt(
         lines.append("回答問題時只能提供這些專案的資訊。")
         lines.append("")
 
-    # 對話歷史
+    # 對話歷史（透過 conversation_manager 統一取得）
+    history = get_chat_history(session_id) if session_id else []
     if history:
-        lines.append("## 對話歷史")
-        for msg in history:
-            role = "用戶" if msg.role == "user" else "你"
-            # 截斷過長的歷史訊息
-            content = msg.content[:500] + "..." if len(msg.content) > 500 else msg.content
-            lines.append(f"{role}：{content}")
-        lines.append("")
+        history_block = format_history_block(history)
+        if history_block:
+            lines.append(history_block)
 
     # 任務建立引導（權限 >= 2 的用戶可建立任務）
     if user_level >= 2 and accessible_projects:
