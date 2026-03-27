@@ -58,16 +58,23 @@ class MessageRouter:
         logger.info("[Router] MessageRouter stopped")
 
     async def _route_loop(self):
-        """主路由循環"""
+        """主路由循環 — 每則訊息獨立 task，不互相阻塞"""
         while self._running:
             try:
                 msg = await message_bus.consume_inbound(timeout=1.0)
                 if msg:
-                    await self._handle_message(msg)
+                    asyncio.create_task(self._safe_handle(msg))
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"[Router] Error: {e}", exc_info=True)
+
+    async def _safe_handle(self, msg: InboundMessage):
+        """包裝 _handle_message，避免未捕獲例外導致 task 靜默失敗"""
+        try:
+            await self._handle_message(msg)
+        except Exception as e:
+            logger.error(f"[Router] Unhandled error: {e}", exc_info=True)
 
     async def _handle_message(self, msg: InboundMessage):
         """處理單一訊息"""

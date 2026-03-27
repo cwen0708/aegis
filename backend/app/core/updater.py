@@ -8,6 +8,7 @@ import os
 import subprocess
 import shutil
 import re
+import time
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
@@ -817,6 +818,30 @@ async def full_update(version: str = None, wait_timeout: int = 300) -> bool:
     - Git 架構：git pull → 建構 → 重啟
     """
     global _state
+
+    # Debounce: 5 分鐘內不重複觸發（DB 層級，跨重啟）
+    DEBOUNCE_SECONDS = 300
+    try:
+        from app.database import engine as _deng
+        from app.models.core import SystemSetting as _DSS
+        from sqlmodel import Session as _DS
+        with _DS(_deng) as _ds:
+            last_update = _ds.get(_DSS, "update_last_triggered_at")
+            if last_update and last_update.value:
+                elapsed = time.time() - float(last_update.value)
+                if elapsed < DEBOUNCE_SECONDS:
+                    logger.info(f"[full_update] Debounce: 上次觸發 {int(elapsed)}s 前，跳過")
+                    return True
+            # 記錄本次觸發時間
+            ts_setting = _ds.get(_DSS, "update_last_triggered_at")
+            if ts_setting:
+                ts_setting.value = str(time.time())
+            else:
+                ts_setting = _DSS(key="update_last_triggered_at", value=str(time.time()))
+            _ds.add(ts_setting)
+            _ds.commit()
+    except Exception:
+        pass
 
     _state.is_updating = True
     _state.error = ""

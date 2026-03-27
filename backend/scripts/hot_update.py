@@ -14,6 +14,33 @@ SCRIPT_DIR = Path(__file__).parent
 BACKEND_DIR = SCRIPT_DIR.parent
 PROJECT_ROOT = BACKEND_DIR.parent
 
+# Debounce lockfile — 5 分鐘內不重複執行
+LOCK_FILE = BACKEND_DIR / ".hot_update.lock"
+DEBOUNCE_SECONDS = 300  # 5 minutes
+
+
+def _check_debounce() -> bool:
+    """檢查 lockfile，回傳 True 表示可以執行"""
+    try:
+        if LOCK_FILE.exists():
+            age = time.time() - LOCK_FILE.stat().st_mtime
+            if age < DEBOUNCE_SECONDS:
+                print(f"[HotUpdate] Debounce: 上次執行 {int(age)}s 前（< {DEBOUNCE_SECONDS}s），跳過")
+                return False
+        LOCK_FILE.write_text(str(int(time.time())))
+        return True
+    except Exception:
+        return True  # lockfile 操作失敗時不阻擋更新
+
+
+def _release_lock():
+    """更新完成後刪除 lockfile（允許下次立即執行）"""
+    try:
+        LOCK_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
 # 加入 backend 到 path
 sys.path.insert(0, str(BACKEND_DIR))
 
@@ -134,6 +161,10 @@ def trigger_smart_update(local_commits: int):
 
 
 def main():
+    # Debounce 檢查
+    if not _check_debounce():
+        return 0
+
     try:
         update_status("downloading", 0, "正在拉取最新代碼...")
 
@@ -276,6 +307,9 @@ def main():
         # 先標記完成（因為重啟後這個進程也會被殺掉）
         update_status("done", 100, "更新完成，服務重啟中...")
 
+        # 更新成功，釋放 lockfile（允許下次更新）
+        _release_lock()
+
         # 重啟服務：先 worker 再 aegis（因為 aegis 重啟會殺掉本進程的父進程）
         time.sleep(1)  # 給 DB 寫入一點時間
 
@@ -288,6 +322,7 @@ def main():
     except Exception as e:
         update_status("failed", 0, "更新失敗", str(e))
         resume_worker()
+        # 失敗時保留 lockfile，讓 debounce 繼續生效
         return 1
 
 
