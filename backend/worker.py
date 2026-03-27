@@ -1130,7 +1130,7 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
     # Data Classification Guard：送往 AI 前掃描敏感資料
     from app.core.data_classifier import guard_for_ai, restore as redact_restore, SecurityBlock
     try:
-        effective_prompt, redact_map = guard_for_ai(effective_prompt)
+        effective_prompt, redact_map = guard_for_ai(effective_prompt, project_path)
     except SecurityBlock as e:
         logger.warning(f"[Worker] Card {idx.card_id}: Prompt blocked by security guard: {e}")
         update_card_status(idx.card_id, "failed", f"\n\n---\n\n### Error\n安全閘門阻擋：偵測到 S3 等級敏感資料，prompt 未送出。\n{e}")

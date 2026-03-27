@@ -94,3 +94,66 @@ class TestGuardForAiRestore:
 
         assert sanitized == text
         assert redact_map == {}
+
+
+class TestGuardWithCustomRules:
+    """guard_for_ai 搭配 per-project 自訂規則的端到端測試"""
+
+    def test_custom_s2_roundtrip(self, tmp_path):
+        """自訂 S2 規則：去敏化後還原應等於原始值。"""
+        aegis_dir = tmp_path / ".aegis"
+        aegis_dir.mkdir()
+        (aegis_dir / "desensitize.yaml").write_text(
+            "patterns:\n"
+            "  - name: order_id\n"
+            '    regex: "ORD-\\\\d{8}"\n'
+            "    level: S2\n"
+        )
+        original = "訂單 ORD-20260327 已出貨"
+        sanitized, redact_map = guard_for_ai(original, str(tmp_path))
+
+        assert "ORD-20260327" not in sanitized
+        assert len(redact_map) == 1
+
+        restored = restore(sanitized, redact_map)
+        assert "ORD-20260327" in restored
+        assert "<<REDACTED:" not in restored
+
+    def test_custom_s3_blocked(self, tmp_path):
+        """自訂 S3 規則：應被阻擋。"""
+        from app.core.data_classifier import SecurityBlock
+        aegis_dir = tmp_path / ".aegis"
+        aegis_dir.mkdir()
+        (aegis_dir / "desensitize.yaml").write_text(
+            "patterns:\n"
+            "  - name: deploy_key\n"
+            '    regex: "DEPLOY-[A-F0-9]{32}"\n'
+            "    level: S3\n"
+        )
+        text = "key: DEPLOY-AABBCCDD11223344AABBCCDD11223344"
+        import pytest
+        with pytest.raises(SecurityBlock):
+            guard_for_ai(text, str(tmp_path))
+
+    def test_no_config_falls_back(self, tmp_path):
+        """沒有設定檔時 guard_for_ai 仍正常運作。"""
+        text = "Hello world, no PII here"
+        sanitized, redact_map = guard_for_ai(text, str(tmp_path))
+        assert sanitized == text
+        assert redact_map == {}
+
+    def test_builtin_plus_custom_both_detected(self, tmp_path):
+        """內建 + 自訂規則同時偵測。"""
+        aegis_dir = tmp_path / ".aegis"
+        aegis_dir.mkdir()
+        (aegis_dir / "desensitize.yaml").write_text(
+            "patterns:\n"
+            "  - name: emp_id\n"
+            '    regex: "EMP-\\\\d{6}"\n'
+            "    level: S2\n"
+        )
+        text = "員工 EMP-999888 的信箱是 hr@example.com"
+        sanitized, redact_map = guard_for_ai(text, str(tmp_path))
+        assert "EMP-999888" not in sanitized
+        assert "hr@example.com" not in sanitized
+        assert len(redact_map) >= 2

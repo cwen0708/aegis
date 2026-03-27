@@ -94,7 +94,7 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
     # Data Classification Guard：送往 AI 前掃描敏感資料
     from app.core.data_classifier import guard_for_ai, restore, SecurityBlock
     try:
-        prompt, redact_map = guard_for_ai(prompt)
+        prompt, redact_map = guard_for_ai(prompt, project_path)
     except SecurityBlock as e:
         logger.warning(f"[Runner] Prompt blocked by security guard: {e}")
         return {"status": "error", "output": f"SecurityBlock: {e}", "provider": forced_provider or "claude"}

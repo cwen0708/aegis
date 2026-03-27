@@ -7,12 +7,17 @@
 - S3 (Private)：高機密，如 API key、密碼、JWT token
 
 提供 classify / scan / sanitize / restore 四個核心功能。
+支援 per-project 自訂去敏化規則：{project_path}/.aegis/desensitize.yaml
 """
 import enum
+import logging
 import re
 import secrets
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 class SecurityLevel(enum.IntEnum):
@@ -86,10 +91,68 @@ _ALL_PATTERNS = _S3_PATTERNS + _S2_PATTERNS
 _PLACEHOLDER_FMT = "<<REDACTED:{tag}>>"
 
 
-def classify(text: str) -> SecurityLevel:
+def _load_project_patterns(project_path: str) -> List[Tuple[str, re.Pattern, SecurityLevel]]:
+    """讀取 {project_path}/.aegis/desensitize.yaml 中的自訂規則。
+
+    YAML 格式範例::
+
+        patterns:
+          - name: internal_token
+            regex: "INTERNAL-[A-Z0-9]{16}"
+            level: S3
+
+    回傳格式與內建 _S3_PATTERNS / _S2_PATTERNS 相同。
+    """
+    import yaml
+
+    config_path = Path(project_path) / ".aegis" / "desensitize.yaml"
+    if not config_path.is_file():
+        return []
+
+    try:
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning(f"[DataClassifier] Failed to load {config_path}: {e}")
+        return []
+
+    if not isinstance(data, dict):
+        return []
+
+    patterns: List[Tuple[str, re.Pattern, SecurityLevel]] = []
+    for item in data.get("patterns") or []:
+        name = item.get("name")
+        regex = item.get("regex")
+        level_str = item.get("level", "").upper()
+        if not name or not regex or level_str not in ("S2", "S3"):
+            logger.warning(f"[DataClassifier] Skipping invalid pattern entry: {item}")
+            continue
+        try:
+            compiled = re.compile(regex)
+        except re.error as e:
+            logger.warning(f"[DataClassifier] Invalid regex '{regex}' for '{name}': {e}")
+            continue
+        level = SecurityLevel.S3 if level_str == "S3" else SecurityLevel.S2
+        patterns.append((name, compiled, level))
+
+    if patterns:
+        logger.info(f"[DataClassifier] Loaded {len(patterns)} custom patterns from {config_path}")
+    return patterns
+
+
+def get_all_patterns(project_path: Optional[str] = None) -> List[Tuple[str, re.Pattern, SecurityLevel]]:
+    """合併內建規則與 per-project 自訂規則。"""
+    if not project_path:
+        return _ALL_PATTERNS
+    custom = _load_project_patterns(project_path)
+    if not custom:
+        return _ALL_PATTERNS
+    return _ALL_PATTERNS + custom
+
+
+def classify(text: str, project_path: Optional[str] = None) -> SecurityLevel:
     """掃描文字並回傳最高安全等級。"""
     level = SecurityLevel.S1
-    for _name, pattern, pat_level in _ALL_PATTERNS:
+    for _name, pattern, pat_level in get_all_patterns(project_path):
         if pattern.search(text):
             if pat_level > level:
                 level = pat_level
@@ -99,10 +162,10 @@ def classify(text: str) -> SecurityLevel:
     return level
 
 
-def scan(text: str) -> List[Match]:
+def scan(text: str, project_path: Optional[str] = None) -> List[Match]:
     """掃描文字，回傳所有命中的敏感資料位置與類型。"""
     matches: List[Match] = []
-    for name, pattern, level in _ALL_PATTERNS:
+    for name, pattern, level in get_all_patterns(project_path):
         for m in pattern.finditer(text):
             matches.append(Match(
                 start=m.start(),
@@ -116,7 +179,7 @@ def scan(text: str) -> List[Match]:
     return matches
 
 
-def sanitize(text: str) -> Tuple[str, Dict[str, str]]:
+def sanitize(text: str, project_path: Optional[str] = None) -> Tuple[str, Dict[str, str]]:
     """遮蔽文字中的敏感資料。
 
     Returns
@@ -124,7 +187,7 @@ def sanitize(text: str) -> Tuple[str, Dict[str, str]]:
     tuple[str, dict]
         (遮蔽後的文字, 還原對照表 {佔位符: 原始值})
     """
-    matches = scan(text)
+    matches = scan(text, project_path)
     if not matches:
         return text, {}
 
@@ -159,18 +222,20 @@ class SecurityBlock(Exception):
     pass
 
 
-def guard_for_ai(text: str) -> Tuple[str, Dict[str, str]]:
+def guard_for_ai(text: str, project_path: Optional[str] = None) -> Tuple[str, Dict[str, str]]:
     """送往 AI API 前的安全閘門。
 
     - S1: 原文放行
     - S2: sanitize 去敏化後放行
     - S3: 拋出 SecurityBlock 阻擋
+
+    project_path: 專案目錄路徑，用於載入 .aegis/desensitize.yaml 自訂規則
     """
-    level = classify(text)
+    level = classify(text, project_path)
     if level == SecurityLevel.S3:
-        matches = scan(text)
+        matches = scan(text, project_path)
         s3_types = [m.pattern_name for m in matches if m.level == SecurityLevel.S3]
         raise SecurityBlock(f"S3 data detected: {s3_types}")
     if level == SecurityLevel.S2:
-        return sanitize(text)
+        return sanitize(text, project_path)
     return text, {}

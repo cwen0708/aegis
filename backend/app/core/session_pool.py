@@ -215,7 +215,7 @@ class ProcessPool:
         # Data Classification Guard：送往 AI 前掃描敏感資料
         from app.core.data_classifier import guard_for_ai, restore as redact_restore, SecurityBlock
         try:
-            message, redact_map = guard_for_ai(message)
+            message, redact_map = guard_for_ai(message, cwd)
         except SecurityBlock as e:
             logger.warning(f"[ProcessPool] Message blocked by security guard: {e}")
             return {"status": "error", "output": f"SecurityBlock: {e}", "token_info": {}}

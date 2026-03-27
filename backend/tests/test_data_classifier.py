@@ -1,4 +1,5 @@
 """資料安全分類規則引擎 — 單元測試"""
+import os
 import pytest
 from app.core.data_classifier import (
     SecurityLevel,
@@ -8,6 +9,9 @@ from app.core.data_classifier import (
     restore,
     guard_for_ai,
     SecurityBlock,
+    _load_project_patterns,
+    get_all_patterns,
+    _ALL_PATTERNS,
 )
 
 
@@ -218,3 +222,144 @@ class TestGuardForAi:
         result_text, mapping = guard_for_ai(hardened)
         assert "user@example.com" not in result_text
         assert len(mapping) > 0
+
+    def test_guard_with_project_path_custom_s3(self, tmp_path):
+        """guard_for_ai 搭配自訂 S3 規則應阻擋。"""
+        aegis_dir = tmp_path / ".aegis"
+        aegis_dir.mkdir()
+        (aegis_dir / "desensitize.yaml").write_text(
+            "patterns:\n"
+            "  - name: internal_token\n"
+            '    regex: "INTERNAL-[A-Z0-9]{16}"\n'
+            "    level: S3\n"
+        )
+        text = "token is INTERNAL-ABCDEF1234567890"
+        with pytest.raises(SecurityBlock, match="S3 data detected"):
+            guard_for_ai(text, str(tmp_path))
+
+    def test_guard_with_project_path_custom_s2(self, tmp_path):
+        """guard_for_ai 搭配自訂 S2 規則應去敏化。"""
+        aegis_dir = tmp_path / ".aegis"
+        aegis_dir.mkdir()
+        (aegis_dir / "desensitize.yaml").write_text(
+            "patterns:\n"
+            "  - name: employee_id\n"
+            '    regex: "EMP-\\\\d{6}"\n'
+            "    level: S2\n"
+        )
+        text = "員工編號 EMP-123456 的資料"
+        result_text, mapping = guard_for_ai(text, str(tmp_path))
+        assert "EMP-123456" not in result_text
+        assert len(mapping) > 0
+
+
+class TestLoadProjectPatterns:
+    """_load_project_patterns() 自訂規則載入測試。"""
+
+    def test_load_valid_yaml(self, tmp_path):
+        """正確的 YAML 應回傳規則列表。"""
+        aegis_dir = tmp_path / ".aegis"
+        aegis_dir.mkdir()
+        (aegis_dir / "desensitize.yaml").write_text(
+            "patterns:\n"
+            "  - name: custom_key\n"
+            '    regex: "CUSTOM-[A-Z]{10}"\n'
+            "    level: S3\n"
+            "  - name: order_id\n"
+            '    regex: "ORD-\\\\d{8}"\n'
+            "    level: S2\n"
+        )
+        patterns = _load_project_patterns(str(tmp_path))
+        assert len(patterns) == 2
+        assert patterns[0][0] == "custom_key"
+        assert patterns[0][2] == SecurityLevel.S3
+        assert patterns[1][0] == "order_id"
+        assert patterns[1][2] == SecurityLevel.S2
+
+    def test_load_missing_file(self, tmp_path):
+        """設定檔不存在應回傳空列表。"""
+        patterns = _load_project_patterns(str(tmp_path))
+        assert patterns == []
+
+    def test_load_invalid_yaml(self, tmp_path):
+        """無效 YAML 應回傳空列表。"""
+        aegis_dir = tmp_path / ".aegis"
+        aegis_dir.mkdir()
+        (aegis_dir / "desensitize.yaml").write_text(":::invalid yaml:::")
+        patterns = _load_project_patterns(str(tmp_path))
+        assert patterns == []
+
+    def test_load_invalid_regex(self, tmp_path):
+        """包含無效 regex 的規則應被跳過。"""
+        aegis_dir = tmp_path / ".aegis"
+        aegis_dir.mkdir()
+        (aegis_dir / "desensitize.yaml").write_text(
+            "patterns:\n"
+            "  - name: bad_regex\n"
+            '    regex: "[invalid(("\n'
+            "    level: S3\n"
+            "  - name: good_one\n"
+            '    regex: "GOOD-[A-Z]{5}"\n'
+            "    level: S2\n"
+        )
+        patterns = _load_project_patterns(str(tmp_path))
+        assert len(patterns) == 1
+        assert patterns[0][0] == "good_one"
+
+    def test_load_missing_fields(self, tmp_path):
+        """缺少必要欄位的規則應被跳過。"""
+        aegis_dir = tmp_path / ".aegis"
+        aegis_dir.mkdir()
+        (aegis_dir / "desensitize.yaml").write_text(
+            "patterns:\n"
+            "  - name: no_regex\n"
+            "    level: S3\n"
+            "  - regex: 'no_name'\n"
+            "    level: S2\n"
+            "  - name: no_level\n"
+            '    regex: "NOLEVEL-\\\\d+"\n'
+        )
+        patterns = _load_project_patterns(str(tmp_path))
+        assert patterns == []
+
+    def test_load_invalid_level(self, tmp_path):
+        """level 不是 S2/S3 的規則應被跳過。"""
+        aegis_dir = tmp_path / ".aegis"
+        aegis_dir.mkdir()
+        (aegis_dir / "desensitize.yaml").write_text(
+            "patterns:\n"
+            "  - name: s1_attempt\n"
+            '    regex: "S1DATA-\\\\d+"\n'
+            "    level: S1\n"
+        )
+        patterns = _load_project_patterns(str(tmp_path))
+        assert patterns == []
+
+
+class TestGetAllPatterns:
+    """get_all_patterns() 合併測試。"""
+
+    def test_no_project_path(self):
+        """不傳 project_path 應回傳內建規則。"""
+        result = get_all_patterns()
+        assert result is _ALL_PATTERNS
+
+    def test_no_config_file(self, tmp_path):
+        """project_path 沒有設定檔應回傳內建規則。"""
+        result = get_all_patterns(str(tmp_path))
+        assert result is _ALL_PATTERNS
+
+    def test_merge_custom_patterns(self, tmp_path):
+        """有設定檔時應合併內建 + 自訂規則。"""
+        aegis_dir = tmp_path / ".aegis"
+        aegis_dir.mkdir()
+        (aegis_dir / "desensitize.yaml").write_text(
+            "patterns:\n"
+            "  - name: my_rule\n"
+            '    regex: "MYRULE-\\\\d+"\n'
+            "    level: S2\n"
+        )
+        result = get_all_patterns(str(tmp_path))
+        assert len(result) == len(_ALL_PATTERNS) + 1
+        names = [r[0] for r in result]
+        assert "my_rule" in names

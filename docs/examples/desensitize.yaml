@@ -1,0 +1,28 @@
+# Aegis Per-Project 自訂去敏化規則範例
+# 放置路徑：{project_path}/.aegis/desensitize.yaml
+#
+# 每個規則包含：
+#   name  — 規則名稱（用於日誌與命中報告）
+#   regex — 正規表達式（Python re 語法）
+#   level — 安全等級：S2（去敏化後放行）或 S3（直接阻擋）
+
+patterns:
+  # S3 範例：部署金鑰（直接阻擋，不送 AI）
+  - name: deploy_key
+    regex: "DEPLOY-[A-F0-9]{32}"
+    level: S3
+
+  # S3 範例：內部 API token
+  - name: internal_api_token
+    regex: "INTERNAL-[A-Za-z0-9]{20,}"
+    level: S3
+
+  # S2 範例：員工編號（去敏化後以佔位符替代）
+  - name: employee_id
+    regex: "EMP-\\d{6}"
+    level: S2
+
+  # S2 範例：訂單編號
+  - name: order_id
+    regex: "ORD-\\d{8}"
+    level: S2
