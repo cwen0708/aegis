@@ -5,6 +5,7 @@ import TerminalViewer from './TerminalViewer.vue'
 import ExecutionFlowDiagram from './ExecutionFlowDiagram.vue'
 import { useAegisStore } from '../stores/aegis'
 import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 
 const store = useAegisStore()
 
@@ -53,7 +54,7 @@ async function selectArtifact(item: ArtifactItem) {
       const res = await fetch(artifactRawUrl(item))
       if (res.ok) {
         const text = await res.text()
-        artifactMarkdown.value = marked(text) as string
+        artifactMarkdown.value = DOMPurify.sanitize(marked(text) as string)
       }
     } catch { artifactMarkdown.value = '<p>載入失敗</p>' }
   }

@@ -700,8 +700,7 @@ def run_task_pty_windows(
                     if is_abort_requested(card_id):
                         logger.info(f"[Task {card_id}] Abort signal received, killing PTY process")
                         try:
-                            import signal as _sig
-                            os.kill(pty_process.pid, _sig.SIGKILL)
+                            pty_process.terminate(force=True)
                         except Exception:
                             pass
                         clear_abort_signal(card_id)
@@ -712,8 +711,7 @@ def run_task_pty_windows(
                     if time.time() - start_time > max_duration:
                         logger.warning(f"[Task {card_id}] Timeout after {max_duration}s, killing PTY process")
                         try:
-                            import signal as _sig
-                            os.kill(pty_process.pid, _sig.SIGKILL)
+                            pty_process.terminate(force=True)
                         except Exception:
                             pass
                         if emitter:
