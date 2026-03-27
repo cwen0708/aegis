@@ -53,6 +53,18 @@ _S3_PATTERNS: List[Tuple[str, re.Pattern, SecurityLevel]] = [
     ("jwt_token", re.compile(
         r"eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"
     ), SecurityLevel.S3),
+    # DB connection string with password
+    ("db_connection_string", re.compile(
+        r"(postgresql|mysql|mongodb|redis|amqp)://[^:]+:[^@]+@"
+    ), SecurityLevel.S3),
+    # PEM private key header
+    ("pem_private_key", re.compile(
+        r"-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"
+    ), SecurityLevel.S3),
+    # Google Cloud API key
+    ("gcp_api_key", re.compile(r"AIza[0-9A-Za-z\-_]{35}"), SecurityLevel.S3),
+    # Slack API token
+    ("slack_token", re.compile(r"xox[bpors]-[0-9a-zA-Z]{10,}"), SecurityLevel.S3),
 ]
 
 _S2_PATTERNS: List[Tuple[str, re.Pattern, SecurityLevel]] = [

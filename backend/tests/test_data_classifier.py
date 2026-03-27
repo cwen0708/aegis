@@ -68,6 +68,26 @@ class TestClassify:
         """空字串應被分類為 S1。"""
         assert classify("") == SecurityLevel.S1
 
+    def test_classify_s3_db_connection_string(self):
+        """含資料庫連線字串（含密碼）應被分類為 S3。"""
+        text = "DATABASE_URL=postgresql://admin:s3cretPass@db.example.com:5432/mydb"
+        assert classify(text) == SecurityLevel.S3
+
+    def test_classify_s3_pem_private_key(self):
+        """含 PEM 私鑰 header 應被分類為 S3。"""
+        text = "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA..."
+        assert classify(text) == SecurityLevel.S3
+
+    def test_classify_s3_gcp_api_key(self):
+        """含 Google Cloud API key 應被分類為 S3。"""
+        text = "GOOGLE_API_KEY=AIzaSyA1234567890abcdefghijklmnopqrstuvw"
+        assert classify(text) == SecurityLevel.S3
+
+    def test_classify_s3_slack_token(self):
+        """含 Slack API token 應被分類為 S3。"""
+        text = "SLACK_TOKEN=xoxb-1234567890-abcdefghij"
+        assert classify(text) == SecurityLevel.S3
+
 
 class TestScan:
     """scan() 掃描測試。"""
@@ -154,6 +174,17 @@ class TestNoFalsePositive:
         """URL 中的長數字不應被誤判為信用卡號。"""
         text = "https://example.com/page/12345"
         assert classify(text) == SecurityLevel.S1
+
+    def test_no_false_positive_normal_url(self):
+        """普通 URL（含 https、http）不應被誤判為敏感資料。"""
+        urls = [
+            "https://example.com/api/v1/users",
+            "http://localhost:8080/health",
+            "https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js",
+            "http://192.168.1.1:3000/dashboard",
+        ]
+        for url in urls:
+            assert classify(url) == SecurityLevel.S1, f"誤判: {url}"
 
 
 class TestGuardForAi:
