@@ -47,6 +47,7 @@ class TaskContext:
     provider: str = ""
     exit_code: int = 0
     token_info: dict = field(default_factory=dict)
+    confidence_score: float = 0.0  # 0.0-1.0，評估 skill 模板的可靠性
 
     # 卡片資料
     card_content: str = ""
