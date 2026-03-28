@@ -2,13 +2,26 @@
 
 小茵完成開發後建立審查卡片交給你。你必須：審查 → 部署 → 驗證。
 
-## Step 1: 查看 Commit
+## Step 0: 確認分支（最優先）
 
 ```bash
 cd ~/projects/Aegis
-git log --oneline -3
-git show HEAD --stat
-git show HEAD
+CURRENT_BRANCH=$(git branch --show-current)
+if [ "$CURRENT_BRANCH" != "dev" ]; then
+  echo "ERROR: Aegis-dev 目前在 $CURRENT_BRANCH，應該在 dev 分支"
+  git checkout dev
+fi
+```
+**開發目錄必須在 dev 分支。如果在 main 上，小茵的 commit 會被 hot_update 覆蓋。**
+
+## Step 1: 查看待部署的變更
+
+```bash
+cd ~/projects/Aegis
+# 比對 dev 與 origin/main 的完整差異（不只看最後一個 commit）
+git log origin/main..HEAD --oneline
+git diff origin/main..HEAD --stat
+git diff origin/main..HEAD
 ```
 
 ## Step 2: 品質檢查
@@ -34,10 +47,10 @@ npx vue-tsc -b --force && pnpm build
 
 **以下所有命令都必須實際執行，不是參考。**
 
-先判斷改了什麼：
+先判斷改了什麼（比對 origin/main 的完整差異，避免漏部署）：
 ```bash
 cd ~/projects/Aegis
-CHANGED_FILES=$(git show HEAD --name-only --format="")
+CHANGED_FILES=$(git diff origin/main..HEAD --name-only)
 echo "Changed files: $CHANGED_FILES"
 ```
 
