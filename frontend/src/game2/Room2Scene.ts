@@ -10,32 +10,15 @@ import {
 } from './characterAnims'
 import { computeTiledWalkable } from './tiledWalkable'
 import { extractWorkSlots, type TiledWorkSlot } from './tiledSlots'
+import {
+  ASSET_BASE, TILE_SIZE,
+  preloadTilesets, buildTilesetInfos, renderObjectLayer,
+  type TilesetInfo,
+} from './tilesetRegistry'
 
-const ASSET_BASE = 'assets/office2'
-const TILE_SIZE = 32
 // 角色縮放：舊房間 ZOOM=3，Room2 地圖較小所以縮 60%
 const ZOOM = 2
 const CHAR_BASE_SCALE = CHAR_LEGACY_W / CHAR_FRAME_W  // 16/128 = 0.125
-
-// tileset name → spritesheet key 映射
-const TILESET_KEY_MAP: Record<string, string> = {
-  'FloorAndGround': 'tiles_floor',
-  'Modern_Office_Black_Shadow': 'tiles_office',
-  'Generic': 'tiles_generic',
-  'Basement': 'tiles_basement',
-  'chair': 'chairs',
-  'computer': 'computers',
-  'whiteboard': 'whiteboards',
-  'vendingmachine': 'vendingmachines',
-}
-
-// tileset 資訊（preload 後由 create 填入）
-interface TilesetInfo {
-  name: string
-  firstgid: number
-  lastgid: number  // firstgid + tilecount - 1
-  spriteKey: string
-}
 
 // ── Types ───────────────────────────────────────────────────────
 export type DeskInfo = {
@@ -86,36 +69,7 @@ export default class Room2Scene extends Phaser.Scene {
 
   preload() {
     this.load.tilemapTiledJSON('tilemap2', `${ASSET_BASE}/map.json`)
-
-    // 地板+牆壁
-    this.load.spritesheet('tiles_floor', `${ASSET_BASE}/FloorAndGround.png`, {
-      frameWidth: 32, frameHeight: 32,
-    })
-    // 辦公傢俱（32×32 tiles）
-    this.load.spritesheet('tiles_office', `${ASSET_BASE}/tileset/Modern_Office_Black_Shadow.png`, {
-      frameWidth: 32, frameHeight: 32,
-    })
-    this.load.spritesheet('tiles_generic', `${ASSET_BASE}/tileset/Generic.png`, {
-      frameWidth: 32, frameHeight: 32,
-    })
-    this.load.spritesheet('tiles_basement', `${ASSET_BASE}/tileset/Basement.png`, {
-      frameWidth: 32, frameHeight: 32,
-    })
-    // 物件（非 32×32）
-    this.load.spritesheet('chairs', `${ASSET_BASE}/items/chair.png`, {
-      frameWidth: 32, frameHeight: 64,
-    })
-    this.load.spritesheet('computers', `${ASSET_BASE}/items/computer.png`, {
-      frameWidth: 96, frameHeight: 64,
-    })
-    this.load.spritesheet('whiteboards', `${ASSET_BASE}/items/whiteboard.png`, {
-      frameWidth: 64, frameHeight: 64,
-    })
-    this.load.spritesheet('vendingmachines', `${ASSET_BASE}/items/vendingmachine.png`, {
-      frameWidth: 48, frameHeight: 72,
-    })
-
-    // 角色精靈
+    preloadTilesets(this)
     preloadDefaultChars(this)
   }
 
@@ -220,57 +174,12 @@ export default class Room2Scene extends Phaser.Scene {
 
   // ── Tileset helpers ─────────────────────────────────────────────
 
-  /** 從 map 的 tilesets 建立 gid 查找表 */
   private _buildTilesetInfos() {
-    this.tilesetInfos = this.map.tilesets.map((ts) => {
-      const spriteKey = TILESET_KEY_MAP[ts.name] || ts.name
-      return {
-        name: ts.name,
-        firstgid: ts.firstgid,
-        lastgid: ts.firstgid + ts.total - 1,
-        spriteKey,
-      }
-    })
-    // 按 firstgid 降序排（查找時大 gid 先匹配）
-    this.tilesetInfos.sort((a, b) => b.firstgid - a.firstgid)
+    this.tilesetInfos = buildTilesetInfos(this.map)
   }
 
-  /** 根據 gid 找到對應的 spritesheet key + frame index */
-  private _resolveGid(gid: number): { key: string; frame: number } | null {
-    for (const info of this.tilesetInfos) {
-      if (gid >= info.firstgid && gid <= info.lastgid) {
-        return { key: info.spriteKey, frame: gid - info.firstgid }
-      }
-    }
-    return null
-  }
-
-  /** 渲染一個 object layer 裡的所有物件 */
   private _renderObjectLayer(layerName: string, useDepthSort: boolean) {
-    const layer = this.map.getObjectLayer(layerName)
-    if (!layer) return
-
-    layer.objects.forEach((obj) => {
-      if (!obj.gid) return
-
-      const resolved = this._resolveGid(obj.gid)
-      if (!resolved) return
-
-      const sprite = this.add.sprite(
-        obj.x! + (obj.width || 0) / 2,
-        obj.y! - (obj.height || 0) / 2,
-        resolved.key,
-        resolved.frame,
-      )
-
-      if (useDepthSort) {
-        // Y-sort：y 越大（越靠下）depth 越高，會蓋住上面的物件
-        sprite.setDepth(obj.y! + (obj.height || 0) * 0.27)
-      } else {
-        // 底層物件：固定低 depth（被桌子和角色蓋住）
-        sprite.setDepth(0)
-      }
-    })
+    renderObjectLayer(this, this.map, this.tilesetInfos, layerName, useDepthSort)
   }
 
   // ══════════════════════════════════════════════════════════════════

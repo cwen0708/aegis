@@ -1,20 +1,20 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAegisStore } from '../stores/aegis'
 import { apiClient } from '../services/api/client'
-import { useResponsive } from '../composables/useResponsive'
 import { assetUrl } from '../config'
 import CharacterDialog from '../components/CharacterDialog.vue'
+import Room2Editor from '../components/Room2Editor.vue'
 import type Phaser from 'phaser'
 import type Room2Scene from '../game2/Room2Scene'
 
-const { isMobile } = useResponsive()
 const route = useRoute()
 const store = useAegisStore()
 
 const canvasRef = ref<HTMLDivElement>()
 const error = ref('')
+const isEditing = ref(false)
 let game: Phaser.Game | null = null
 
 // ===== Room support =====
@@ -193,6 +193,23 @@ function closeCharacterDialog() {
   selectedCharacter.value = null
 }
 
+function enterEditMode() {
+  game?.destroy(true)
+  game = null
+  isEditing.value = true
+}
+
+async function exitEditMode() {
+  isEditing.value = false
+  await nextTick()
+  const { createRoom2Game } = await import('../game2/Room2Scene')
+  if (canvasRef.value) {
+    game = createRoom2Game('room2-canvas')
+    setupGameListeners()
+    pushDataToScene()
+  }
+}
+
 function setupGameListeners() {
   if (!game) return
   game.events.on('scene-ready', () => {
@@ -253,37 +270,53 @@ watch(
 
 <template>
   <div class="h-full w-full bg-[#1a1a2e] relative">
-    <div v-if="error" class="absolute inset-0 flex items-center justify-center z-10">
-      <div class="bg-red-900/50 border border-red-500/30 rounded-lg p-6 max-w-md">
-        <p class="text-red-400 text-sm font-mono">{{ error }}</p>
-      </div>
-    </div>
-
-    <div class="flex flex-col h-full">
-      <!-- Canvas -->
-      <div id="room2-canvas" ref="canvasRef" class="flex-1 min-h-0" />
-
-      <!-- Footer -->
-      <div class="flex items-center gap-2 sm:gap-4 px-2 sm:px-3 h-6 bg-slate-800 border-t border-slate-700 z-10 shrink-0"
-           style="font-family: 'Press Start 2P', monospace;">
-        <span class="text-[8px] text-emerald-400">ACTIVE:{{ store.systemInfo.workstations_used }}</span>
-        <span class="text-[8px] text-slate-400">IDLE:{{ restingMembers.length }}</span>
-        <span class="text-[8px] text-slate-400">TOTAL:{{ members.length }}</span>
-        <span class="flex-1"></span>
-        <span v-if="!isMobile" class="text-[8px] text-amber-400/60">ROOM2</span>
-      </div>
-    </div>
-
-    <!-- Character Dialog -->
-    <CharacterDialog
-      v-if="showCharacterDialog && selectedCharacter"
-      :member-id="selectedCharacter.memberId"
-      :name="selectedCharacter.name"
-      :provider="selectedCharacter.provider"
-      :role="selectedCharacter.role"
-      :portrait="assetUrl(selectedCharacter.portrait || '')"
-      @close="closeCharacterDialog"
+    <!-- 編輯模式 -->
+    <Room2Editor
+      v-if="isEditing"
+      @save="exitEditMode"
+      @cancel="exitEditMode"
     />
+
+    <!-- 遊戲模式 -->
+    <template v-else>
+      <div v-if="error" class="absolute inset-0 flex items-center justify-center z-10">
+        <div class="bg-red-900/50 border border-red-500/30 rounded-lg p-6 max-w-md">
+          <p class="text-red-400 text-sm font-mono">{{ error }}</p>
+        </div>
+      </div>
+
+      <div class="flex flex-col h-full">
+        <!-- Canvas -->
+        <div id="room2-canvas" ref="canvasRef" class="flex-1 min-h-0" />
+
+        <!-- Footer -->
+        <div class="flex items-center gap-2 sm:gap-4 px-2 sm:px-3 h-6 bg-slate-800 border-t border-slate-700 z-10 shrink-0"
+             style="font-family: 'Press Start 2P', monospace;">
+          <span class="text-[8px] text-emerald-400">ACTIVE:{{ store.systemInfo.workstations_used }}</span>
+          <span class="text-[8px] text-slate-400">IDLE:{{ restingMembers.length }}</span>
+          <span class="text-[8px] text-slate-400">TOTAL:{{ members.length }}</span>
+          <span class="flex-1"></span>
+          <button
+            class="text-[8px] text-amber-400/60 hover:text-amber-300 cursor-pointer"
+            style="font-family: 'Press Start 2P', monospace;"
+            @click="enterEditMode"
+          >
+            EDIT
+          </button>
+        </div>
+      </div>
+
+      <!-- Character Dialog -->
+      <CharacterDialog
+        v-if="showCharacterDialog && selectedCharacter"
+        :member-id="selectedCharacter.memberId"
+        :name="selectedCharacter.name"
+        :provider="selectedCharacter.provider"
+        :role="selectedCharacter.role"
+        :portrait="assetUrl(selectedCharacter.portrait || '')"
+        @close="closeCharacterDialog"
+      />
+    </template>
   </div>
 </template>
 
