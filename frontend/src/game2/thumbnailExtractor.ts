@@ -35,7 +35,8 @@ export function extractThumbnails(
   const cols = Math.floor(source.width / cfg.frameWidth)
   const rows = Math.floor(source.height / cfg.frameHeight)
   const totalFrames = cols * rows
-  const scanLimit = Math.min(totalFrames, maxCount * 3) // scan more to fill maxCount after skipping blanks
+  // Scan entire tileset to find non-blank frames (large tilesets have sparse content)
+  const scanLimit = totalFrames
 
   const items: ThumbnailItem[] = []
 
