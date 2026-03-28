@@ -24,7 +24,7 @@ import {
   ZOOM_MIN, ZOOM_MAX, ZOOM_INITIAL, INITIAL_OBJECT_ID, isDepthSorted,
 } from './editorConstants'
 
-export type EditorTool = 'ground' | 'eraser' | 'select' | 'object' | 'fill'
+export type EditorTool = 'ground' | 'eraser' | 'select' | 'object' | 'fill' | 'hand'
 
 export interface EditorLayerDef {
   name: string
@@ -177,7 +177,7 @@ export default class Room2EditorScene extends Phaser.Scene {
   // ── Input ──────────────────────────────────────────────────────
 
   private setupInput() {
-    // ── 統一 pointermove（單一 handler）──────────────────────
+    // ── pointermove ─────────────────────────────────────────
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
       // pinch zoom
       if (this.input.pointer1.isDown && this.input.pointer2.isDown) {
@@ -186,13 +186,13 @@ export default class Room2EditorScene extends Phaser.Scene {
       }
       if (this.isPinching) return
 
-      // 拖曳物件（select 模式下左鍵拖曳已選物件）
+      // 拖曳物件
       if (this.isDragging && pointer.isDown) {
         this.handleDragMove(pointer)
         return
       }
 
-      // 攝影機平移（中鍵 or Space+左鍵）
+      // 攝影機平移（右鍵 / 中鍵 / Space+左鍵 / hand 工具左鍵）
       if (this.isPanning && pointer.isDown) {
         this.cameras.main.scrollX -= (pointer.x - pointer.prevPosition.x) / this.cameras.main.zoom
         this.cameras.main.scrollY -= (pointer.y - pointer.prevPosition.y) / this.cameras.main.zoom
@@ -212,35 +212,33 @@ export default class Room2EditorScene extends Phaser.Scene {
 
     // ── pointerdown ─────────────────────────────────────────
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      // 中鍵 → 攝影機平移
-      if (pointer.middleButtonDown()) {
+      // 右鍵 / 中鍵 → 永遠攝影機平移（like Photoshop）
+      if (pointer.rightButtonDown() || pointer.middleButtonDown()) {
         this.isPanning = true
         return
       }
 
-      // Space + 左鍵 → 攝影機平移
-      if (this.isSpaceDown && !pointer.rightButtonDown()) {
+      // Space+左鍵 or hand 工具 → 攝影機平移
+      if (this.isSpaceDown || this.currentTool === 'hand') {
         this.isPanning = true
         return
       }
 
       // 左鍵操作（依工具）
-      if (!pointer.rightButtonDown() && !pointer.middleButtonDown()) {
-        switch (this.currentTool) {
-          case 'select':
-            this.handleSelectDown(pointer)
-            break
-          case 'object':
-            this.handleObjectPlace(pointer)
-            break
-          case 'fill':
-            this.handleFloodFill(pointer)
-            break
-          case 'ground':
-          case 'eraser':
-            this.handlePaint(pointer)
-            break
-        }
+      switch (this.currentTool) {
+        case 'select':
+          this.handleSelectDown(pointer)
+          break
+        case 'object':
+          this.handleObjectPlace(pointer)
+          break
+        case 'fill':
+          this.handleFloodFill(pointer)
+          break
+        case 'ground':
+        case 'eraser':
+          this.handlePaint(pointer)
+          break
       }
     })
 
