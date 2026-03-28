@@ -6,6 +6,7 @@ import type Room2EditorScene from './Room2EditorScene'
 import type { EditorTool, SelectionInfo } from './Room2EditorScene'
 import type { TilesetInfo } from './tilesetRegistry'
 import type { TiledMapJson } from './mapSerializer'
+import type { CompositeObject } from './compositeObjects'
 
 /** 所有 Phaser → Vue 事件名稱 */
 export const EditorEvents = {
@@ -36,6 +37,7 @@ export class EditorBridge {
   setTool(tool: EditorTool) { this.scene?.setTool(tool) }
   setSelectedGid(gid: number) { this.scene?.setSelectedGid(gid) }
   setTargetLayer(layerName: string) { this.scene?.setTargetLayer(layerName) }
+  setComposite(comp: CompositeObject | null) { this.scene?.setComposite(comp) }
 
   // ── History ───────────────────────────────────────────────────
 

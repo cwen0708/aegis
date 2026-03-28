@@ -18,6 +18,7 @@ import {
 } from './editorHistory'
 import { exportMapJson, fetchDefaultTilesets, type TiledMapJson } from './mapSerializer'
 import { EditorEvents } from './editorBridge'
+import type { CompositeObject } from './compositeObjects'
 import {
   DEPTH_BASE_LAYER, DEPTH_GRID, DEPTH_HOVER, DEPTH_COLLISION,
   DEPTH_SELECTION, DEPTH_HOVER_SPRITE, DEPTH_SORT_FACTOR,
@@ -79,6 +80,7 @@ export default class Room2EditorScene extends Phaser.Scene {
   private layerSprites: Map<string, Phaser.GameObjects.Sprite[]> = new Map()
   private layerObjects: Map<string, PlacedObject[]> = new Map()
   private hoverSprite: Phaser.GameObjects.Sprite | null = null
+  private activeComposite: CompositeObject | null = null
 
   // Selection & drag (Phase 3)
   private history = new EditorHistory()
@@ -543,15 +545,21 @@ export default class Room2EditorScene extends Phaser.Scene {
   // ── Object placement (with history) ───────────────────────────
 
   private handleObjectPlace(pointer: Phaser.Input.Pointer) {
-    const resolved = resolveGid(this.selectedGid, this.tilesetInfos)
-    if (!resolved) return
-
     const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y)
-    const cfg = this.getFrameSize(resolved.key)
-
     const snapX = Math.floor(worldPoint.x / TILE_SIZE) * TILE_SIZE
     const snapY = (Math.floor(worldPoint.y / TILE_SIZE) + 1) * TILE_SIZE
 
+    // 組合物件放置
+    if (this.activeComposite) {
+      this.placeComposite(this.activeComposite, snapX, snapY)
+      return
+    }
+
+    // 單一物件放置
+    const resolved = resolveGid(this.selectedGid, this.tilesetInfos)
+    if (!resolved) return
+
+    const cfg = this.getFrameSize(resolved.key)
     const obj: PlacedObject = {
       id: this.nextObjectId++,
       gid: this.selectedGid,
@@ -563,6 +571,34 @@ export default class Room2EditorScene extends Phaser.Scene {
 
     const cmd = new PlaceObjectCommand(this, this.targetLayerName, obj)
     this.history.execute(cmd)
+  }
+
+  private placeComposite(comp: CompositeObject, baseX: number, baseY: number) {
+    const cmds: PlaceObjectCommand[] = []
+
+    for (let r = 0; r < comp.gids.length; r++) {
+      const row = comp.gids[r]!
+      for (let c = 0; c < row.length; c++) {
+        const gid = row[c]!
+        const resolved = resolveGid(gid, this.tilesetInfos)
+        if (!resolved) continue
+
+        const cfg = this.getFrameSize(resolved.key)
+        const obj: PlacedObject = {
+          id: this.nextObjectId++,
+          gid,
+          x: baseX + c * TILE_SIZE,
+          y: baseY + r * TILE_SIZE,
+          width: cfg.frameWidth,
+          height: cfg.frameHeight,
+        }
+        cmds.push(new PlaceObjectCommand(this, comp.targetLayer, obj))
+      }
+    }
+
+    if (cmds.length > 0) {
+      this.history.execute(new BatchCommand(cmds))
+    }
   }
 
   // ── Load original object layer into editable state ─────────────
@@ -853,6 +889,10 @@ export default class Room2EditorScene extends Phaser.Scene {
 
   setTargetLayer(layerName: string) {
     this.targetLayerName = layerName
+  }
+
+  setComposite(comp: CompositeObject | null) {
+    this.activeComposite = comp
   }
 
   getTilesetInfos(): TilesetInfo[] {
