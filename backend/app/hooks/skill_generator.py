@@ -15,6 +15,8 @@ class SkillGeneratorHook(Hook):
 
     def on_complete(self, ctx: TaskContext) -> None:
         if ctx.status != "completed":
+            # 失敗狀態的信心分數為 0
+            ctx.confidence_score = 0.0
             return
         if not ctx.project_path:
             return
@@ -28,12 +30,56 @@ class SkillGeneratorHook(Hook):
             changed_files = self._extract_changed_files(diff_text)
             new_functions = self._extract_new_functions(diff_text)
 
+            # 計算信心分數
+            ctx.confidence_score = self._calculate_confidence(ctx)
+
             skill_md = self._build_skill_template(ctx, changed_files, new_functions)
             self._save_skill(ctx.project_path, skill_md)
         except Exception as e:
             logger.warning(f"[SkillGeneratorHook] failed: {e}")
 
     # ── 內部方法 ──────────────────────────────────────────────
+
+    def _calculate_confidence(self, ctx: TaskContext) -> float:
+        """
+        計算信心分數（0.0-1.0），用以評估該 pattern 的可靠性。
+
+        計分規則：
+        - exit_code == 0: +0.5
+        - output 長度 > 100 字: +0.2
+        - 執行時間合理 (無超時): +0.2
+        - 無異常/警告: +0.1
+        """
+        score = 0.0
+
+        # 1. exit_code == 0: +0.5
+        if ctx.exit_code == 0:
+            score += 0.5
+
+        # 2. output 長度 > 100 字: +0.2
+        if len(ctx.output) > 100:
+            score += 0.2
+
+        # 3. 執行時間合理（檢查是否無超時相關的錯誤）: +0.2
+        timeout_keywords = [
+            "timeout",
+            "timed out",
+            "time limit exceeded",
+            "max time",
+            "deadline",
+        ]
+        has_timeout = any(keyword.lower() in ctx.output.lower() for keyword in timeout_keywords)
+        if not has_timeout:
+            score += 0.2
+
+        # 4. 無異常/警告: +0.1
+        error_keywords = ["exception", "error", "traceback", "failed"]
+        has_error = any(keyword.lower() in ctx.output.lower() for keyword in error_keywords)
+        if not has_error:
+            score += 0.1
+
+        # 限制在 0.0-1.0 範圍內
+        return min(max(score, 0.0), 1.0)
 
     def _get_git_diff(self, project_path: str) -> str:
         """對比 origin/main 取得 diff 文字。"""
@@ -95,17 +141,24 @@ class SkillGeneratorHook(Hook):
         files_md = "\n".join(f"- `{f}`" for f in changed_files) if changed_files else "（無）"
         funcs_md = "\n".join(f"- `{f}`" for f in new_functions) if new_functions else "（無）"
 
+        # 信心分數信息
+        confidence_pct = int(ctx.confidence_score * 100)
+        confidence_note = f"此 skill 的信心分數為 {confidence_pct}%（{ctx.confidence_score:.2f}/1.0），評估該 pattern 的可靠性。"
+
         return f"""---
 name: {ctx.card_title or "auto-generated-skill"}
 description: 自動生成於任務「{ctx.card_title}」完成後（{now}）
 generated_from_card: {ctx.card_id}
 generated_at: {now}
 project: {ctx.project_name}
+confidence_score: {ctx.confidence_score:.2f}
 ---
 
 # {ctx.card_title}
 
 > 此 skill 由 SkillGeneratorHook 自動生成，請依實際需求調整。
+>
+> **信心分數：{confidence_pct}%** — {confidence_note}
 
 ## 修改的檔案
 
