@@ -90,17 +90,19 @@ def collect_hooks(source: str = "worker") -> list[Hook]:
     from app.hooks.platform import PlatformHook
     from app.hooks.media import MediaHook
     from app.hooks.event_log import EventLogHook
+    from app.hooks.skill_generator import SkillGeneratorHook
 
     if source == "worker":
         return [
-            WebSocketHook(),    # DURING: Kanban log
-            EventLogHook(),     # DURING: 事件記錄 → JSONL（Playback 回放）
-            OneStackHook(),     # DURING: aegis_stream + POST: 任務回報
-            BroadcastHook(),    # POST: task_completed 事件
-            DialogueHook(),     # POST: AVG 對話
-            MediaHook(),        # POST: send_file 標記 → 頻道發送
-            MemoryHook(),       # POST: 成員記憶
-            CleanupHook(),      # POST: 清理（永遠最後）
+            WebSocketHook(),        # DURING: Kanban log
+            EventLogHook(),         # DURING: 事件記錄 → JSONL（Playback 回放）
+            OneStackHook(),         # DURING: aegis_stream + POST: 任務回報
+            BroadcastHook(),        # POST: task_completed 事件
+            DialogueHook(),         # POST: AVG 對話
+            MediaHook(),            # POST: send_file 標記 → 頻道發送
+            MemoryHook(),           # POST: 成員記憶
+            SkillGeneratorHook(),   # POST: 自動生成 skill 模板
+            CleanupHook(),          # POST: 清理（永遠最後）
         ]
     elif source == "chat":
         return [
