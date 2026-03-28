@@ -181,6 +181,7 @@ class Member(SQLModel, table=True):
     portrait: str = ""  # 立繪圖片路徑
     sprite_sheet: str = ""  # sprite sheet 路徑（如 /uploads/sprites/1/sheet_20260323.png）
     sprite_scale: float = Field(default=1.0)  # sprite 縮放比例（前端用）
+    hook_profile: str = Field(default="standard")  # "minimal" | "standard" | "strict" — hook 嚴格度設定
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
