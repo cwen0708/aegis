@@ -4,7 +4,7 @@ import type { TilesetInfo } from '../../game2/tilesetRegistry'
 import { TILESET_PRELOAD_CONFIG } from '../../game2/tilesetRegistry'
 import type { ThumbnailItem } from '../../game2/thumbnailExtractor'
 import {
-  getCompositeGidSet, getCompositesByCategory,
+  loadCompositeConfig, getCompositeGidSet, getCompositesByCategory,
   type CompositeObject,
 } from '../../game2/compositeObjects'
 
@@ -40,8 +40,7 @@ const activeCategory = ref(CATEGORIES[0]?.key ?? 'tiles_floor')
 const thumbnails = ref<Map<string, ThumbnailItem[]>>(new Map())
 const compositeThumbs = ref<Map<string, { comp: CompositeObject; dataUrl: string }[]>>(new Map())
 
-// 組合物件包含的 GID，用於過濾單 tile 列表
-const compositeGids = getCompositeGidSet()
+// compositeGids 在 generateThumbnails 中動態取得（loadCompositeConfig 後才有資料）
 
 const currentThumbnails = computed(() => {
   return thumbnails.value.get(activeCategory.value) || []
@@ -57,7 +56,13 @@ const currentTargetLayer = computed(() => {
 
 async function generateThumbnails() {
   if (!props.scene) return
+
+  // 先載入 composites.json
+  await loadCompositeConfig()
+
   const textures = props.scene.textures
+  // 重新取得（loadCompositeConfig 後才有資料）
+  const compositeGidSet = getCompositeGidSet()
 
   for (const cat of CATEGORIES) {
     // 單 tile 縮圖（過濾掉組合物件的 GID）
@@ -65,7 +70,7 @@ async function generateThumbnails() {
     const allItems = extractThumbnailsForKey(
       textures, props.tilesetInfos, cat.key, cat.maxCount ?? 80,
     )
-    const filtered = allItems.filter(item => !compositeGids.has(item.gid))
+    const filtered = allItems.filter(item => !compositeGidSet.has(item.gid))
     thumbnails.value.set(cat.key, filtered)
 
     // 組合物件縮圖

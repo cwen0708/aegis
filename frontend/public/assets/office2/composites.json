@@ -1,0 +1,112 @@
+{
+  "version": 1,
+  "collideLayer": "ObjectsOnCollide",
+  "defaultLayer": "Objects",
+  "objects": [
+    {
+      "name": "小盆栽",
+      "category": "tiles_office",
+      "gids": [[2782], [2798], [2814]]
+    },
+    {
+      "name": "掛畫A",
+      "category": "tiles_office",
+      "gids": [[2751], [2761]]
+    },
+    {
+      "name": "掛畫B",
+      "category": "tiles_office",
+      "gids": [[2752], [2768]]
+    },
+    {
+      "name": "掛畫C",
+      "category": "tiles_office",
+      "gids": [[2599], [2615]]
+    },
+    {
+      "name": "冷氣機",
+      "category": "tiles_office",
+      "gids": [[2771, 2772]]
+    },
+    {
+      "name": "大掛畫A",
+      "category": "tiles_office",
+      "gids": [[2776, 2777], [2792, 2793]]
+    },
+    {
+      "name": "置物架",
+      "category": "tiles_office",
+      "gids": [[2783, 2784], [2799, 2800], [2815, 2816]],
+      "collides": [2815, 2816]
+    },
+    {
+      "name": "書架",
+      "category": "tiles_office",
+      "gids": [[2831, 2832], [2847, 2848], [2863, 2864]],
+      "collides": [2863, 2864]
+    },
+    {
+      "name": "印表機",
+      "category": "tiles_office",
+      "gids": [[2880, 2881], [2896, 2897]],
+      "collides": [2896, 2897]
+    },
+    {
+      "name": "飲水機",
+      "category": "tiles_office",
+      "gids": [[2836], [2852], [2868]],
+      "collides": [2868]
+    },
+    {
+      "name": "大掛畫B",
+      "category": "tiles_generic",
+      "gids": [[3644, 3645], [3660, 3661]]
+    },
+    {
+      "name": "窗戶",
+      "category": "tiles_generic",
+      "gids": [[4130, 4131], [4146, 4147]]
+    },
+    {
+      "name": "一堆錢",
+      "category": "tiles_generic",
+      "gids": [[4388], [4404]]
+    },
+    {
+      "name": "撞球桌",
+      "category": "tiles_basement",
+      "gids": [[5092, 5093, 5094, 5095], [5108, 5109, 5110, 5111], [5124, 5125, 5126, 5127]],
+      "collides": [5092, 5093, 5094, 5095, 5108, 5109, 5110, 5111, 5124, 5125, 5126, 5127]
+    },
+    {
+      "name": "會議桌A",
+      "category": "tiles_basement",
+      "gids": [[5053, 5054], [5061, 5062], [5077, 5078]],
+      "collides": [5077, 5078]
+    }
+  ],
+  "nativeObjects": [
+    { "gid": 2562, "name": "辦公椅(下)", "layer": "Chair" },
+    { "gid": 2563, "name": "辦公椅(下左)", "layer": "Chair" },
+    { "gid": 2564, "name": "辦公椅(下右)", "layer": "Chair" },
+    { "gid": 2566, "name": "辦公椅(上)", "layer": "Chair" },
+    { "gid": 2568, "name": "高背椅(上)", "layer": "Chair" },
+    { "gid": 2569, "name": "高背椅(下)", "layer": "Chair" },
+    { "gid": 2572, "name": "辦公椅B(上)", "layer": "Chair" },
+    { "gid": 2573, "name": "辦公椅(左)", "layer": "Chair" },
+    { "gid": 2574, "name": "辦公椅(右)", "layer": "Chair" },
+    { "gid": 2580, "name": "會議椅A", "layer": "Chair" },
+    { "gid": 2581, "name": "會議椅B", "layer": "Chair" },
+    { "gid": 2582, "name": "會議椅C", "layer": "Chair" },
+    { "gid": 2583, "name": "會議椅D", "layer": "Chair" },
+    { "gid": 4680, "name": "電腦A", "layer": "Computer" },
+    { "gid": 4681, "name": "電腦B", "layer": "Computer" },
+    { "gid": 4682, "name": "電腦C", "layer": "Computer" },
+    { "gid": 4683, "name": "電腦D", "layer": "Computer" },
+    { "gid": 4684, "name": "電腦E", "layer": "Computer" },
+    { "gid": 4685, "name": "白板A", "layer": "Whiteboard" },
+    { "gid": 4686, "name": "白板B", "layer": "Whiteboard" },
+    { "gid": 4687, "name": "白板C", "layer": "Whiteboard" },
+    { "gid": 5488, "name": "販賣機", "layer": "VendingMachine", "collides": true }
+  ]
+}
