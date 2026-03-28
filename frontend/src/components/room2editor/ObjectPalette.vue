@@ -87,14 +87,10 @@ function renderCompositeThumbnail(
   textures: Phaser.Textures.TextureManager,
   comp: CompositeObject,
 ): string | null {
-  const rows = comp.gids.length
-  const cols = Math.max(...comp.gids.map(r => r.length))
+  if (comp.tiles.length === 0) return null
 
-  // 找到第一個 GID 所屬的 tileset config
-  const firstGid = comp.gids[0]?.[0]
-  if (!firstGid) return null
-
-  const info = props.tilesetInfos.find(i => firstGid >= i.firstgid && firstGid <= i.lastgid)
+  const firstTile = comp.tiles[0]!
+  const info = props.tilesetInfos.find(i => firstTile.gid >= i.firstgid && firstTile.gid <= i.lastgid)
   if (!info) return null
 
   const cfg = TILESET_PRELOAD_CONFIG.find(c => c.key === info.spriteKey)
@@ -110,21 +106,15 @@ function renderCompositeThumbnail(
   const imgCols = Math.floor(source.width / fw)
 
   const canvas = document.createElement('canvas')
-  canvas.width = cols * fw
-  canvas.height = rows * fh
+  canvas.width = comp.cols * fw
+  canvas.height = comp.rows * fh
   const ctx = canvas.getContext('2d')!
 
-  for (let r = 0; r < rows; r++) {
-    const rowGids = comp.gids[r]
-    if (!rowGids) continue
-    for (let c = 0; c < rowGids.length; c++) {
-      const gid = rowGids[c]
-      if (!gid) continue
-      const frame = gid - info.firstgid
-      const sx = (frame % imgCols) * fw
-      const sy = Math.floor(frame / imgCols) * fh
-      ctx.drawImage(source, sx, sy, fw, fh, c * fw, r * fh, fw, fh)
-    }
+  for (const tile of comp.tiles) {
+    const frame = tile.gid - info.firstgid
+    const sx = (frame % imgCols) * fw
+    const sy = Math.floor(frame / imgCols) * fh
+    ctx.drawImage(source, sx, sy, fw, fh, tile.col * fw, tile.row * fh, fw, fh)
   }
 
   return canvas.toDataURL()

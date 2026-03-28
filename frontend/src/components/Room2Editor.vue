@@ -155,9 +155,10 @@ function handlePaletteSelect(gid: number, layerName: string) {
 
 function handleCompositeSelect(comp: CompositeObject) {
   bridge.setComposite(comp)
-  bridge.setTargetLayer(comp.targetLayer)
+  const primaryLayer = comp.tiles[0]?.layer ?? 'Objects'
+  bridge.setTargetLayer(primaryLayer)
   bridge.setTool('object')
-  activeLayer.value = comp.targetLayer
+  activeLayer.value = primaryLayer
   activeTool.value = 'ground'
 }
 
