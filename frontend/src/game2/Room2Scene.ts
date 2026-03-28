@@ -71,7 +71,13 @@ export default class Room2Scene extends Phaser.Scene {
   private usedSlots: Set<number> = new Set()
   private memberSlotMap: Map<number, number> = new Map()
   private memberSpriteKeys: Map<number, string> = new Map()
+  private placeholderDots: Map<number, Phaser.GameObjects.Graphics> = new Map()
   private charCount = MAX_CHAR_COUNT
+
+  // Pinch zoom state
+  private isPinching = false
+  private pinchStartDist = 0
+  private pinchStartZoom = 1
 
   constructor() {
     super('room2')
@@ -151,21 +157,30 @@ export default class Room2Scene extends Phaser.Scene {
     // 攝影機取整（防止 tile bleeding 黑線）
     this.cameras.main.setRoundPixels(true)
 
-    // 拖曳
+    // 拖曳（pinch 時不拖曳）
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+      if (this.input.pointer1.isDown && this.input.pointer2.isDown) {
+        this.handlePinchMove()
+        return
+      }
+      if (this.isPinching) return
       if (pointer.isDown) {
         this.cameras.main.scrollX -= (pointer.x - pointer.prevPosition.x) / this.cameras.main.zoom
         this.cameras.main.scrollY -= (pointer.y - pointer.prevPosition.y) / this.cameras.main.zoom
       }
     })
+    this.input.on('pointerup', () => {
+      if (!this.input.pointer1.isDown || !this.input.pointer2.isDown) {
+        this.isPinching = false
+      }
+    })
+
+    // 多點觸控（pinch zoom 需要 2 個 pointer）
+    this.input.addPointer(1)
 
     // 滾輪縮放（限制為整數倍避免子像素）
     this.input.on('wheel', (_p: unknown, _g: unknown, _dx: number, _dy: number, dz: number) => {
-      const cam = this.cameras.main
-      const raw = cam.zoom - dz * 0.001
-      // 取整到 0.5 的倍數（1.0, 1.5, 2.0, 2.5, 3.0）避免非整數 zoom 產生 tile bleeding
-      const snapped = Math.round(raw * 2) / 2
-      cam.setZoom(Phaser.Math.Clamp(snapped, 0.5, 3))
+      this.applyZoom(this.cameras.main.zoom - dz * 0.001)
     })
 
     // 角色點擊
@@ -178,6 +193,28 @@ export default class Room2Scene extends Phaser.Scene {
 
     // 通知 Vue 場景已就緒
     this.game.events.emit('scene-ready')
+  }
+
+  // ── Camera zoom ────────────────────────────────────────────────
+
+  private applyZoom(raw: number) {
+    const snapped = Math.round(raw * 2) / 2
+    this.cameras.main.setZoom(Phaser.Math.Clamp(snapped, 0.5, 3))
+  }
+
+  private handlePinchMove() {
+    const p1 = this.input.pointer1
+    const p2 = this.input.pointer2
+    const dist = Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y)
+
+    if (!this.isPinching) {
+      this.isPinching = true
+      this.pinchStartDist = dist
+      this.pinchStartZoom = this.cameras.main.zoom
+    } else {
+      const scale = dist / this.pinchStartDist
+      this.applyZoom(this.pinchStartZoom * scale)
+    }
   }
 
   // ── Tileset helpers ─────────────────────────────────────────────
@@ -306,7 +343,12 @@ export default class Room2Scene extends Phaser.Scene {
       : ZOOM * (memberScale || CHAR_BASE_SCALE)
     sprite.setTexture(charKey)
     sprite.setScale(charScale)
+    sprite.setVisible(true)
     sprite.play(`${charKey}_idle`)
+
+    // 清除 placeholder 紅點（sprite 載入完成，不再需要）
+    const dot = this.placeholderDots.get(memberId)
+    if (dot) { dot.destroy(); this.placeholderDots.delete(memberId) }
   }
 
   // ── Characters (incremental update) ─────────────────────────────
@@ -488,6 +530,7 @@ export default class Room2Scene extends Phaser.Scene {
       dot.fillStyle(0xff4444, 1)
       dot.fillCircle(0, -6, 6)
       container.add(dot)
+      this.placeholderDots.set(memberId, dot)
     }
 
     // 名字標籤
