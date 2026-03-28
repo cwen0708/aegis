@@ -20,7 +20,7 @@ const groupOptions: { value: 'date' | 'member' | 'provider'; label: string }[] =
 async function fetchData() {
   loading.value = true
   try {
-    const res = await fetch(`${API}/api/v1/members/usage-dashboard?group_by=${groupBy.value}&days=${days.value}`)
+    const res = await fetch(`${API}/api/v1/usage-dashboard?group_by=${groupBy.value}&days=${days.value}`)
     if (res.ok) data.value = await res.json()
   } catch { /* ignore */ }
   loading.value = false
