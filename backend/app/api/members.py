@@ -44,6 +44,7 @@ class MemberCreateRequest(BaseModel):
     avatar: str = ""
     role: str = ""
     description: str = ""
+    hook_profile: str = "standard"  # "minimal" | "standard" | "strict"
 
 
 class MemberUpdateRequest(BaseModel):
@@ -53,6 +54,7 @@ class MemberUpdateRequest(BaseModel):
     description: Optional[str] = None
     sprite_index: Optional[int] = None
     portrait: Optional[str] = None
+    hook_profile: Optional[str] = None  # "minimal" | "standard" | "strict"
 
 
 class BindAccountRequest(BaseModel):
