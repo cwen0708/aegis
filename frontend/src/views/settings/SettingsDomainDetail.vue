@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Save, Loader2, Trash2, AlertTriangle } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
+import { useDialogState } from '../../composables/useDialogState'
 import ConfirmDialog from '../../components/ConfirmDialog.vue'
 import { config } from '../../config'
 import { authHeaders } from '../../utils/authFetch'
@@ -14,15 +15,17 @@ const API = config.apiUrl
 
 const domainId = Number(route.params.id)
 const loading = ref(true)
-const saving = ref(false)
 
-const form = ref({
-  hostname: '',
-  name: '',
-  is_default: false,
-  is_active: true,
-  require_login: false,
-  show_onboarding: true,
+// 使用 useDialogState 管理表單和保存狀態
+const { form, loading: saving } = useDialogState({
+  initialForm: {
+    hostname: '',
+    name: '',
+    is_default: false,
+    is_active: true,
+    require_login: false,
+    show_onboarding: true,
+  },
 })
 
 const confirmDelete = ref(false)
@@ -32,6 +35,7 @@ async function fetchDomain() {
     const res = await fetch(`${API}/api/v1/domains/${domainId}`, { headers: authHeaders() })
     if (!res.ok) throw new Error('載入失敗')
     const d = await res.json()
+    // 使用 resetForm 更新表單數據
     form.value = {
       hostname: d.hostname,
       name: d.name || '',
