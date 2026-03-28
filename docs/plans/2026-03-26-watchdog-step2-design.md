@@ -198,7 +198,7 @@ def touch_last_activity(card_id: int, source: str):
 # 4. MCP 發起:        touch_last_activity(card_id, "mcp_start")
 ```
 
-> **設計原則**：觸發點 4（MCP 發起時）是防禦性更新 — 當 MCP tool 呼叫外部服務需要較長時間（如 API 回應慢），發起時就更新時戳可避免等待期間被 Watchdog 誤判。
+> **設計原則**：觸發點 4（MCP 發起時）是防禦性更新 -- 當 MCP tool 呼叫外部服務需要較長時間（如 API 回應慢），發起時就更新時戳可避免等待期間被 Watchdog 誤判。
 
 ### 2.4 重啟執行流程
 
