@@ -15,6 +15,8 @@ const store = useAegisStore()
 const canvasRef = ref<HTMLDivElement>()
 const error = ref('')
 const isEditing = ref(false)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const customMapJson = ref<Record<string, any> | null>(null)
 let game: Phaser.Game | null = null
 
 // ===== Room support =====
@@ -193,18 +195,56 @@ function closeCharacterDialog() {
   selectedCharacter.value = null
 }
 
+async function loadRoomMap() {
+  const rid = currentRoomId.value
+  if (!rid) return
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const roomData = await apiClient.get<any>(`/api/v1/rooms/${rid}`)
+    if (roomData.layout_json) {
+      try {
+        const parsed = typeof roomData.layout_json === 'string'
+          ? JSON.parse(roomData.layout_json)
+          : roomData.layout_json
+        if (parsed && typeof parsed === 'object' && Array.isArray(parsed.layers)) {
+          customMapJson.value = parsed
+        }
+      } catch { /* 損壞的 JSON，用預設 map */ }
+    }
+  } catch { /* 用預設 map */ }
+}
+
 function enterEditMode() {
   game?.destroy(true)
   game = null
   isEditing.value = true
 }
 
+async function handleSave(mapJson: object) {
+  const rid = currentRoomId.value
+  if (rid) {
+    try {
+      await apiClient.patch(`/api/v1/rooms/${rid}/layout`, { layout_json: mapJson })
+      customMapJson.value = mapJson as Record<string, unknown>
+    } catch (e) {
+      console.error('[Room2] Failed to save map:', e)
+    }
+  }
+  isEditing.value = false
+  await nextTick()
+  await createGame()
+}
+
 async function exitEditMode() {
   isEditing.value = false
   await nextTick()
+  await createGame()
+}
+
+async function createGame() {
   const { createRoom2Game } = await import('../game2/Room2Scene')
   if (canvasRef.value) {
-    game = createRoom2Game('room2-canvas')
+    game = createRoom2Game('room2-canvas', customMapJson.value ?? undefined)
     setupGameListeners()
     pushDataToScene()
   }
@@ -221,15 +261,14 @@ function setupGameListeners() {
 // ===== Lifecycle =====
 onMounted(async () => {
   try {
-    const { createRoom2Game } = await import('../game2/Room2Scene')
-    if (canvasRef.value) {
-      game = createRoom2Game('room2-canvas')
-      setupGameListeners()
-    } else {
+    await loadRoomMap()
+    await createGame()
+    if (!canvasRef.value) {
       error.value = 'Canvas element not found'
     }
-  } catch (e: any) {
-    error.value = e.message || String(e)
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    error.value = msg
     console.error('[Room2] Failed to create game:', e)
   }
 
@@ -273,7 +312,8 @@ watch(
     <!-- 編輯模式 -->
     <Room2Editor
       v-if="isEditing"
-      @save="exitEditMode"
+      :custom-map-json="customMapJson"
+      @save="handleSave"
       @cancel="exitEditMode"
     />
 

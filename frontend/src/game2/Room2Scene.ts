@@ -63,12 +63,25 @@ export default class Room2Scene extends Phaser.Scene {
   private pinchStartDist = 0
   private pinchStartZoom = 1
 
-  constructor() {
+  // Custom map (Phase 4)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private customMapJson: Record<string, any> | null = null
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  constructor(customMapJson?: Record<string, any>) {
     super('room2')
+    this.customMapJson = customMapJson ?? null
   }
 
   preload() {
-    this.load.tilemapTiledJSON('tilemap2', `${ASSET_BASE}/map.json`)
+    if (this.customMapJson) {
+      this.cache.tilemap.add('tilemap2', {
+        data: this.customMapJson,
+        format: Phaser.Tilemaps.Formats.TILED_JSON,
+      })
+    } else {
+      this.load.tilemapTiledJSON('tilemap2', `${ASSET_BASE}/map.json`)
+    }
     preloadTilesets(this)
     preloadDefaultChars(this)
   }
@@ -653,8 +666,10 @@ export default class Room2Scene extends Phaser.Scene {
 }
 
 
-export function createRoom2Game(parent: string): Phaser.Game {
-  return new Phaser.Game({
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function createRoom2Game(parent: string, customMapJson?: Record<string, any>): Phaser.Game {
+  const scene = new Room2Scene(customMapJson)
+  const game = new Phaser.Game({
     type: Phaser.AUTO,
     parent,
     width: window.innerWidth,
@@ -665,11 +680,13 @@ export function createRoom2Game(parent: string): Phaser.Game {
       default: 'arcade',
       arcade: { debug: false },
     },
-    scene: [Room2Scene],
+    scene: [],
     scale: {
       mode: Phaser.Scale.RESIZE,
       autoCenter: Phaser.Scale.CENTER_BOTH,
     },
     backgroundColor: '#1a1a2e',
   })
+  game.scene.add('room2', scene, true)
+  return game
 }
