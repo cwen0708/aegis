@@ -91,6 +91,9 @@ class CardIndex(SQLModel, table=True):
     file_mtime: float = Field(default=0.0)
     member_id: Optional[int] = Field(default=None, index=True)  # 執行中的成員 ID
     cron_job_id: Optional[int] = Field(default=None, index=True)  # 由哪個排程建立
+    total_input_tokens: int = Field(default=0)  # 累計輸入 token 數
+    total_output_tokens: int = Field(default=0)  # 累計輸出 token 數
+    estimated_cost_usd: float = Field(default=0.0)  # 預估費用（USD）
 
 
 class CronJob(SQLModel, table=True):
