@@ -72,6 +72,7 @@ export default class Room2Scene extends Phaser.Scene {
   private memberSlotMap: Map<number, number> = new Map()
   private memberSpriteKeys: Map<number, string> = new Map()
   private placeholderDots: Map<number, Phaser.GameObjects.Graphics> = new Map()
+  private statusText: Phaser.GameObjects.Text | null = null
   private charCount = MAX_CHAR_COUNT
 
   // Pinch zoom state
@@ -479,6 +480,31 @@ export default class Room2Scene extends Phaser.Scene {
       this.memberSpriteKeys.set(memberId, key)
       this.startWander(key, c, memberId, this.allWalkable)
     })
+
+    // 狀態文字
+    this.updateStatusText(data)
+  }
+
+  private updateStatusText(data: SceneData) {
+    if (this.statusText) { this.statusText.destroy(); this.statusText = null }
+
+    let text = ''
+    let color = '#94a3b8'
+    if (data.memberCount === 0) {
+      text = 'NO MEMBERS'
+      color = '#887766'
+    } else if (data.resting.length === 0) {
+      text = 'ALL DEPLOYED!'
+      color = '#ffd700'
+    }
+
+    if (!text || !this.map) return
+
+    this.statusText = this.add.text(
+      this.map.widthInPixels / 2, 24,
+      text,
+      { fontFamily: '"Press Start 2P"', fontSize: '14px', color },
+    ).setOrigin(0.5, 0.5).setDepth(500).setScrollFactor(0)
   }
 
   // ── Character creation ──────────────────────────────────────────
