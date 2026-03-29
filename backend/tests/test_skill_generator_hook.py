@@ -285,6 +285,63 @@ class TestSaveSkillPaths:
         assert calls == ["slug-member"]
 
 
+class TestConfidenceThreshold:
+    """信心分數閾值過濾測試"""
+
+    @patch.object(SkillGeneratorHook, "_get_git_diff", return_value="diff --git a/f b/f\n+code")
+    @patch.object(SkillGeneratorHook, "_save_skill")
+    @patch.object(SkillGeneratorHook, "_get_confidence_threshold", return_value=0.5)
+    def test_skips_generation_when_below_threshold(self, mock_threshold, mock_save, mock_diff):
+        """confidence=0.3, threshold=0.5 → 不生成 skill"""
+        hook = SkillGeneratorHook()
+        ctx = TaskContext(
+            status="completed",
+            project_path="/tmp",
+            output="A" * 150,
+            exit_code=1,  # exit_code=1 → no +0.5, result ≈ 0.5 → 用 monkeypatch 控制
+        )
+        # 直接覆寫 _calculate_confidence 回傳 0.3
+        with patch.object(hook, "_calculate_confidence", return_value=0.3):
+            hook.on_complete(ctx)
+
+        assert ctx.confidence_score == pytest.approx(0.3)
+        mock_save.assert_not_called()
+
+    @patch.object(SkillGeneratorHook, "_get_git_diff", return_value="diff --git a/f b/f\n+code")
+    @patch.object(SkillGeneratorHook, "_save_skill")
+    @patch.object(SkillGeneratorHook, "_get_confidence_threshold", return_value=0.5)
+    def test_generates_when_meets_threshold(self, mock_threshold, mock_save, mock_diff):
+        """confidence=0.7, threshold=0.5 → 生成 skill"""
+        hook = SkillGeneratorHook()
+        ctx = TaskContext(
+            status="completed",
+            project_path="/tmp",
+            output="A" * 150,
+            exit_code=0,
+        )
+        with patch.object(hook, "_calculate_confidence", return_value=0.7):
+            hook.on_complete(ctx)
+
+        assert ctx.confidence_score == pytest.approx(0.7)
+        mock_save.assert_called_once()
+
+    def test_uses_default_threshold_when_not_set(self):
+        """無 SystemSetting 設定時，_get_confidence_threshold 應回傳預設 0.5"""
+        hook = SkillGeneratorHook()
+        with patch("app.hooks.skill_generator.SkillGeneratorHook._get_confidence_threshold") as mock_method:
+            # 模擬 DB 查不到 → 應回傳 0.5
+            mock_method.side_effect = lambda: 0.5
+            threshold = hook._get_confidence_threshold()
+        assert threshold == pytest.approx(0.5)
+
+    def test_default_threshold_on_db_failure(self):
+        """DB 讀取失敗時，_get_confidence_threshold 應回傳預設 0.5"""
+        hook = SkillGeneratorHook()
+        with patch("builtins.__import__", side_effect=ImportError("no db")):
+            threshold = hook._get_confidence_threshold()
+        assert threshold == pytest.approx(0.5)
+
+
 class TestOnCompleteIntegration:
     """on_complete 整合測試"""
 

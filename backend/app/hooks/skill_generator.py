@@ -33,6 +33,15 @@ class SkillGeneratorHook(Hook):
             # 計算信心分數
             ctx.confidence_score = self._calculate_confidence(ctx)
 
+            # 閾值過濾
+            threshold = self._get_confidence_threshold()
+            if ctx.confidence_score < threshold:
+                logger.info(
+                    f"[SkillGeneratorHook] confidence score {ctx.confidence_score} "
+                    f"below threshold {threshold}, skipping"
+                )
+                return
+
             commit_hash = self._get_commit_hash(ctx.project_path)
             skill_md = self._build_skill_template(ctx, changed_files, new_functions, commit_hash)
             self._save_skill(ctx.member_slug, skill_md, ctx.project_path)
@@ -40,6 +49,22 @@ class SkillGeneratorHook(Hook):
             logger.warning(f"[SkillGeneratorHook] failed: {e}")
 
     # ── 內部方法 ──────────────────────────────────────────────
+
+    def _get_confidence_threshold(self) -> float:
+        """從 SystemSetting 讀取信心分數閾值，失敗時回傳預設值 0.5。"""
+        default = 0.5
+        try:
+            from sqlmodel import Session
+            from app.database import engine
+            from app.models.core import SystemSetting
+
+            with Session(engine) as s:
+                setting = s.get(SystemSetting, "skill_confidence_threshold")
+                if setting is None:
+                    return default
+                return float(setting.value)
+        except Exception:
+            return default
 
     def _calculate_confidence(self, ctx: TaskContext) -> float:
         """
