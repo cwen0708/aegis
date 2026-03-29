@@ -149,53 +149,43 @@ onMounted(() => {
       </button>
     </div>
 
-    <!-- 縮圖網格 -->
-    <div class="flex-1 overflow-y-auto p-2">
-      <!-- 組合物件 -->
-      <div v-if="currentComposites.length > 0" class="mb-2">
-        <div class="text-[10px] text-gray-500 mb-1">組合物件</div>
-        <div class="grid grid-cols-3 gap-1">
-          <button
-            v-for="(item, idx) in currentComposites"
-            :key="'comp-' + idx"
-            class="relative border border-gray-600 rounded hover:border-blue-400 bg-gray-900 p-0.5 overflow-hidden"
-            :title="item.comp.name"
-            @click="handleCompositeSelect(item.comp)"
-          >
-            <img
-              :src="item.dataUrl"
-              class="w-full h-auto"
-              style="image-rendering: pixelated"
-              :alt="item.comp.name"
-            />
-            <span class="absolute bottom-0 left-0 right-0 text-[8px] text-gray-400 bg-gray-900/80 px-0.5 text-center truncate leading-tight">
-              {{ item.comp.name }}
-            </span>
-          </button>
-        </div>
-      </div>
-
-      <!-- 單 tile -->
-      <div v-if="currentComposites.length > 0 && currentThumbnails.length > 0" class="text-[10px] text-gray-500 mb-1">
-        單一物件
-      </div>
-      <div class="grid grid-cols-5 gap-1">
+    <!-- 瀑布式佈局：組合物件 + 單 tile 混排，按實際格數大小 -->
+    <div class="flex-1 overflow-y-auto p-1.5">
+      <div class="flex flex-wrap gap-1 palette-flow">
+        <!-- 組合物件 -->
+        <button
+          v-for="(item, idx) in currentComposites"
+          :key="'comp-' + idx"
+          class="relative border border-gray-600 rounded hover:border-blue-400 bg-gray-900 overflow-hidden flex-shrink-0"
+          :style="{ width: item.comp.cols * 32 + 'px', height: item.comp.rows * 32 + 'px' }"
+          :title="item.comp.name"
+          @click="handleCompositeSelect(item.comp)"
+        >
+          <img
+            :src="item.dataUrl"
+            class="w-full h-full"
+            style="image-rendering: pixelated"
+            :alt="item.comp.name"
+          />
+          <span class="absolute bottom-0 left-0 right-0 text-[7px] text-gray-400 bg-gray-900/80 px-0.5 text-center truncate leading-tight">
+            {{ item.comp.name }}
+          </span>
+        </button>
+        <!-- 單 tile -->
         <button
           v-for="item in currentThumbnails"
           :key="item.gid"
-          class="relative border border-gray-600 rounded hover:border-blue-400 bg-gray-900 p-0 overflow-hidden"
+          class="relative border border-gray-600 rounded hover:border-blue-400 bg-gray-900 overflow-hidden flex-shrink-0"
+          style="width: 32px; height: 32px"
           :title="`GID ${item.gid}`"
           @click="handleSelect(item.gid)"
         >
           <img
             :src="item.dataUrl"
-            class="w-full h-auto"
+            class="w-full h-full"
             style="image-rendering: pixelated"
             :alt="`tile ${item.gid}`"
           />
-          <span class="absolute bottom-0 right-0 text-[8px] text-gray-500 bg-gray-900/80 px-0.5 leading-tight">
-            {{ item.gid }}
-          </span>
         </button>
       </div>
       <p v-if="currentThumbnails.length === 0 && currentComposites.length === 0" class="text-gray-500 text-xs text-center mt-4">
