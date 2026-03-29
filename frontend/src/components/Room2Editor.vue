@@ -8,7 +8,7 @@ import { EditorBridge, EditorEvents } from '../game2/editorBridge'
 import type { CompositeObject } from '../game2/compositeObjects'
 import {
   MousePointer2, Paintbrush, PaintBucket, Eraser, Hand,
-  Undo2, Redo2,
+  Undo2, Redo2, BoxSelect,
 } from 'lucide-vue-next'
 import FloatingPanel from './room2editor/FloatingPanel.vue'
 import ObjectPalette from './room2editor/ObjectPalette.vue'
@@ -48,7 +48,8 @@ interface ToolDef { key: EditorTool; icon: any; label: string; shortcut: string 
 
 const toolbox: ToolDef[] = [
   { key: 'select', icon: MousePointer2, label: '選取', shortcut: 'V' },
-  { key: 'ground', icon: Paintbrush, label: '放置', shortcut: 'B' },
+  { key: 'ground', icon: Paintbrush, label: '地板', shortcut: 'B' },
+  { key: 'object', icon: BoxSelect, label: '物件', shortcut: 'O' },
   { key: 'fill', icon: PaintBucket, label: '填充', shortcut: 'G' },
   { key: 'eraser', icon: Eraser, label: '橡皮擦', shortcut: 'E' },
   { key: 'hand', icon: Hand, label: '手掌', shortcut: 'H' },
@@ -128,12 +129,8 @@ function handleRedo() { bridge.redo() }
 
 function setTool(tool: EditorTool) {
   activeTool.value = tool
-  // 「放置」按鈕在有 composite 或 object palette 選擇時保持 object tool
+  bridge.setComposite(null)
   bridge.setTool(tool)
-  // 切換到非放置工具時清除 composite
-  if (tool !== 'ground') {
-    bridge.setComposite(null)
-  }
 }
 
 function handlePaletteSelect(gid: number, layerName: string) {
@@ -143,19 +140,22 @@ function handlePaletteSelect(gid: number, layerName: string) {
   bridge.setComposite(null)
   activeLayer.value = layerName
   if (layerName === 'Ground') {
-    if (activeTool.value !== 'ground' && activeTool.value !== 'fill') setTool('ground')
+    if (activeTool.value !== 'ground' && activeTool.value !== 'fill') {
+      activeTool.value = 'ground'
+      bridge.setTool('ground')
+    }
   } else {
+    activeTool.value = 'object' as EditorTool
     bridge.setTool('object')
-    activeTool.value = 'ground'
   }
 }
 
 function handleCompositeSelect(comp: CompositeObject) {
+  activeTool.value = 'object' as EditorTool
+  bridge.setTool('object')
   bridge.setComposite(comp)
   const primaryLayer = comp.tiles[0]?.layer ?? 'Objects'
   bridge.setTargetLayer(primaryLayer)
-  activeTool.value = 'ground'  // UI 高亮「放置」按鈕
-  bridge.setTool('object')     // Scene 用 object tool 放置
   activeLayer.value = primaryLayer
 }
 
