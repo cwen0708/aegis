@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Loader2, ChevronRight, RefreshCw, Layers } from 'lucide-vue-next'
+import { Loader2, ChevronRight, RefreshCw, Layers, Plus } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 import { config } from '../../config'
 import { authHeaders } from '../../utils/authFetch'
+import ChannelWizardDialog from '../../components/ChannelWizardDialog.vue'
+
+const showWizard = ref(false)
 
 const router = useRouter()
 const store = useAegisStore()
@@ -112,15 +115,24 @@ onMounted(() => {
     <!-- Hint -->
     <div class="bg-slate-800/30 rounded-xl border border-slate-700/30 p-4 text-sm text-slate-400 flex items-center justify-between">
       <span>連接外部通訊平台，透過 Bot 接收指令和發送通知。設定變更後需重啟服務。</span>
-      <button
-        @click="restartChannels"
-        :disabled="channelRestarting"
-        class="flex items-center gap-1.5 px-3 py-1.5 bg-teal-500/20 hover:bg-teal-500/30 disabled:opacity-50 text-teal-400 rounded-lg text-xs font-medium transition-all shrink-0 ml-4"
-      >
-        <Loader2 v-if="channelRestarting" class="w-3 h-3 animate-spin" />
-        <RefreshCw v-else class="w-3 h-3" />
-        重啟服務
-      </button>
+      <div class="flex items-center gap-2 shrink-0 ml-4">
+        <button
+          @click="showWizard = true"
+          class="flex items-center gap-1.5 px-3 py-1.5 bg-teal-500/20 hover:bg-teal-500/30 text-teal-400 rounded-lg text-xs font-medium transition-all"
+        >
+          <Plus class="w-3 h-3" />
+          新增頻道
+        </button>
+        <button
+          @click="restartChannels"
+          :disabled="channelRestarting"
+          class="flex items-center gap-1.5 px-3 py-1.5 bg-teal-500/20 hover:bg-teal-500/30 disabled:opacity-50 text-teal-400 rounded-lg text-xs font-medium transition-all"
+        >
+          <Loader2 v-if="channelRestarting" class="w-3 h-3 animate-spin" />
+          <RefreshCw v-else class="w-3 h-3" />
+          重啟服務
+        </button>
+      </div>
     </div>
 
     <!-- Loading -->
@@ -172,5 +184,7 @@ onMounted(() => {
         </div>
       </div>
     </div>
+
+    <ChannelWizardDialog :show="showWizard" @close="showWizard = false" />
   </div>
 </template>
