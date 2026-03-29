@@ -5,6 +5,7 @@ import { TILESET_PRELOAD_CONFIG } from '../../game2/tilesetRegistry'
 import type { ThumbnailItem } from '../../game2/thumbnailExtractor'
 import {
   loadCompositeConfig, getCompositeGidSet, getCompositesByCategory,
+  getNativeObjectDef,
   type CompositeObject,
 } from '../../game2/compositeObjects'
 
@@ -126,7 +127,10 @@ function renderCompositeThumbnail(
 }
 
 function handleSelect(gid: number) {
-  emit('select', gid, currentTargetLayer.value)
+  // 原生物件用 JSON 定義的 layer，其餘用 category 預設值
+  const native = getNativeObjectDef(gid)
+  const layer = native ? native.layer : currentTargetLayer.value
+  emit('select', gid, layer)
 }
 
 function handleCompositeSelect(comp: CompositeObject) {
