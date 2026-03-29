@@ -80,6 +80,7 @@ export default class Room2EditorScene extends Phaser.Scene {
   private layerSprites: Map<string, Phaser.GameObjects.Sprite[]> = new Map()
   private layerObjects: Map<string, PlacedObject[]> = new Map()
   private hoverSprite: Phaser.GameObjects.Sprite | null = null
+  private hoverCompositeSprites: Phaser.GameObjects.Sprite[] = []
   private activeComposite: CompositeObject | null = null
 
   // Selection & drag (Phase 3)
@@ -377,6 +378,19 @@ export default class Room2EditorScene extends Phaser.Scene {
   }
 
   private updateObjectHover(worldPoint: Phaser.Math.Vector2) {
+    const snapX = Math.floor(worldPoint.x / TILE_SIZE) * TILE_SIZE
+    const snapY = (Math.floor(worldPoint.y / TILE_SIZE) + 1) * TILE_SIZE
+
+    // 組合物件預覽
+    if (this.activeComposite) {
+      this.destroyHoverSprite()
+      this.updateCompositeHover(snapX, snapY)
+      return
+    }
+
+    // 單一物件預覽（先清掉組合 hover）
+    for (const s of this.hoverCompositeSprites) s.destroy()
+    this.hoverCompositeSprites = []
     const resolved = resolveGid(this.selectedGid, this.tilesetInfos)
     if (!resolved) {
       this.destroyHoverSprite()
@@ -384,8 +398,6 @@ export default class Room2EditorScene extends Phaser.Scene {
     }
 
     const cfg = this.getFrameSize(resolved.key)
-    const snapX = Math.floor(worldPoint.x / TILE_SIZE) * TILE_SIZE
-    const snapY = (Math.floor(worldPoint.y / TILE_SIZE) + 1) * TILE_SIZE
 
     if (!this.hoverSprite) {
       this.hoverSprite = this.add.sprite(0, 0, resolved.key, resolved.frame)
@@ -402,10 +414,45 @@ export default class Room2EditorScene extends Phaser.Scene {
     )
   }
 
+  private updateCompositeHover(baseX: number, baseY: number) {
+    const comp = this.activeComposite!
+    const needed = comp.tiles.length
+
+    // 建立或重用 hover sprites
+    while (this.hoverCompositeSprites.length < needed) {
+      const s = this.add.sprite(0, 0, '__DEFAULT')
+      s.setAlpha(0.5).setDepth(DEPTH_HOVER_SPRITE)
+      this.hoverCompositeSprites.push(s)
+    }
+    // 隱藏多餘的
+    for (let i = needed; i < this.hoverCompositeSprites.length; i++) {
+      this.hoverCompositeSprites[i]!.setVisible(false)
+    }
+
+    for (let i = 0; i < needed; i++) {
+      const tile = comp.tiles[i]!
+      const sprite = this.hoverCompositeSprites[i]!
+      const resolved = resolveGid(tile.gid, this.tilesetInfos)
+      if (!resolved) { sprite.setVisible(false); continue }
+
+      const cfg = this.getFrameSize(resolved.key)
+      sprite.setVisible(true)
+      sprite.setTexture(resolved.key, resolved.frame)
+      sprite.setPosition(
+        baseX + tile.col * TILE_SIZE + cfg.frameWidth / 2,
+        baseY + tile.row * TILE_SIZE - cfg.frameHeight / 2,
+      )
+    }
+  }
+
   private destroyHoverSprite() {
     if (this.hoverSprite) {
       this.hoverSprite.destroy()
       this.hoverSprite = null
+    }
+    if (this.hoverCompositeSprites.length > 0) {
+      for (const s of this.hoverCompositeSprites) s.destroy()
+      this.hoverCompositeSprites = []
     }
   }
 
