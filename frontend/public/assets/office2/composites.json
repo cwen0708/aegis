@@ -1,8 +1,20 @@
 {
-  "version": 1,
+  "version": 2,
   "collideLayer": "ObjectsOnCollide",
   "defaultLayer": "Objects",
-  "objects": [
+
+  "categories": [
+    { "label": "地板", "key": "tiles_floor", "targetLayer": "Ground", "maxCount": 120 },
+    { "label": "桌椅", "key": "tiles_office", "targetLayer": "Objects" },
+    { "label": "椅子", "key": "chairs", "targetLayer": "Chair" },
+    { "label": "電腦", "key": "computers", "targetLayer": "Computer" },
+    { "label": "白板", "key": "whiteboards", "targetLayer": "Whiteboard" },
+    { "label": "裝飾", "key": "tiles_generic", "targetLayer": "GenericObjects" },
+    { "label": "其他", "key": "tiles_basement", "targetLayer": "Basement" },
+    { "label": "販賣機", "key": "vendingmachines", "targetLayer": "VendingMachine" }
+  ],
+
+  "composites": [
     {
       "name": "小盆栽",
       "category": "tiles_office",
@@ -86,28 +98,29 @@
       "collides": [5077, 5078]
     }
   ],
+
   "nativeObjects": [
-    { "gid": 2562, "name": "辦公椅(下)", "layer": "Chair" },
-    { "gid": 2563, "name": "辦公椅(下左)", "layer": "Chair" },
-    { "gid": 2564, "name": "辦公椅(下右)", "layer": "Chair" },
-    { "gid": 2566, "name": "辦公椅(上)", "layer": "Chair" },
-    { "gid": 2568, "name": "高背椅(上)", "layer": "Chair" },
-    { "gid": 2569, "name": "高背椅(下)", "layer": "Chair" },
-    { "gid": 2572, "name": "辦公椅B(上)", "layer": "Chair" },
-    { "gid": 2573, "name": "辦公椅(左)", "layer": "Chair" },
-    { "gid": 2574, "name": "辦公椅(右)", "layer": "Chair" },
-    { "gid": 2580, "name": "會議椅A", "layer": "Chair" },
-    { "gid": 2581, "name": "會議椅B", "layer": "Chair" },
-    { "gid": 2582, "name": "會議椅C", "layer": "Chair" },
-    { "gid": 2583, "name": "會議椅D", "layer": "Chair" },
-    { "gid": 4680, "name": "電腦A", "layer": "Computer" },
-    { "gid": 4681, "name": "電腦B", "layer": "Computer" },
-    { "gid": 4682, "name": "電腦C", "layer": "Computer" },
-    { "gid": 4683, "name": "電腦D", "layer": "Computer" },
-    { "gid": 4684, "name": "電腦E", "layer": "Computer" },
-    { "gid": 4685, "name": "白板A", "layer": "Whiteboard" },
-    { "gid": 4686, "name": "白板B", "layer": "Whiteboard" },
-    { "gid": 4687, "name": "白板C", "layer": "Whiteboard" },
-    { "gid": 5488, "name": "販賣機", "layer": "VendingMachine", "collides": true }
+    { "gid": 2562, "name": "辦公椅(下)", "layer": "Chair", "category": "chairs" },
+    { "gid": 2563, "name": "辦公椅(下左)", "layer": "Chair", "category": "chairs" },
+    { "gid": 2564, "name": "辦公椅(下右)", "layer": "Chair", "category": "chairs" },
+    { "gid": 2566, "name": "辦公椅(上)", "layer": "Chair", "category": "chairs" },
+    { "gid": 2568, "name": "高背椅(上)", "layer": "Chair", "category": "chairs" },
+    { "gid": 2569, "name": "高背椅(下)", "layer": "Chair", "category": "chairs" },
+    { "gid": 2572, "name": "辦公椅B(上)", "layer": "Chair", "category": "chairs" },
+    { "gid": 2573, "name": "辦公椅(左)", "layer": "Chair", "category": "chairs" },
+    { "gid": 2574, "name": "辦公椅(右)", "layer": "Chair", "category": "chairs" },
+    { "gid": 2580, "name": "會議椅A", "layer": "Chair", "category": "chairs" },
+    { "gid": 2581, "name": "會議椅B", "layer": "Chair", "category": "chairs" },
+    { "gid": 2582, "name": "會議椅C", "layer": "Chair", "category": "chairs" },
+    { "gid": 2583, "name": "會議椅D", "layer": "Chair", "category": "chairs" },
+    { "gid": 4680, "name": "電腦A", "layer": "Computer", "category": "computers" },
+    { "gid": 4681, "name": "電腦B", "layer": "Computer", "category": "computers" },
+    { "gid": 4682, "name": "電腦C", "layer": "Computer", "category": "computers" },
+    { "gid": 4683, "name": "電腦D", "layer": "Computer", "category": "computers" },
+    { "gid": 4684, "name": "電腦E", "layer": "Computer", "category": "computers" },
+    { "gid": 4685, "name": "白板A", "layer": "Whiteboard", "category": "whiteboards" },
+    { "gid": 4686, "name": "白板B", "layer": "Whiteboard", "category": "whiteboards" },
+    { "gid": 4687, "name": "白板C", "layer": "Whiteboard", "category": "whiteboards" },
+    { "gid": 5488, "name": "販賣機", "layer": "VendingMachine", "category": "vendingmachines", "collides": true }
   ]
 }

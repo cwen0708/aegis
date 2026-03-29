@@ -4,9 +4,9 @@ import type { TilesetInfo } from '../../game2/tilesetRegistry'
 import { TILESET_PRELOAD_CONFIG } from '../../game2/tilesetRegistry'
 import type { ThumbnailItem } from '../../game2/thumbnailExtractor'
 import {
-  loadCompositeConfig, getCompositeGidSet, getCompositesByCategory,
-  getNativeObjectDef,
-  type CompositeObject,
+  loadCompositeConfig, getCompositeGidSet,
+  getCompositesByCategory, getNativeObjectDef,
+  type CompositeObject, type PaletteCategory,
 } from '../../game2/compositeObjects'
 
 const props = defineProps<{
@@ -19,29 +19,10 @@ const emit = defineEmits<{
   (e: 'select-composite', composite: CompositeObject): void
 }>()
 
-interface PaletteCategory {
-  label: string
-  key: string
-  targetLayer: string
-  maxCount?: number
-}
-
-const CATEGORIES: PaletteCategory[] = [
-  { label: '地板', key: 'tiles_floor', targetLayer: 'Ground', maxCount: 120 },
-  { label: '桌椅', key: 'tiles_office', targetLayer: 'Objects' },
-  { label: '椅子', key: 'chairs', targetLayer: 'Chair' },
-  { label: '電腦', key: 'computers', targetLayer: 'Computer' },
-  { label: '白板', key: 'whiteboards', targetLayer: 'Whiteboard' },
-  { label: '裝飾', key: 'tiles_generic', targetLayer: 'GenericObjects' },
-  { label: '其他', key: 'tiles_basement', targetLayer: 'Basement' },
-  { label: '販賣機', key: 'vendingmachines', targetLayer: 'VendingMachine' },
-]
-
-const activeCategory = ref(CATEGORIES[0]?.key ?? 'tiles_floor')
+const categories = ref<PaletteCategory[]>([])
+const activeCategory = ref('tiles_floor')
 const thumbnails = ref<Map<string, ThumbnailItem[]>>(new Map())
 const compositeThumbs = ref<Map<string, { comp: CompositeObject; dataUrl: string }[]>>(new Map())
-
-// compositeGids 在 generateThumbnails 中動態取得（loadCompositeConfig 後才有資料）
 
 const currentThumbnails = computed(() => {
   return thumbnails.value.get(activeCategory.value) || []
@@ -52,20 +33,23 @@ const currentComposites = computed(() => {
 })
 
 const currentTargetLayer = computed(() => {
-  return CATEGORIES.find(c => c.key === activeCategory.value)?.targetLayer || 'Objects'
+  return categories.value.find(c => c.key === activeCategory.value)?.targetLayer || 'Objects'
 })
 
 async function generateThumbnails() {
   if (!props.scene) return
 
-  // 先載入 composites.json
-  await loadCompositeConfig()
+  // 從 JSON 載入所有配置
+  const config = await loadCompositeConfig()
+  categories.value = config.categories
+  if (categories.value.length > 0) {
+    activeCategory.value = categories.value[0]!.key
+  }
 
   const textures = props.scene.textures
-  // 重新取得（loadCompositeConfig 後才有資料）
   const compositeGidSet = getCompositeGidSet()
 
-  for (const cat of CATEGORIES) {
+  for (const cat of categories.value) {
     // 單 tile 縮圖（過濾掉組合物件的 GID）
     const { extractThumbnailsForKey } = await import('../../game2/thumbnailExtractor')
     const allItems = extractThumbnailsForKey(
@@ -148,10 +132,10 @@ onMounted(() => {
 
 <template>
   <div class="flex flex-col h-full bg-gray-800">
-    <!-- 分類橫排 -->
+    <!-- 分類橫排（從 JSON 載入） -->
     <div class="flex overflow-x-auto gap-0 border-b border-gray-700 flex-shrink-0">
       <button
-        v-for="cat in CATEGORIES"
+        v-for="cat in categories"
         :key="cat.key"
         :class="[
           'px-2.5 py-1.5 text-xs font-medium whitespace-nowrap border-b-2 transition-colors',
@@ -167,7 +151,7 @@ onMounted(() => {
 
     <!-- 縮圖網格 -->
     <div class="flex-1 overflow-y-auto p-2">
-      <!-- 組合物件（優先顯示在最上方） -->
+      <!-- 組合物件 -->
       <div v-if="currentComposites.length > 0" class="mb-2">
         <div class="text-[10px] text-gray-500 mb-1">組合物件</div>
         <div class="grid grid-cols-3 gap-1">

@@ -1,10 +1,18 @@
 /**
- * compositeObjects — 從 composites.json 載入組合物件 + 原生大尺寸物件
+ * compositeObjects — 從 composites.json 統一載入所有物件配置
+ * 包含：分類定義、組合物件、原生大尺寸物件
  * JSON 定義在 public/assets/office2/composites.json
  */
 import { ASSET_BASE } from './tilesetRegistry'
 
 // ── Types ────────────────────────────────────────────────────────
+
+export interface PaletteCategory {
+  label: string
+  key: string
+  targetLayer: string
+  maxCount?: number
+}
 
 export interface CompositeTile {
   gid: number
@@ -26,6 +34,7 @@ export interface NativeObjectDef {
   name: string
   layer: string
   collides: boolean
+  category: string
 }
 
 // ── JSON schema ─────────────────────────────────────────────────
@@ -37,21 +46,31 @@ interface CompositeJsonEntry {
   collides?: number[]
 }
 
+interface NativeJsonEntry {
+  gid: number
+  name: string
+  layer: string
+  category: string
+  collides?: boolean
+}
+
 interface CompositeJsonFile {
   version: number
   collideLayer: string
   defaultLayer: string
-  objects: CompositeJsonEntry[]
-  nativeObjects: { gid: number; name: string; layer: string; collides?: boolean }[]
+  categories: PaletteCategory[]
+  composites: CompositeJsonEntry[]
+  nativeObjects: NativeJsonEntry[]
 }
 
 // ── Parsed cache ────────────────────────────────────────────────
 
+let cachedCategories: PaletteCategory[] | null = null
 let cachedComposites: CompositeObject[] | null = null
 let cachedNatives: NativeObjectDef[] | null = null
 let cachedCompositeGids: Set<number> | null = null
 
-function parseEntry(
+function parseCompositeEntry(
   entry: CompositeJsonEntry,
   collideLayer: string,
   defaultLayer: string,
@@ -84,18 +103,21 @@ function parseEntry(
 // ── Public API ───────────────────────────────────────────────────
 
 export async function loadCompositeConfig(): Promise<{
+  categories: PaletteCategory[]
   composites: CompositeObject[]
   natives: NativeObjectDef[]
 }> {
-  if (cachedComposites && cachedNatives) {
-    return { composites: cachedComposites, natives: cachedNatives }
+  if (cachedCategories && cachedComposites && cachedNatives) {
+    return { categories: cachedCategories, composites: cachedComposites, natives: cachedNatives }
   }
 
   const res = await fetch(`${ASSET_BASE}/composites.json`)
   const json = await res.json() as CompositeJsonFile
 
-  cachedComposites = json.objects.map(entry =>
-    parseEntry(entry, json.collideLayer, json.defaultLayer),
+  cachedCategories = json.categories
+
+  cachedComposites = json.composites.map(entry =>
+    parseCompositeEntry(entry, json.collideLayer, json.defaultLayer),
   )
 
   cachedNatives = json.nativeObjects.map(n => ({
@@ -103,6 +125,7 @@ export async function loadCompositeConfig(): Promise<{
     name: n.name,
     layer: n.layer,
     collides: n.collides ?? false,
+    category: n.category,
   }))
 
   cachedCompositeGids = new Set<number>()
@@ -112,7 +135,11 @@ export async function loadCompositeConfig(): Promise<{
     }
   }
 
-  return { composites: cachedComposites, natives: cachedNatives }
+  return { categories: cachedCategories, composites: cachedComposites, natives: cachedNatives }
+}
+
+export function getCategories(): PaletteCategory[] {
+  return cachedCategories ?? []
 }
 
 export function getCompositeGidSet(): Set<number> {
