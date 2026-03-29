@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Play, Pause, Check, AlertCircle, CheckCircle2, XCircle, Timer, ChevronDown, ChevronRight, Zap } from 'lucide-vue-next'
+import { ArrowLeft, Play, Pause, Check, AlertCircle, CheckCircle2, XCircle, Timer, ChevronDown, ChevronRight, Zap, CalendarDays } from 'lucide-vue-next'
 import ParsedOutput from '../components/ParsedOutput.vue'
+import CronCalendar from '../components/CronCalendar.vue'
 import { useAegisStore } from '../stores/aegis'
 import { useAuthStore } from '../stores/auth'
 import { apiClient } from '../services/api/client'
@@ -19,6 +20,33 @@ const logsTotal = ref(0)
 const loading = ref(true)
 const logsLoading = ref(false)
 const expandedLogId = ref<number | null>(null)
+
+// 日曆篩選
+const selectedDate = ref<string | null>(null)
+const showCalendar = ref(true)
+
+function toDateKey(iso: string): string {
+  const d = new Date(iso.includes('Z') || iso.includes('+') ? iso : iso.replace(' ', 'T') + 'Z')
+  return d.toISOString().slice(0, 10)
+}
+
+const filteredLogs = computed(() => {
+  if (!selectedDate.value) return logs.value
+  return logs.value.filter(log => toDateKey(log.created_at) === selectedDate.value)
+})
+
+const selectedDateStats = computed(() => {
+  if (!selectedDate.value) return null
+  const dayLogs = filteredLogs.value
+  const success = dayLogs.filter(l => l.status === 'success').length
+  const error = dayLogs.filter(l => l.status !== 'success').length
+  return { success, error, total: dayLogs.length, date: selectedDate.value }
+})
+
+function onCalendarSelectDate(date: string | null) {
+  selectedDate.value = date
+  expandedLogId.value = null
+}
 
 // 編輯模式
 const editing = ref(false)
@@ -338,10 +366,42 @@ watch(jobId, async () => {
         </button>
       </div>
 
+      <!-- 日曆視圖 -->
+      <div>
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-bold text-slate-200 flex items-center gap-2">
+            <CalendarDays class="w-4 h-4 text-slate-400" />
+            執行日曆
+          </h2>
+          <button
+            @click="showCalendar = !showCalendar"
+            class="text-[10px] text-slate-500 hover:text-slate-300 transition-colors"
+          >
+            {{ showCalendar ? '收起' : '展開' }}
+          </button>
+        </div>
+        <CronCalendar v-if="showCalendar" :logs="logs" @select-date="onCalendarSelectDate" />
+      </div>
+
       <!-- 執行記錄 -->
       <div>
         <div class="flex items-center justify-between mb-3">
-          <h2 class="text-sm font-bold text-slate-200">執行記錄</h2>
+          <div class="flex items-center gap-3">
+            <h2 class="text-sm font-bold text-slate-200">執行記錄</h2>
+            <!-- 已選日期統計 -->
+            <template v-if="selectedDateStats">
+              <span class="text-[10px] text-slate-500">{{ selectedDateStats.date }}</span>
+              <span class="px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                成功 {{ selectedDateStats.success }}
+              </span>
+              <span v-if="selectedDateStats.error > 0" class="px-1.5 py-0.5 rounded text-[10px] bg-red-500/10 text-red-400 border border-red-500/20">
+                失敗 {{ selectedDateStats.error }}
+              </span>
+              <button @click="selectedDate = null; expandedLogId = null" class="text-[10px] text-slate-500 hover:text-slate-300">
+                清除篩選
+              </button>
+            </template>
+          </div>
           <button @click="fetchLogs" class="text-[10px] text-slate-500 hover:text-slate-300 transition-colors">重新整理</button>
         </div>
 
@@ -352,8 +412,13 @@ watch(jobId, async () => {
           <p class="text-xs text-slate-500">尚無執行記錄</p>
         </div>
 
+        <div v-else-if="filteredLogs.length === 0" class="bg-slate-800/30 rounded-xl border border-slate-700/50 p-8 text-center">
+          <CalendarDays class="w-8 h-8 mx-auto mb-3 text-slate-600 opacity-40" />
+          <p class="text-xs text-slate-500">{{ selectedDate }} 無執行記錄</p>
+        </div>
+
         <div v-else class="space-y-2">
-          <div v-for="log in logs" :key="log.id" class="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden transition-colors hover:border-slate-600/50">
+          <div v-for="log in filteredLogs" :key="log.id" class="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden transition-colors hover:border-slate-600/50">
             <!-- Log 標題列 -->
             <div class="flex items-center gap-3 px-4 py-3 cursor-pointer" @click="toggleLog(log.id)">
               <component :is="statusIcon(log.status)" class="w-4 h-4 shrink-0" :class="statusColor(log.status)" />
