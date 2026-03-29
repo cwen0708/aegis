@@ -91,6 +91,9 @@ class CardIndex(SQLModel, table=True):
     file_mtime: float = Field(default=0.0)
     member_id: Optional[int] = Field(default=None, index=True)  # 執行中的成員 ID
     cron_job_id: Optional[int] = Field(default=None, index=True)  # 由哪個排程建立
+    total_input_tokens: int = Field(default=0)  # 累計輸入 token 數
+    total_output_tokens: int = Field(default=0)  # 累計輸出 token 數
+    estimated_cost_usd: float = Field(default=0.0)  # 預估費用（USD）
 
 
 class CronJob(SQLModel, table=True):
@@ -181,6 +184,7 @@ class Member(SQLModel, table=True):
     portrait: str = ""  # 立繪圖片路徑
     sprite_sheet: str = ""  # sprite sheet 路徑（如 /uploads/sprites/1/sheet_20260323.png）
     sprite_scale: float = Field(default=1.0)  # sprite 縮放比例（前端用）
+    hook_profile: str = Field(default="standard")  # "minimal" | "standard" | "strict" — hook 嚴格度設定
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 

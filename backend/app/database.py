@@ -258,6 +258,12 @@ def _migrate_db():
             pm_count = cur.execute("SELECT COUNT(*) FROM person_member").fetchone()[0]
             logger.info(f"[Migration] Created 'person_member' with {pm_count} records")
 
+        # Member 加 hook_profile 欄位
+        cols = [row[1] for row in cur.execute("PRAGMA table_info(member)").fetchall()]
+        if "hook_profile" not in cols:
+            cur.execute("ALTER TABLE member ADD COLUMN hook_profile TEXT DEFAULT 'standard'")
+            logger.info("[Migration] Added 'hook_profile' column to member (default='standard')")
+
         # Room: 首次建立時 seed 預設房間（重新掃描確保 create_all 的表都能檢測到）
         tables = [row[0] for row in cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
         if "room" in tables:

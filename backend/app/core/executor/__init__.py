@@ -27,6 +27,7 @@ from app.core.executor.emitter import (  # noqa: F401
     parse_stream_event, clean_ansi, sanitize_output,
 )
 from app.core.executor.heartbeat import heartbeat_monitor  # noqa: F401
+from app.core.executor.memory import retrieve_task_memory  # noqa: F401
 
 __all__ = [
     "PROVIDERS", "build_command",
@@ -36,4 +37,5 @@ __all__ = [
     "StreamEmitter", "HookEmitter", "StreamEvent", "StreamTarget", "NullTarget",
     "parse_stream_event", "clean_ansi", "sanitize_output",
     "heartbeat_monitor",
+    "retrieve_task_memory",
 ]

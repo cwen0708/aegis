@@ -136,7 +136,12 @@ function handleRedo() { bridge.redo() }
 
 function setTool(tool: EditorTool) {
   activeTool.value = tool
+  // 「放置」按鈕在有 composite 或 object palette 選擇時保持 object tool
   bridge.setTool(tool)
+  // 切換到非放置工具時清除 composite
+  if (tool !== 'ground') {
+    bridge.setComposite(null)
+  }
 }
 
 function handlePaletteSelect(gid: number, layerName: string) {
@@ -155,10 +160,11 @@ function handlePaletteSelect(gid: number, layerName: string) {
 
 function handleCompositeSelect(comp: CompositeObject) {
   bridge.setComposite(comp)
-  bridge.setTargetLayer(comp.targetLayer)
-  bridge.setTool('object')
-  activeLayer.value = comp.targetLayer
-  activeTool.value = 'ground'
+  const primaryLayer = comp.tiles[0]?.layer ?? 'Objects'
+  bridge.setTargetLayer(primaryLayer)
+  activeTool.value = 'ground'  // UI 高亮「放置」按鈕
+  bridge.setTool('object')     // Scene 用 object tool 放置
+  activeLayer.value = primaryLayer
 }
 
 function handleLayerSelect(layerName: string) {

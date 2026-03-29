@@ -37,7 +37,11 @@ export class EditorBridge {
   setTool(tool: EditorTool) { this.scene?.setTool(tool) }
   setSelectedGid(gid: number) { this.scene?.setSelectedGid(gid) }
   setTargetLayer(layerName: string) { this.scene?.setTargetLayer(layerName) }
-  setComposite(comp: CompositeObject | null) { this.scene?.setComposite(comp) }
+  setComposite(comp: CompositeObject | null) {
+    // toRaw 避免 Vue reactive proxy 傳入 Phaser
+    const raw = comp ? { ...comp, tiles: [...comp.tiles] } : null
+    this.scene?.setComposite(raw)
+  }
 
   // ── History ───────────────────────────────────────────────────
 

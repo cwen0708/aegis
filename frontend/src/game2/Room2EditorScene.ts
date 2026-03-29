@@ -576,24 +576,20 @@ export default class Room2EditorScene extends Phaser.Scene {
   private placeComposite(comp: CompositeObject, baseX: number, baseY: number) {
     const cmds: PlaceObjectCommand[] = []
 
-    for (let r = 0; r < comp.gids.length; r++) {
-      const row = comp.gids[r]!
-      for (let c = 0; c < row.length; c++) {
-        const gid = row[c]!
-        const resolved = resolveGid(gid, this.tilesetInfos)
-        if (!resolved) continue
+    for (const tile of comp.tiles) {
+      const resolved = resolveGid(tile.gid, this.tilesetInfos)
+      if (!resolved) continue
 
-        const cfg = this.getFrameSize(resolved.key)
-        const obj: PlacedObject = {
-          id: this.nextObjectId++,
-          gid,
-          x: baseX + c * TILE_SIZE,
-          y: baseY + r * TILE_SIZE,
-          width: cfg.frameWidth,
-          height: cfg.frameHeight,
-        }
-        cmds.push(new PlaceObjectCommand(this, comp.targetLayer, obj))
+      const cfg = this.getFrameSize(resolved.key)
+      const obj: PlacedObject = {
+        id: this.nextObjectId++,
+        gid: tile.gid,
+        x: baseX + tile.col * TILE_SIZE,
+        y: baseY + tile.row * TILE_SIZE,
+        width: cfg.frameWidth,
+        height: cfg.frameHeight,
       }
+      cmds.push(new PlaceObjectCommand(this, tile.layer, obj))
     }
 
     if (cmds.length > 0) {
