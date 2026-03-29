@@ -226,6 +226,65 @@ class TestSkillTemplateGeneration:
         assert "## 注意事項" in template
 
 
+class TestSaveSkillPaths:
+    """_save_skill 路徑測試"""
+
+    def test_saves_to_drafts_when_member_slug_given(self, tmp_path, monkeypatch):
+        """有 member_slug 時，應寫入 skills/drafts/"""
+        monkeypatch.setattr("app.core.member_profile.MEMBERS_ROOT", tmp_path)
+        # 建立 member dir（含 drafts/active）
+        from app.core.member_profile import get_member_dir
+        get_member_dir("test-member")
+
+        hook = SkillGeneratorHook()
+        hook._save_skill("test-member", "# Test Content")
+
+        drafts_dir = tmp_path / "test-member" / "skills" / "drafts"
+        files = list(drafts_dir.glob("*.md"))
+        assert len(files) == 1
+        assert files[0].read_text(encoding="utf-8") == "# Test Content"
+
+    def test_saves_to_legacy_path_when_no_slug(self, tmp_path):
+        """無 member_slug 時，應 fallback 到 .claude/skills/"""
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+
+        hook = SkillGeneratorHook()
+        hook._save_skill("", "# Legacy Content", str(project_dir))
+
+        legacy_dir = project_dir / ".claude" / "skills"
+        files = list(legacy_dir.glob("*.md"))
+        assert len(files) == 1
+        assert files[0].read_text(encoding="utf-8") == "# Legacy Content"
+
+    def test_on_complete_passes_member_slug_to_save(self, monkeypatch, tmp_path):
+        """on_complete 應傳 member_slug 給 _save_skill"""
+        monkeypatch.setattr("app.core.member_profile.MEMBERS_ROOT", tmp_path)
+        from app.core.member_profile import get_member_dir
+        get_member_dir("slug-member")
+
+        calls = []
+        original_save = SkillGeneratorHook._save_skill
+
+        def fake_save(self, member_slug, content, project_path=""):
+            calls.append(member_slug)
+
+        import unittest.mock as mock
+        with mock.patch.object(SkillGeneratorHook, "_get_git_diff", return_value="diff --git a/f b/f\n+code"):
+            with mock.patch.object(SkillGeneratorHook, "_save_skill", fake_save):
+                hook = SkillGeneratorHook()
+                ctx = TaskContext(
+                    status="completed",
+                    project_path=str(tmp_path),
+                    member_slug="slug-member",
+                    output="A" * 150,
+                    exit_code=0,
+                )
+                hook.on_complete(ctx)
+
+        assert calls == ["slug-member"]
+
+
 class TestOnCompleteIntegration:
     """on_complete 整合測試"""
 

@@ -3,7 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowLeft, Save, Loader2, Trash2, Upload, Sparkles,
-  Plus, Edit3, BookOpen, ChevronDown, ChevronUp, Plug, AlertTriangle, Copy,
+  Plus, Edit3, BookOpen, ChevronDown, ChevronUp, Plug, AlertTriangle, Copy, CheckCircle,
 } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 import ConfirmDialog from '../../components/ConfirmDialog.vue'
@@ -99,6 +99,7 @@ const skillEditContent = ref('')
 const savingSkill = ref(false)
 const showNewSkillDialog = ref(false)
 const newSkillForm = ref({ name: '', content: '' })
+const approvingSkill = ref<string | null>(null)
 
 // ── Skill Copy ──
 interface OtherMember {
@@ -408,6 +409,23 @@ async function handleCreateSkill() {
   }
 }
 
+async function handleApproveSkill(skillName: string) {
+  approvingSkill.value = skillName
+  try {
+    await membersApi.approveSkill(memberId, skillName)
+    store.addToast('技能已批准', 'success')
+    await fetchSkills()
+    // 若該 skill 正在展開，重新載入內容
+    if (expandedSkill.value === skillName) {
+      const data = await membersApi.getSkill(memberId, skillName)
+      skillContent.value = data.content
+    }
+  } catch (e: any) {
+    store.addToast(e.message || '批准失敗', 'error')
+  }
+  approvingSkill.value = null
+}
+
 // ═══════════════════════════════════════
 // MCP
 // ═══════════════════════════════════════
@@ -711,6 +729,14 @@ onUnmounted(() => {
                 <div class="text-sm text-slate-200 truncate">{{ skill.title }}</div>
                 <div class="text-[10px] text-slate-500 font-mono">{{ skill.name }}.md</div>
               </div>
+              <span
+                v-if="skill.status === 'draft'"
+                class="text-[10px] px-1.5 py-0.5 rounded border bg-amber-500/10 text-amber-400 border-amber-500/20 shrink-0"
+              >待審核</span>
+              <span
+                v-else
+                class="text-[10px] px-1.5 py-0.5 rounded border bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shrink-0"
+              >已批准</span>
               <component :is="expandedSkill === skill.name ? ChevronUp : ChevronDown" class="w-4 h-4 text-slate-500 shrink-0" />
             </button>
 
@@ -737,6 +763,16 @@ onUnmounted(() => {
                   </button>
                   <div class="flex gap-2">
                     <template v-if="!editingSkill">
+                      <!-- Approve button (drafts only) -->
+                      <button
+                        v-if="skill.status === 'draft'"
+                        @click="handleApproveSkill(skill.name)"
+                        :disabled="approvingSkill === skill.name"
+                        class="flex items-center gap-1 px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 disabled:opacity-50 text-emerald-300 rounded-lg text-xs font-medium transition-colors"
+                      >
+                        <CheckCircle class="w-3.5 h-3.5" />
+                        {{ approvingSkill === skill.name ? '批准中...' : '批准' }}
+                      </button>
                       <!-- Copy skill button -->
                       <div class="relative">
                         <button

@@ -671,8 +671,8 @@ def create_member_skill(member_id: int, data: dict, session: Session = Depends(g
 
 @router.delete("/members/{member_id}/skills/{skill_name}")
 def delete_member_skill(member_id: int, skill_name: str, session: Session = Depends(get_session)):
-    """刪除技能"""
-    from app.core.member_profile import get_skills_dir
+    """刪除技能（搜尋 root / active / drafts）"""
+    from app.core.member_profile import find_skill_file
 
     member = session.get(Member, member_id)
     if not member:
@@ -685,14 +685,38 @@ def delete_member_skill(member_id: int, skill_name: str, session: Session = Depe
     if not skill_name or ".." in skill_name or "/" in skill_name or "\\" in skill_name:
         raise HTTPException(status_code=400, detail="Invalid skill name")
 
-    skills_dir = get_skills_dir(member.slug)
-    skill_file = skills_dir / f"{skill_name}.md"
-
-    if not skill_file.exists():
+    skill_file = find_skill_file(member.slug, skill_name)
+    if not skill_file:
         raise HTTPException(status_code=404, detail="Skill not found")
 
     skill_file.unlink()
     return {"deleted": skill_name}
+
+
+@router.post("/members/{member_id}/skills/{skill_name}/approve")
+def approve_member_skill(member_id: int, skill_name: str, session: Session = Depends(get_session)):
+    """審核通過：將 skill 從 drafts/ 移至 active/"""
+    from app.core.member_profile import approve_skill
+
+    member = session.get(Member, member_id)
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    if not member.slug:
+        raise HTTPException(status_code=404, detail="Member has no profile")
+
+    # 允許底線（自動生成檔名含底線）
+    if not skill_name or ".." in skill_name or "/" in skill_name or "\\" in skill_name:
+        raise HTTPException(status_code=400, detail="Invalid skill name")
+    if not re.match(r"^[a-z0-9][a-z0-9_\-]*$", skill_name):
+        raise HTTPException(status_code=400, detail="Skill name must be lowercase letters, numbers, underscores, and hyphens")
+
+    try:
+        dest = approve_skill(member.slug, skill_name)
+    except (FileNotFoundError, ValueError) as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    return {"status": "approved", "location": "active", "path": str(dest)}
 
 
 # ==========================================

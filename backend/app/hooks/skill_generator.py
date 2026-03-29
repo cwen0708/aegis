@@ -33,8 +33,9 @@ class SkillGeneratorHook(Hook):
             # 計算信心分數
             ctx.confidence_score = self._calculate_confidence(ctx)
 
-            skill_md = self._build_skill_template(ctx, changed_files, new_functions)
-            self._save_skill(ctx.project_path, skill_md)
+            commit_hash = self._get_commit_hash(ctx.project_path)
+            skill_md = self._build_skill_template(ctx, changed_files, new_functions, commit_hash)
+            self._save_skill(ctx.member_slug, skill_md, ctx.project_path)
         except Exception as e:
             logger.warning(f"[SkillGeneratorHook] failed: {e}")
 
@@ -80,6 +81,22 @@ class SkillGeneratorHook(Hook):
 
         # 限制在 0.0-1.0 範圍內
         return min(max(score, 0.0), 1.0)
+
+    def _get_commit_hash(self, project_path: str) -> str:
+        """取得目前 git commit 的短 hash，失敗時回傳空字串。"""
+        if not project_path:
+            return ""
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=project_path,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            return result.stdout.strip() or ""
+        except Exception:
+            return ""
 
     def _get_git_diff(self, project_path: str) -> str:
         """對比 origin/main 取得 diff 文字。"""
@@ -134,6 +151,7 @@ class SkillGeneratorHook(Hook):
         ctx: TaskContext,
         changed_files: list[str],
         new_functions: list[str],
+        commit_hash: str = "",
     ) -> str:
         """生成 Markdown 格式的 skill 模板。"""
         now = datetime.now().strftime("%Y-%m-%d")
@@ -145,13 +163,15 @@ class SkillGeneratorHook(Hook):
         confidence_pct = int(ctx.confidence_score * 100)
         confidence_note = f"此 skill 的信心分數為 {confidence_pct}%（{ctx.confidence_score:.2f}/1.0），評估該 pattern 的可靠性。"
 
+        commit_line = f"\ncommit_hash: {commit_hash}" if commit_hash else ""
+
         return f"""---
 name: {ctx.card_title or "auto-generated-skill"}
 description: 自動生成於任務「{ctx.card_title}」完成後（{now}）
 generated_from_card: {ctx.card_id}
 generated_at: {now}
 project: {ctx.project_name}
-confidence_score: {ctx.confidence_score:.2f}
+confidence_score: {ctx.confidence_score:.2f}{commit_line}
 ---
 
 # {ctx.card_title}
@@ -181,16 +201,28 @@ confidence_score: {ctx.confidence_score:.2f}
 <!-- TODO: 列出已知限制或需特別留意的地方 -->
 """
 
-    def _save_skill(self, project_path: str, content: str) -> None:
-        """將 skill 模板寫入 .claude/skills/ 目錄。"""
-        skills_dir = os.path.join(project_path, ".claude", "skills")
-        os.makedirs(skills_dir, exist_ok=True)
+    def _save_skill(self, member_slug: str, content: str, project_path: str = "") -> None:
+        """將 skill 模板寫入目標目錄。
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        - 有 member_slug：寫入 .aegis/members/{slug}/skills/drafts/
+        - 無 member_slug（fallback）：寫入 {project_path}/.claude/skills/
+        """
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         filename = f"skill_generated_{timestamp}.md"
-        filepath = os.path.join(skills_dir, filename)
 
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(content)
-
-        logger.info(f"[SkillGeneratorHook] skill saved: {filepath}")
+        if member_slug:
+            from app.core.member_profile import get_skills_drafts_dir, get_member_dir
+            # 確保 drafts/ 與 active/ 都已建立
+            get_member_dir(member_slug)
+            drafts_dir = get_skills_drafts_dir(member_slug)
+            filepath = drafts_dir / filename
+            filepath.write_text(content, encoding="utf-8")
+            logger.info(f"[SkillGeneratorHook] skill saved to drafts: {filepath}")
+        else:
+            # fallback：舊路徑
+            skills_dir = os.path.join(project_path, ".claude", "skills")
+            os.makedirs(skills_dir, exist_ok=True)
+            filepath_str = os.path.join(skills_dir, filename)
+            with open(filepath_str, "w", encoding="utf-8") as f:
+                f.write(content)
+            logger.info(f"[SkillGeneratorHook] skill saved (legacy): {filepath_str}")
