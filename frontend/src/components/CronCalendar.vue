@@ -191,13 +191,13 @@ const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
             v-if="cell.date && dateMap[cell.date]"
             class="text-[9px] leading-none mt-0.5 opacity-80"
           >
-            {{ dateMap[cell.date].total }}
+            {{ dateMap[cell.date!]!.total }}
           </span>
           <!-- 狀態點 -->
           <span
             v-if="cell.date && dateMap[cell.date]"
             class="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full"
-            :class="dotColor(cell.date)"
+            :class="dotColor(cell.date!)"
           />
         </template>
       </div>
