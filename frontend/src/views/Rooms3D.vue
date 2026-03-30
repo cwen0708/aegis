@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useAegisStore } from '../stores/aegis'
 import { useTaskStore } from '../stores/task'
 import { apiClient } from '../services/api/client'
 import { Loader2, Box, Monitor } from 'lucide-vue-next'
@@ -12,7 +11,6 @@ import type { SceneData3D, CharacterClickInfo } from '../game3d/types'
 
 const route = useRoute()
 const router = useRouter()
-const store = useAegisStore()
 const taskStore = useTaskStore()
 
 // ===== Refs =====

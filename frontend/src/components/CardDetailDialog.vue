@@ -3,12 +3,10 @@ import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { Zap, Square, Pencil, X, GitBranch, Package } from 'lucide-vue-next'
 import TerminalViewer from './TerminalViewer.vue'
 import ExecutionFlowDiagram from './ExecutionFlowDiagram.vue'
-import { useAegisStore } from '../stores/aegis'
 import { useTaskStore } from '../stores/task'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
-const store = useAegisStore()
 const taskStore = useTaskStore()
 
 const props = defineProps<{
@@ -84,7 +82,7 @@ onMounted(async () => {
         const logs: { line: string }[] = await res.json()
         if (logs.length > 0) {
           for (const log of logs) {
-            store.appendTaskLog(props.card.id, log.line)
+            taskStore.appendTaskLog(props.card.id, log.line)
           }
         }
       }
