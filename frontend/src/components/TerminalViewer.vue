@@ -1,17 +1,17 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, computed } from 'vue'
-import { useAegisStore } from '../stores/aegis'
+import { useTaskStore } from '../stores/task'
 import { parseLine } from '../composables/useStreamParser'
 
 const props = defineProps<{
   cardId: number
 }>()
 
-const store = useAegisStore()
+const taskStore = useTaskStore()
 const terminalEl = ref<HTMLPreElement | null>(null)
 
 const parsedLogs = computed(() => {
-  const raw = store.taskLogs.get(props.cardId) || []
+  const raw = taskStore.taskLogs.get(props.cardId) || []
   return raw.map(parseLine).filter(l => l.content)
 })
 

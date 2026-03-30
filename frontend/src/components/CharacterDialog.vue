@@ -2,10 +2,12 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { X, CheckCircle, XCircle, Clock, Loader2, ListTodo, BookOpen, ChevronLeft, ChevronRight, Volume2, VolumeX } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
+import { useTaskStore } from '../stores/task'
 import { config } from '../config'
 import { apiClient } from '../services/api/client'
 
 const store = useAegisStore()
+const taskStore = useTaskStore()
 
 const props = defineProps<{
   memberId: number
@@ -165,17 +167,17 @@ function goToNext() {
 
 // 即時模式：成員正在工作
 const isWorking = computed(() => {
-  return store.runningTasks.some(t => t.member_id === props.memberId)
+  return taskStore.runningTasks.some(t => t.member_id === props.memberId)
 })
 
 const activeCardId = computed(() => {
-  const task = store.runningTasks.find(t => t.member_id === props.memberId)
+  const task = taskStore.runningTasks.find(t => t.member_id === props.memberId)
   return task?.task_id ?? null
 })
 
 const liveLines = computed(() => {
   if (!activeCardId.value) return []
-  const raw = store.taskLogs.get(activeCardId.value) ?? []
+  const raw = taskStore.taskLogs.get(activeCardId.value) ?? []
   const parsed: string[] = []
   for (const line of raw) {
     try {

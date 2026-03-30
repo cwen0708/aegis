@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { X, Maximize2, Minimize2, ZoomIn, ZoomOut, RotateCcw } from 'lucide-vue-next'
-import { useAegisStore } from '../stores/aegis'
+import { useTaskStore } from '../stores/task'
 import { useFlowDiagram } from '../composables/useFlowDiagram'
 
 const props = defineProps<{
@@ -9,7 +9,7 @@ const props = defineProps<{
   memberName?: string
 }>()
 
-const store = useAegisStore()
+const taskStore = useTaskStore()
 const svgContainer = ref<HTMLElement>()
 const svgContent = ref('')
 const renderError = ref('')
@@ -17,7 +17,7 @@ const isFullscreen = ref(false)
 
 let panZoomInstance: any = null
 
-const rawLogs = computed(() => store.taskLogs.get(props.cardId) || [])
+const rawLogs = computed(() => taskStore.taskLogs.get(props.cardId) || [])
 const { mermaidCode, hasData } = useFlowDiagram(rawLogs, props.memberName)
 
 let mermaidModule: any = null

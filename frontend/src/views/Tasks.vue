@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { Zap, History, CheckCircle, XCircle, Clock, Loader2, ChevronDown, ChevronRight } from 'lucide-vue-next'
 import ParsedOutput from '../components/ParsedOutput.vue'
 import { useAegisStore } from '../stores/aegis'
+import { useTaskStore } from '../stores/task'
 import { useProjectSelector } from '../composables/useProjectSelector'
 import { useAuthStore } from '../stores/auth'
 import { apiClient } from '../services/api/client'
@@ -11,6 +12,7 @@ import RunningTaskCard from '../components/RunningTaskCard.vue'
 import TerminalViewer from '../components/TerminalViewer.vue'
 
 const store = useAegisStore()
+const taskStore = useTaskStore()
 const auth = useAuthStore()
 const { selectedProjectId } = useProjectSelector()
 
@@ -108,7 +110,7 @@ onUnmounted(() => window.removeEventListener('aegis:task-event', _onTaskEvent))
     <PageHeader :icon="Zap">
       <div class="flex items-center gap-2 text-xs text-slate-500">
         <Zap class="w-4 h-4" />
-        <span>{{ store.runningTasks.length }} 個即時任務</span>
+        <span>{{ taskStore.runningTasks.length }} 個即時任務</span>
       </div>
     </PageHeader>
 
@@ -119,11 +121,11 @@ onUnmounted(() => window.removeEventListener('aegis:task-event', _onTaskEvent))
           <Zap class="w-3.5 h-3.5 text-amber-400" />
           即時任務
         </h3>
-        <div v-if="store.runningTasks.length === 0" class="bg-slate-800/30 rounded-xl border border-slate-700/50 p-8 text-center">
+        <div v-if="taskStore.runningTasks.length === 0" class="bg-slate-800/30 rounded-xl border border-slate-700/50 p-8 text-center">
           <p class="text-sm text-slate-500">目前沒有運行中的任務</p>
         </div>
         <div v-else class="space-y-3">
-          <div v-for="task in store.runningTasks" :key="task.task_id">
+          <div v-for="task in taskStore.runningTasks" :key="task.task_id">
             <RunningTaskCard
               :task="task"
               @abort="handleAbort"

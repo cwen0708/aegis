@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAegisStore } from '../stores/aegis'
+import { useTaskStore } from '../stores/task'
 import { apiClient } from '../services/api/client'
 import { assetUrl } from '../config'
 import CharacterDialog from '../components/CharacterDialog.vue'
@@ -11,6 +12,7 @@ import type Room2Scene from '../game2/Room2Scene'
 
 const route = useRoute()
 const store = useAegisStore()
+const taskStore = useTaskStore()
 
 const canvasRef = ref<HTMLDivElement>()
 const error = ref('')
@@ -64,7 +66,7 @@ const totalDesks = computed(() => store.systemInfo.workstations_total)
 
 const busyMemberMap = computed(() => {
   const map = new Map<number, { card_title: string; project: string; provider: string }>()
-  for (const t of store.runningTasks) {
+  for (const t of taskStore.runningTasks) {
     const mid = (t as any).member_id
     if (mid) {
       map.set(mid, { card_title: t.card_title, project: t.project, provider: t.provider })

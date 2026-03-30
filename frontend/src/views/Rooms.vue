@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAegisStore } from '../stores/aegis'
+import { useTaskStore } from '../stores/task'
 import { useAuthStore } from '../stores/auth'
 import { apiClient } from '../services/api/client'
 // domain store 不再用於 rooms 過濾
@@ -23,6 +24,7 @@ import { buildDefaultLayout } from '../game/defaultLayout'
 import type Phaser from 'phaser'
 
 const store = useAegisStore()
+const taskStore = useTaskStore()
 
 // ===== Room support =====
 const currentRoomId = computed(() => {
@@ -149,7 +151,7 @@ const totalDesks = computed(() => store.systemInfo.workstations_total)
 // 哪些成員正在忙碌（從 running_tasks 取 member_id）
 const busyMemberMap = computed(() => {
   const map = new Map<number, { card_title: string; project: string; provider: string }>()
-  for (const t of store.runningTasks) {
+  for (const t of taskStore.runningTasks) {
     const mid = (t as any).member_id
     if (mid) {
       map.set(mid, { card_title: t.card_title, project: t.project, provider: t.provider })

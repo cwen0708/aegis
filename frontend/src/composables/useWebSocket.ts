@@ -1,5 +1,6 @@
 import { onMounted, onUnmounted } from 'vue'
 import { useAegisStore } from '../stores/aegis'
+import { useTaskStore } from '../stores/task'
 import { config } from '../config'
 
 let ws: WebSocket | null = null
@@ -23,6 +24,7 @@ if (import.meta.hot) {
 
 export function useWebSocket() {
   const store = useAegisStore()
+  const taskStore = useTaskStore()
 
   function connect() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
@@ -87,7 +89,7 @@ export function useWebSocket() {
 
     switch (type) {
       case 'running_tasks_update':
-        store.updateRunningTasks(data)
+        taskStore.updateRunningTasks(data)
         break
 
       case 'system_info_update':
@@ -111,7 +113,7 @@ export function useWebSocket() {
         break
 
       case 'task_log':
-        store.appendTaskLog(data.card_id, data.line)
+        taskStore.appendTaskLog(data.card_id, data.line)
         break
 
       case 'member_dialogue':
