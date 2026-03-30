@@ -1005,7 +1005,7 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
             card_data.content = card_data.description
     except Exception as e:
         logger.error(f"[Worker] Failed to read card {idx.card_id}: {e}")
-        cron_job_id = _parse_cron_job_id(idx.title)
+        cron_job_id = idx.cron_job_id or _parse_cron_job_id(idx.title)
         if cron_job_id is not None:
             with Session(engine) as session:
                 from app.models.core import CronJob as CJ
@@ -1247,7 +1247,7 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
         return
 
     # 依卡片類型分派結果處理
-    cron_job_id = _parse_cron_job_id(idx.title)
+    cron_job_id = idx.cron_job_id or _parse_cron_job_id(idx.title)
     if is_chat_mode:
         _handle_chat_result(idx, result, new_status, token_info, member_slug, chat_id)
         return
