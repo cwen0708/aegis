@@ -6,6 +6,7 @@ AI 設定檔模板產生器 — 多 Provider / Chat / Task 共用
 
 合併原本分散在 chat_workspace.py 和 task_workspace.py 中的模板邏輯。
 """
+import asyncio
 import logging
 from pathlib import Path
 from typing import Optional, List, Literal
@@ -61,14 +62,17 @@ def build_config_md(
     mode="task": 卡片任務用（Worker 臨時 workspace）
     """
     if mode == "task":
-        return _build_task_md(
-            soul=soul,
-            member_slug=member_slug,
-            project_path=project_path,
-            card_content=card_content,
-            stage_name=stage_name,
-            stage_description=stage_description,
-            stage_instruction=stage_instruction,
+        # 使用 asyncio.run 執行 async 任務
+        return asyncio.run(
+            _build_task_md(
+                soul=soul,
+                member_slug=member_slug,
+                project_path=project_path,
+                card_content=card_content,
+                stage_name=stage_name,
+                stage_description=stage_description,
+                stage_instruction=stage_instruction,
+            )
         )
     else:
         return _build_chat_md(
@@ -194,7 +198,7 @@ def _build_chat_md(
 
 # ── Task 模板 ──
 
-def _build_task_md(
+async def _build_task_md(
     soul: str,
     member_slug: str,
     project_path: str,
@@ -203,9 +207,27 @@ def _build_task_md(
     stage_description: str = "",
     stage_instruction: str = "",
 ) -> str:
-    """生成 task 專用設定檔（含 workspace 資訊、記憶路徑、階段指令）。"""
+    """生成 task 專用設定檔（含 workspace 資訊、記憶路徑、階段指令、歷史記憶注入）。"""
     from app.core.member_profile import get_member_memory_dir
+    from app.core.executor.memory import retrieve_task_memory
+
     memory_path = get_member_memory_dir(member_slug)
+
+    # 獲取相關過往經驗
+    task_memories = []
+    try:
+        task_memories = await asyncio.wait_for(
+            retrieve_task_memory(
+                card_title=card_content.split('\n')[0][:100],  # 標題通常在第一行
+                card_description=card_content,
+                member_slug=member_slug,
+            ),
+            timeout=2.0
+        )
+    except asyncio.TimeoutError:
+        logger.warning(f"Task memory retrieval timeout for {member_slug}")
+    except Exception as e:
+        logger.warning(f"Failed to retrieve task memory: {e}")
 
     # 階段說明區塊
     stage_section = ""
@@ -232,6 +254,12 @@ def _build_task_md(
 - 禁止修改系統設定或安裝全域套件
 """
 
+    # 相關過往經驗 section
+    memories_section = ""
+    if task_memories:
+        memories_text = "\n".join([f"- {m['content']}" for m in task_memories])
+        memories_section = f"\n## 相關過往經驗\n{memories_text}\n"
+
     return f"""# 工作目錄
 你的工作目錄（cwd）是臨時工作區，專案檔案已透過 symlink 連結進來。
 可以直接用相對路徑操作（如 backend/worker.py），改動會直接反映在專案目錄。
@@ -249,8 +277,7 @@ git 操作在此目錄中可直接執行（.git 已連結）。
 {memory_path}
 - short-term/ 短期記憶（近期任務摘要）
 - long-term/ 長期記憶（累積的經驗與模式）
-需要回憶時可以去讀取。
-
+需要回憶時可以去讀取。{memories_section}
 {stage_section}
 # 本次任務
 {card_content}

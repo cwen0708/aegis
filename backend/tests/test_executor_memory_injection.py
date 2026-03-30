@@ -159,3 +159,78 @@ async def test_retrieve_task_memory_missing_file(tmp_path):
         result = await retrieve_task_memory("Task", "Desc", "xiao-yin")
 
     assert result == []
+
+
+# ── build_config_md 整合測試 ──────────────────────────────────────────────────
+
+def test_build_config_md_task_with_memory(tmp_path):
+    """build_config_md mode=task 應正確注入相關過往經驗 section。"""
+    mem_file = tmp_path / "memory_a.md"
+    mem_file.write_text("某個過往任務的解決方案", encoding="utf-8")
+
+    records = [_make_record(str(mem_file), HIGH_SIM_VEC)]
+
+    with (
+        patch("app.core.executor.memory.get_embedding", new=AsyncMock(return_value=QUERY_VEC)),
+        patch(
+            "app.core.executor.memory._load_embedding_records",
+            return_value=records,
+        ),
+    ):
+        from app.core.executor.config_md import build_config_md
+
+        result = build_config_md(
+            mode="task",
+            soul="# 小良\n技術主管",
+            member_slug="xiao-yin",
+            project_path="/tmp/test-project",
+            card_content="# 測試任務\n實現某個功能",
+            stage_name="開發中",
+        )
+
+    # 驗證結果包含記憶注入部分
+    assert "## 相關過往經驗" in result
+    assert "某個過往任務的解決方案" in result
+
+
+def test_build_config_md_task_no_memory():
+    """build_config_md 在無記憶時，應不包含 ## 相關過往經驗 section。"""
+    with patch("app.core.executor.memory._load_embedding_records", return_value=[]):
+        from app.core.executor.config_md import build_config_md
+
+        result = build_config_md(
+            mode="task",
+            soul="# 小良\n技術主管",
+            member_slug="xiao-yin",
+            project_path="/tmp/test-project",
+            card_content="# 測試任務\n實現某個功能",
+        )
+
+    # 驗證結果不包含記憶部分
+    assert "## 相關過往經驗" not in result
+    # 但應包含其他必要部分
+    assert "# 工作目錄" in result
+    assert "# 本次任務" in result
+
+
+def test_build_config_md_task_timeout():
+    """build_config_md 當記憶檢索超時時，應正確 fallback。"""
+    async def slow_retrieve(*args, **kwargs):
+        import asyncio
+        await asyncio.sleep(10)
+        return []
+
+    with patch("app.core.executor.memory.retrieve_task_memory", new=slow_retrieve):
+        from app.core.executor.config_md import build_config_md
+
+        result = build_config_md(
+            mode="task",
+            soul="# 小良\n技術主管",
+            member_slug="xiao-yin",
+            project_path="/tmp/test-project",
+            card_content="# 測試任務\n實現某個功能",
+        )
+
+    # 超時後應該沒有記憶部分，但卡片內容正常
+    assert "## 相關過往經驗" not in result
+    assert "# 本次任務" in result
