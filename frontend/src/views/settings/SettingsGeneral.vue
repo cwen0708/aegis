@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { Globe, Cpu, Save, Loader2, Lock, Sparkles, ShieldCheck, Github, CheckCircle2, Unplug, LogOut } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 import { useAuthStore } from '../../stores/auth'
+import { useAsyncOp } from '../../composables/useAsyncOperation'
 
 import { config } from '../../config'
 import { authHeaders } from '../../utils/authFetch'
@@ -69,8 +70,7 @@ async function toggleLoginToView() {
   }
 }
 
-const loading = ref(true)
-const saving = ref(false)
+const { loading, saving, run } = useAsyncOp()
 
 const requireLoginToView = ref(false)
 const ttsEnabled = ref(false)
@@ -217,20 +217,15 @@ onMounted(async () => {
 })
 
 async function saveSettings() {
-  saving.value = true
-  try {
-    await store.updateSettings({
-      timezone: form.value.timezone,
-      max_workstations: form.value.max_workstations,
-      poll_interval: form.value.poll_interval,
-      memory_short_term_days: form.value.memory_short_term_days,
-      gemini_api_key: form.value.gemini_api_key,
-      ttsmaker_api_key: form.value.ttsmaker_api_key,
-      skill_confidence_threshold: String(form.value.skill_confidence_threshold),
-    })
-  } finally {
-    saving.value = false
-  }
+  await run(() => store.updateSettings({
+    timezone: form.value.timezone,
+    max_workstations: form.value.max_workstations,
+    poll_interval: form.value.poll_interval,
+    memory_short_term_days: form.value.memory_short_term_days,
+    gemini_api_key: form.value.gemini_api_key,
+    ttsmaker_api_key: form.value.ttsmaker_api_key,
+    skill_confidence_threshold: String(form.value.skill_confidence_threshold),
+  }))
 }
 </script>
 
