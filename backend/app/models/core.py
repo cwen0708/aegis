@@ -682,6 +682,21 @@ class WebhookConfig(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+# ==========================================
+# Prompt Queue（任務提示佇列化）
+# ==========================================
+class PromptQueueEntry(SQLModel, table=True):
+    """Prompt 佇列項目 — 任務提示佇列化，支援優先級出隊"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    queue_id: str = Field(index=True, unique=True)       # UUID，外部追蹤用
+    session_id: str = Field(index=True)                   # chat_key，如 "telegram:123:xiao-yin"
+    prompt_text: str                                       # 實際要送出的提示文字
+    priority: int = Field(default=1)                      # 數值越大優先級越高
+    status: str = Field(default="pending", index=True)    # pending | processing | processed | failed
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class Domain(SQLModel, table=True):
     """網域綁定 — 控制該網域的登入和引導頁設定"""
     id: Optional[int] = Field(default=None, primary_key=True)
