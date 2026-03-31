@@ -234,3 +234,79 @@ def test_build_config_md_task_timeout():
     # 超時後應該沒有記憶部分，但卡片內容正常
     assert "## 相關過往經驗" not in result
     assert "# 本次任務" in result
+
+
+# ── prepare_workspace 整合路徑測試 ────────────────────────────────────────────
+
+
+def test_prepare_workspace_injects_memory_into_claude_md(tmp_path):
+    """prepare_workspace → build_config_md 整合路徑：CLAUDE.md 應含 ## 相關過往經驗。"""
+    mem_file = tmp_path / "memory_a.md"
+    mem_file.write_text("過往任務的關鍵解法", encoding="utf-8")
+
+    records = [_make_record(str(mem_file), HIGH_SIM_VEC)]
+    project_path = str(tmp_path / "project")
+    (tmp_path / "project").mkdir()
+
+    # 覆蓋 WORKSPACES_ROOT，讓 workspace 建立在 tmp_path 下
+    import app.core.task_workspace as tw_module
+    original_root = tw_module.WORKSPACES_ROOT
+    tw_module.WORKSPACES_ROOT = tmp_path / "workspaces"
+
+    try:
+        with (
+            patch("app.core.executor.memory.get_embedding", new=AsyncMock(return_value=QUERY_VEC)),
+            patch("app.core.executor.memory._load_embedding_records", return_value=records),
+            patch("app.core.task_workspace.get_soul_content", return_value="# 小茵\n全端工程師"),
+            patch("app.core.task_workspace.get_skills_dir", return_value=tmp_path / "no-skills"),
+            patch("app.core.task_workspace.get_mcp_config_path", return_value=tmp_path / "mcp.json"),
+        ):
+            from app.core.task_workspace import prepare_workspace
+            ws = prepare_workspace(
+                card_id=99901,
+                member_slug="xiao-yin",
+                provider="claude",
+                project_path=project_path,
+                card_content="# 測試任務\n確認 runner 啟動時注入記憶",
+            )
+
+        claude_md = ws / "CLAUDE.md"
+        assert claude_md.exists(), "CLAUDE.md 應被建立"
+        content = claude_md.read_text(encoding="utf-8")
+        assert "## 相關過往經驗" in content, "CLAUDE.md 應包含相關過往經驗 section"
+        assert "過往任務的關鍵解法" in content, "記憶內容應被注入 CLAUDE.md"
+    finally:
+        tw_module.WORKSPACES_ROOT = original_root
+
+
+def test_prepare_workspace_no_memory_no_section(tmp_path):
+    """prepare_workspace 在無相關記憶時，CLAUDE.md 不應包含 ## 相關過往經驗。"""
+    project_path = str(tmp_path / "project")
+    (tmp_path / "project").mkdir()
+
+    import app.core.task_workspace as tw_module
+    original_root = tw_module.WORKSPACES_ROOT
+    tw_module.WORKSPACES_ROOT = tmp_path / "workspaces"
+
+    try:
+        with (
+            patch("app.core.executor.memory.get_embedding", new=AsyncMock(return_value=QUERY_VEC)),
+            patch("app.core.executor.memory._load_embedding_records", return_value=[]),
+            patch("app.core.task_workspace.get_soul_content", return_value="# 小茵\n全端工程師"),
+            patch("app.core.task_workspace.get_skills_dir", return_value=tmp_path / "no-skills"),
+            patch("app.core.task_workspace.get_mcp_config_path", return_value=tmp_path / "mcp.json"),
+        ):
+            from app.core.task_workspace import prepare_workspace
+            ws = prepare_workspace(
+                card_id=99902,
+                member_slug="xiao-yin",
+                provider="claude",
+                project_path=project_path,
+                card_content="# 無記憶任務\n無相關歷史",
+            )
+
+        content = (ws / "CLAUDE.md").read_text(encoding="utf-8")
+        assert "## 相關過往經驗" not in content
+        assert "# 本次任務" in content
+    finally:
+        tw_module.WORKSPACES_ROOT = original_root
