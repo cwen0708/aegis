@@ -1,1 +1,65 @@
-/home/cwen0708/projects/Aegis-dev/.gitignore
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+*.db
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+/references
+
+# Claude Code
+.claude/
+
+# Dev scripts & temp test files
+frontend/scripts/*.png
+backend/test_*.py
+!backend/tests/test_*.py
+# frontend/pnpm-lock.yaml  # CI 需要 lock file
+
+# User data (portraits, uploads, .aegis runtime data)
+.aegis/
+backend/.aegis/
+projects/
+backend/uploads/*
+!backend/uploads/portraits/
+backend/uploads/portraits/*
+!backend/uploads/portraits/example_*.png
+!backend/uploads/portraits/aegis*.png
+!backend/uploads/sprites/
+backend/uploads/sprites/*/
+!backend/uploads/sprites/*/sheet_*.png
+backend/portraits/
+
+# Environment files
+.env
+.env.*
+*.env
+
+# Credentials (never commit these)
+*credentials*.json
+*-profiles/
+
+# Private / sensitive directories
+private/
+frontend/.firebase/
