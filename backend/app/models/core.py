@@ -667,6 +667,21 @@ class RoomMember(SQLModel, table=True):
     desk_index: int = Field(default=0)           # 房間內的座位位置
 
 
+class WebhookConfig(SQLModel, table=True):
+    """用戶自定義 Webhook 配置（每個專案可建立多個命名 webhook）"""
+    __table_args__ = (
+        UniqueConstraint("project_id", "name", name="uq_webhookconfig_project_name"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    project_id: int = Field(foreign_key="project.id", index=True)
+    name: str = Field(index=True)                    # 顯示名稱，專案內唯一
+    url: str                                          # 目標 URL
+    active: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class Domain(SQLModel, table=True):
     """網域綁定 — 控制該網域的登入和引導頁設定"""
     id: Optional[int] = Field(default=None, primary_key=True)
