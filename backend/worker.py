@@ -1110,18 +1110,19 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
         ]
         logger.info(f"[Worker] Card {idx.card_id}: card-level model override → {card_model}")
     else:
-        # 成本感知模型路由：tag-based > complexity-based > 帳號預設
+        # 成本感知模型路由：tag-based > max(complexity, member_model) > 帳號預設
         try:
             card_tags = json.loads(getattr(idx, "tags_json", "[]") or "[]")
         except (json.JSONDecodeError, TypeError):
             card_tags = []
-        routed_model = resolve_model(card_tags, effective_prompt)
+        member_model = accounts_list[0][1] if accounts_list else ""
+        routed_model = resolve_model(card_tags, effective_prompt, member_model=member_model)
         if routed_model:
             accounts_list = [
                 (provider, routed_model, auth, name)
                 for provider, _model, auth, name in accounts_list
             ]
-            logger.info(f"[Worker] Card {idx.card_id}: model route → {routed_model}")
+            logger.info(f"[Worker] Card {idx.card_id}: model route → {routed_model} (member default: {member_model})")
 
     # Prompt Hardening：附加安全規則提醒，防止長對話稀釋安全限制
     from app.core.prompt_hardening import harden_prompt
