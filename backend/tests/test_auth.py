@@ -120,3 +120,172 @@ def test_check_password_plaintext_compat():
 
 def test_get_auth_mode_default():
     assert get_auth_mode() == "local"
+
+
+# ==========================================
+# verify_local_password
+# ==========================================
+
+def test_verify_local_password_reads_from_db(monkeypatch):
+    """從 SystemSetting 讀取密碼並驗證正確密碼"""
+    from unittest.mock import MagicMock
+    from app.models.core import SystemSetting
+    from app.core.auth import hash_password, verify_local_password
+
+    hashed = hash_password("custom_pass")
+    setting = SystemSetting(key="admin_password", value=hashed)
+
+    mock_session = MagicMock()
+    mock_session.get.return_value = setting
+
+    assert verify_local_password("custom_pass", mock_session) is True
+    assert verify_local_password("wrong_pass", mock_session) is False
+
+
+def test_verify_local_password_fallback_to_default(monkeypatch):
+    """DB 無密碼時（session.get 回傳 None）使用 DEFAULT_PASSWORD"""
+    from unittest.mock import MagicMock
+    import app.core.auth as auth_mod
+    from app.core.auth import verify_local_password
+
+    monkeypatch.setattr(auth_mod, "DEFAULT_PASSWORD", "aegis2026!")
+
+    mock_session = MagicMock()
+    mock_session.get.return_value = None  # 模擬 DB 無此設定
+
+    assert verify_local_password("aegis2026!", mock_session) is True
+    assert verify_local_password("wrong", mock_session) is False
+
+
+def test_verify_local_password_correct_and_wrong(monkeypatch):
+    """直接測試正確/錯誤密碼回傳值"""
+    from unittest.mock import MagicMock
+    from app.models.core import SystemSetting
+    from app.core.auth import hash_password, verify_local_password
+
+    stored = hash_password("secret123")
+    setting = SystemSetting(key="admin_password", value=stored)
+
+    mock_session = MagicMock()
+    mock_session.get.return_value = setting
+
+    assert verify_local_password("secret123", mock_session) is True
+    assert verify_local_password("notSecret", mock_session) is False
+
+
+# ==========================================
+# verify_api_key
+# ==========================================
+
+async def test_verify_api_key_valid(monkeypatch):
+    """AEGIS_API_KEY 已設定，傳入正確 key → True"""
+    import app.core.auth as auth_mod
+    from app.core.auth import verify_api_key
+
+    monkeypatch.setattr(auth_mod, "AEGIS_API_KEY", "my-secret-key")
+    result = await verify_api_key(x_api_key="my-secret-key")
+    assert result is True
+
+
+async def test_verify_api_key_invalid(monkeypatch):
+    """AEGIS_API_KEY 已設定，傳入錯誤 key → HTTPException 401"""
+    import app.core.auth as auth_mod
+    from app.core.auth import verify_api_key
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(auth_mod, "AEGIS_API_KEY", "my-secret-key")
+    with pytest.raises(HTTPException) as exc_info:
+        await verify_api_key(x_api_key="wrong-key")
+    assert exc_info.value.status_code == 401
+
+
+async def test_verify_api_key_not_set(monkeypatch):
+    """未設定 AEGIS_API_KEY 時跳過驗證，直接回傳 True"""
+    import app.core.auth as auth_mod
+    from app.core.auth import verify_api_key
+
+    monkeypatch.setattr(auth_mod, "AEGIS_API_KEY", "")
+    result = await verify_api_key(x_api_key=None)
+    assert result is True
+
+
+def test_require_api_key_wraps_verify(monkeypatch):
+    """require_api_key 依賴注入：直接傳入 valid=True 應回傳 True"""
+    from app.core.auth import require_api_key
+
+    assert require_api_key(valid=True) is True
+
+
+# ==========================================
+# require_admin_token
+# ==========================================
+
+def _make_request(host: str, authorization: str = "") -> "Request":
+    """建立 mock Request"""
+    from unittest.mock import MagicMock
+    req = MagicMock()
+    req.client = MagicMock()
+    req.client.host = host
+    req.headers = {"authorization": authorization} if authorization else {}
+    return req
+
+
+async def test_require_admin_token_localhost():
+    """localhost 請求直接放行，不需 token"""
+    from app.core.auth import require_admin_token
+
+    req = _make_request("127.0.0.1")
+    # 不應 raise
+    await require_admin_token(req)
+
+
+async def test_require_admin_token_localhost_ipv6():
+    """::1 (IPv6 localhost) 也放行"""
+    from app.core.auth import require_admin_token
+
+    req = _make_request("::1")
+    await require_admin_token(req)
+
+
+async def test_require_admin_token_valid_remote():
+    """遠端請求帶有效 admin token → 放行"""
+    from app.core.auth import require_admin_token, generate_session_token
+
+    token = generate_session_token(user_type="admin")
+    req = _make_request("10.0.0.1", authorization=f"Bearer {token}")
+    await require_admin_token(req)
+
+
+async def test_require_admin_token_invalid_token():
+    """遠端請求帶無效 token → HTTPException 401"""
+    from app.core.auth import require_admin_token
+    from fastapi import HTTPException
+
+    req = _make_request("10.0.0.1", authorization="Bearer invalid.token")
+    with pytest.raises(HTTPException) as exc_info:
+        await require_admin_token(req)
+    assert exc_info.value.status_code == 401
+
+
+async def test_require_admin_token_non_admin_type():
+    """遠端請求帶 user type token → HTTPException 403"""
+    from app.core.auth import require_admin_token, generate_session_token
+    from fastapi import HTTPException
+
+    token = generate_session_token(user_type="user", user_id=42)
+    req = _make_request("10.0.0.1", authorization=f"Bearer {token}")
+    with pytest.raises(HTTPException) as exc_info:
+        await require_admin_token(req)
+    assert exc_info.value.status_code == 403
+
+
+async def test_require_admin_token_no_bearer_prefix():
+    """Authorization header 無 Bearer 前綴 → HTTPException 401"""
+    from app.core.auth import require_admin_token, generate_session_token
+    from fastapi import HTTPException
+
+    token = generate_session_token(user_type="admin")
+    req = _make_request("10.0.0.1", authorization=token)  # 缺少 "Bearer "
+    with pytest.raises(HTTPException) as exc_info:
+        await require_admin_token(req)
+    assert exc_info.value.status_code == 401
