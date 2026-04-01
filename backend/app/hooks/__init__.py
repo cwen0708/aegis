@@ -92,6 +92,7 @@ def collect_hooks(source: str = "worker") -> list[Hook]:
     from app.hooks.media import MediaHook
     from app.hooks.event_log import EventLogHook
     from app.hooks.skill_generator import SkillGeneratorHook
+    from app.hooks.token_counting import TokenCountingHook
 
     if source == "worker":
         return [
@@ -101,6 +102,7 @@ def collect_hooks(source: str = "worker") -> list[Hook]:
             BroadcastHook(),        # POST: task_completed 事件
             DialogueHook(),         # POST: AVG 對話
             MediaHook(),            # POST: send_file 標記 → 頻道發送
+            TokenCountingHook(),    # POST: 記錄 token 使用量和成本
             MemoryHook(),           # POST: 成員記憶
             SkillGeneratorHook(),   # POST: 自動生成 skill 模板
             CleanupHook(),          # POST: 清理（永遠最後）
@@ -108,20 +110,23 @@ def collect_hooks(source: str = "worker") -> list[Hook]:
     elif source == "chat":
         return [
             # PlatformHook 由 chat_handler 按需 insert（需要 platform/chat_id/placeholder_id）
-            MediaHook(),        # POST: send_file 標記 → 頻道發送
-            MemoryHook(),       # POST: 成員記憶
+            MediaHook(),            # POST: send_file 標記 → 頻道發送
+            TokenCountingHook(),    # POST: 記錄 token 使用量和成本
+            MemoryHook(),           # POST: 成員記憶
         ]
     elif source == "onestack":
         return [
-            OneStackHook(),     # DURING: aegis_stream
-            MemoryHook(),       # POST: 成員記憶
+            OneStackHook(),         # DURING: aegis_stream
+            TokenCountingHook(),    # POST: 記錄 token 使用量和成本
+            MemoryHook(),           # POST: 成員記憶
         ]
     elif source == "meeting":
         return [
-            MemoryHook(),       # POST: 成員記憶
+            TokenCountingHook(),    # POST: 記錄 token 使用量和成本
+            MemoryHook(),           # POST: 成員記憶
         ]
     else:
-        return [MemoryHook()]
+        return [TokenCountingHook(), MemoryHook()]
 
 
 def run_on_stream(hooks: list[Hook], event: StreamEvent) -> None:
