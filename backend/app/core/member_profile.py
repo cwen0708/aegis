@@ -26,6 +26,8 @@ def get_member_dir(slug: str) -> Path:
     d = MEMBERS_ROOT / slug
     d.mkdir(parents=True, exist_ok=True)
     (d / "skills").mkdir(exist_ok=True)
+    (d / "skills" / "drafts").mkdir(exist_ok=True)
+    (d / "skills" / "active").mkdir(exist_ok=True)
     (d / "memory" / "short-term").mkdir(parents=True, exist_ok=True)
     (d / "memory" / "long-term").mkdir(parents=True, exist_ok=True)
     return d
@@ -40,8 +42,18 @@ def get_soul_content(slug: str) -> str:
 
 
 def get_skills_dir(slug: str) -> Path:
-    """Return the member's skills directory."""
+    """Return the member's skills directory (root, for manually created skills)."""
     return get_member_dir(slug) / "skills"
+
+
+def get_skills_drafts_dir(slug: str) -> Path:
+    """Return the member's skills/drafts directory (auto-generated, pending review)."""
+    return get_member_dir(slug) / "skills" / "drafts"
+
+
+def get_skills_active_dir(slug: str) -> Path:
+    """Return the member's skills/active directory (auto-generated, approved)."""
+    return get_member_dir(slug) / "skills" / "active"
 
 
 def get_member_memory_dir(slug: str) -> Path:
@@ -74,51 +86,108 @@ def save_mcp_config(slug: str, config: dict) -> None:
     path.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def _extract_title(filepath: Path) -> str:
+    """從 .md 檔案提取第一個 # 標題，找不到則回傳檔名 stem。"""
+    title = filepath.stem
+    try:
+        content = filepath.read_text(encoding="utf-8")
+        for line in content.split("\n"):
+            line = line.strip()
+            if line.startswith("# "):
+                title = line[2:].strip()
+                break
+    except Exception:
+        pass
+    return title
+
+
 def list_skills(slug: str) -> list[dict]:
     """List all skills for a member.
 
-    Returns list of dicts with 'name' (filename without .md) and 'title' (first heading).
+    掃描三個位置，回傳含 status 的清單：
+    - skills/*.md        → status="active"  (手動建立 / 舊格式)
+    - skills/active/*.md → status="active"  (自動生成已批准)
+    - skills/drafts/*.md → status="draft"   (自動生成待審核)
     """
-    skills_dir = get_skills_dir(slug)
-    if not skills_dir.exists():
+    base_dir = get_member_dir(slug) / "skills"
+    if not base_dir.exists():
         return []
 
-    skills = []
-    for f in sorted(skills_dir.glob("*.md")):
-        name = f.stem  # filename without extension
-        title = name  # default to filename
+    seen: dict[str, dict] = {}  # name → skill dict，防重複
 
-        # Try to extract first heading as title
-        try:
-            content = f.read_text(encoding="utf-8")
-            for line in content.split("\n"):
-                line = line.strip()
-                if line.startswith("# "):
-                    title = line[2:].strip()
-                    break
-        except Exception:
-            pass
+    # 1. root skills/*.md → active
+    for f in sorted(base_dir.glob("*.md")):
+        name = f.stem
+        seen[name] = {"name": name, "title": _extract_title(f), "status": "active"}
 
-        skills.append({"name": name, "title": title})
+    # 2. skills/active/*.md → active
+    active_dir = base_dir / "active"
+    if active_dir.exists():
+        for f in sorted(active_dir.glob("*.md")):
+            name = f.stem
+            seen[name] = {"name": name, "title": _extract_title(f), "status": "active"}
 
-    return skills
+    # 3. skills/drafts/*.md → draft
+    drafts_dir = base_dir / "drafts"
+    if drafts_dir.exists():
+        for f in sorted(drafts_dir.glob("*.md")):
+            name = f.stem
+            if name not in seen:  # 已批准的優先，不被 draft 覆蓋
+                seen[name] = {"name": name, "title": _extract_title(f), "status": "draft"}
+
+    return list(seen.values())
 
 
 def get_skill_content(slug: str, skill_name: str) -> str:
     """Read a specific skill file content.
 
-    Args:
-        slug: Member slug
-        skill_name: Skill filename (without .md extension)
-
-    Returns:
-        Skill file content or empty string if not found.
+    依序搜尋：root skills/ → skills/active/ → skills/drafts/
+    回傳第一個找到的內容，找不到回傳空字串。
     """
     # Validate skill_name to prevent path traversal
     if not skill_name or ".." in skill_name or "/" in skill_name or "\\" in skill_name:
         raise ValueError(f"Invalid skill name: {skill_name!r}")
 
-    skill_file = get_skills_dir(slug) / f"{skill_name}.md"
-    if skill_file.exists():
-        return skill_file.read_text(encoding="utf-8")
+    base_dir = get_member_dir(slug) / "skills"
+    for subdir in [base_dir, base_dir / "active", base_dir / "drafts"]:
+        skill_file = subdir / f"{skill_name}.md"
+        if skill_file.exists():
+            return skill_file.read_text(encoding="utf-8")
     return ""
+
+
+def find_skill_file(slug: str, skill_name: str) -> Path | None:
+    """尋找 skill 檔案所在路徑（root → active → drafts），找不到回傳 None。"""
+    if not skill_name or ".." in skill_name or "/" in skill_name or "\\" in skill_name:
+        return None
+    base_dir = get_member_dir(slug) / "skills"
+    for subdir in [base_dir, base_dir / "active", base_dir / "drafts"]:
+        skill_file = subdir / f"{skill_name}.md"
+        if skill_file.exists():
+            return skill_file
+    return None
+
+
+def approve_skill(slug: str, skill_name: str) -> Path:
+    """將 skills/drafts/{skill_name}.md 移動到 skills/active/{skill_name}.md。
+
+    Returns:
+        移動後的目標路徑
+
+    Raises:
+        FileNotFoundError: 若 drafts 中找不到該 skill
+    """
+    if not skill_name or ".." in skill_name or "/" in skill_name or "\\" in skill_name:
+        raise ValueError(f"Invalid skill name: {skill_name!r}")
+
+    drafts_dir = get_skills_drafts_dir(slug)
+    active_dir = get_skills_active_dir(slug)
+
+    src = drafts_dir / f"{skill_name}.md"
+    if not src.exists():
+        raise FileNotFoundError(f"Draft skill not found: {skill_name}")
+
+    dest = active_dir / f"{skill_name}.md"
+    src.rename(dest)
+    logger.info(f"[member_profile] skill approved: {src} → {dest}")
+    return dest

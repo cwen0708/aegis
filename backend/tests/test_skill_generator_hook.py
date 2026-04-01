@@ -226,6 +226,122 @@ class TestSkillTemplateGeneration:
         assert "## 注意事項" in template
 
 
+class TestSaveSkillPaths:
+    """_save_skill 路徑測試"""
+
+    def test_saves_to_drafts_when_member_slug_given(self, tmp_path, monkeypatch):
+        """有 member_slug 時，應寫入 skills/drafts/"""
+        monkeypatch.setattr("app.core.member_profile.MEMBERS_ROOT", tmp_path)
+        # 建立 member dir（含 drafts/active）
+        from app.core.member_profile import get_member_dir
+        get_member_dir("test-member")
+
+        hook = SkillGeneratorHook()
+        hook._save_skill("test-member", "# Test Content")
+
+        drafts_dir = tmp_path / "test-member" / "skills" / "drafts"
+        files = list(drafts_dir.glob("*.md"))
+        assert len(files) == 1
+        assert files[0].read_text(encoding="utf-8") == "# Test Content"
+
+    def test_saves_to_legacy_path_when_no_slug(self, tmp_path):
+        """無 member_slug 時，應 fallback 到 .claude/skills/"""
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+
+        hook = SkillGeneratorHook()
+        hook._save_skill("", "# Legacy Content", str(project_dir))
+
+        legacy_dir = project_dir / ".claude" / "skills"
+        files = list(legacy_dir.glob("*.md"))
+        assert len(files) == 1
+        assert files[0].read_text(encoding="utf-8") == "# Legacy Content"
+
+    def test_on_complete_passes_member_slug_to_save(self, monkeypatch, tmp_path):
+        """on_complete 應傳 member_slug 給 _save_skill"""
+        monkeypatch.setattr("app.core.member_profile.MEMBERS_ROOT", tmp_path)
+        from app.core.member_profile import get_member_dir
+        get_member_dir("slug-member")
+
+        calls = []
+        original_save = SkillGeneratorHook._save_skill
+
+        def fake_save(self, member_slug, content, project_path=""):
+            calls.append(member_slug)
+
+        import unittest.mock as mock
+        with mock.patch.object(SkillGeneratorHook, "_get_git_diff", return_value="diff --git a/f b/f\n+code"):
+            with mock.patch.object(SkillGeneratorHook, "_save_skill", fake_save):
+                hook = SkillGeneratorHook()
+                ctx = TaskContext(
+                    status="completed",
+                    project_path=str(tmp_path),
+                    member_slug="slug-member",
+                    output="A" * 150,
+                    exit_code=0,
+                )
+                hook.on_complete(ctx)
+
+        assert calls == ["slug-member"]
+
+
+class TestConfidenceThreshold:
+    """信心分數閾值過濾測試"""
+
+    @patch.object(SkillGeneratorHook, "_get_git_diff", return_value="diff --git a/f b/f\n+code")
+    @patch.object(SkillGeneratorHook, "_save_skill")
+    @patch.object(SkillGeneratorHook, "_get_confidence_threshold", return_value=0.5)
+    def test_skips_generation_when_below_threshold(self, mock_threshold, mock_save, mock_diff):
+        """confidence=0.3, threshold=0.5 → 不生成 skill"""
+        hook = SkillGeneratorHook()
+        ctx = TaskContext(
+            status="completed",
+            project_path="/tmp",
+            output="A" * 150,
+            exit_code=1,  # exit_code=1 → no +0.5, result ≈ 0.5 → 用 monkeypatch 控制
+        )
+        # 直接覆寫 _calculate_confidence 回傳 0.3
+        with patch.object(hook, "_calculate_confidence", return_value=0.3):
+            hook.on_complete(ctx)
+
+        assert ctx.confidence_score == pytest.approx(0.3)
+        mock_save.assert_not_called()
+
+    @patch.object(SkillGeneratorHook, "_get_git_diff", return_value="diff --git a/f b/f\n+code")
+    @patch.object(SkillGeneratorHook, "_save_skill")
+    @patch.object(SkillGeneratorHook, "_get_confidence_threshold", return_value=0.5)
+    def test_generates_when_meets_threshold(self, mock_threshold, mock_save, mock_diff):
+        """confidence=0.7, threshold=0.5 → 生成 skill"""
+        hook = SkillGeneratorHook()
+        ctx = TaskContext(
+            status="completed",
+            project_path="/tmp",
+            output="A" * 150,
+            exit_code=0,
+        )
+        with patch.object(hook, "_calculate_confidence", return_value=0.7):
+            hook.on_complete(ctx)
+
+        assert ctx.confidence_score == pytest.approx(0.7)
+        mock_save.assert_called_once()
+
+    def test_uses_default_threshold_when_not_set(self):
+        """無 SystemSetting 設定時，_get_confidence_threshold 應回傳預設 0.5"""
+        hook = SkillGeneratorHook()
+        with patch("app.hooks.skill_generator.SkillGeneratorHook._get_confidence_threshold") as mock_method:
+            # 模擬 DB 查不到 → 應回傳 0.5
+            mock_method.side_effect = lambda: 0.5
+            threshold = hook._get_confidence_threshold()
+        assert threshold == pytest.approx(0.5)
+
+    def test_default_threshold_on_db_failure(self):
+        """DB 讀取失敗時，_get_confidence_threshold 應回傳預設 0.5"""
+        hook = SkillGeneratorHook()
+        with patch("builtins.__import__", side_effect=ImportError("no db")):
+            threshold = hook._get_confidence_threshold()
+        assert threshold == pytest.approx(0.5)
+
+
 class TestOnCompleteIntegration:
     """on_complete 整合測試"""
 
