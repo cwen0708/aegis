@@ -417,6 +417,24 @@ function openArchivePanel() {
   fetchArchivedCards()
 }
 
+const confirmPurgeArchive = ref(false)
+const purgeArchiveLoading = ref(false)
+
+async function purgeArchivedCards() {
+  if (!selectedProjectId.value) return
+  purgeArchiveLoading.value = true
+  try {
+    const res = await apiClient.delete(`/api/v1/projects/${selectedProjectId.value}/cards/archived`)
+    store.addToast(`已刪除 ${res.deleted} 張封存卡片`, 'success')
+    await fetchArchivedCards()
+  } catch (e: any) {
+    store.addToast(e.message || '刪除失敗', 'error')
+  } finally {
+    purgeArchiveLoading.value = false
+    confirmPurgeArchive.value = false
+  }
+}
+
 async function unarchiveCard(cardId: number) {
   unarchiveLoading.value = cardId
   try {
@@ -898,6 +916,16 @@ async function unarchiveCard(cardId: number) {
     @cancel="confirmDelete = false; deleteTargetCardId = null"
   />
 
+  <!-- Purge Archive Confirm -->
+  <ConfirmDialog
+    :show="confirmPurgeArchive"
+    title="清空封存"
+    :message="`確定要永久刪除所有 ${archivedCards.length} 張封存卡片？此操作無法復原。`"
+    confirm-text="全部刪除"
+    @confirm="purgeArchivedCards"
+    @cancel="confirmPurgeArchive = false"
+  />
+
   <!-- Assign Member Dialog -->
   <Teleport to="body">
     <div v-if="showAssignDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" @click.self="showAssignDialog = false">
@@ -1071,9 +1099,17 @@ async function unarchiveCard(cardId: number) {
             <Archive class="w-5 h-5 text-slate-400" />
             <h3 class="text-sm font-bold text-slate-200">封存卡片</h3>
           </div>
-          <button @click="showArchivePanel = false" class="text-slate-400 hover:text-slate-200 p-1 rounded-lg hover:bg-slate-700">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-          </button>
+          <div class="flex items-center gap-2">
+            <button
+              v-if="archivedCards.length > 0"
+              @click="confirmPurgeArchive = true"
+              :disabled="purgeArchiveLoading"
+              class="px-3 py-1.5 text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors disabled:opacity-50"
+            >清空封存</button>
+            <button @click="showArchivePanel = false" class="text-slate-400 hover:text-slate-200 p-1 rounded-lg hover:bg-slate-700">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+          </div>
         </div>
 
         <!-- Content -->

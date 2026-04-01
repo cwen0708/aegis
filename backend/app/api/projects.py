@@ -598,6 +598,41 @@ def list_archived_cards(project_id: int, session: Session = Depends(get_session)
     ]
 
 
+@router.delete("/projects/{project_id}/cards/archived")
+def delete_all_archived_cards(project_id: int, session: Session = Depends(get_session)):
+    """永久刪除專案中所有封存卡片"""
+    from app.core.card_index import query_archived
+    from app.api.deps import _card_locks
+
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    archived = query_archived(session, project_id)
+    count = 0
+    for idx in archived:
+        # 跳過運行中的卡片
+        if idx.status in ("running", "pending"):
+            continue
+        # 刪除 MD 檔案
+        if idx.file_path:
+            md_path = Path(idx.file_path)
+            if md_path.exists():
+                md_path.unlink()
+        # 移除索引
+        remove_card_from_index(session, idx.card_id)
+        # 刪除 ORM Card 記錄
+        orm_card = session.get(Card, idx.card_id)
+        if orm_card:
+            session.delete(orm_card)
+        # 清除鎖
+        _card_locks.pop(idx.card_id, None)
+        count += 1
+
+    session.commit()
+    return {"deleted": count}
+
+
 # ==========================================
 # Project Environment Variables
 # ==========================================
