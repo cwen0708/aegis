@@ -157,6 +157,32 @@ def parse_tool_call(line: str) -> Optional[Tuple[str, str]]:
     return None
 
 
+def parse_ollama_stream(line: str) -> Optional[str]:
+    """從 Ollama 流式輸出單行提取文字內容。
+
+    支援兩種 Ollama API 格式：
+    - /api/chat：{"message": {"role": "assistant", "content": "..."}, "done": false}
+    - /api/generate：{"response": "...", "done": false}
+
+    Returns:
+        提取的文字內容，或 None（非文字行或解析失敗）
+    """
+    try:
+        data = json.loads(line.strip())
+        # /api/chat 格式
+        message = data.get("message")
+        if isinstance(message, dict) and message.get("role") == "assistant":
+            content = message.get("content", "")
+            return content if content else None
+        # /api/generate 格式
+        response = data.get("response")
+        if response is not None:
+            return response if response else None
+    except (json.JSONDecodeError, KeyError, TypeError):
+        pass
+    return None
+
+
 def parse_openai_json(output: str) -> Dict[str, Any]:
     """從 OpenAI CLI wrapper 的 JSON 輸出解析結果與 token 用量"""
     try:
