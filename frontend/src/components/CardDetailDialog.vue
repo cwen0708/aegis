@@ -3,11 +3,11 @@ import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { Zap, Square, Pencil, X, GitBranch, Package } from 'lucide-vue-next'
 import TerminalViewer from './TerminalViewer.vue'
 import ExecutionFlowDiagram from './ExecutionFlowDiagram.vue'
-import { useAegisStore } from '../stores/aegis'
+import { useTaskStore } from '../stores/task'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
-const store = useAegisStore()
+const taskStore = useTaskStore()
 
 const props = defineProps<{
   card: any
@@ -75,14 +75,14 @@ onUnmounted(() => window.removeEventListener('keydown', handleKeydown))
 
 // 開啟對話框時，若 taskLogs 沒有資料，從 API 載入歷史廣播記錄
 onMounted(async () => {
-  if (!store.taskLogs.has(props.card.id) || store.taskLogs.get(props.card.id)!.length === 0) {
+  if (!taskStore.taskLogs.has(props.card.id) || taskStore.taskLogs.get(props.card.id)!.length === 0) {
     try {
       const res = await fetch(`/api/v1/cards/${props.card.id}/broadcast-logs`)
       if (res.ok) {
         const logs: { line: string }[] = await res.json()
         if (logs.length > 0) {
           for (const log of logs) {
-            store.appendTaskLog(props.card.id, log.line)
+            taskStore.appendTaskLog(props.card.id, log.line)
           }
         }
       }
@@ -303,7 +303,7 @@ watch(() => props.card.status, (newStatus) => {
           <div v-if="isRunning" class="flex-1">
             <TerminalViewer :card-id="card.id" />
           </div>
-          <div v-else-if="store.taskLogs.has(card.id)" class="flex-1">
+          <div v-else-if="taskStore.taskLogs.has(card.id)" class="flex-1">
             <TerminalViewer :card-id="card.id" />
           </div>
           <div v-else class="flex-1 flex flex-col items-center justify-center gap-4">

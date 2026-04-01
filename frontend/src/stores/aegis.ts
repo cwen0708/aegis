@@ -4,15 +4,8 @@ import { config } from '../config'
 
 const API = config.apiUrl
 
-export interface RunningTask {
-  task_id: number
-  project: string
-  card_title: string
-  started_at: number
-  pid: number | null
-  provider: string
-  member_id: number | null
-}
+// RunningTask 已移至 task store，此處 re-export 保持向後相容
+export type { RunningTask } from './task'
 
 export interface SystemInfo {
   cpu_percent: number
@@ -41,7 +34,6 @@ export const useAegisStore = defineStore('aegis', () => {
 
   // WebSocket 狀態
   const connected = ref(false)
-  const runningTasks = ref<RunningTask[]>([])
   const systemInfo = ref<SystemInfo>({
     cpu_percent: 0,
     mem_percent: 0,
@@ -50,9 +42,6 @@ export const useAegisStore = defineStore('aegis', () => {
     workstations_used: 0,
     workstations_total: 3,
   })
-
-  // Log streaming 緩衝
-  const taskLogs = ref<Map<number, string[]>>(new Map())
 
   // Directive 佇列
   const directiveQueue = ref<Directive[]>([])
@@ -96,28 +85,8 @@ export const useAegisStore = defineStore('aegis', () => {
     connected.value = val
   }
 
-  function updateRunningTasks(tasks: RunningTask[]) {
-    runningTasks.value = tasks
-  }
-
   function updateSystemInfo(info: SystemInfo) {
     systemInfo.value = info
-  }
-
-  function appendTaskLog(cardId: number, line: string) {
-    if (!taskLogs.value.has(cardId)) {
-      taskLogs.value.set(cardId, [])
-    }
-    const logs = taskLogs.value.get(cardId)!
-    logs.push(line)
-    // 最多保留 2000 行
-    if (logs.length > 2000) {
-      logs.splice(0, logs.length - 2000)
-    }
-  }
-
-  function clearTaskLog(cardId: number) {
-    taskLogs.value.delete(cardId)
   }
 
   // Auth helpers
@@ -230,27 +199,17 @@ export const useAegisStore = defineStore('aegis', () => {
     settings.value = await res.json()
   }
 
-  // 運行中任務數量（by project）
-  function runningCountByProject(projectName: string) {
-    return runningTasks.value.filter(t => t.project === projectName).length
-  }
-
   return {
     settings,
     connected,
-    runningTasks,
     systemInfo,
-    taskLogs,
     toasts,
     directiveQueue,
     addToast,
     removeToast,
     handleDirective,
     setConnected,
-    updateRunningTasks,
     updateSystemInfo,
-    appendTaskLog,
-    clearTaskLog,
     pauseRunner,
     resumeRunner,
     triggerCard,
@@ -259,7 +218,6 @@ export const useAegisStore = defineStore('aegis', () => {
     deleteCronJob,
     pauseCron,
     resumeCron,
-    runningCountByProject,
     fetchSettings,
     updateSettings,
   }

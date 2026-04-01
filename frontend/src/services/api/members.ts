@@ -39,6 +39,7 @@ export interface AccountInfo {
 export interface SkillInfo {
   name: string
   title: string
+  status: 'active' | 'draft'
 }
 
 // ── Members ──
@@ -80,6 +81,10 @@ export function updateSkill(memberId: number, skillName: string, data: { content
 
 export function deleteSkill(memberId: number, skillName: string) {
   return apiClient.delete(`/api/v1/members/${memberId}/skills/${skillName}`)
+}
+
+export function approveSkill(memberId: number, skillName: string) {
+  return apiClient.post(`/api/v1/members/${memberId}/skills/${skillName}/approve`)
 }
 
 // ── MCP ──

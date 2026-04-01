@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { Plus, Play, Pause, Square, Trash2, Zap, MoreVertical, ChevronLeft, ChevronRight, FolderOpen, ListTodo, UserCircle, Settings2, Bot, Hand, Archive, RotateCcw, Loader2, Lock } from 'lucide-vue-next'
 import draggable from 'vuedraggable'
 import { useAegisStore } from '../stores/aegis'
+import { useTaskStore } from '../stores/task'
 import { useAuthStore } from '../stores/auth'
 import { apiClient } from '../services/api/client'
 import { useEscapeKey } from '../composables/useEscapeKey'
@@ -15,6 +16,7 @@ import CardDetailDialog from '../components/CardDetailDialog.vue'
 const { isMobile } = useResponsive()
 
 const store = useAegisStore()
+const taskStore = useTaskStore()
 const auth = useAuthStore()
 
 // 全域專案選擇（共用 composable）
@@ -41,7 +43,7 @@ let elapsedInterval: ReturnType<typeof setInterval>
 
 function updateElapsedTimers() {
   const now = Date.now() / 1000
-  for (const task of store.runningTasks) {
+  for (const task of taskStore.runningTasks) {
     const diff = Math.floor(now - task.started_at)
     const m = Math.floor(diff / 60).toString().padStart(2, '0')
     const s = (diff % 60).toString().padStart(2, '0')
@@ -198,7 +200,7 @@ onUnmounted(() => {
 
 // 判斷某卡片是否運行中
 function isCardRunning(cardId: number) {
-  return store.runningTasks.some(t => t.task_id === cardId)
+  return taskStore.runningTasks.some(t => t.task_id === cardId)
 }
 
 // 成員指派 Dialog

@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { Globe, Cpu, Save, Loader2, Lock, Sparkles, ShieldCheck, Github, CheckCircle2, Unplug, LogOut } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 import { useAuthStore } from '../../stores/auth'
+import { useAsyncOp } from '../../composables/useAsyncOperation'
 
 import { config } from '../../config'
 import { authHeaders } from '../../utils/authFetch'
@@ -69,8 +70,7 @@ async function toggleLoginToView() {
   }
 }
 
-const loading = ref(true)
-const saving = ref(false)
+const { loading, saving, run } = useAsyncOp()
 
 const requireLoginToView = ref(false)
 const ttsEnabled = ref(false)
@@ -83,6 +83,7 @@ const form = ref({
   memory_short_term_days: '30',
   gemini_api_key: '',
   ttsmaker_api_key: '',
+  skill_confidence_threshold: 0.5,
 })
 
 // 密碼修改
@@ -208,6 +209,7 @@ onMounted(async () => {
   form.value.memory_short_term_days = store.settings.memory_short_term_days || '30'
   form.value.gemini_api_key = store.settings.gemini_api_key || ''
   form.value.ttsmaker_api_key = store.settings.ttsmaker_api_key || ''
+  form.value.skill_confidence_threshold = parseFloat(store.settings.skill_confidence_threshold || '0.5')
   requireLoginToView.value = store.settings.require_login_to_view === 'true'
   ttsEnabled.value = store.settings.tts_enabled === 'true'
   ttsProvider.value = store.settings.tts_provider || (store.settings.tts_gemini === 'true' ? 'gemini' : 'web')
@@ -215,19 +217,15 @@ onMounted(async () => {
 })
 
 async function saveSettings() {
-  saving.value = true
-  try {
-    await store.updateSettings({
-      timezone: form.value.timezone,
-      max_workstations: form.value.max_workstations,
-      poll_interval: form.value.poll_interval,
-      memory_short_term_days: form.value.memory_short_term_days,
-      gemini_api_key: form.value.gemini_api_key,
-      ttsmaker_api_key: form.value.ttsmaker_api_key,
-    })
-  } finally {
-    saving.value = false
-  }
+  await run(() => store.updateSettings({
+    timezone: form.value.timezone,
+    max_workstations: form.value.max_workstations,
+    poll_interval: form.value.poll_interval,
+    memory_short_term_days: form.value.memory_short_term_days,
+    gemini_api_key: form.value.gemini_api_key,
+    ttsmaker_api_key: form.value.ttsmaker_api_key,
+    skill_confidence_threshold: String(form.value.skill_confidence_threshold),
+  }))
 }
 </script>
 
@@ -334,6 +332,25 @@ async function saveSettings() {
             class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-mono"
           />
           <p class="text-[11px] text-slate-500 mt-1">AEGIS 系統短期記憶的保留天數，超過自動清理</p>
+        </div>
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="block text-xs font-medium text-slate-400">Skill 自動生成信心閾值</label>
+            <span class="text-xs font-mono text-emerald-400">{{ form.skill_confidence_threshold.toFixed(2) }}</span>
+          </div>
+          <input
+            v-model.number="form.skill_confidence_threshold"
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            class="w-full accent-emerald-500"
+          />
+          <div class="flex justify-between text-[10px] text-slate-600 mt-0.5">
+            <span>0.0（全部生成）</span>
+            <span>1.0（最嚴格）</span>
+          </div>
+          <p class="text-[11px] text-slate-500 mt-1">自動生成 Skill 時，低於此信心分數的草稿不會被採用（預設 0.5）</p>
         </div>
       </div>
     </div>
