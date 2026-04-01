@@ -581,3 +581,17 @@ def get_card_broadcast_logs(card_id: int, session: Session = Depends(get_session
         .order_by(BroadcastLog.created_at)
     ).all()
     return [{"line": l.line, "created_at": l.created_at} for l in logs]
+
+
+@router.get("/cards/{card_id}/cost")
+def get_card_cost(card_id: int, session: Session = Depends(get_session)):
+    """取得卡片的累計 token 使用量和預估費用"""
+    idx = session.get(CardIndex, card_id)
+    if not idx:
+        raise HTTPException(status_code=404, detail="Card not found")
+    return {
+        "card_id": card_id,
+        "total_input_tokens": idx.total_input_tokens,
+        "total_output_tokens": idx.total_output_tokens,
+        "estimated_cost_usd": idx.estimated_cost_usd,
+    }
