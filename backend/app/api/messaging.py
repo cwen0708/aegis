@@ -119,12 +119,14 @@ async def classify_emails_batch(
 class RoomCreate(BaseModel):
     name: str
     description: str = ""
+    layout_type: str = "tiled"
 
 class RoomUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     position: Optional[int] = None
     is_active: Optional[bool] = None
+    layout_type: Optional[str] = None
 
 class DomainCreate(BaseModel):
     hostname: str
@@ -346,6 +348,7 @@ def create_room(data: RoomCreate, session: Session = Depends(get_session)):
         name=data.name,
         description=data.description,
         layout_json=get_default_office_layout_json(),
+        layout_type=data.layout_type,
         position=(max_pos or 0) + 1,
     )
     session.add(room)
