@@ -5,7 +5,6 @@ import { useAegisStore } from '../stores/aegis'
 import { useTaskStore } from '../stores/task'
 import { useAuthStore } from '../stores/auth'
 import { apiClient } from '../services/api/client'
-// domain store 不再用於 rooms 過濾
 import { useResponsive } from '../composables/useResponsive'
 import { assetUrl } from '../config'
 
@@ -13,15 +12,17 @@ const { isMobile } = useResponsive()
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
-// rooms/members 直接從 API 取
+
 import { Settings, Box } from 'lucide-vue-next'
 import { createOfficeGame, OfficeScene } from '../game/OfficeScene'
 import OfficeEditor from '../components/OfficeEditor.vue'
+import Room2Editor from '../components/Room2Editor.vue'
 import CharacterDialog from '../components/CharacterDialog.vue'
 import type { OfficeLayout } from '../game/types'
 import { deserializeLayout, serializeLayout } from '../game/layoutManager'
 import { buildDefaultLayout } from '../game/defaultLayout'
 import type Phaser from 'phaser'
+import type Room2Scene from '../game2/Room2Scene'
 
 const store = useAegisStore()
 const taskStore = useTaskStore()
@@ -29,70 +30,112 @@ const taskStore = useTaskStore()
 // ===== Room support =====
 const currentRoomId = computed(() => {
   const id = route.params.roomId as string | undefined
-  if (id) return id
-  // Fallback: fetch first active room
-  // (rooms 從 API 取，不再從 domain store)
-  return null
+  return id || null
 })
 
-// ===== Layout management =====
+// ===== Layout type =====
+const layoutType = ref<'tiled' | 'classic'>('classic')
+
+// ===== Classic layout =====
 const currentLayout = ref<OfficeLayout | null>(null)
+
+// ===== Tiled layout =====
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const customMapJson = ref<Record<string, any> | null>(null)
+const tileError = ref('')
+
+// ===== Edit mode =====
 const isEditing = ref(false)
 
-async function loadLayoutFromSettings() {
-  if (currentRoomId.value) {
-    // Load layout from single room API (includes layout_json)
-    try {
-      const room = await apiClient.get<any>(`/api/v1/rooms/${currentRoomId.value}`)
+// ===== Load room (detects layout_type) =====
+async function loadRoom() {
+  const rid = currentRoomId.value
+  if (!rid) {
+    layoutType.value = 'classic'
+    await _loadClassicFallback()
+    return
+  }
+  try {
+    const room = await apiClient.get<any>(`/api/v1/rooms/${rid}`)
+    layoutType.value = room.layout_type === 'tiled' ? 'tiled' : 'classic'
+
+    if (layoutType.value === 'tiled') {
+      customMapJson.value = null
+      if (room.layout_json) {
+        try {
+          const parsed = typeof room.layout_json === 'string'
+            ? JSON.parse(room.layout_json)
+            : room.layout_json
+          if (parsed && typeof parsed === 'object' && Array.isArray(parsed.layers)) {
+            customMapJson.value = parsed
+          }
+        } catch { /* use default tiled map */ }
+      }
+    } else {
       if (room.layout_json) {
         const layout = deserializeLayout(room.layout_json)
         if (layout) {
           if (!layout.slots || layout.slots.length === 0) {
-            const defaultLayout = buildDefaultLayout(totalDesks.value || 4)
-            layout.slots = defaultLayout.slots
+            layout.slots = buildDefaultLayout(totalDesks.value || 4).slots
           }
           currentLayout.value = layout
           return
         }
       }
-    } catch (e) {
-      console.warn('Failed to load room layout:', e)
+      currentLayout.value = buildDefaultLayout(totalDesks.value || 4)
     }
-    // Fallback to default layout if room API fails
-    currentLayout.value = buildDefaultLayout(totalDesks.value || 4)
-  } else {
-    // Original behavior: load from system settings
-    await store.fetchSettings()
-    const raw = store.settings.office_layout
-    if (raw) {
-      const layout = deserializeLayout(raw)
-      if (layout) {
-        if (!layout.slots || layout.slots.length === 0) {
-          const defaultLayout = buildDefaultLayout(totalDesks.value || 4)
-          layout.slots = defaultLayout.slots
-        }
-        currentLayout.value = layout
-        return
-      }
-    }
+  } catch {
+    layoutType.value = 'classic'
     currentLayout.value = buildDefaultLayout(totalDesks.value || 4)
   }
 }
 
-async function handleSaveLayout(layout: OfficeLayout) {
+async function _loadClassicFallback() {
+  await store.fetchSettings()
+  const raw = store.settings.office_layout
+  if (raw) {
+    const layout = deserializeLayout(raw)
+    if (layout) {
+      if (!layout.slots || layout.slots.length === 0) {
+        layout.slots = buildDefaultLayout(totalDesks.value || 4).slots
+      }
+      currentLayout.value = layout
+      return
+    }
+  }
+  currentLayout.value = buildDefaultLayout(totalDesks.value || 4)
+}
+
+// ===== Save handlers =====
+async function handleSaveClassicLayout(layout: OfficeLayout) {
   currentLayout.value = layout
   if (currentRoomId.value) {
-    // Save to room
     await apiClient.patch(`/api/v1/rooms/${currentRoomId.value}/layout`, { layout_json: serializeLayout(layout) })
   } else {
-    // Save to system settings
     await store.updateSettings({ office_layout: serializeLayout(layout) })
   }
+  isEditing.value = false
+  rebuildGame()
+}
+
+async function handleSaveTiledMap(mapJson: object) {
+  const rid = currentRoomId.value
+  if (rid) {
+    try {
+      await apiClient.patch(`/api/v1/rooms/${rid}/layout`, { layout_json: mapJson })
+      customMapJson.value = mapJson as Record<string, unknown>
+    } catch (e) {
+      console.error('[Rooms] Failed to save tiled map:', e)
+    }
+  }
+  isEditing.value = false
+  await nextTick()
+  await rebuildGame()
 }
 
 function handleExitEdit() {
   isEditing.value = false
-  rebuildOfficeGame()
+  rebuildGame()
 }
 
 function enterEditMode() {
@@ -106,7 +149,7 @@ function goTo3D() {
   router.push(rid ? `/room-3d/${rid}` : '/room-3d')
 }
 
-// 成員資料
+// ===== Members =====
 interface MemberInfo {
   id: number
   name: string
@@ -115,6 +158,8 @@ interface MemberInfo {
   role?: string
   portrait?: string
   sprite_index?: number
+  sprite_sheet?: string
+  sprite_scale?: number
 }
 
 const members = ref<MemberInfo[]>([])
@@ -123,7 +168,6 @@ let pollId: number
 async function fetchMembers() {
   try {
     let all = await apiClient.get<any[]>('/api/v1/members')
-    // 如果有指定房間，從 Room API 取成員過濾
     const rid = currentRoomId.value
     if (rid) {
       try {
@@ -139,16 +183,8 @@ async function fetchMembers() {
   } catch {}
 }
 
-onMounted(() => {
-  fetchMembers()
-  pollId = window.setInterval(fetchMembers, 10000)
-})
-onUnmounted(() => clearInterval(pollId))
-
-// 工作台數量
 const totalDesks = computed(() => store.systemInfo.workstations_total)
 
-// 哪些成員正在忙碌（從 running_tasks 取 member_id）
 const busyMemberMap = computed(() => {
   const map = new Map<number, { card_title: string; project: string; provider: string }>()
   for (const t of taskStore.runningTasks) {
@@ -160,7 +196,6 @@ const busyMemberMap = computed(() => {
   return map
 })
 
-// 工作台分配：busyMembers 佔據工作台
 const deskAssignments = computed(() => {
   const desks: Array<{ member: MemberInfo; task: { card_title: string; project: string; provider: string } } | null> = []
   const busy = busyMemberMap.value
@@ -175,66 +210,40 @@ const deskAssignments = computed(() => {
   return desks
 })
 
-// 休息區成員：不在忙碌的啟用成員
 const restingMembers = computed(() => {
   const busy = busyMemberMap.value
   return members.value.filter(m => !busy.has(m.id))
 })
 
-// 對話泡泡
+// ===== Bubbles =====
 const IDLE_BUBBLES = [
-  '休息一下～',
-  '等待任務中...',
-  '喝杯咖啡',
-  '隨時待命！',
-  '整理思緒中',
-  '充電完畢！',
-  '看看有什麼新任務',
-  '今天也要加油',
+  '休息一下～', '等待任務中...', '喝杯咖啡', '隨時待命！',
+  '整理思緒中', '充電完畢！', '看看有什麼新任務', '今天也要加油',
 ]
-
 const WORK_BUBBLES = [
-  '專注模式！',
-  '程式碼寫起來！',
-  '分析中...',
-  '快完成了',
-  '全力輸出！',
-  '進度推進中',
+  '專注模式！', '程式碼寫起來！', '分析中...', '快完成了', '全力輸出！', '進度推進中',
 ]
-
 const bubbles = ref<Map<number, string>>(new Map())
 
 function randomBubble(memberId: number, isWorking: boolean) {
   const list = isWorking ? WORK_BUBBLES : IDLE_BUBBLES
   const text = list[Math.floor(Math.random() * list.length)]!
   bubbles.value.set(memberId, text)
-  setTimeout(() => {
-    bubbles.value.delete(memberId)
-  }, 4000)
+  setTimeout(() => { bubbles.value.delete(memberId) }, 4000)
 }
 
 let bubbleInterval: number
-onMounted(() => {
-  bubbleInterval = window.setInterval(() => {
-    const allMembers = members.value
-    if (allMembers.length === 0) return
-    const m = allMembers[Math.floor(Math.random() * allMembers.length)]!
-    randomBubble(m.id, busyMemberMap.value.has(m.id))
-  }, 5000)
-})
-onUnmounted(() => clearInterval(bubbleInterval))
 
-// 時間顯示
+// ===== Time =====
 const now = ref(Date.now())
 let timeInterval: number
-onMounted(() => { timeInterval = window.setInterval(() => now.value = Date.now(), 1000) })
-onUnmounted(() => clearInterval(timeInterval))
 
-// Debug: 格子座標追蹤
+// ===== Debug (classic only) =====
 const hoverPos = ref<{ row: number; col: number; frame: string | number }>({ row: 0, col: 0, frame: '--' })
 const TILE = 16, ZOOM = 3, tileSize = TILE * ZOOM
 
 function onCanvasMouseMove(e: MouseEvent) {
+  if (layoutType.value !== 'classic') return
   const canvas = (e.target as HTMLElement).querySelector('canvas') || e.target as HTMLCanvasElement
   if (!canvas || canvas.tagName !== 'CANVAS') return
 
@@ -243,7 +252,7 @@ function onCanvasMouseMove(e: MouseEvent) {
   const scaleY = canvas.height / rect.height
 
   let offsetX = 0, offsetY = 0
-  const scene = getScene()
+  const scene = getClassicScene()
   if (scene?.cameras?.main) {
     offsetX = scene.cameras.main.scrollX
     offsetY = scene.cameras.main.scrollY
@@ -254,7 +263,6 @@ function onCanvasMouseMove(e: MouseEvent) {
   const col = Math.floor(worldX / tileSize)
   const row = Math.floor(worldY / tileSize)
 
-  // 取得 frame
   let frame: string | number = '--'
   if (scene?.layout) {
     const { cols, rows, ground } = scene.layout
@@ -279,8 +287,9 @@ function onCanvasMouseMove(e: MouseEvent) {
 }
 
 function copyPos() {
+  if (layoutType.value !== 'classic') return
   const { row, col, frame } = hoverPos.value
-  const scene = getScene()
+  const scene = getClassicScene()
   let info = `row=${row}, col=${col}, frame=${frame}`
 
   if (scene?.layout) {
@@ -288,57 +297,63 @@ function copyPos() {
     const getType = (r: number, c: number) => {
       if (r < 0 || r >= rows || c < 0 || c >= cols) return 'X'
       const gt = ground[r * cols + c]!
-      if (gt === 0) return 'V' // void
-      if (gt === 1 || (gt >= 13 && gt <= 16)) return 'W' // wall
-      return 'F' // floor
+      if (gt === 0) return 'V'
+      if (gt === 1 || (gt >= 13 && gt <= 16)) return 'W'
+      return 'F'
     }
-
-    // 8 neighbors: N, NE, E, SE, S, SW, W, NW
-    const n = getType(row - 1, col)
-    const ne = getType(row - 1, col + 1)
-    const e = getType(row, col + 1)
-    const se = getType(row + 1, col + 1)
-    const s = getType(row + 1, col)
-    const sw = getType(row + 1, col - 1)
-    const w = getType(row, col - 1)
-    const nw = getType(row - 1, col - 1)
-
+    const n = getType(row - 1, col), ne = getType(row - 1, col + 1)
+    const e = getType(row, col + 1), se = getType(row + 1, col + 1)
+    const s = getType(row + 1, col), sw = getType(row + 1, col - 1)
+    const w = getType(row, col - 1), nw = getType(row - 1, col - 1)
     info += `\nneighbors: n=${n}, ne=${ne}, e=${e}, se=${se}, s=${s}, sw=${sw}, w=${w}, nw=${nw}`
-    info += `\n  ${nw} ${n} ${ne}`
-    info += `\n  ${w} * ${e}`
-    info += `\n  ${sw} ${s} ${se}`
+    info += `\n  ${nw} ${n} ${ne}\n  ${w} * ${e}\n  ${sw} ${s} ${se}`
     info += `\nshould be => `
   }
-
   navigator.clipboard.writeText(info)
 }
 
 // ===== Phaser Game =====
 let game: Phaser.Game | null = null
 
-function getScene(): OfficeScene | null {
+function getClassicScene(): OfficeScene | null {
   if (!game) return null
   return game.scene.getScene('OfficeScene') as OfficeScene | null
 }
 
-function pushDataToScene() {
-  const scene = getScene()
-  if (!scene?.updateData) return
+function getTiledScene(): Room2Scene | null {
+  if (!game) return null
+  return game.scene.getScene('room2') as Room2Scene | null
+}
 
-  scene.updateData({
+function pushDataToScene() {
+  const commonData = {
     totalDesks: totalDesks.value,
     desks: deskAssignments.value.map(d => d ? {
-      member: { id: d.member.id, name: d.member.name, provider: d.member.provider, sprite_index: d.member.sprite_index ?? 0, sprite_sheet: (d.member as any).sprite_sheet, sprite_scale: (d.member as any).sprite_scale },
+      member: {
+        id: d.member.id, name: d.member.name, provider: d.member.provider,
+        sprite_index: d.member.sprite_index ?? 0,
+        sprite_sheet: d.member.sprite_sheet,
+        sprite_scale: d.member.sprite_scale,
+      },
       task: { card_title: d.task.card_title, project: d.task.project },
     } : null),
     resting: restingMembers.value.map(m => ({
-      id: m.id, name: m.name, provider: m.provider, sprite_index: m.sprite_index ?? 0, sprite_sheet: (m as any).sprite_sheet, sprite_scale: (m as any).sprite_scale,
+      id: m.id, name: m.name, provider: m.provider,
+      sprite_index: m.sprite_index ?? 0,
+      sprite_sheet: m.sprite_sheet,
+      sprite_scale: m.sprite_scale,
     })),
     bubbles: bubbles.value,
     used: store.systemInfo.workstations_used,
     total: store.systemInfo.workstations_total,
     memberCount: members.value.length,
-  })
+  }
+
+  if (layoutType.value === 'tiled') {
+    getTiledScene()?.updateData?.(commonData)
+  } else {
+    getClassicScene()?.updateData?.(commonData)
+  }
 }
 
 // ===== Character Dialog =====
@@ -352,14 +367,10 @@ interface CharacterInfo {
 const showCharacterDialog = ref(false)
 const selectedCharacter = ref<CharacterInfo | null>(null)
 
-// ===== Task completion auto-popup =====
-// Triggered by member_dialogue event (sent after task completes with summary text)
 function onMemberDialoguePopup(e: Event) {
   const detail = (e as CustomEvent).detail
   if (!detail.member_id) return
-  // Only auto-popup for task completion/failure dialogues
   if (detail.dialogue_type !== 'task_complete' && detail.dialogue_type !== 'task_failed') return
-  // Don't interrupt if dialog is already open for a different member
   if (showCharacterDialog.value && selectedCharacter.value?.memberId !== detail.member_id) return
 
   const member = members.value.find(m => m.id === detail.member_id)
@@ -376,10 +387,9 @@ function onMemberDialoguePopup(e: Event) {
 }
 
 function setupCharacterClickListener() {
-  const scene = getScene()
+  const scene = layoutType.value === 'tiled' ? getTiledScene() : getClassicScene()
   if (!scene) return
   scene.events.on('character-clicked', (data: CharacterInfo) => {
-    // Find member role and portrait from members list
     const member = members.value.find(m => m.id === data.memberId)
     selectedCharacter.value = {
       ...data,
@@ -397,91 +407,144 @@ function closeCharacterDialog() {
 
 function setupGameListeners() {
   if (!game) return
-  // Use 'scene-ready' emitted from OfficeScene.create() — reliable unlike
-  // 'ready' which may fire synchronously during new Phaser.Game() constructor
   game.events.on('scene-ready', () => {
     pushDataToScene()
     setupCharacterClickListener()
   })
 }
 
-async function rebuildOfficeGame() {
+const canvasRef = ref<HTMLDivElement>()
+
+async function rebuildGame() {
   game?.destroy(true)
   game = null
-
-  // Wait for Vue to re-render #office-canvas
   await nextTick()
 
   if (isEditing.value) return
-  const el = document.getElementById('office-canvas')
-  if (!el) return
 
-  const layout = currentLayout.value || buildDefaultLayout(totalDesks.value || 4)
-  game = createOfficeGame('office-canvas', layout)
-  setupGameListeners()
+  if (layoutType.value === 'tiled') {
+    if (!canvasRef.value) return
+    tileError.value = ''
+    try {
+      const { createRoom2Game } = await import('../game2/Room2Scene')
+      game = createRoom2Game('room-canvas', customMapJson.value ?? undefined)
+      setupGameListeners()
+      pushDataToScene()
+    } catch (e: unknown) {
+      tileError.value = e instanceof Error ? e.message : String(e)
+      console.error('[Rooms] Failed to create tiled game:', e)
+    }
+  } else {
+    const el = document.getElementById('room-canvas')
+    if (!el) return
+    const layout = currentLayout.value || buildDefaultLayout(totalDesks.value || 4)
+    game = createOfficeGame('room-canvas', layout)
+    setupGameListeners()
+  }
 }
 
+// ===== Lifecycle =====
 onMounted(async () => {
-  await loadLayoutFromSettings()
+  await loadRoom()
   await document.fonts.ready
 
-  const layout = currentLayout.value || buildDefaultLayout(totalDesks.value || 4)
-  game = createOfficeGame('office-canvas', layout)
-  setupGameListeners()
+  fetchMembers()
+  pollId = window.setInterval(fetchMembers, 10000)
 
-  // Listen for task completion dialogue to auto-popup character
+  timeInterval = window.setInterval(() => now.value = Date.now(), 1000)
+
+  bubbleInterval = window.setInterval(() => {
+    const allMembers = members.value
+    if (allMembers.length === 0) return
+    const m = allMembers[Math.floor(Math.random() * allMembers.length)]!
+    randomBubble(m.id, busyMemberMap.value.has(m.id))
+  }, 5000)
+
+  await rebuildGame()
   window.addEventListener('aegis:member-dialogue', onMemberDialoguePopup)
 })
 
 onUnmounted(() => {
+  clearInterval(pollId)
+  clearInterval(bubbleInterval)
+  clearInterval(timeInterval)
   window.removeEventListener('aegis:member-dialogue', onMemberDialoguePopup)
   game?.destroy(true)
   game = null
 })
 
-// Watch all reactive data and push to Phaser scene
 watch(
   [deskAssignments, restingMembers, bubbles, () => store.systemInfo, members],
   pushDataToScene,
   { deep: true }
 )
 
-// Watch room changes — reload layout and rebuild game
 watch(
   () => route.params.roomId,
   async () => {
-    await loadLayoutFromSettings()
+    await loadRoom()
     await fetchMembers()
-    rebuildOfficeGame()
+    await rebuildGame()
   }
 )
 </script>
 
 <template>
-  <div class="h-full w-full bg-[#1a1510] relative">
-    <!-- Editor mode -->
+  <div
+    class="h-full w-full relative"
+    :class="layoutType === 'tiled' ? 'bg-[#1a1a2e]' : 'bg-[#1a1510]'"
+  >
+    <!-- Classic editor -->
     <OfficeEditor
-      v-if="isEditing && currentLayout"
+      v-if="isEditing && layoutType === 'classic' && currentLayout"
       :layout="currentLayout"
-      @save="handleSaveLayout"
+      @save="handleSaveClassicLayout"
       @cancel="handleExitEdit"
     />
 
-    <!-- Normal room view -->
+    <!-- Tiled editor -->
+    <Room2Editor
+      v-else-if="isEditing && layoutType === 'tiled'"
+      :custom-map-json="customMapJson"
+      @save="handleSaveTiledMap"
+      @cancel="handleExitEdit"
+    />
+
+    <!-- Game view -->
     <template v-else>
+      <!-- Tiled error overlay -->
+      <div v-if="tileError" class="absolute inset-0 flex items-center justify-center z-10">
+        <div class="bg-red-900/50 border border-red-500/30 rounded-lg p-6 max-w-md">
+          <p class="text-red-400 text-sm font-mono">{{ tileError }}</p>
+        </div>
+      </div>
+
       <div class="flex flex-col h-full">
         <!-- Canvas -->
-        <div id="office-canvas" class="flex-1 min-h-0" @mousemove="onCanvasMouseMove" @click="copyPos"></div>
+        <div
+          id="room-canvas"
+          ref="canvasRef"
+          class="flex-1 min-h-0"
+          @mousemove="onCanvasMouseMove"
+          @click="copyPos"
+        />
 
         <!-- Footer -->
-        <div class="flex items-center gap-2 sm:gap-4 px-2 sm:px-3 h-6 bg-slate-800 border-t border-slate-700 z-10 shrink-0"
-             style="font-family: 'Press Start 2P', monospace;">
+        <div
+          class="flex items-center gap-2 sm:gap-4 px-2 sm:px-3 h-6 bg-slate-800 border-t border-slate-700 z-10 shrink-0"
+          style="font-family: 'Press Start 2P', monospace;"
+        >
           <span class="text-[8px] text-emerald-400">ACTIVE:{{ store.systemInfo.workstations_used }}</span>
           <span class="text-[8px] text-slate-400">IDLE:{{ restingMembers.length }}</span>
           <span class="text-[8px] text-slate-400">TOTAL:{{ members.length }}</span>
           <span class="flex-1"></span>
-          <!-- Debug info: hide on mobile -->
-          <span v-if="!isMobile" class="text-[8px] text-amber-400 cursor-pointer" @click.stop="copyPos" title="Click to copy">
+          <!-- Classic debug info -->
+          <span
+            v-if="!isMobile && layoutType === 'classic'"
+            class="text-[8px] text-amber-400 cursor-pointer"
+            @click.stop="copyPos"
+            title="Click to copy"
+          >
             row={{ hoverPos.row }}, col={{ hoverPos.col }}, frame={{ hoverPos.frame }}
           </span>
           <button
@@ -518,11 +581,11 @@ watch(
 </template>
 
 <style scoped>
-#office-canvas {
+#room-canvas {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }
-#office-canvas canvas {
+#room-canvas canvas {
   image-rendering: pixelated !important;
   image-rendering: crisp-edges !important;
 }

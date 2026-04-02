@@ -38,7 +38,7 @@ const router = createRouter({
     { path: '/onboarding', component: Onboarding },
     { path: '/rooms/:roomId?', name: 'rooms', component: Rooms },
     { path: '/room-3d/:roomId?', name: 'rooms3d', component: () => import('../views/Rooms3D.vue') },
-    { path: '/room2', name: 'room2', component: () => import('../views/Room2.vue') },
+    { path: '/room2', redirect: '/rooms' }, // 舊路由相容 → 統一由 Rooms.vue 處理
     { path: '/kanban', component: Kanban, meta: { requiresAuth: true } },
     { path: '/cron', component: CronJobs, meta: { requiresAuth: true } },
     { path: '/cron/:id', component: CronJobDetail, meta: { requiresAuth: true } },

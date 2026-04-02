@@ -264,6 +264,20 @@ def _migrate_db():
             cur.execute("ALTER TABLE member ADD COLUMN hook_profile TEXT DEFAULT 'standard'")
             logger.info("[Migration] Added 'hook_profile' column to member (default='standard')")
 
+        # Room: layout_type 一次性遷移 — 原有房間改為 "classic"（新建房間預設 "tiled"）
+        if "room" in tables:
+            cols = [row[1] for row in cur.execute("PRAGMA table_info(room)").fetchall()]
+            if "layout_type" in cols:
+                already = cur.execute(
+                    "SELECT value FROM systemsetting WHERE key = 'migrated_room_layout_type_v1'"
+                ).fetchone()
+                if not already:
+                    cur.execute("UPDATE room SET layout_type = 'classic'")
+                    cur.execute(
+                        "INSERT OR REPLACE INTO systemsetting (key, value) VALUES ('migrated_room_layout_type_v1', '1')"
+                    )
+                    logger.info("[Migration] Set all existing rooms' layout_type to 'classic'")
+
         # Room: 首次建立時 seed 預設房間（重新掃描確保 create_all 的表都能檢測到）
         tables = [row[0] for row in cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
         if "room" in tables:
