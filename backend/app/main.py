@@ -25,6 +25,7 @@ from app.api import graph as graph_routes
 from app.api import sprite_gen as sprite_gen_routes
 from app.api import agent_chat as agent_chat_routes
 from app.api import member_messages as member_messages_routes
+from app.api import history as history_routes
 from app.core.telemetry import get_system_metrics
 from app.core.cron_poller import start_cron_poller
 from app.core.usage_poller import start_usage_poller
@@ -511,6 +512,7 @@ app.include_router(files.router, prefix="/api/v1")
 app.include_router(tags_routes.router, prefix="/api/v1")
 app.include_router(agent_chat_routes.router, prefix="/api/v1")
 app.include_router(member_messages_routes.router, prefix="/api/v1")
+app.include_router(history_routes.router, prefix="/api/v1")
 
 # ==========================================
 # SPA Frontend (serve from frontend/dist)
