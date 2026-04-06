@@ -16,6 +16,22 @@ import re as _re
 
 router = APIRouter(tags=["Projects"])
 
+
+def _safe_parse_tags(tags_json: str) -> list:
+    """安全解析 tags_json，非陣列時自動包裝"""
+    if not tags_json:
+        return []
+    try:
+        parsed = json.loads(tags_json)
+        if isinstance(parsed, list):
+            return parsed
+        if isinstance(parsed, str):
+            return [parsed] if parsed else []
+        return []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
 # ==========================================
 # Response Models
 # ==========================================
@@ -355,7 +371,7 @@ def read_project_board(project_id: int, request: Request, session: Session = Dep
             cards=[CardResponse(
                 id=ci.card_id, list_id=ci.list_id, title=ci.title,
                 description=ci.description, status=ci.status,
-                tags=json.loads(ci.tags_json) if ci.tags_json else [],
+                tags=_safe_parse_tags(ci.tags_json),
                 created_at=ci.created_at,
             ) for ci in list_cards],
             # 階段配置

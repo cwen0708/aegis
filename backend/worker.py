@@ -220,16 +220,17 @@ def update_card_status(card_id: int, new_status: str, append_content: str = ""):
         if not idx:
             return
 
-        file_path = Path(idx.file_path)
-        try:
-            card_data = read_card(file_path)
-            card_data.status = new_status
-            if append_content:
-                card_data.content += append_content
-            write_card(file_path, card_data)
-            sync_card_to_index(session, card_data, idx.project_id, str(file_path))
-        except Exception as e:
-            logger.error(f"[Card {card_id}] Failed to update MD: {e}")
+        if idx.file_path and idx.file_path not in ("", "."):
+            file_path = Path(idx.file_path)
+            try:
+                card_data = read_card(file_path)
+                card_data.status = new_status
+                if append_content:
+                    card_data.content += append_content
+                write_card(file_path, card_data)
+                sync_card_to_index(session, card_data, idx.project_id, str(file_path))
+            except Exception as e:
+                logger.error(f"[Card {card_id}] Failed to update MD: {e}")
 
         # Dual-write ORM
         orm_card = session.get(Card, card_id)
@@ -252,13 +253,14 @@ def mark_card_running(card_id: int, member_id: Optional[int]):
             session.add(idx)
 
             # 也更新 MD 檔
-            file_path = Path(idx.file_path)
-            try:
-                card_data = read_card(file_path)
-                card_data.status = "running"
-                write_card(file_path, card_data)
-            except Exception as e:
-                logger.warning(f"[Card {card_id}] Failed to update MD to running: {e}")
+            if idx.file_path and idx.file_path not in ("", "."):
+                file_path = Path(idx.file_path)
+                try:
+                    card_data = read_card(file_path)
+                    card_data.status = "running"
+                    write_card(file_path, card_data)
+                except Exception as e:
+                    logger.warning(f"[Card {card_id}] Failed to update MD to running: {e}")
 
             # 封鎖同 milestone 中標題相似的待辦卡片
             blocked = block_similar_cards(card_id, idx.title, session)
