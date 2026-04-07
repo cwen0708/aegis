@@ -72,6 +72,7 @@ from app.core.poller import _parse_and_create_cards
 
 from app.core.task_workspace import link_project_into_workspace as _link_project_into_workspace
 from app.core.memory_manager import write_member_short_term_memory
+from app.core.gate_check import run_build_gate
 
 # HTTP client for broadcasting
 import urllib.request
@@ -434,6 +435,20 @@ def _apply_worker_stage_action(idx, new_status: str) -> str:
                 # fallback: 找不到列表就刪除（舊行為）
                 delete_card_completely(idx.card_id)
                 return "delete"
+
+            # Build gate 閘門檢查：成功且啟用時，先驗證語法
+            if new_status == "completed" and stage_list.gate_enabled:
+                from app.core.task_workspace import WORKSPACES_ROOT
+                ws_path = str(WORKSPACES_ROOT / f"task-{idx.card_id}")
+                gate_result = run_build_gate(ws_path, idx.project_id)
+                logger.info(f"[Gate] Card {idx.card_id}: {gate_result.message}")
+                if not gate_result.passed:
+                    new_status = "failed"
+                    # 在卡片 content 追加閘門失敗原因
+                    update_card_status(
+                        idx.card_id, "failed",
+                        f"\n\n---\n\n### Build Gate Failed\n```\n{gate_result.message}\n```",
+                    )
 
             action = stage_list.on_success_action if new_status == "completed" else stage_list.on_fail_action
 

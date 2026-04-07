@@ -47,6 +47,7 @@ class StageList(SQLModel, table=True):
     on_success_action: str = Field(default="none")
     on_fail_action: str = Field(default="none")
     auto_commit: bool = Field(default=False)  # 成功自動 git commit，失敗自動 shelve 到分支
+    gate_enabled: bool = Field(default=False)  # 啟用 build gate 閘門檢查（語法驗證）
 
     project: Optional[Project] = Relationship(back_populates="lists")
     cards: List["Card"] = Relationship(back_populates="stage_list")
