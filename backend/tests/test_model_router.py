@@ -4,11 +4,11 @@ from app.core.model_router import (
     resolve_model_by_tags,
     assess_complexity,
     resolve_model,
-    MODEL_TIER,
     PROVIDER_FAILOVER,
     get_failover_chain,
     get_failover_model,
 )
+from app.core.model_registry import FAMILY_TIER as MODEL_TIER
 
 
 class TestResolveModelByTags:
@@ -93,7 +93,8 @@ class TestModelTier:
         assert MODEL_TIER["haiku"] < MODEL_TIER["sonnet"] < MODEL_TIER["opus"]
 
     def test_all_tiers_defined(self):
-        assert set(MODEL_TIER.keys()) == {"haiku", "sonnet", "opus"}
+        # FAMILY_TIER 包含其他 provider（gemini/gpt 等），這裡只驗證 Claude 三層存在
+        assert {"haiku", "sonnet", "opus"} <= set(MODEL_TIER.keys())
 
 
 class TestAssessComplexity:
