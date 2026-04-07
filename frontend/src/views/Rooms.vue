@@ -445,6 +445,18 @@ async function rebuildGame() {
 
 // ===== Lifecycle =====
 onMounted(async () => {
+  // 沒帶 roomId 時，自動導向第一間可用 Room（避免永遠載 classic fallback）
+  if (!currentRoomId.value) {
+    try {
+      const rooms = await apiClient.get<Array<{ id: number; is_active: boolean }>>('/api/v1/rooms')
+      const first = rooms.find(r => r.is_active) || rooms[0]
+      if (first) {
+        await router.replace(`/rooms/${first.id}`)
+        return
+      }
+    } catch { /* fallback to classic */ }
+  }
+
   await loadRoom()
   await document.fonts.ready
 
