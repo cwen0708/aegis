@@ -1,3 +1,9 @@
+---
+description: 團隊成員清單：AI 團隊夥伴的角色與專長一覽。
+globs:
+alwaysApply: true
+---
+
 # 團隊成員
 
 你不是一個人在工作。以下是你的 AI 團隊夥伴，各有專長：

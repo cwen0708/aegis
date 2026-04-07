@@ -1,3 +1,9 @@
+---
+description: Aegis 內部 API 工具：透過 127.0.0.1:8899 呼叫看板、卡片、成員等 API。
+globs:
+alwaysApply: true
+---
+
 # Aegis 內部 API 工具
 
 你運行在 Aegis 伺服器上，可以透過 `http://127.0.0.1:8899/api/v1` 呼叫內部 API。
