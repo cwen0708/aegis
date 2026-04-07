@@ -1,11 +1,16 @@
 <script setup lang="ts">
-import { ref, shallowRef, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, shallowRef, onMounted, onUnmounted, nextTick } from 'vue'
 import Phaser from 'phaser'
 import Room2EditorScene, { type EditorTool, type SelectionInfo } from '../game2/Room2EditorScene'
 import type { TilesetInfo } from '../game2/tilesetRegistry'
 import type { TiledMapJson } from '../game2/mapSerializer'
 import { EditorBridge, EditorEvents } from '../game2/editorBridge'
-import { extractThumbnailsForKey, type ThumbnailItem } from '../game2/thumbnailExtractor'
+import type { CompositeObject } from '../game2/compositeObjects'
+import {
+  MousePointer2, Paintbrush, PaintBucket, Eraser, Hand,
+  Undo2, Redo2, BoxSelect,
+} from 'lucide-vue-next'
+import FloatingPanel from './room2editor/FloatingPanel.vue'
 import ObjectPalette from './room2editor/ObjectPalette.vue'
 import LayerPanel from './room2editor/LayerPanel.vue'
 import PropertyPanel from './room2editor/PropertyPanel.vue'
@@ -22,7 +27,7 @@ const emit = defineEmits<{
   (e: 'cancel'): void
 }>()
 
-const activeTool = ref<EditorTool>('ground')
+const activeTool = ref<EditorTool>('select')
 const selectedGid = ref(1)
 const activeLayer = ref('Objects')
 const selection = ref<SelectionInfo | null>(null)
@@ -34,28 +39,21 @@ let backupInterval: number | null = null
 
 const sceneRef = shallowRef<Phaser.Scene | null>(null)
 const tilesetInfos = ref<TilesetInfo[]>([])
+const layerPanelX = ref(800)
+const propPanelX = ref(800)
 
-const tools: { key: EditorTool; label: string; icon: string }[] = [
-  { key: 'ground', label: '地板', icon: '🏗' },
-  { key: 'fill', label: '填充', icon: '🪣' },
-  { key: 'object', label: '物件', icon: '📦' },
-  { key: 'eraser', label: '橡皮擦', icon: '🧹' },
-  { key: 'select', label: '選取', icon: '👆' },
+// ── 工具定義 ────────────────────────────────────────────────────
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+interface ToolDef { key: EditorTool; icon: any; label: string; shortcut: string }
+
+const toolbox: ToolDef[] = [
+  { key: 'select', icon: MousePointer2, label: '選取', shortcut: 'V' },
+  { key: 'ground', icon: Paintbrush, label: '地板', shortcut: 'B' },
+  { key: 'object', icon: BoxSelect, label: '物件', shortcut: 'O' },
+  { key: 'fill', icon: PaintBucket, label: '填充', shortcut: 'G' },
+  { key: 'eraser', icon: Eraser, label: '橡皮擦', shortcut: 'E' },
+  { key: 'hand', icon: Hand, label: '手掌', shortcut: 'H' },
 ]
-
-// ── 地板 tile 縮圖 (#5) ─────────────────────────────────────────
-
-const groundThumbs = ref<ThumbnailItem[]>([])
-
-function generateGroundThumbnails() {
-  const scene = sceneRef.value
-  if (!scene) return
-  groundThumbs.value = extractThumbnailsForKey(
-    scene.textures, tilesetInfos.value, 'tiles_floor', 40,
-  )
-}
-
-watch(sceneRef, (s) => { if (s) generateGroundThumbnails() })
 
 // ── Lifecycle ───────────────────────────────────────────────────
 
@@ -63,7 +61,9 @@ onMounted(async () => {
   await document.fonts.ready
   await nextTick()
 
-  // 檢查 localStorage 備份
+  layerPanelX.value = window.innerWidth - 220
+  propPanelX.value = window.innerWidth - 220
+
   const backup = localStorage.getItem(BACKUP_KEY)
   let initialMap = props.customMapJson as TiledMapJson | undefined
   if (backup && !initialMap) {
@@ -102,7 +102,6 @@ onMounted(async () => {
     showCollision.value = on
   })
 
-  // 自動備份 (30s)
   backupInterval = window.setInterval(autoBackup, 30000)
 })
 
@@ -123,26 +122,41 @@ async function autoBackup() {
   } catch { /* ignore */ }
 }
 
+// ── 工具操作 ────────────────────────────────────────────────────
+
 function handleUndo() { bridge.undo() }
 function handleRedo() { bridge.redo() }
 
 function setTool(tool: EditorTool) {
   activeTool.value = tool
+  bridge.setComposite(null)
   bridge.setTool(tool)
 }
 
-function selectTile(gid: number) {
-  selectedGid.value = gid
-  bridge.setSelectedGid(gid)
-  if (activeTool.value !== 'ground' && activeTool.value !== 'fill') setTool('ground')
-}
-
-function handleObjectSelect(gid: number, layerName: string) {
+function handlePaletteSelect(gid: number, layerName: string) {
   selectedGid.value = gid
   bridge.setSelectedGid(gid)
   bridge.setTargetLayer(layerName)
+  bridge.setComposite(null)
   activeLayer.value = layerName
-  if (activeTool.value !== 'object') setTool('object')
+  if (layerName === 'Ground') {
+    if (activeTool.value !== 'ground' && activeTool.value !== 'fill') {
+      activeTool.value = 'ground'
+      bridge.setTool('ground')
+    }
+  } else {
+    activeTool.value = 'object' as EditorTool
+    bridge.setTool('object')
+  }
+}
+
+function handleCompositeSelect(comp: CompositeObject) {
+  activeTool.value = 'object' as EditorTool
+  bridge.setTool('object')
+  bridge.setComposite(comp)
+  const primaryLayer = comp.tiles[0]?.layer ?? 'Objects'
+  bridge.setTargetLayer(primaryLayer)
+  activeLayer.value = primaryLayer
 }
 
 function handleLayerSelect(layerName: string) {
@@ -154,6 +168,10 @@ function handleToggleVisibility(layerName: string, visible: boolean) {
   bridge.toggleLayerVisibility(layerName, visible)
 }
 
+function handleToggleCollision() {
+  bridge.toggleCollisionPreview()
+}
+
 function handleUpdatePosition(layerName: string, objId: number, x: number, y: number) {
   bridge.updateObjectPosition(layerName, objId, x, y)
 }
@@ -162,11 +180,7 @@ function handleDeleteFromPanel() {
   bridge.deleteSelected()
 }
 
-function toggleCollision() {
-  bridge.toggleCollisionPreview()
-}
-
-// ── 匯出 JSON 下載 ──────────────────────────────────────────────
+// ── 匯出/匯入 ──────────────────────────────────────────────────
 
 async function downloadMapJson() {
   const json = await bridge.getMapData()
@@ -180,9 +194,7 @@ async function downloadMapJson() {
   URL.revokeObjectURL(url)
 }
 
-// ── 匯入 JSON 上傳 ──────────────────────────────────────────────
-
-const MAX_IMPORT_SIZE = 10 * 1024 * 1024 // 10MB
+const MAX_IMPORT_SIZE = 10 * 1024 * 1024
 
 function validateTiledJson(json: unknown): json is TiledMapJson {
   if (!json || typeof json !== 'object') return false
@@ -201,10 +213,7 @@ function uploadMapJson() {
   input.onchange = () => {
     const file = input.files?.[0]
     if (!file) return
-    if (file.size > MAX_IMPORT_SIZE) {
-      alert('檔案過大，上限 10MB')
-      return
-    }
+    if (file.size > MAX_IMPORT_SIZE) { alert('檔案過大，上限 10MB'); return }
     const reader = new FileReader()
     reader.onload = (e) => {
       try {
@@ -216,16 +225,12 @@ function uploadMapJson() {
         localStorage.setItem(BACKUP_KEY, JSON.stringify(json))
         emit('cancel')
         alert('已匯入，請重新進入編輯模式')
-      } catch {
-        alert('JSON 解析失敗')
-      }
+      } catch { alert('JSON 解析失敗') }
     }
     reader.readAsText(file)
   }
   input.click()
 }
-
-// ── 儲存 ────────────────────────────────────────────────────────
 
 const isSaving = ref(false)
 
@@ -241,166 +246,107 @@ async function handleSave() {
     isSaving.value = false
   }
 }
-
-function handleCancel() {
-  emit('cancel')
-}
 </script>
 
 <template>
-  <div class="fixed inset-0 z-50 flex flex-col bg-gray-900">
-    <!-- 頂部工具列 -->
-    <div class="flex items-center gap-2 px-4 py-2 bg-gray-800 border-b border-gray-700">
-      <div class="flex gap-1">
-        <button
-          v-for="t in tools"
-          :key="t.key"
-          :class="[
-            'px-3 py-1.5 rounded text-sm font-medium transition-colors',
-            activeTool === t.key
-              ? 'bg-blue-600 text-white'
-              : 'bg-gray-700 text-gray-300 hover:bg-gray-600',
-          ]"
-          @click="setTool(t.key)"
-        >
-          {{ t.icon }} {{ t.label }}
-        </button>
-      </div>
+  <div class="fixed inset-0 z-50 bg-gray-900">
+    <!-- Phaser Canvas -->
+    <div id="editor-canvas" class="absolute inset-0" />
 
+    <!-- ====== 頂部選單列 ====== -->
+    <div class="absolute top-0 left-0 right-0 z-[61] flex items-center gap-2 px-3 py-1 bg-gray-800/90 backdrop-blur-sm border-b border-gray-700 text-xs">
       <!-- Undo / Redo -->
-      <div class="flex gap-0.5 ml-2">
-        <button
-          class="px-2 py-1.5 rounded text-sm bg-gray-700 text-gray-300 hover:bg-gray-600"
-          title="復原 (Ctrl+Z)"
-          @click="handleUndo"
-        >
-          ↩
-        </button>
-        <button
-          class="px-2 py-1.5 rounded text-sm bg-gray-700 text-gray-300 hover:bg-gray-600"
-          title="重做 (Ctrl+Shift+Z)"
-          @click="handleRedo"
-        >
-          ↪
-        </button>
-      </div>
-
-      <!-- 碰撞預覽 -->
-      <button
-        :class="[
-          'px-2 py-1.5 rounded text-sm font-medium transition-colors ml-1',
-          showCollision
-            ? 'bg-orange-600 text-white'
-            : 'bg-gray-700 text-gray-300 hover:bg-gray-600',
-        ]"
-        title="碰撞預覽 (C)"
-        @click="toggleCollision"
-      >
-        碰撞
+      <button class="p-1 rounded hover:bg-gray-700 text-gray-300" title="復原 (Ctrl+Z)" @click="handleUndo">
+        <Undo2 :size="16" />
+      </button>
+      <button class="p-1 rounded hover:bg-gray-700 text-gray-300" title="重做 (Ctrl+Shift+Z)" @click="handleRedo">
+        <Redo2 :size="16" />
       </button>
 
-      <div class="text-xs text-gray-500 ml-2">
-        Layer: <span class="text-gray-300">{{ activeLayer }}</span>
-        · GID: <span class="text-gray-300">{{ selectedGid }}</span>
-      </div>
+      <div class="w-px h-4 bg-gray-600" />
+
+      <span class="text-gray-500">
+        {{ activeLayer }} · GID {{ selectedGid }}
+      </span>
 
       <div class="flex-1" />
 
-      <div class="text-xs text-gray-600 mr-2">
-        左鍵操作 · 中鍵/Space 平移 · 滾輪縮放 · Del 刪除 · C 碰撞
-      </div>
+      <span class="text-gray-600">左鍵操作 · 右鍵平移 · 滾輪縮放</span>
 
-      <div class="flex gap-1">
-        <button
-          class="px-3 py-1.5 rounded text-xs font-medium bg-gray-700 text-gray-300 hover:bg-gray-600"
-          title="匯出 JSON"
-          @click="downloadMapJson"
-        >
-          匯出
-        </button>
-        <button
-          class="px-3 py-1.5 rounded text-xs font-medium bg-gray-700 text-gray-300 hover:bg-gray-600"
-          title="匯入 JSON"
-          @click="uploadMapJson"
-        >
-          匯入
-        </button>
-        <button
-          :disabled="isSaving"
-          :class="[
-            'px-4 py-1.5 rounded text-sm font-medium text-white',
-            isSaving ? 'bg-green-800 cursor-wait' : 'bg-green-600 hover:bg-green-500',
-          ]"
-          @click="handleSave"
-        >
-          {{ isSaving ? '儲存中...' : '儲存' }}
-        </button>
-        <button
-          class="px-4 py-1.5 rounded text-sm font-medium bg-gray-700 text-gray-300 hover:bg-gray-600"
-          @click="handleCancel"
-        >
-          退出
-        </button>
-      </div>
+      <div class="w-px h-4 bg-gray-600" />
+
+      <button class="px-2 py-0.5 rounded bg-gray-700 text-gray-300 hover:bg-gray-600" @click="downloadMapJson">匯出</button>
+      <button class="px-2 py-0.5 rounded bg-gray-700 text-gray-300 hover:bg-gray-600" @click="uploadMapJson">匯入</button>
+      <button
+        :disabled="isSaving"
+        :class="['px-3 py-0.5 rounded font-medium text-white', isSaving ? 'bg-green-800' : 'bg-green-600 hover:bg-green-500']"
+        @click="handleSave"
+      >{{ isSaving ? '儲存中...' : '儲存' }}</button>
+      <button class="px-3 py-0.5 rounded bg-gray-700 text-gray-300 hover:bg-gray-600" @click="emit('cancel')">退出</button>
     </div>
 
-    <!-- 主體：左側面板 + 畫布 + 右側面板 -->
-    <div class="flex flex-1 overflow-hidden">
-      <!-- 左側：物件面板 -->
-      <div
-        v-if="activeTool === 'object'"
-        class="w-56 border-r border-gray-700 flex-shrink-0 overflow-hidden"
+    <!-- ====== 浮動工具箱 ====== -->
+    <div class="absolute left-3 top-12 z-[62] flex flex-col gap-0.5 bg-gray-800/95 backdrop-blur-sm rounded-lg border border-gray-600 p-1 shadow-xl">
+      <button
+        v-for="t in toolbox"
+        :key="t.key"
+        :class="[
+          'w-8 h-8 rounded flex items-center justify-center transition-colors',
+          activeTool === t.key
+            ? 'bg-blue-600 text-white'
+            : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200',
+        ]"
+        :title="`${t.label} (${t.shortcut})`"
+        @click="setTool(t.key)"
       >
-        <ObjectPalette
-          :scene="sceneRef"
-          :tileset-infos="tilesetInfos"
-          @select="handleObjectSelect"
-        />
-      </div>
-
-      <!-- Phaser Canvas -->
-      <div id="editor-canvas" class="flex-1" />
-
-      <!-- 右側：圖層面板 + 屬性面板 -->
-      <div class="w-48 border-l border-gray-700 flex-shrink-0 overflow-hidden flex flex-col">
-        <div class="flex-1 overflow-y-auto">
-          <LayerPanel
-            :active-layer="activeLayer"
-            @select-layer="handleLayerSelect"
-            @toggle-visibility="handleToggleVisibility"
-          />
-        </div>
-        <div class="border-t border-gray-700">
-          <PropertyPanel
-            :selection="selection"
-            @update-position="handleUpdatePosition"
-            @delete="handleDeleteFromPanel"
-          />
-        </div>
-      </div>
+        <component :is="t.icon" :size="18" />
+      </button>
     </div>
 
-    <!-- 底部面板：地板 tile 選擇（含縮圖） -->
-    <div
-      v-if="activeTool === 'ground' || activeTool === 'fill'"
-      class="bg-gray-800 border-t border-gray-700 p-2"
+    <!-- ====== 浮動素材庫 ====== -->
+    <FloatingPanel
+      title="素材庫"
+      :initial-x="56"
+      :initial-y="44"
+      width="260px"
     >
-      <div class="flex gap-1 overflow-x-auto">
-        <button
-          v-for="item in groundThumbs"
-          :key="item.gid"
-          :class="[
-            'w-10 h-10 rounded border-2 flex-shrink-0 p-0 overflow-hidden',
-            selectedGid === item.gid
-              ? 'border-blue-400'
-              : 'border-gray-600 hover:border-gray-400',
-          ]"
-          :title="`Tile GID ${item.gid}`"
-          @click="selectTile(item.gid)"
-        >
-          <img :src="item.dataUrl" class="w-full h-full" style="image-rendering: pixelated" />
-        </button>
-      </div>
-    </div>
+      <ObjectPalette
+        :scene="sceneRef"
+        :tileset-infos="tilesetInfos"
+        @select="handlePaletteSelect"
+        @select-composite="handleCompositeSelect"
+      />
+    </FloatingPanel>
+
+    <!-- ====== 浮動圖層面板 ====== -->
+    <FloatingPanel
+      title="圖層"
+      :initial-x="layerPanelX"
+      :initial-y="44"
+      width="180px"
+    >
+      <LayerPanel
+        :active-layer="activeLayer"
+        :show-collision="showCollision"
+        @select-layer="handleLayerSelect"
+        @toggle-visibility="handleToggleVisibility"
+        @toggle-collision="handleToggleCollision"
+      />
+    </FloatingPanel>
+
+    <!-- ====== 浮動屬性面板 ====== -->
+    <FloatingPanel
+      v-if="selection"
+      title="屬性"
+      :initial-x="propPanelX"
+      :initial-y="340"
+      width="180px"
+    >
+      <PropertyPanel
+        :selection="selection"
+        @update-position="handleUpdatePosition"
+        @delete="handleDeleteFromPanel"
+      />
+    </FloatingPanel>
   </div>
 </template>

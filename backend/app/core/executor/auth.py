@@ -62,6 +62,10 @@ def inject_auth_to_os_environ(
         os.environ["ANTHROPIC_API_KEY"] = auth_info["api_key"]
         injected_keys.append("ANTHROPIC_API_KEY")
 
+    if auth_info.get("oauth_token"):
+        os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = auth_info["oauth_token"]
+        injected_keys.append("CLAUDE_CODE_OAUTH_TOKEN")
+
     if extra_env:
         for k, v in extra_env.items():
             os.environ[k] = v

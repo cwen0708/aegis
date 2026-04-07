@@ -220,16 +220,17 @@ def update_card_status(card_id: int, new_status: str, append_content: str = ""):
         if not idx:
             return
 
-        file_path = Path(idx.file_path)
-        try:
-            card_data = read_card(file_path)
-            card_data.status = new_status
-            if append_content:
-                card_data.content += append_content
-            write_card(file_path, card_data)
-            sync_card_to_index(session, card_data, idx.project_id, str(file_path))
-        except Exception as e:
-            logger.error(f"[Card {card_id}] Failed to update MD: {e}")
+        if idx.file_path and idx.file_path not in ("", "."):
+            file_path = Path(idx.file_path)
+            try:
+                card_data = read_card(file_path)
+                card_data.status = new_status
+                if append_content:
+                    card_data.content += append_content
+                write_card(file_path, card_data)
+                sync_card_to_index(session, card_data, idx.project_id, str(file_path))
+            except Exception as e:
+                logger.error(f"[Card {card_id}] Failed to update MD: {e}")
 
         # Dual-write ORM
         orm_card = session.get(Card, card_id)
@@ -252,13 +253,14 @@ def mark_card_running(card_id: int, member_id: Optional[int]):
             session.add(idx)
 
             # 也更新 MD 檔
-            file_path = Path(idx.file_path)
-            try:
-                card_data = read_card(file_path)
-                card_data.status = "running"
-                write_card(file_path, card_data)
-            except Exception as e:
-                logger.warning(f"[Card {card_id}] Failed to update MD to running: {e}")
+            if idx.file_path and idx.file_path not in ("", "."):
+                file_path = Path(idx.file_path)
+                try:
+                    card_data = read_card(file_path)
+                    card_data.status = "running"
+                    write_card(file_path, card_data)
+                except Exception as e:
+                    logger.warning(f"[Card {card_id}] Failed to update MD to running: {e}")
 
             # 封鎖同 milestone 中標題相似的待辦卡片
             blocked = block_similar_cards(card_id, idx.title, session)
@@ -1005,7 +1007,7 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
             card_data.content = card_data.description
     except Exception as e:
         logger.error(f"[Worker] Failed to read card {idx.card_id}: {e}")
-        cron_job_id = _parse_cron_job_id(idx.title)
+        cron_job_id = idx.cron_job_id or _parse_cron_job_id(idx.title)
         if cron_job_id is not None:
             with Session(engine) as session:
                 from app.models.core import CronJob as CJ
@@ -1110,18 +1112,19 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
         ]
         logger.info(f"[Worker] Card {idx.card_id}: card-level model override → {card_model}")
     else:
-        # 成本感知模型路由：tag-based > complexity-based > 帳號預設
+        # 成本感知模型路由：tag-based > max(complexity, member_model) > 帳號預設
         try:
             card_tags = json.loads(getattr(idx, "tags_json", "[]") or "[]")
         except (json.JSONDecodeError, TypeError):
             card_tags = []
-        routed_model = resolve_model(card_tags, effective_prompt)
+        member_model = accounts_list[0][1] if accounts_list else ""
+        routed_model = resolve_model(card_tags, effective_prompt, member_model=member_model)
         if routed_model:
             accounts_list = [
                 (provider, routed_model, auth, name)
                 for provider, _model, auth, name in accounts_list
             ]
-            logger.info(f"[Worker] Card {idx.card_id}: model route → {routed_model}")
+            logger.info(f"[Worker] Card {idx.card_id}: model route → {routed_model} (member default: {member_model})")
 
     # Prompt Hardening：附加安全規則提醒，防止長對話稀釋安全限制
     from app.core.prompt_hardening import harden_prompt
@@ -1247,7 +1250,7 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
         return
 
     # 依卡片類型分派結果處理
-    cron_job_id = _parse_cron_job_id(idx.title)
+    cron_job_id = idx.cron_job_id or _parse_cron_job_id(idx.title)
     if is_chat_mode:
         _handle_chat_result(idx, result, new_status, token_info, member_slug, chat_id)
         return

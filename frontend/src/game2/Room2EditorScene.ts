@@ -18,13 +18,14 @@ import {
 } from './editorHistory'
 import { exportMapJson, fetchDefaultTilesets, type TiledMapJson } from './mapSerializer'
 import { EditorEvents } from './editorBridge'
+import type { CompositeObject } from './compositeObjects'
 import {
   DEPTH_BASE_LAYER, DEPTH_GRID, DEPTH_HOVER, DEPTH_COLLISION,
   DEPTH_SELECTION, DEPTH_HOVER_SPRITE, DEPTH_SORT_FACTOR,
   ZOOM_MIN, ZOOM_MAX, ZOOM_INITIAL, INITIAL_OBJECT_ID, isDepthSorted,
 } from './editorConstants'
 
-export type EditorTool = 'ground' | 'eraser' | 'select' | 'object' | 'fill'
+export type EditorTool = 'ground' | 'eraser' | 'select' | 'object' | 'fill' | 'hand'
 
 export interface EditorLayerDef {
   name: string
@@ -79,6 +80,8 @@ export default class Room2EditorScene extends Phaser.Scene {
   private layerSprites: Map<string, Phaser.GameObjects.Sprite[]> = new Map()
   private layerObjects: Map<string, PlacedObject[]> = new Map()
   private hoverSprite: Phaser.GameObjects.Sprite | null = null
+  private hoverCompositeSprites: Phaser.GameObjects.Sprite[] = []
+  private activeComposite: CompositeObject | null = null
 
   // Selection & drag (Phase 3)
   private history = new EditorHistory()
@@ -177,7 +180,7 @@ export default class Room2EditorScene extends Phaser.Scene {
   // ── Input ──────────────────────────────────────────────────────
 
   private setupInput() {
-    // ── 統一 pointermove（單一 handler）──────────────────────
+    // ── pointermove ─────────────────────────────────────────
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
       // pinch zoom
       if (this.input.pointer1.isDown && this.input.pointer2.isDown) {
@@ -186,13 +189,13 @@ export default class Room2EditorScene extends Phaser.Scene {
       }
       if (this.isPinching) return
 
-      // 拖曳物件（select 模式下左鍵拖曳已選物件）
+      // 拖曳物件
       if (this.isDragging && pointer.isDown) {
         this.handleDragMove(pointer)
         return
       }
 
-      // 攝影機平移（中鍵 or Space+左鍵）
+      // 攝影機平移（右鍵 / 中鍵 / Space+左鍵 / hand 工具左鍵）
       if (this.isPanning && pointer.isDown) {
         this.cameras.main.scrollX -= (pointer.x - pointer.prevPosition.x) / this.cameras.main.zoom
         this.cameras.main.scrollY -= (pointer.y - pointer.prevPosition.y) / this.cameras.main.zoom
@@ -212,35 +215,33 @@ export default class Room2EditorScene extends Phaser.Scene {
 
     // ── pointerdown ─────────────────────────────────────────
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      // 中鍵 → 攝影機平移
-      if (pointer.middleButtonDown()) {
+      // 右鍵 / 中鍵 → 永遠攝影機平移（like Photoshop）
+      if (pointer.rightButtonDown() || pointer.middleButtonDown()) {
         this.isPanning = true
         return
       }
 
-      // Space + 左鍵 → 攝影機平移
-      if (this.isSpaceDown && !pointer.rightButtonDown()) {
+      // Space+左鍵 or hand 工具 → 攝影機平移
+      if (this.isSpaceDown || this.currentTool === 'hand') {
         this.isPanning = true
         return
       }
 
       // 左鍵操作（依工具）
-      if (!pointer.rightButtonDown() && !pointer.middleButtonDown()) {
-        switch (this.currentTool) {
-          case 'select':
-            this.handleSelectDown(pointer)
-            break
-          case 'object':
-            this.handleObjectPlace(pointer)
-            break
-          case 'fill':
-            this.handleFloodFill(pointer)
-            break
-          case 'ground':
-          case 'eraser':
-            this.handlePaint(pointer)
-            break
-        }
+      switch (this.currentTool) {
+        case 'select':
+          this.handleSelectDown(pointer)
+          break
+        case 'object':
+          this.handleObjectPlace(pointer)
+          break
+        case 'fill':
+          this.handleFloodFill(pointer)
+          break
+        case 'ground':
+        case 'eraser':
+          this.handlePaint(pointer)
+          break
       }
     })
 
@@ -377,6 +378,19 @@ export default class Room2EditorScene extends Phaser.Scene {
   }
 
   private updateObjectHover(worldPoint: Phaser.Math.Vector2) {
+    const snapX = Math.floor(worldPoint.x / TILE_SIZE) * TILE_SIZE
+    const snapY = (Math.floor(worldPoint.y / TILE_SIZE) + 1) * TILE_SIZE
+
+    // 組合物件預覽
+    if (this.activeComposite) {
+      this.destroyHoverSprite()
+      this.updateCompositeHover(snapX, snapY)
+      return
+    }
+
+    // 單一物件預覽（先清掉組合 hover）
+    for (const s of this.hoverCompositeSprites) s.destroy()
+    this.hoverCompositeSprites = []
     const resolved = resolveGid(this.selectedGid, this.tilesetInfos)
     if (!resolved) {
       this.destroyHoverSprite()
@@ -384,8 +398,6 @@ export default class Room2EditorScene extends Phaser.Scene {
     }
 
     const cfg = this.getFrameSize(resolved.key)
-    const snapX = Math.floor(worldPoint.x / TILE_SIZE) * TILE_SIZE
-    const snapY = (Math.floor(worldPoint.y / TILE_SIZE) + 1) * TILE_SIZE
 
     if (!this.hoverSprite) {
       this.hoverSprite = this.add.sprite(0, 0, resolved.key, resolved.frame)
@@ -402,10 +414,45 @@ export default class Room2EditorScene extends Phaser.Scene {
     )
   }
 
+  private updateCompositeHover(baseX: number, baseY: number) {
+    const comp = this.activeComposite!
+    const needed = comp.tiles.length
+
+    // 建立或重用 hover sprites
+    while (this.hoverCompositeSprites.length < needed) {
+      const s = this.add.sprite(0, 0, '__DEFAULT')
+      s.setAlpha(0.5).setDepth(DEPTH_HOVER_SPRITE)
+      this.hoverCompositeSprites.push(s)
+    }
+    // 隱藏多餘的
+    for (let i = needed; i < this.hoverCompositeSprites.length; i++) {
+      this.hoverCompositeSprites[i]!.setVisible(false)
+    }
+
+    for (let i = 0; i < needed; i++) {
+      const tile = comp.tiles[i]!
+      const sprite = this.hoverCompositeSprites[i]!
+      const resolved = resolveGid(tile.gid, this.tilesetInfos)
+      if (!resolved) { sprite.setVisible(false); continue }
+
+      const cfg = this.getFrameSize(resolved.key)
+      sprite.setVisible(true)
+      sprite.setTexture(resolved.key, resolved.frame)
+      sprite.setPosition(
+        baseX + tile.col * TILE_SIZE + cfg.frameWidth / 2,
+        baseY + tile.row * TILE_SIZE - cfg.frameHeight / 2,
+      )
+    }
+  }
+
   private destroyHoverSprite() {
     if (this.hoverSprite) {
       this.hoverSprite.destroy()
       this.hoverSprite = null
+    }
+    if (this.hoverCompositeSprites.length > 0) {
+      for (const s of this.hoverCompositeSprites) s.destroy()
+      this.hoverCompositeSprites = []
     }
   }
 
@@ -545,15 +592,21 @@ export default class Room2EditorScene extends Phaser.Scene {
   // ── Object placement (with history) ───────────────────────────
 
   private handleObjectPlace(pointer: Phaser.Input.Pointer) {
-    const resolved = resolveGid(this.selectedGid, this.tilesetInfos)
-    if (!resolved) return
-
     const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y)
-    const cfg = this.getFrameSize(resolved.key)
-
     const snapX = Math.floor(worldPoint.x / TILE_SIZE) * TILE_SIZE
     const snapY = (Math.floor(worldPoint.y / TILE_SIZE) + 1) * TILE_SIZE
 
+    // 組合物件放置
+    if (this.activeComposite) {
+      this.placeComposite(this.activeComposite, snapX, snapY)
+      return
+    }
+
+    // 單一物件放置
+    const resolved = resolveGid(this.selectedGid, this.tilesetInfos)
+    if (!resolved) return
+
+    const cfg = this.getFrameSize(resolved.key)
     const obj: PlacedObject = {
       id: this.nextObjectId++,
       gid: this.selectedGid,
@@ -565,6 +618,30 @@ export default class Room2EditorScene extends Phaser.Scene {
 
     const cmd = new PlaceObjectCommand(this, this.targetLayerName, obj)
     this.history.execute(cmd)
+  }
+
+  private placeComposite(comp: CompositeObject, baseX: number, baseY: number) {
+    const cmds: PlaceObjectCommand[] = []
+
+    for (const tile of comp.tiles) {
+      const resolved = resolveGid(tile.gid, this.tilesetInfos)
+      if (!resolved) continue
+
+      const cfg = this.getFrameSize(resolved.key)
+      const obj: PlacedObject = {
+        id: this.nextObjectId++,
+        gid: tile.gid,
+        x: baseX + tile.col * TILE_SIZE,
+        y: baseY + tile.row * TILE_SIZE,
+        width: cfg.frameWidth,
+        height: cfg.frameHeight,
+      }
+      cmds.push(new PlaceObjectCommand(this, tile.layer, obj))
+    }
+
+    if (cmds.length > 0) {
+      this.history.execute(new BatchCommand(cmds))
+    }
   }
 
   // ── Load original object layer into editable state ─────────────
@@ -855,6 +932,10 @@ export default class Room2EditorScene extends Phaser.Scene {
 
   setTargetLayer(layerName: string) {
     this.targetLayerName = layerName
+  }
+
+  setComposite(comp: CompositeObject | null) {
+    this.activeComposite = comp
   }
 
   getTilesetInfos(): TilesetInfo[] {

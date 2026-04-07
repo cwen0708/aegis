@@ -108,7 +108,8 @@ def sync_card_to_index(
     fpath = Path(file_path)
     mtime = fpath.stat().st_mtime if fpath.exists() else 0.0
     content_hash = hashlib.sha256(fpath.read_bytes()).hexdigest() if fpath.exists() else ""
-    tags_json = json.dumps(card.tags, ensure_ascii=False)
+    tags = card.tags if isinstance(card.tags, list) else ([card.tags] if card.tags else [])
+    tags_json = json.dumps(tags, ensure_ascii=False)
 
     existing = session.get(CardIndex, card.id)
     if existing:

@@ -140,16 +140,16 @@ process_pool.send_message → 小良的 session 回應 → 回傳給小牧
 發言完可能隨機 @ 其他成員繼續
 ```
 
-## 實施優先級
+## 實施狀態
 
-| 階段 | 項目 | 狀態 | 說明 |
-|------|------|------|------|
-| **P0** | ask_member API | ✅ 已完成 | `POST /api/v1/agent-chat/ask` |
-| **P0** | ask-member.md skill | ✅ 已完成 | 所有成員自動擁有 |
-| **P1** | ConversationRoom coordinator | 待做 | 取代卡片流轉站會，省 ~66% token |
-| **P1** | `meetings/` 目錄 + 紀錄格式 | 待做 | coordinator 的前置 |
-| **P2** | CronJob 整合 | 待做 | cron_poller 觸發 coordinator 而非建卡片 |
-| **P3** | 群聊 UI | 構想 | 辦公室頁面的會議按鈕 |
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| ask_member API | ✅ 已完成 | `POST /api/v1/agent-chat/ask` |
+| ask-member.md skill | ✅ 已完成 | 所有成員自動擁有 |
+| ConversationRoom coordinator | ✅ 已完成 | 輪流制 + 主持人制，每日站會使用中 |
+| `meetings/` 目錄 + 紀錄格式 | ✅ 已完成 | 站會紀錄自動寫入 |
+| CronJob 整合 | ✅ 已完成 | `api_url="meeting"` 觸發 coordinator |
+| 群聊 UI | 構想 | 辦公室頁面的會議按鈕 |
 
 ## 與 Executor 模組的關係
 

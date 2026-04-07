@@ -1,17 +1,17 @@
 """成本感知模型路由 — 根據卡片標籤與 prompt 複雜度自動選擇最經濟的模型。
 
-優先順序：card.model > tag-based route > complexity-based > member-account > provider default
+優先順序：card.model > tag-based > prompt 提到模型 > max(complexity, member_model)
+
+所有模型名稱和分數從 model_registry 取得，不在此 hardcode。
 """
 
 import re
 from typing import Optional
 
-# 模型成本等級（低 → 高）
-MODEL_TIER = {
-    "haiku": 1,
-    "sonnet": 2,
-    "opus": 3,
-}
+from app.core.model_registry import (
+    get_tier, FAMILY_TIER, FAMILY_ALIASES,
+    PROVIDER_FAILOVER, FAILOVER_DEFAULT_MODEL,
+)
 
 # Tag → 模型映射規則（按優先順序排列，第一個匹配即返回）
 _TAG_RULES: list[tuple[set[str], str]] = [
@@ -32,42 +32,49 @@ _SONNET_KEYWORDS = re.compile(
     re.IGNORECASE,
 )
 
-
-# Provider Failover Chain — 當某 provider 所有帳號都失敗時，依序嘗試的備援 provider
-PROVIDER_FAILOVER: dict[str, list[str]] = {
-    "claude": ["gemini", "openai"],
-    "gemini": ["claude", "openai"],
-    "openai": ["claude", "gemini"],
-}
-
-# 各 provider 的預設 failover 模型
-_FAILOVER_DEFAULT_MODEL: dict[str, str] = {
-    "claude": "sonnet",
-    "gemini": "gemini-2.0-flash",
-    "openai": "gpt-4o-mini",
-}
+# prompt 中可偵測的模型名稱（按 tier 高→低排序）
+_PROMPT_MODEL_NAMES = sorted(FAMILY_TIER.keys(), key=lambda m: FAMILY_TIER[m], reverse=True)
 
 
 def get_failover_chain(provider: str) -> list[str]:
-    """回傳指定 provider 的備援 provider 列表。未知 provider 回傳空列表。"""
+    """回傳指定 provider 的備援 provider 列表。"""
     return PROVIDER_FAILOVER.get(provider, [])
 
 
 def get_failover_model(provider: str) -> str:
-    """回傳 failover provider 應使用的預設模型。未知 provider 回傳空字串。"""
-    return _FAILOVER_DEFAULT_MODEL.get(provider, "")
+    """回傳 failover provider 應使用的預設模型。"""
+    return FAILOVER_DEFAULT_MODEL.get(provider, "")
+
+
+def detect_model_mention(prompt: str) -> Optional[str]:
+    """偵測 prompt 中是否直接提到模型名稱（用戶明確指定）。
+
+    例如：「請用 opus 來分析」「use sonnet」「haiku 就好」「用 gemini-pro」
+    按 tier 高→低檢查，優先匹配高階模型。
+    """
+    lower = prompt.lower()
+    for model in _PROMPT_MODEL_NAMES:
+        if model in lower:
+            return model
+    # 也檢查別名
+    for alias, family in FAMILY_ALIASES.items():
+        if alias in lower and alias not in FAMILY_TIER:
+            return family
+    return None
 
 
 def assess_complexity(prompt: str) -> str:
     """根據 prompt 長度與內容評估複雜度，回傳建議模型等級。
 
-    - 短 prompt（<500 字元）且無多步驟指標 → "haiku"
-    - 中等 prompt（500-2000 字元）或含程式碼修改關鍵字 → "sonnet"
-    - 長 prompt（>2000 字元）或含架構設計/多步驟推理關鍵字 → "opus"
+    優先級：prompt 明確提到模型 > 關鍵字 > 長度
     """
+    # prompt 直接提到模型名稱 → 尊重用戶意圖
+    mentioned = detect_model_mention(prompt)
+    if mentioned:
+        return mentioned
+
     length = len(prompt)
 
-    # 關鍵字優先：opus 關鍵字不論長度都升級
     if _OPUS_KEYWORDS.search(prompt):
         return "opus"
 
@@ -81,14 +88,7 @@ def assess_complexity(prompt: str) -> str:
 
 
 def resolve_model_by_tags(tags: list[str], default: Optional[str] = None) -> Optional[str]:
-    """根據卡片 tags 解析模型。
-
-    規則（按優先順序）：
-    - tags 含 AI-Opus 或 complex → opus
-    - tags 含 AI-Sonnet → sonnet
-    - tags 含 AI-Haiku、simple 或 Refactor → haiku
-    - 其他 → 回傳 default（不改變現有行為）
-    """
+    """根據卡片 tags 解析模型。"""
     tag_set = set(tags)
     for trigger_tags, model in _TAG_RULES:
         if tag_set & trigger_tags:
@@ -96,18 +96,29 @@ def resolve_model_by_tags(tags: list[str], default: Optional[str] = None) -> Opt
     return default
 
 
-def resolve_model(tags: list[str], prompt: str = "", default: Optional[str] = None) -> Optional[str]:
+def resolve_model(tags: list[str], prompt: str = "", default: Optional[str] = None,
+                   member_model: Optional[str] = None) -> Optional[str]:
     """統一模型路由入口。
 
-    優先級：tag-based > complexity-based > default
+    優先級：tag-based > max(complexity-based, member_model) > default
+
+    member_model 作為 floor（最低保障），complexity-based 只能往上升不能往下降。
     """
-    # 1. Tag-based 路由
+    # 1. Tag-based 路由（明確指定，最高優先）
     tag_result = resolve_model_by_tags(tags)
     if tag_result:
         return tag_result
 
-    # 2. Complexity-based 路由（僅在有 prompt 時啟用）
+    # 2. Complexity-based 路由（含 prompt 提到模型名稱偵測）
     if prompt:
-        return assess_complexity(prompt)
+        routed = assess_complexity(prompt)
+        if member_model:
+            routed_tier = get_tier(routed)
+            member_tier = get_tier(member_model)
+            # 未知模型（tier=-1）→ 尊重成員設定，不降級
+            if member_tier < 0:
+                return member_model
+            return routed if routed_tier >= member_tier else member_model
+        return routed
 
-    return default
+    return member_model or default
