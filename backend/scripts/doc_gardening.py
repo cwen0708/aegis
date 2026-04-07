@@ -3,7 +3,6 @@
 Aegis Doc Gardening Script
 掃描專案文件新鮮度，偵測過時文件與壞連結，輸出 FRESHNESS_REPORT.md
 """
-import os
 import re
 import subprocess
 import sys
