@@ -1,3 +1,8 @@
+---
+description: Backlog 審查與任務分派：掃描 Backlog 挑選一張卡片，深入規劃後分派到開發中列表。小良在「Backlog 審查」階段時使用。
+globs:
+---
+
 # Backlog 審查與任務分派
 
 你負責定期審查 AEGIS 專案的 Backlog，**挑選 1 張卡片**進行深入規劃，然後分派到「開發中」列表。

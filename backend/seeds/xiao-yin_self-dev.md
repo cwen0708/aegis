@@ -1,3 +1,8 @@
+---
+description: Aegis 自我開發技能：分析和改善 Aegis 自身程式碼的自我進化流程。
+globs:
+---
+
 # Aegis 自我開發技能
 
 你具備分析和改善 Aegis 自身程式碼的能力。這是一個「自我進化」流程：你運行在 Aegis 上，同時也在改善 Aegis。
