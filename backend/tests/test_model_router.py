@@ -57,6 +57,18 @@ class TestResolveModelByTags:
         """混合業務標籤和模型標籤。"""
         assert resolve_model_by_tags(["P0", "Cost", "AI-Haiku", "Feature"]) == "haiku"
 
+    def test_m1_tag_returns_ollama(self):
+        """M1 標籤 → ollama 本地模型。"""
+        assert resolve_model_by_tags(["M1"]) == "ollama"
+
+    def test_ollama_tag_returns_ollama(self):
+        """ollama 標籤 → ollama 本地模型。"""
+        assert resolve_model_by_tags(["ollama"]) == "ollama"
+
+    def test_ollama_priority_over_opus(self):
+        """ollama/M1 規則優先級高於 AI-Opus。"""
+        assert resolve_model_by_tags(["M1", "AI-Opus"]) == "ollama"
+
 
 class TestModelTier:
     """MODEL_TIER 常數驗證。"""
