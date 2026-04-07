@@ -94,12 +94,14 @@ def collect_hooks(source: str = "worker") -> list[Hook]:
     from app.hooks.skill_generator import SkillGeneratorHook
     from app.hooks.token_counting import TokenCountingHook
     from app.hooks.verification import VerificationHook
+    from app.hooks.content_detector import ContentDetectorHook
 
     if source == "worker":
         return [
             WebSocketHook(),        # DURING: Kanban log
             EventLogHook(),         # DURING: 事件記錄 → JSONL（Playback 回放）
             OneStackHook(),         # DURING: aegis_stream + POST: 任務回報
+            ContentDetectorHook(),  # DURING+POST: 輸出端敏感資料偵測
             BroadcastHook(),        # POST: task_completed 事件
             DialogueHook(),         # POST: AVG 對話
             MediaHook(),            # POST: send_file 標記 → 頻道發送
