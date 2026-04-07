@@ -1,10 +1,8 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
-import { config } from '../config'
+import { apiClient } from '../services/api/client'
 
 export const useDomainStore = defineStore('domain', () => {
-  const API = config.apiUrl
-
   interface DomainInfo {
     id: number
     hostname: string
@@ -20,11 +18,10 @@ export const useDomainStore = defineStore('domain', () => {
   async function resolve() {
     try {
       const hostname = window.location.hostname
-      const res = await fetch(`${API}/api/v1/domain/current?hostname=${encodeURIComponent(hostname)}`)
-      if (res.ok) {
-        const data = await res.json()
-        domain.value = data.domain
-      }
+      const data = await apiClient.get<{ domain: DomainInfo }>(
+        `/api/v1/domain/current?hostname=${encodeURIComponent(hostname)}`,
+      )
+      domain.value = data.domain
     } catch (e) {
       console.warn('Domain resolution failed:', e)
     }
