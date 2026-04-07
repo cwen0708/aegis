@@ -640,7 +640,12 @@ class Room(SQLModel, table=True):
     name: str                                    # "研發部", "維運中心"
     description: str = Field(default="")
     layout_json: str = Field(default="{}")       # Phaser 辦公室佈局
-    layout_type: str = Field(default="tiled")    # "tiled" | "classic"
+    layout_type: str = Field(default="tiled")
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        if self.layout_type not in ("classic", "tiled"):
+            raise ValueError(f"layout_type must be 'classic' or 'tiled', got '{self.layout_type}'")
     position: int = Field(default=0)             # 顯示順序
     is_active: bool = Field(default=True)
     allow_anonymous: bool = Field(default=False)  # 允許未登入瀏覽
