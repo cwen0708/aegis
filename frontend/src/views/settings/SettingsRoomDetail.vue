@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Save, Loader2, Trash2, AlertTriangle, Users } from 'lucide-vue-next'
+import { ArrowLeft, Save, Loader2, Trash2, AlertTriangle, Users, LayoutGrid, Monitor } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 import ConfirmDialog from '../../components/ConfirmDialog.vue'
 import { config } from '../../config'
@@ -16,6 +16,9 @@ const roomId = Number(route.params.id)
 const loading = ref(true)
 const saving = ref(false)
 const confirmDelete = ref(false)
+const confirmLayoutSwitch = ref(false)
+const pendingLayoutType = ref<'classic' | 'tiled' | null>(null)
+const switchingLayout = ref(false)
 
 interface MemberOption { id: number; name: string; avatar: string }
 
@@ -23,6 +26,7 @@ const form = ref({
   name: '',
   description: '',
   allow_anonymous: false,
+  layout_type: 'tiled' as 'classic' | 'tiled',
   member_ids: [] as number[],
 })
 
@@ -37,6 +41,7 @@ async function fetchRoom() {
       name: room.name,
       description: room.description,
       allow_anonymous: room.allow_anonymous ?? false,
+      layout_type: room.layout_type ?? 'tiled',
       member_ids: [...(room.member_ids || [])],
     }
   } catch (e: any) {
@@ -95,6 +100,41 @@ async function doDelete() {
   }
 }
 
+function requestLayoutSwitch(newType: 'classic' | 'tiled') {
+  if (newType === form.value.layout_type) return
+  pendingLayoutType.value = newType
+  confirmLayoutSwitch.value = true
+}
+
+async function doLayoutSwitch() {
+  if (!pendingLayoutType.value) return
+  switchingLayout.value = true
+  try {
+    // 1. 更新 layout_type
+    const res = await fetch(`${API}/api/v1/rooms/${roomId}`, {
+      method: 'PATCH',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ layout_type: pendingLayoutType.value }),
+    })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || '切換失敗')
+
+    // 2. 清空 layout_json（使用獨立的 layout endpoint）
+    await fetch(`${API}/api/v1/rooms/${roomId}/layout`, {
+      method: 'PATCH',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ layout_json: '{}' }),
+    })
+
+    form.value = { ...form.value, layout_type: pendingLayoutType.value }
+    store.addToast('佈局模式已切換', 'success')
+  } catch (e: any) {
+    store.addToast(e.message, 'error')
+  }
+  switchingLayout.value = false
+  confirmLayoutSwitch.value = false
+  pendingLayoutType.value = null
+}
+
 onMounted(async () => {
   await Promise.all([fetchRoom(), fetchMembers()])
   loading.value = false
@@ -145,6 +185,33 @@ onMounted(async () => {
         </div>
       </div>
 
+      <!-- 佈局模式 -->
+      <div class="bg-slate-800/50 rounded-2xl border border-slate-700 p-6 space-y-4">
+        <h3 class="text-sm font-bold text-slate-300 uppercase tracking-wider">佈局模式</h3>
+        <div class="flex gap-3">
+          <button
+            v-for="opt in ([
+              { value: 'tiled' as const, label: '磚塊模式', desc: '卡片式成員排列' },
+              { value: 'classic' as const, label: '經典模式', desc: 'Phaser 虛擬辦公室' },
+            ])"
+            :key="opt.value"
+            @click="requestLayoutSwitch(opt.value)"
+            class="flex-1 rounded-lg border p-4 transition-all text-left"
+            :class="form.layout_type === opt.value
+              ? 'border-emerald-500 bg-emerald-500/10'
+              : 'border-slate-600 bg-slate-900 hover:border-slate-500 cursor-pointer'"
+          >
+            <div class="flex items-center gap-2">
+              <LayoutGrid v-if="opt.value === 'tiled'" class="w-4 h-4" :class="form.layout_type === opt.value ? 'text-emerald-400' : 'text-slate-500'" />
+              <Monitor v-else class="w-4 h-4" :class="form.layout_type === opt.value ? 'text-emerald-400' : 'text-slate-500'" />
+              <span class="text-sm font-medium" :class="form.layout_type === opt.value ? 'text-slate-200' : 'text-slate-400'">{{ opt.label }}</span>
+              <span v-if="form.layout_type === opt.value" class="ml-auto text-[10px] text-emerald-400 font-medium">目前使用</span>
+            </div>
+            <p class="text-xs mt-1 ml-6" :class="form.layout_type === opt.value ? 'text-slate-400' : 'text-slate-600'">{{ opt.desc }}</p>
+          </button>
+        </div>
+      </div>
+
       <!-- AI 成員 -->
       <div class="bg-slate-800/50 rounded-2xl border border-slate-700 p-6 space-y-4">
         <div class="flex items-center gap-2">
@@ -181,5 +248,14 @@ onMounted(async () => {
     </template>
 
     <ConfirmDialog :show="confirmDelete" title="刪除空間" :message="`確定要刪除空間「${form.name}」？`" confirm-text="刪除" @confirm="doDelete" @cancel="confirmDelete = false" />
+    <ConfirmDialog
+      :show="confirmLayoutSwitch"
+      title="切換佈局模式"
+      :message="`切換為${pendingLayoutType === 'tiled' ? '磚塊' : '經典'}模式將會清空目前的佈局配置，確定要繼續嗎？`"
+      confirm-text="確認切換"
+      confirm-class="bg-amber-500 hover:bg-amber-600"
+      @confirm="doLayoutSwitch"
+      @cancel="confirmLayoutSwitch = false; pendingLayoutType = null"
+    />
   </div>
 </template>

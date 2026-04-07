@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Shield, ListTodo, Settings, Clock, FolderOpen, Wifi, WifiOff, Sun, Moon, Zap, Building2, Home, PanelLeftClose, PanelLeftOpen, Rocket, LogIn, LogOut, Monitor } from 'lucide-vue-next'
+import { Shield, ListTodo, Settings, Clock, FolderOpen, Wifi, WifiOff, Sun, Moon, Zap, Building2, Home, PanelLeftClose, PanelLeftOpen, Rocket, LogIn, LogOut, Monitor, LayoutGrid } from 'lucide-vue-next'
 import { useWebSocket } from './composables/useWebSocket'
 import { useResponsive } from './composables/useResponsive'
 import { useAegisStore } from './stores/aegis'
@@ -36,7 +36,7 @@ const { isMobile } = useResponsive()
 
 
 // 空間列表（從 API 取，不再從 domain store）
-const rooms = ref<{id: number, name: string}[]>([])
+const rooms = ref<{id: number, name: string, layout_type?: string}[]>([])
 async function fetchRooms() {
   try {
     const token = localStorage.getItem('aegis-token')
@@ -172,7 +172,7 @@ function mobileNavClass(path: string) {
               class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium"
               :class="navClass(`/rooms/${room.id}`)"
             >
-              <component :is="idx === 0 ? Home : Building2" class="w-5 h-5 shrink-0" />
+              <component :is="room.layout_type === 'classic' ? Monitor : LayoutGrid" class="w-5 h-5 shrink-0" />
               <span v-if="!sidebarCollapsed">{{ room.name }}</span>
             </router-link>
           </template>
