@@ -183,6 +183,35 @@ def parse_ollama_stream(line: str) -> Optional[str]:
     return None
 
 
+def parse_openai_stream(line: str) -> Optional[str]:
+    """從 OpenAI SSE 流式輸出單行提取文字內容。
+
+    支援格式：
+    - data: {"choices":[{"delta":{"content":"..."}}]}
+    - data: [DONE] 終止信號 → None
+
+    Returns:
+        提取的文字內容，或 None（非文字行、空 delta 或解析失敗）
+    """
+    stripped = line.strip()
+    if not stripped.startswith("data:"):
+        return None
+    payload = stripped[5:].strip()
+    if payload == "[DONE]":
+        return None
+    try:
+        data = json.loads(payload)
+        choices = data.get("choices")
+        if isinstance(choices, list) and choices:
+            delta = choices[0].get("delta", {})
+            content = delta.get("content")
+            if content:
+                return content
+    except (json.JSONDecodeError, KeyError, TypeError, IndexError):
+        pass
+    return None
+
+
 def parse_openai_json(output: str) -> Dict[str, Any]:
     """從 OpenAI CLI wrapper 的 JSON 輸出解析結果與 token 用量"""
     try:

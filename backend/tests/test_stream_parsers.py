@@ -10,6 +10,7 @@ from app.core.stream_parsers import (
     parse_tool_call,
     parse_ollama_stream,
     parse_openai_json,
+    parse_openai_stream,
 )
 
 
@@ -331,6 +332,58 @@ class TestParseOllamaStream:
         """既無 message 也無 response → None。"""
         line = json.dumps({"model": "llama3", "done": True})
         assert parse_ollama_stream(line) is None
+
+
+# ── parse_openai_stream ────────────────────────────────────
+
+class TestParseOpenaiStream:
+    """parse_openai_stream 函式測試。"""
+
+    def test_normal_sse_chunk(self):
+        """正常 SSE chunk 提取 content。"""
+        line = 'data: {"choices":[{"delta":{"content":"你好"}}]}'
+        assert parse_openai_stream(line) == "你好"
+
+    def test_empty_delta(self):
+        """delta 無 content → None。"""
+        line = 'data: {"choices":[{"delta":{}}]}'
+        assert parse_openai_stream(line) is None
+
+    def test_empty_content(self):
+        """content 為空字串 → None。"""
+        line = 'data: {"choices":[{"delta":{"content":""}}]}'
+        assert parse_openai_stream(line) is None
+
+    def test_done_signal(self):
+        """[DONE] 終止信號 → None。"""
+        assert parse_openai_stream("data: [DONE]") is None
+
+    def test_malformed_json(self):
+        """不合法 JSON → None。"""
+        assert parse_openai_stream("data: {bad json}") is None
+
+    def test_not_sse_line(self):
+        """非 data: 開頭 → None。"""
+        assert parse_openai_stream("event: ping") is None
+
+    def test_empty_string(self):
+        """空字串 → None。"""
+        assert parse_openai_stream("") is None
+
+    def test_empty_choices(self):
+        """choices 為空陣列 → None。"""
+        line = 'data: {"choices":[]}'
+        assert parse_openai_stream(line) is None
+
+    def test_whitespace_around_data(self):
+        """data: 前後有空白仍可解析。"""
+        line = '  data:   {"choices":[{"delta":{"content":"ok"}}]}  '
+        assert parse_openai_stream(line) == "ok"
+
+    def test_role_delta_no_content(self):
+        """role delta（首個 chunk）無 content → None。"""
+        line = 'data: {"choices":[{"delta":{"role":"assistant"}}]}'
+        assert parse_openai_stream(line) is None
 
 
 # ── parse_openai_json ───────────────────────────────────────
