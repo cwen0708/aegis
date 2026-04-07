@@ -1,5 +1,6 @@
 #!/bin/bash
-# Aegis Heartbeat 三層安裝腳本
+# Aegis Heartbeat 安裝腳本（L1 + L2）
+# L3 由 Aegis 內部排程執行（CronJob #1）
 # 用法: sudo bash install.sh [--uninstall]
 
 set -e
@@ -11,10 +12,8 @@ USER="${SUDO_USER:-$(whoami)}"
 
 # 讀取 config.json 的 AI 設定
 L2_MODEL="haiku"
-L3_MODEL="sonnet"
 if [ -f "$SCRIPT_DIR/config.json" ]; then
     L2_MODEL=$(python3 -c "import json; print(json.load(open('$SCRIPT_DIR/config.json')).get('ai',{}).get('l2_model','haiku'))" 2>/dev/null || echo "haiku")
-    L3_MODEL=$(python3 -c "import json; print(json.load(open('$SCRIPT_DIR/config.json')).get('ai',{}).get('l3_model','sonnet'))" 2>/dev/null || echo "sonnet")
 fi
 
 if [ "$1" = "--uninstall" ]; then
@@ -35,14 +34,13 @@ if [ "$1" = "--uninstall" ]; then
     exit 0
 fi
 
-echo "Installing Aegis Heartbeat (3-layer)..."
+echo "Installing Aegis Heartbeat (L1 + L2)..."
 echo "  Script dir: $SCRIPT_DIR"
 echo "  User: $USER"
 echo "  Claude: $CLAUDE_BIN"
 echo "  L2 model: $L2_MODEL"
-echo "  L3 model: $L3_MODEL"
 
-# ─── L1: Python 哨兵 (5 min) ───
+# ─── L1: Basic Check (5 min) ───
 cat > /etc/systemd/system/aegis-heartbeat-l1.service << EOF
 [Unit]
 Description=Aegis Heartbeat L1 — Basic Check
@@ -70,7 +68,7 @@ AccuracySec=30s
 WantedBy=timers.target
 EOF
 
-# ─── L2: 弱 AI 軍醫 (30 min) ───
+# ─── L2: AI Diagnose (30 min) ───
 cat > /etc/systemd/system/aegis-heartbeat-l2.service << EOF
 [Unit]
 Description=Aegis Heartbeat L2 — AI Diagnose
@@ -98,38 +96,16 @@ AccuracySec=60s
 WantedBy=timers.target
 EOF
 
-# ─── L3: 強 AI 將軍 (2 hr) ───
-cat > /etc/systemd/system/aegis-heartbeat-l3.service << EOF
-[Unit]
-Description=Aegis Heartbeat L3 — AI Resolve
-After=network.target
-
-[Service]
-Type=oneshot
-User=$USER
-WorkingDirectory=$SCRIPT_DIR
-ExecStart=$CLAUDE_BIN -p "read heartbeat-resolve.md and execute all steps" --model $L3_MODEL --dangerously-skip-permissions --max-turns 15 --output-format text
-TimeoutSec=300
-KillMode=process
-EOF
-
-cat > /etc/systemd/system/aegis-heartbeat-l3.timer << EOF
-[Unit]
-Description=Aegis Heartbeat L3 Timer (every 2 hours)
-
-[Timer]
-OnBootSec=600
-OnUnitActiveSec=2h
-AccuracySec=120s
-
-[Install]
-WantedBy=timers.target
-EOF
+# ─── 清理 L3（已移至 Aegis CronJob #1）───
+systemctl stop aegis-heartbeat-l3.timer 2>/dev/null || true
+systemctl disable aegis-heartbeat-l3.timer 2>/dev/null || true
+rm -f /etc/systemd/system/aegis-heartbeat-l3.service
+rm -f /etc/systemd/system/aegis-heartbeat-l3.timer
 
 # ─── 啟動 ───
 systemctl daemon-reload
 
-for level in l1 l2 l3; do
+for level in l1 l2; do
     systemctl enable "aegis-heartbeat-${level}.timer"
     systemctl start "aegis-heartbeat-${level}.timer"
     echo "  ✓ aegis-heartbeat-${level}.timer enabled"
@@ -146,4 +122,5 @@ echo ""
 echo "View logs:"
 echo "  journalctl -u aegis-heartbeat-l1 --since '1 hour ago'"
 echo "  journalctl -u aegis-heartbeat-l2 --since '1 hour ago'"
-echo "  journalctl -u aegis-heartbeat-l3 --since '3 hours ago'"
+echo ""
+echo "Note: L3 (deep analysis) runs inside Aegis as CronJob #1 (every 2 hours)"

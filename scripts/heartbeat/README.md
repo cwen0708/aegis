@@ -1,13 +1,16 @@
-# Aegis Heartbeat — 三層心跳監控
+# Aegis Heartbeat
 
 系統層級的健康監控，不依賴 Aegis 排程。即使 Aegis 完全掛掉也能自動偵測並修復。
 
 ## 架構
 
 ```
-L1 (5min)   ─── Python 腳本，零 AI 依賴，自動修復已知問題
-L2 (30min)  ─── 弱 AI (Haiku)，日誌分析 + 錯誤模式識別 + 輕量修復
-L3 (2hr)    ─── 強 AI (Sonnet)，根因分析 + 建卡建議 + 預防性改善
+systemd timer（不依賴 Aegis）
+  L1 (5min)   ─── Python 腳本，零 AI 依賴，自動修復已知問題
+  L2 (30min)  ─── AI (Haiku)，日誌分析 + 錯誤模式識別 + 輕量修復
+
+Aegis 內部排程（依賴 Aegis 正常運行）
+  L3 (2hr)    ─── CronJob #1，深度分析 + 建卡建議
 ```
 
 ## 安裝
@@ -32,8 +35,7 @@ sudo bash install.sh --uninstall
   "zombie_threshold_minutes": 60,
   "ai": {
     "provider": "claude",
-    "l2_model": "haiku",
-    "l3_model": "sonnet"
+    "l2_model": "haiku"
   }
 }
 ```
@@ -41,17 +43,13 @@ sudo bash install.sh --uninstall
 ## 查看狀態
 
 ```bash
-# Timer 狀態
 systemctl list-timers 'aegis-heartbeat-*'
 
-# L1 日誌（最頻繁）
-journalctl -u aegis-heartbeat-l1 --since '1 hour ago' -f
+# L1 日誌
+journalctl -u aegis-heartbeat-l1 --since '1 hour ago'
 
 # L2 診斷報告
 journalctl -u aegis-heartbeat-l2 --since '1 hour ago'
-
-# L3 系統分析
-journalctl -u aegis-heartbeat-l3 --since '3 hours ago'
 ```
 
 ## 各層職責
@@ -66,24 +64,23 @@ journalctl -u aegis-heartbeat-l3 --since '3 hours ago'
 
 ### L2 (`heartbeat-diagnose.md`)
 - 彙整 L1 日誌
-- Worker 錯誤模式分析（找出重複的錯誤）
+- Worker 錯誤模式分析
 - 任務成功率統計
 - 資源使用檢查
 - 輕量修復（重啟、清暫存）
 
-### L3 (`heartbeat-resolve.md`)
+### L3（Aegis CronJob #1）
 - 彙整 L1 + L2 報告
 - 任務執行分析（成本、token、成功率）
 - 失敗任務根因分析
-- 系統趨勢評估
-- 可建卡到 Backlog（不觸發）
-- 產出完整報告
+- 可建卡到 Backlog
+- 有完整 Aegis 環境（skills、MCP 等）
 
 ## 其他 AI Provider
 
-L2/L3 的提示詞在 `.md` 檔案中，可自行替換為其他 CLI：
+L2 的提示詞在 `heartbeat-diagnose.md`，可替換為其他 CLI：
 
 ```bash
-# Gemini 範例（修改 install.sh 或直接改 systemd service）
+# Gemini 範例
 ExecStart=gemini -p "read heartbeat-diagnose.md and execute" --model gemini-2.0-flash
 ```
