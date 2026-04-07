@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlmodel import Session, select
 from sqlalchemy import func as sa_func
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from app.database import get_session
@@ -119,14 +119,14 @@ async def classify_emails_batch(
 class RoomCreate(BaseModel):
     name: str
     description: str = ""
-    layout_type: str = "tiled"
+    layout_type: Literal["classic", "tiled"] = "tiled"
 
 class RoomUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     position: Optional[int] = None
     is_active: Optional[bool] = None
-    layout_type: Optional[str] = None
+    layout_type: Optional[Literal["classic", "tiled"]] = None
 
 class DomainCreate(BaseModel):
     hostname: str
