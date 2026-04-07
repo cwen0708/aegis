@@ -16,9 +16,13 @@ const selectedProjectId = ref<number | null>(null)
 const loaded = ref(false)
 
 async function fetchProjects() {
-  const data = await apiClient.get<ProjectInfo[]>('/api/v1/projects/')
-  const filtered = data.filter((p) => p.is_active)
-  projects.value = filtered.sort((a, b) => a.name.localeCompare(b.name))
+  try {
+    const data = await apiClient.get<ProjectInfo[]>('/api/v1/projects/')
+    const filtered = data.filter((p) => p.is_active)
+    projects.value = filtered.sort((a, b) => a.name.localeCompare(b.name))
+  } catch (e) {
+    console.error('Failed to fetch projects', e)
+  }
 }
 
 export function useProjectSelector() {
