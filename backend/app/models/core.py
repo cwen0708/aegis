@@ -646,6 +646,7 @@ class Room(SQLModel, table=True):
         super().__init__(**data)
         if self.layout_type not in ("classic", "tiled"):
             raise ValueError(f"layout_type must be 'classic' or 'tiled', got '{self.layout_type}'")
+
     position: int = Field(default=0)             # 顯示順序
     is_active: bool = Field(default=True)
     allow_anonymous: bool = Field(default=False)  # 允許未登入瀏覽
