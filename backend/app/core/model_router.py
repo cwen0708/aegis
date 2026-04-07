@@ -15,6 +15,8 @@ from app.core.model_registry import (
 
 # Tag → 模型映射規則（按優先順序排列，第一個匹配即返回）
 _TAG_RULES: list[tuple[set[str], str]] = [
+    ({"M1", "ollama"}, "ollama"),       # Ollama 本地模型，優先級最高
+    ({"M2", "openai"}, "openai"),        # OpenAI 模型
     ({"AI-Opus", "complex"}, "opus"),
     ({"AI-Sonnet"}, "sonnet"),
     ({"AI-Haiku", "simple", "Refactor"}, "haiku"),

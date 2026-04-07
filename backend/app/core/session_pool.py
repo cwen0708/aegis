@@ -93,7 +93,27 @@ class ProcessPool:
         on_line: Optional[Callable[[str], None]] = None,
         cwd: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """送訊息到持久進程。沒有進程或已死則自動 spawn。"""
+        """送訊息到持久進程。沒有進程或已死則自動 spawn。
+
+        若 Prompt Queue 中有待處理的佇列項，優先使用佇列中的 prompt 取代傳入的 message。
+        """
+        # 檢查 Prompt Queue：有待處理佇列項則優先使用
+        _queued_entry = None
+        _pq = None
+        try:
+            from app.database import engine as _db_engine
+            from app.core.prompt_queue import PromptQueueManager
+            _pq = PromptQueueManager(_db_engine)
+            _queued_entry = _pq.dequeue(chat_key)
+            if _queued_entry:
+                logger.info(
+                    f"[ProcessPool] Dequeued prompt for {chat_key} "
+                    f"(queue_id={_queued_entry.queue_id[:8]}, priority={_queued_entry.priority})"
+                )
+                message = _queued_entry.prompt_text
+        except Exception as _e:
+            logger.warning(f"[ProcessPool] PromptQueue check error: {_e}")
+
         entry = self._get_or_spawn(chat_key, model, member_id, auth_info, extra_env, cwd=cwd)
 
         with entry.lock:
@@ -103,9 +123,22 @@ class ProcessPool:
                 entry = self._get_or_spawn(chat_key, model, member_id, auth_info, extra_env, cwd=cwd)
 
             try:
-                return self._send_and_read(entry, message, on_line)
+                result = self._send_and_read(entry, message, on_line)
+                # 佇列項處理完成，更新狀態為 processed
+                if _queued_entry and _pq:
+                    try:
+                        _pq.mark_processed(_queued_entry.queue_id)
+                    except Exception as _e:
+                        logger.warning(f"[ProcessPool] Failed to mark queue entry processed: {_e}")
+                return result
             except Exception as e:
                 logger.error(f"[ProcessPool] Error for {chat_key}: {e}")
+                # 佇列項處理失敗，標記為 failed
+                if _queued_entry and _pq:
+                    try:
+                        _pq.mark_failed(_queued_entry.queue_id)
+                    except Exception:
+                        pass
                 self._kill_entry(entry)
                 self._remove(chat_key)
                 return {"status": "error", "output": str(e), "token_info": {}}

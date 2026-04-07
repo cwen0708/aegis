@@ -205,12 +205,9 @@ class OneStackConnector:
 
         # 已有認證，驗證是否有效
         if self.device_id and self.device_token:
-            result = await self._request(
-                "GET",
-                "cli_devices",
-                params={"id": f"eq.{self.device_id}", "select": "id,device_name"}
-            )
-            if result and len(result) > 0:
+            from app.core.onestack_api import get_device_info
+            info = await get_device_info(self._request, self.device_id, "id,device_name")
+            if info:
                 logger.info(f"[OneStack] Device verified: {self.device_id[:8]}... (source: {self._credentials_source})")
                 return
             else:
@@ -302,16 +299,12 @@ class OneStackConnector:
 
         metadata = self._get_metadata()
 
-        result = await self._request(
-            "PATCH",
-            "cli_devices",
-            params={"id": f"eq.{self.device_id}"},
-            json_data={
-                "status": "online",
-                "last_heartbeat": datetime.now(timezone.utc).isoformat(),
-                "metadata": metadata,
-            }
-        )
+        from app.core.onestack_api import _patch_by_id
+        result = await _patch_by_id(self._request, "cli_devices", self.device_id, {
+            "status": "online",
+            "last_heartbeat": datetime.now(timezone.utc).isoformat(),
+            "metadata": metadata,
+        })
 
         if result is not None:
             logger.debug(f"[OneStack] Heartbeat sent: {self.device_name}")
@@ -383,12 +376,8 @@ class OneStackConnector:
         ]
 
         if rows:
-            await self._request(
-                "POST",
-                "aegis_members?on_conflict=device_id,aegis_member_id",
-                json_data=rows,
-                prefer_override="resolution=merge-duplicates,return=minimal",
-            )
+            from app.core.onestack_api import _upsert
+            await _upsert(self._request, "aegis_members", "device_id,aegis_member_id", rows)
 
         # 刪除已移除的成員
         aegis_ids = [m.id for m in members]
@@ -439,12 +428,8 @@ class OneStackConnector:
                 })
 
         if rows:
-            await self._request(
-                "POST",
-                "aegis_projects?on_conflict=device_id,aegis_project_id",
-                json_data=rows,
-                prefer_override="resolution=merge-duplicates,return=minimal",
-            )
+            from app.core.onestack_api import _upsert
+            await _upsert(self._request, "aegis_projects", "device_id,aegis_project_id", rows)
 
         # 刪除已移除的專案
         aegis_ids = [r["aegis_project_id"] for r in rows]
@@ -491,18 +476,8 @@ class OneStackConnector:
         if not self.enabled or not self.device_id:
             return []
 
-        result = await self._request(
-            "GET",
-            "cli_tasks",
-            params={
-                "device_id": f"eq.{self.device_id}",
-                "status": "eq.pending",
-                "order": "created_at.asc",
-                "limit": "5",
-            }
-        )
-
-        return result if isinstance(result, list) else []
+        from app.core.onestack_api import _query_pending
+        return await _query_pending(self._request, "cli_tasks", self.device_id, limit=5)
 
     def on_task(self, callback):
         """註冊任務回調（收到新任務時觸發）"""
@@ -550,24 +525,8 @@ class OneStackConnector:
         if not self.enabled:
             return
 
-        data: Dict[str, Any] = {"status": status}
-
-        if status == "processing":
-            data["started_at"] = datetime.now(timezone.utc).isoformat()
-        elif status in ["completed", "failed"]:
-            data["completed_at"] = datetime.now(timezone.utc).isoformat()
-
-        if result:
-            data["result"] = result
-        if error_message:
-            data["error_message"] = error_message
-
-        await self._request(
-            "PATCH",
-            "cli_tasks",
-            params={"id": f"eq.{task_id}"},
-            json_data=data
-        )
+        from app.core.onestack_api import update_task_status as _update_task
+        await _update_task(self._request, task_id, status, result, error_message)
 
     # ─── 任務完成回報 ───
 
@@ -842,16 +801,10 @@ class OneStackConnector:
         if self._cached_owner_id:
             return self._cached_owner_id
 
-        result = await self._request(
-            "GET",
-            "cli_devices",
-            params={
-                "id": f"eq.{self.device_id}",
-                "select": "owner_id",
-            }
-        )
-        if result and isinstance(result, list) and len(result) > 0:
-            self._cached_owner_id = result[0].get("owner_id")
+        from app.core.onestack_api import get_device_info
+        info = await get_device_info(self._request, self.device_id, "owner_id")
+        if info:
+            self._cached_owner_id = info.get("owner_id")
         return self._cached_owner_id
 
     async def stream_status(self, card_id: int, status: str, member_slug: Optional[str] = None, chat_id: Optional[str] = None):
@@ -873,17 +826,8 @@ class OneStackConnector:
         if not self.enabled or not self.device_id:
             return []
 
-        result = await self._request(
-            "GET",
-            "aegis_commands",
-            params={
-                "device_id": f"eq.{self.device_id}",
-                "status": "eq.pending",
-                "order": "created_at.asc",
-                "limit": "10",
-            }
-        )
-        return result if isinstance(result, list) else []
+        from app.core.onestack_api import _query_pending
+        return await _query_pending(self._request, "aegis_commands", self.device_id, limit=10)
 
     async def update_command_status(
         self, command_id: int, status: str, result: Optional[Dict] = None
@@ -892,19 +836,8 @@ class OneStackConnector:
         if not self.enabled:
             return
 
-        data: Dict[str, Any] = {
-            "status": status,
-            "processed_at": datetime.now(timezone.utc).isoformat(),
-        }
-        if result:
-            data["result"] = result
-
-        await self._request(
-            "PATCH",
-            "aegis_commands",
-            params={"id": f"eq.{command_id}"},
-            json_data=data
-        )
+        from app.core.onestack_api import update_command_status as _update_cmd
+        await _update_cmd(self._request, command_id, status, result)
 
     _command_callback = None
 
@@ -969,12 +902,8 @@ class OneStackConnector:
         if not self.enabled or not self.device_id:
             return
 
-        await self._request(
-            "PATCH",
-            "cli_devices",
-            params={"id": f"eq.{self.device_id}"},
-            json_data={"status": "offline"}
-        )
+        from app.core.onestack_api import _patch_by_id
+        await _patch_by_id(self._request, "cli_devices", self.device_id, {"status": "offline"})
         logger.info(f"[OneStack] Device set to offline: {self.device_name}")
 
 

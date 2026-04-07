@@ -640,6 +640,7 @@ class Room(SQLModel, table=True):
     name: str                                    # "研發部", "維運中心"
     description: str = Field(default="")
     layout_json: str = Field(default="{}")       # Phaser 辦公室佈局
+    layout_type: str = Field(default="tiled")    # "tiled" | "classic"
     position: int = Field(default=0)             # 顯示順序
     is_active: bool = Field(default=True)
     allow_anonymous: bool = Field(default=False)  # 允許未登入瀏覽
@@ -678,6 +679,21 @@ class WebhookConfig(SQLModel, table=True):
     name: str = Field(index=True)                    # 顯示名稱，專案內唯一
     url: str                                          # 目標 URL
     active: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# ==========================================
+# Prompt Queue（任務提示佇列化）
+# ==========================================
+class PromptQueueEntry(SQLModel, table=True):
+    """Prompt 佇列項目 — 任務提示佇列化，支援優先級出隊"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    queue_id: str = Field(index=True, unique=True)       # UUID，外部追蹤用
+    session_id: str = Field(index=True)                   # chat_key，如 "telegram:123:xiao-yin"
+    prompt_text: str                                       # 實際要送出的提示文字
+    priority: int = Field(default=1)                      # 數值越大優先級越高
+    status: str = Field(default="pending", index=True)    # pending | processing | processed | failed
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

@@ -8,6 +8,9 @@ from app.core.stream_parsers import (
     _short_path,
     translate_tool,
     parse_tool_call,
+    parse_ollama_stream,
+    parse_openai_json,
+    parse_openai_stream,
 )
 
 
@@ -276,3 +279,160 @@ def test_parse_tool_call_with_message_wrapper():
     r = parse_tool_call(line)
     assert r[0] == "tool_call"
     assert "ls" in r[1]
+
+
+# ── parse_ollama_stream ─────────────────────────────────────
+
+class TestParseOllamaStream:
+    """parse_ollama_stream 函式測試。"""
+
+    def test_chat_format_assistant(self):
+        """/api/chat 格式：assistant role 正常提取內容。"""
+        line = json.dumps({
+            "message": {"role": "assistant", "content": "你好"},
+            "done": False,
+        })
+        assert parse_ollama_stream(line) == "你好"
+
+    def test_generate_format(self):
+        """/api/generate 格式：response 欄位正常提取。"""
+        line = json.dumps({"response": "hello world", "done": False})
+        assert parse_ollama_stream(line) == "hello world"
+
+    def test_done_true_empty_content(self):
+        """done=true 且 content 為空字串 → None。"""
+        line = json.dumps({
+            "message": {"role": "assistant", "content": ""},
+            "done": True,
+        })
+        assert parse_ollama_stream(line) is None
+
+    def test_done_true_empty_response(self):
+        """done=true 且 response 為空字串 → None。"""
+        line = json.dumps({"response": "", "done": True})
+        assert parse_ollama_stream(line) is None
+
+    def test_non_assistant_role(self):
+        """非 assistant role → None（跳過 /api/chat 分支）。"""
+        line = json.dumps({
+            "message": {"role": "system", "content": "你是助手"},
+            "done": False,
+        })
+        assert parse_ollama_stream(line) is None
+
+    def test_invalid_json(self):
+        """不合法 JSON → None。"""
+        assert parse_ollama_stream("{bad json") is None
+
+    def test_empty_string(self):
+        """空字串 → None。"""
+        assert parse_ollama_stream("") is None
+
+    def test_no_message_no_response(self):
+        """既無 message 也無 response → None。"""
+        line = json.dumps({"model": "llama3", "done": True})
+        assert parse_ollama_stream(line) is None
+
+
+# ── parse_openai_stream ────────────────────────────────────
+
+class TestParseOpenaiStream:
+    """parse_openai_stream 函式測試。"""
+
+    def test_normal_sse_chunk(self):
+        """正常 SSE chunk 提取 content。"""
+        line = 'data: {"choices":[{"delta":{"content":"你好"}}]}'
+        assert parse_openai_stream(line) == "你好"
+
+    def test_empty_delta(self):
+        """delta 無 content → None。"""
+        line = 'data: {"choices":[{"delta":{}}]}'
+        assert parse_openai_stream(line) is None
+
+    def test_empty_content(self):
+        """content 為空字串 → None。"""
+        line = 'data: {"choices":[{"delta":{"content":""}}]}'
+        assert parse_openai_stream(line) is None
+
+    def test_done_signal(self):
+        """[DONE] 終止信號 → None。"""
+        assert parse_openai_stream("data: [DONE]") is None
+
+    def test_malformed_json(self):
+        """不合法 JSON → None。"""
+        assert parse_openai_stream("data: {bad json}") is None
+
+    def test_not_sse_line(self):
+        """非 data: 開頭 → None。"""
+        assert parse_openai_stream("event: ping") is None
+
+    def test_empty_string(self):
+        """空字串 → None。"""
+        assert parse_openai_stream("") is None
+
+    def test_empty_choices(self):
+        """choices 為空陣列 → None。"""
+        line = 'data: {"choices":[]}'
+        assert parse_openai_stream(line) is None
+
+    def test_whitespace_around_data(self):
+        """data: 前後有空白仍可解析。"""
+        line = '  data:   {"choices":[{"delta":{"content":"ok"}}]}  '
+        assert parse_openai_stream(line) == "ok"
+
+    def test_role_delta_no_content(self):
+        """role delta（首個 chunk）無 content → None。"""
+        line = 'data: {"choices":[{"delta":{"role":"assistant"}}]}'
+        assert parse_openai_stream(line) is None
+
+
+# ── parse_openai_json ───────────────────────────────────────
+
+class TestParseOpenaiJson:
+    """parse_openai_json 函式測試。"""
+
+    def test_full_payload(self):
+        """完整 payload 解析所有欄位。"""
+        data = json.dumps({
+            "result_text": "回答完成",
+            "model": "gpt-4o",
+            "duration_ms": 2345,
+            "cost_usd": 0.03,
+            "input_tokens": 150,
+            "output_tokens": 80,
+        })
+        r = parse_openai_json(data)
+        assert r["result_text"] == "回答完成"
+        assert r["model"] == "gpt-4o"
+        assert r["duration_ms"] == 2345
+        assert r["cost_usd"] == 0.03
+        assert r["input_tokens"] == 150
+        assert r["output_tokens"] == 80
+
+    def test_empty_json(self):
+        """空 JSON 物件 → 各欄位回傳預設值。"""
+        r = parse_openai_json(json.dumps({}))
+        assert r["result_text"] == ""
+        assert r["model"] == ""
+        assert r["duration_ms"] == 0
+        assert r["cost_usd"] == 0
+        assert r["input_tokens"] == 0
+        assert r["output_tokens"] == 0
+
+    def test_invalid_json(self):
+        """不合法 JSON → 空 dict。"""
+        assert parse_openai_json("not json") == {}
+
+    def test_empty_string(self):
+        """空字串 → 空 dict。"""
+        assert parse_openai_json("") == {}
+
+    def test_partial_fields(self):
+        """部分欄位缺失 → 缺失欄位使用預設值。"""
+        data = json.dumps({"result_text": "ok", "model": "gpt-4o-mini"})
+        r = parse_openai_json(data)
+        assert r["result_text"] == "ok"
+        assert r["model"] == "gpt-4o-mini"
+        assert r["duration_ms"] == 0
+        assert r["input_tokens"] == 0
+        assert r["output_tokens"] == 0

@@ -49,10 +49,10 @@ class TestCollectHooks:
         assert "OneStackHook" in names
         assert "MemoryHook" in names
 
-    def test_meeting_has_memory_only(self):
+    def test_meeting_has_token_counting_and_memory(self):
         hooks = collect_hooks("meeting")
         names = [type(h).__name__ for h in hooks]
-        assert names == ["MemoryHook"]
+        assert names == ["TokenCountingHook", "MemoryHook"]
 
     def test_unknown_source_fallback(self):
         hooks = collect_hooks("unknown")

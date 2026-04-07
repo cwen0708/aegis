@@ -87,6 +87,22 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
             cwd=cwd,
         )
 
+    # PromptQueue 整合：如果 chat_key 提供，優先從佇列取出待處理項
+    _queue_id: Optional[str] = None
+    _pq_manager = None
+    if chat_key:
+        try:
+            from app.core.prompt_queue import PromptQueueManager
+            from app.database import engine as _db_engine
+            _pq_manager = PromptQueueManager(_db_engine)
+            _queued = _pq_manager.dequeue(chat_key)
+            if _queued:
+                prompt = _queued.prompt_text
+                _queue_id = _queued.queue_id
+                logger.info(f"[Runner] Using queued prompt: queue_id={_queue_id[:8]}")
+        except Exception as _qe:
+            logger.warning(f"[Runner] PromptQueue dequeue failed: {_qe}")
+
     # Prompt Hardening: 非 pool 路徑也注入安全提醒
     from app.core.prompt_hardening import harden_prompt
     prompt = harden_prompt(prompt, project_path)
@@ -218,6 +234,16 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
         if redact_map:
             actual_output = restore(actual_output, redact_map)
 
+        # PromptQueue 狀態更新
+        if _queue_id and _pq_manager:
+            try:
+                if status == "success":
+                    _pq_manager.mark_processed(_queue_id)
+                else:
+                    _pq_manager.mark_failed(_queue_id)
+            except Exception:
+                pass
+
         return {
             "status": status,
             "output": actual_output,
@@ -229,4 +255,9 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
 
     except Exception as e:
         logger.exception(f"[Runner] Execution failed: {e}")
+        if _queue_id and _pq_manager:
+            try:
+                _pq_manager.mark_failed(_queue_id)
+            except Exception:
+                pass
         return {"status": "error", "output": str(e), "provider": provider_name}

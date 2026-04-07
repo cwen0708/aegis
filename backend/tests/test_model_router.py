@@ -57,6 +57,34 @@ class TestResolveModelByTags:
         """混合業務標籤和模型標籤。"""
         assert resolve_model_by_tags(["P0", "Cost", "AI-Haiku", "Feature"]) == "haiku"
 
+    def test_m1_tag_returns_ollama(self):
+        """M1 標籤 → ollama 本地模型。"""
+        assert resolve_model_by_tags(["M1"]) == "ollama"
+
+    def test_ollama_tag_returns_ollama(self):
+        """ollama 標籤 → ollama 本地模型。"""
+        assert resolve_model_by_tags(["ollama"]) == "ollama"
+
+    def test_ollama_priority_over_opus(self):
+        """ollama/M1 規則優先級高於 AI-Opus。"""
+        assert resolve_model_by_tags(["M1", "AI-Opus"]) == "ollama"
+
+    def test_m2_tag_returns_openai(self):
+        """M2 標籤 → openai。"""
+        assert resolve_model_by_tags(["M2"]) == "openai"
+
+    def test_openai_tag_returns_openai(self):
+        """openai 標籤 → openai。"""
+        assert resolve_model_by_tags(["openai"]) == "openai"
+
+    def test_openai_priority_over_opus(self):
+        """openai 規則優先級高於 AI-Opus。"""
+        assert resolve_model_by_tags(["M2", "AI-Opus"]) == "openai"
+
+    def test_ollama_priority_over_openai(self):
+        """ollama 規則優先級高於 openai。"""
+        assert resolve_model_by_tags(["M1", "M2"]) == "ollama"
+
 
 class TestModelTier:
     """MODEL_TIER 常數驗證。"""
@@ -184,3 +212,14 @@ class TestProviderFailover:
         """每個 provider 的 failover chain 不包含自己。"""
         for provider, chain in PROVIDER_FAILOVER.items():
             assert provider not in chain
+
+    def test_provider_failover_claude_to_openai_to_ollama(self):
+        """Claude → OpenAI → Ollama 降級鏈驗證：每個 provider 都有備援。"""
+        chain = get_failover_chain("claude")
+        assert "openai" in chain
+        # OpenAI 也有備援
+        openai_chain = get_failover_chain("openai")
+        assert len(openai_chain) > 0
+        # 所有 provider 都有 failover model
+        for p in ["claude", "openai", "gemini"]:
+            assert get_failover_model(p) != ""
