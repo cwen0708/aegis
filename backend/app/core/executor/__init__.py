@@ -11,7 +11,8 @@ Executor — 統一 Worker/Runner 的共用邏輯模組
 串流輸出和任務後處理由 app/hooks/ 統一管理。
 """
 
-from app.core.executor.providers import PROVIDERS, build_command  # noqa: F401
+from app.core.executor.providers import PROVIDERS, build_command, get_provider, register_provider  # noqa: F401
+from app.core.executor.provider_base import BaseProvider, ProviderMeta  # noqa: F401
 from app.core.executor.auth import inject_auth_env, get_mcp_config_path  # noqa: F401
 from app.core.executor.context import (  # noqa: F401
     MemberContext, AccountInfo,
@@ -30,7 +31,8 @@ from app.core.executor.heartbeat import heartbeat_monitor  # noqa: F401
 from app.core.executor.memory import retrieve_task_memory  # noqa: F401
 
 __all__ = [
-    "PROVIDERS", "build_command",
+    "PROVIDERS", "build_command", "get_provider", "register_provider",
+    "BaseProvider", "ProviderMeta",
     "inject_auth_env", "get_mcp_config_path",
     "MemberContext", "AccountInfo", "resolve_member_for_task", "resolve_member_for_chat",
     "build_config_md", "build_claude_md", "PROVIDER_CONFIG", "get_config_filename", "get_dot_dir",

@@ -2,10 +2,16 @@
 Provider 設定與命令建構 — Worker / Runner 共用
 
 合併原本分散在 worker.py 和 runner.py 中的 PROVIDERS dict 與命令建構邏輯。
+新增 Provider 類別註冊機制，支援透過 get_provider() 取得具型別介面的 Provider 實例。
 """
-from typing import Optional, List, Literal
+from __future__ import annotations
 
-# ── Provider 設定 ──
+from typing import Optional, List, Literal, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.core.executor.provider_base import BaseProvider
+
+# ── Provider 設定（舊版 dict，保留向後相容） ──
 # 共用基底，mode-specific 差異由 build_command() 處理
 PROVIDERS = {
     "claude": {
@@ -29,6 +35,28 @@ PROVIDERS = {
         "stdin_prompt": True,
     },
 }
+
+# ── Provider 類別註冊表 ──
+_PROVIDER_REGISTRY: dict[str, BaseProvider] = {}
+
+
+def _ensure_registry() -> None:
+    """延遲初始化 Provider 註冊表（避免循環 import）。"""
+    if _PROVIDER_REGISTRY:
+        return
+    from app.core.executor.provider_openai import OpenAIProvider
+    _PROVIDER_REGISTRY["openai"] = OpenAIProvider()
+
+
+def get_provider(name: str) -> Optional[BaseProvider]:
+    """取得已註冊的 Provider 實例。未註冊時回傳 None。"""
+    _ensure_registry()
+    return _PROVIDER_REGISTRY.get(name)
+
+
+def register_provider(provider: BaseProvider) -> None:
+    """註冊自訂 Provider（供擴充或測試用）。"""
+    _PROVIDER_REGISTRY[provider.meta.name] = provider
 
 
 def build_command(
