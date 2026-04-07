@@ -34,9 +34,8 @@ class TestBuildConfigMdChatMode:
         assert fake_memory_path in result
         assert "short-term/" in result
         assert "long-term/" in result
-        # 安全限制
-        assert "# 安全限制" in result
-        assert "禁止修改系統檔案" in result
+        # 安全限制：靜態規則已移至 .claude/rules/security.md，CLAUDE.md 不再內嵌
+        assert "禁止修改系統檔案" not in result
 
     def test_build_config_md_chat_with_user_context(self):
         """user_context 帶 display_name → 渲染「當前用戶」section"""

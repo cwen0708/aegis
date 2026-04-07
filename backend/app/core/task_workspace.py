@@ -67,9 +67,12 @@ def prepare_workspace(
     )
     (ws / cfg["config_file"]).write_text(content, encoding="utf-8")
 
-    # 2. Copy skills into .claude/skills/ or .gemini/skills/
-    #    先載入 shared skills，再載入成員專屬（可覆蓋共用的）
+    # 2a. Copy shared rules into .claude/rules/
     dot_dir = ws / cfg["dot_dir"]
+    _copy_shared_rules(dot_dir)
+
+    # 2b. Copy skills into .claude/skills/ or .gemini/skills/
+    #     先載入 shared skills，再載入成員專屬（可覆蓋共用的）
     target_skills = dot_dir / "skills"
     target_skills.mkdir(parents=True, exist_ok=True)
 
@@ -106,6 +109,17 @@ def prepare_workspace(
 
     logger.info(f"[Workspace] Created task-{card_id} for {member_slug} ({provider})")
     return ws
+
+
+def _copy_shared_rules(dot_dir: Path) -> None:
+    """將 .aegis/shared/rules/*.md 複製到 workspace 的 dot_dir/rules/。"""
+    shared_rules = _INSTALL_ROOT / ".aegis" / "shared" / "rules"
+    if not shared_rules.exists():
+        return
+    target_rules = dot_dir / "rules"
+    target_rules.mkdir(parents=True, exist_ok=True)
+    for md_file in shared_rules.glob("*.md"):
+        shutil.copy2(md_file, target_rules / md_file.name)
 
 
 def cleanup_workspace(card_id: int) -> None:

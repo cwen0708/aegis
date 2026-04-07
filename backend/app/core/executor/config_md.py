@@ -162,13 +162,7 @@ def _build_chat_md(
             lines.append(f"任務描述最後請加上：「完成後請透過 {platform} 通知 chat_id={chat_id}」")
         lines.append("")
 
-    # 安全限制
-    lines.append("# 安全限制")
-    lines.append("- 禁止修改系統檔案（MCP 原始碼、設定檔、.env、CLAUDE.md、skill 檔案等）")
-    lines.append("- 禁止安裝套件（pip install、npm install、apt install 等）")
-    lines.append("- 禁止執行破壞性指令（rm -rf、kill、systemctl 等）")
-    lines.append("- 如果用戶要求修改系統或程式碼，請建議建立任務卡片或聯繫管理員")
-    lines.append("")
+    # 安全限制：靜態規則已移至 .claude/rules/security.md，由 Claude Code 自動載入
 
     # 回應風格
     lines.append("# 回應風格")
@@ -239,19 +233,15 @@ async def _build_task_md(
             parts.append(f"\n## 階段指令\n{stage_instruction}")
         stage_section = "\n".join(parts) + "\n"
 
-    # 安全限制區塊
+    # 安全限制：動態路徑部分（靜態規則已移至 .claude/rules/security.md）
     install_root = str(_INSTALL_ROOT)
-    security_section = f"""# 安全限制
+    security_section = f"""# 安全限制（路徑）
 你只能在以下目錄操作：
 1. {project_path} — 專案目錄
 2. 當前工作區目錄（臨時）
 
-禁止存取：
+禁止存取的路徑：
 - Aegis 安裝目錄（{install_root}）
-- ~/.claude/、~/.ssh/、~/.config/
-- 任何 .env、*.db、credentials 檔案
-- 禁止執行 kill/pkill/killall/taskkill 等進程管理命令
-- 禁止修改系統設定或安裝全域套件
 """
 
     # 相關過往經驗 section
