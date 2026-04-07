@@ -1,0 +1,23 @@
+{
+  "aegis_api": "http://127.0.0.1:8899/api/v1",
+  "db_path": "",
+  "services": ["aegis", "aegis-worker"],
+  "venv_path": "",
+  "zombie_threshold_minutes": 60,
+  "restart_cooldown_minutes": 10,
+
+  "ai": {
+    "provider": "claude",
+    "l2_model": "haiku",
+    "l3_model": "sonnet",
+    "max_turns_l2": 10,
+    "max_turns_l3": 15
+  },
+
+  "notify": {
+    "enabled": false,
+    "method": "telegram",
+    "chat_id": "",
+    "bot_token": ""
+  }
+}
