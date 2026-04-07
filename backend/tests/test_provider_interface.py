@@ -100,7 +100,7 @@ class TestOpenAIProviderMeta:
 class TestOpenAIBuildCommand:
     def test_default_model(self, openai_provider):
         cmd, stdin = openai_provider.build_command()
-        assert cmd == ["python", "scripts/openai_stream_chat.py", "--model", "gpt-4o"]
+        assert cmd == ["python", "backend/scripts/openai_stream_chat.py", "--model", "gpt-4o"]
         assert stdin is True
 
     def test_custom_model(self, openai_provider):

@@ -24,7 +24,7 @@ PROVIDERS = {
         "json_output": False,
     },
     "openai": {
-        "cmd_base": ["python", "scripts/openai_stream_chat.py"],
+        "cmd_base": ["python", "backend/scripts/openai_stream_chat.py"],
         "stream_json": True,
         "default_model": "gpt-4o",
     },

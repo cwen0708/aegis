@@ -37,7 +37,7 @@ class OpenAIProvider(BaseProvider):
         resume_session_id: Optional[str] = None,
     ) -> Tuple[List[str], bool]:
         resolved_model = model or self._meta.default_model
-        cmd = ["python", "scripts/openai_stream_chat.py", "--model", resolved_model]
+        cmd = ["python", "backend/scripts/openai_stream_chat.py", "--model", resolved_model]
         return cmd, True  # prompt 從 stdin 傳入
 
     def parse_stream_line(self, line: str) -> Optional[str]:
