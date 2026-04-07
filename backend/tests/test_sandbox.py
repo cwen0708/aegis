@@ -100,13 +100,15 @@ class TestGetPopenKwargs:
         kwargs = get_popen_kwargs()
         assert kwargs.get("start_new_session") is True
 
-    @patch("app.core.sandbox.platform.system", return_value="Windows")
-    def test_windows_creation_flags(self, _mock):
+    def test_windows_creation_flags(self):
         """Windows should get CREATE_NEW_PROCESS_GROUP flags."""
         import subprocess
-        kwargs = get_popen_kwargs()
-        flags = kwargs.get("creationflags", 0)
-        assert flags & subprocess.CREATE_NEW_PROCESS_GROUP
+        with patch("app.core.sandbox.platform.system", return_value="Windows"), \
+             patch.object(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200, create=True), \
+             patch.object(subprocess, "CREATE_NO_WINDOW", 0x08000000, create=True):
+            kwargs = get_popen_kwargs()
+            flags = kwargs.get("creationflags", 0)
+            assert flags & subprocess.CREATE_NEW_PROCESS_GROUP
 
     def test_current_platform(self):
         """Should not raise on current platform."""
