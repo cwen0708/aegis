@@ -178,16 +178,22 @@ def convert_ground(classic: dict, report: ConversionReport) -> list[int]:
     return data
 
 
-def convert_slots(classic: dict, report: ConversionReport) -> list[dict]:
-    """將 classic slots/workstations 轉換為 Chair layer 的 TiledObject[]。"""
+def convert_slots(
+    classic: dict, report: ConversionReport,
+) -> tuple[list[dict], set[tuple[int, int]], set[str]]:
+    """將 classic slots/workstations 轉換為 Chair layer 的 TiledObject[]。
+
+    回傳: (objects, consumed_positions, consumed_furniture_ids)
+    """
     slots = classic.get("slots", [])
     workstations = classic.get("workstations", [])
     furniture = classic.get("furniture", [])
 
     objects: list[dict] = []
+    consumed_positions: set[tuple[int, int]] = set()
+    consumed_ids: set[str] = set()
     obj_id = 1
 
-    # 優先使用 slots（新格式）
     if slots:
         for slot in slots:
             col = slot.get("col", 0)
@@ -198,16 +204,16 @@ def convert_slots(classic: dict, report: ConversionReport) -> list[dict]:
                 "id": obj_id,
                 "gid": gid,
                 "x": col * TILE_SIZE,
-                "y": (row + 1) * TILE_SIZE + TILE_SIZE,  # 底邊 = (row+2)*32（椅子高度 64px）
+                "y": (row + 1) * TILE_SIZE + TILE_SIZE,
                 "width": 32,
                 "height": 64,
                 "rotation": 0,
                 "visible": True,
             })
+            consumed_positions.add((col, row))
             obj_id += 1
         report.slot_count = len(slots)
     elif workstations:
-        # 從 workstations 找椅子位置
         furniture_map = {f["id"]: f for f in furniture}
         for ws in workstations:
             chair_id = ws.get("chairId", "")
@@ -218,7 +224,7 @@ def convert_slots(classic: dict, report: ConversionReport) -> list[dict]:
             row = chair.get("row", 0)
             objects.append({
                 "id": obj_id,
-                "gid": 2562,  # 預設朝下
+                "gid": 2562,
                 "x": col * TILE_SIZE,
                 "y": (row + 1) * TILE_SIZE + TILE_SIZE,
                 "width": 32,
@@ -226,28 +232,33 @@ def convert_slots(classic: dict, report: ConversionReport) -> list[dict]:
                 "rotation": 0,
                 "visible": True,
             })
+            consumed_positions.add((col, row))
+            consumed_ids.add(chair_id)
             obj_id += 1
         report.slot_count = len(objects)
 
-    return objects
+    return objects, consumed_positions, consumed_ids
+
+
+CHAIR_TYPES = frozenset({"chair", "chair_exec"})
 
 
 def convert_furniture_and_props(
-    classic: dict, report: ConversionReport, start_obj_id: int,
+    classic: dict,
+    report: ConversionReport,
+    start_obj_id: int,
+    consumed_positions: set[tuple[int, int]],
+    consumed_ids: set[str],
 ) -> dict[str, list[dict]]:
     """將 classic furniture/props 轉換為各 object layer 的物件。
 
     回傳: {layer_name: [TiledObject, ...]}
+    consumed_positions/consumed_ids 用來避免與 convert_slots 重複產出椅子。
     """
     layers: dict[str, list[dict]] = {}
     obj_id = start_obj_id
     furniture = classic.get("furniture", [])
     props = classic.get("props", [])
-
-    # 已經由 convert_slots 處理的椅子 ID
-    slot_chair_ids: set[str] = set()
-    for ws in classic.get("workstations", []):
-        slot_chair_ids.add(ws.get("chairId", ""))
 
     # 轉換家具
     for item in furniture:
@@ -256,8 +267,10 @@ def convert_furniture_and_props(
         col = item.get("col", 0)
         row = item.get("row", 0)
 
-        # 跳過已在 slots/workstations 處理的椅子
-        if item_id in slot_chair_ids:
+        # 跳過已在 convert_slots 處理的椅子（ID 匹配或位置+類型匹配）
+        if item_id in consumed_ids:
+            continue
+        if item_type in CHAIR_TYPES and (col, row) in consumed_positions:
             continue
 
         mapping = FURNITURE_TYPE_TO_GID.get(item_type)
@@ -320,11 +333,13 @@ def classic_to_tiled(classic: dict, report: ConversionReport) -> dict:
     ground_data = convert_ground(classic, report)
 
     # 2. Chair objects（from slots）
-    chair_objects = convert_slots(classic, report)
+    chair_objects, consumed_pos, consumed_ids = convert_slots(classic, report)
 
     # 3. Furniture & props objects
     start_id = len(chair_objects) + 1
-    object_layers = convert_furniture_and_props(classic, report, start_id)
+    object_layers = convert_furniture_and_props(
+        classic, report, start_id, consumed_pos, consumed_ids,
+    )
 
     # 計算最大 object id
     max_obj_id = 0
@@ -356,7 +371,7 @@ def classic_to_tiled(classic: dict, report: ConversionReport) -> dict:
     # Object layers（按標準順序）
     for name in OBJECT_LAYER_ORDER:
         if name == "Chair":
-            objs = chair_objects
+            objs = chair_objects + object_layers.get(name, [])
         else:
             objs = object_layers.get(name, [])
 
@@ -495,8 +510,11 @@ def migrate(dry_run: bool, room_id: int | None) -> None:
 def rollback(room_id: int | None) -> None:
     """從備份還原房間。"""
     with Session(engine) as session:
+        success_count = 0
+
         if room_id is not None:
-            rollback_room(session, room_id)
+            if rollback_room(session, room_id):
+                success_count += 1
         else:
             if not BACKUP_DIR.exists():
                 logger.error(f"備份目錄不存在: {BACKUP_DIR}")
@@ -506,10 +524,21 @@ def rollback(room_id: int | None) -> None:
                 logger.error("找不到任何備份檔案")
                 return
             for bf in backup_files:
-                data = json.loads(bf.read_text(encoding="utf-8"))
-                rollback_room(session, data["room_id"])
+                try:
+                    data = json.loads(bf.read_text(encoding="utf-8"))
+                    rid = data["room_id"]
+                except (json.JSONDecodeError, KeyError) as e:
+                    logger.warning(f"備份檔案格式錯誤 {bf.name}: {e}")
+                    continue
+                if rollback_room(session, rid):
+                    success_count += 1
+
+        if success_count == 0:
+            logger.error("沒有任何房間成功還原，放棄 commit")
+            sys.exit(1)
+
         session.commit()
-        logger.info("回滾完成")
+        logger.info(f"回滾完成，共還原 {success_count} 個房間")
 
 
 def main() -> None:
