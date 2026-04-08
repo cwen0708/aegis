@@ -95,6 +95,7 @@ def collect_hooks(source: str = "worker") -> list[Hook]:
     from app.hooks.token_counting import TokenCountingHook
     from app.hooks.verification import VerificationHook
     from app.hooks.content_detector import ContentDetectorHook
+    from app.hooks.taste_propagation import TastePropagationHook
 
     if source == "worker":
         return [
@@ -109,6 +110,7 @@ def collect_hooks(source: str = "worker") -> list[Hook]:
             MemoryHook(),           # POST: 成員記憶
             SkillGeneratorHook(),   # POST: 自動生成 skill 模板
             VerificationHook(),     # POST: anti-fabrication 驗證
+            TastePropagationHook(), # POST: taste 標記 → golden-rules
             CleanupHook(),          # POST: 清理（永遠最後）
         ]
     elif source == "chat":
