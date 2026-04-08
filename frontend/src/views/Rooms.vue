@@ -14,13 +14,8 @@ const router = useRouter()
 const auth = useAuthStore()
 
 import { Settings, Box } from 'lucide-vue-next'
-import { createOfficeGame, OfficeScene } from '../game/OfficeScene'
-import OfficeEditor from '../components/OfficeEditor.vue'
 import Room2Editor from '../components/Room2Editor.vue'
 import CharacterDialog from '../components/CharacterDialog.vue'
-import type { OfficeLayout } from '../game/types'
-import { deserializeLayout, serializeLayout } from '../game/layoutManager'
-import { buildDefaultLayout } from '../game/defaultLayout'
 import type Phaser from 'phaser'
 import type Room2Scene from '../game2/Room2Scene'
 
@@ -33,12 +28,6 @@ const currentRoomId = computed(() => {
   return id || null
 })
 
-// ===== Layout type =====
-const layoutType = ref<'tiled' | 'classic'>('classic')
-
-// ===== Classic layout =====
-const currentLayout = ref<OfficeLayout | null>(null)
-
 // ===== Tiled layout =====
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const customMapJson = ref<Record<string, any> | null>(null)
@@ -47,77 +36,27 @@ const tileError = ref('')
 // ===== Edit mode =====
 const isEditing = ref(false)
 
-// ===== Load room (detects layout_type) =====
+// ===== Load room =====
 async function loadRoom() {
   const rid = currentRoomId.value
-  if (!rid) {
-    layoutType.value = 'classic'
-    await _loadClassicFallback()
-    return
-  }
+  if (!rid) return
   try {
     const room = await apiClient.get<any>(`/api/v1/rooms/${rid}`)
-    layoutType.value = room.layout_type === 'tiled' ? 'tiled' : 'classic'
-
-    if (layoutType.value === 'tiled') {
-      customMapJson.value = null
-      if (room.layout_json) {
-        try {
-          const parsed = typeof room.layout_json === 'string'
-            ? JSON.parse(room.layout_json)
-            : room.layout_json
-          if (parsed && typeof parsed === 'object' && Array.isArray(parsed.layers)) {
-            customMapJson.value = parsed
-          }
-        } catch { /* use default tiled map */ }
-      }
-    } else {
-      if (room.layout_json) {
-        const layout = deserializeLayout(room.layout_json)
-        if (layout) {
-          if (!layout.slots || layout.slots.length === 0) {
-            layout.slots = buildDefaultLayout(totalDesks.value || 4).slots
-          }
-          currentLayout.value = layout
-          return
+    customMapJson.value = null
+    if (room.layout_json) {
+      try {
+        const parsed = typeof room.layout_json === 'string'
+          ? JSON.parse(room.layout_json)
+          : room.layout_json
+        if (parsed && typeof parsed === 'object' && Array.isArray(parsed.layers)) {
+          customMapJson.value = parsed
         }
-      }
-      currentLayout.value = buildDefaultLayout(totalDesks.value || 4)
+      } catch { /* use default tiled map */ }
     }
-  } catch {
-    layoutType.value = 'classic'
-    currentLayout.value = buildDefaultLayout(totalDesks.value || 4)
-  }
-}
-
-async function _loadClassicFallback() {
-  await store.fetchSettings()
-  const raw = store.settings.office_layout
-  if (raw) {
-    const layout = deserializeLayout(raw)
-    if (layout) {
-      if (!layout.slots || layout.slots.length === 0) {
-        layout.slots = buildDefaultLayout(totalDesks.value || 4).slots
-      }
-      currentLayout.value = layout
-      return
-    }
-  }
-  currentLayout.value = buildDefaultLayout(totalDesks.value || 4)
+  } catch { /* use default tiled map */ }
 }
 
 // ===== Save handlers =====
-async function handleSaveClassicLayout(layout: OfficeLayout) {
-  currentLayout.value = layout
-  if (currentRoomId.value) {
-    await apiClient.patch(`/api/v1/rooms/${currentRoomId.value}/layout`, { layout_json: serializeLayout(layout) })
-  } else {
-    await store.updateSettings({ office_layout: serializeLayout(layout) })
-  }
-  isEditing.value = false
-  rebuildGame()
-}
-
 async function handleSaveTiledMap(mapJson: object) {
   const rid = currentRoomId.value
   if (rid) {
@@ -238,87 +177,8 @@ let bubbleInterval: number
 const now = ref(Date.now())
 let timeInterval: number
 
-// ===== Debug (classic only) =====
-const hoverPos = ref<{ row: number; col: number; frame: string | number }>({ row: 0, col: 0, frame: '--' })
-const TILE = 16, ZOOM = 3, tileSize = TILE * ZOOM
-
-function onCanvasMouseMove(e: MouseEvent) {
-  if (layoutType.value !== 'classic') return
-  const canvas = (e.target as HTMLElement).querySelector('canvas') || e.target as HTMLCanvasElement
-  if (!canvas || canvas.tagName !== 'CANVAS') return
-
-  const rect = canvas.getBoundingClientRect()
-  const scaleX = canvas.width / rect.width
-  const scaleY = canvas.height / rect.height
-
-  let offsetX = 0, offsetY = 0
-  const scene = getClassicScene()
-  if (scene?.cameras?.main) {
-    offsetX = scene.cameras.main.scrollX
-    offsetY = scene.cameras.main.scrollY
-  }
-
-  const worldX = (e.clientX - rect.left) * scaleX + offsetX
-  const worldY = (e.clientY - rect.top) * scaleY + offsetY
-  const col = Math.floor(worldX / tileSize)
-  const row = Math.floor(worldY / tileSize)
-
-  let frame: string | number = '--'
-  if (scene?.layout) {
-    const { cols, rows, ground } = scene.layout
-    if (row >= 0 && row < rows && col >= 0 && col < cols) {
-      const gt = ground[row * cols + col]!
-      const isWall = gt === 1 || (gt >= 13 && gt <= 16)
-      if (!isWall) {
-        frame = `g${gt}`
-      } else {
-        const x = col * tileSize, y = row * tileSize
-        const images = scene.children.list.filter((c: any) => c.type === 'Image' && c.texture?.key === 'floor_tiles')
-        for (const img of images as any[]) {
-          if (Math.abs(img.x - x) < 2 && Math.abs(img.y - y) < 2) {
-            frame = img.frame?.name ?? '--'
-            break
-          }
-        }
-      }
-    }
-  }
-  hoverPos.value = { row, col, frame }
-}
-
-function copyPos() {
-  if (layoutType.value !== 'classic') return
-  const { row, col, frame } = hoverPos.value
-  const scene = getClassicScene()
-  let info = `row=${row}, col=${col}, frame=${frame}`
-
-  if (scene?.layout) {
-    const { cols, rows, ground } = scene.layout
-    const getType = (r: number, c: number) => {
-      if (r < 0 || r >= rows || c < 0 || c >= cols) return 'X'
-      const gt = ground[r * cols + c]!
-      if (gt === 0) return 'V'
-      if (gt === 1 || (gt >= 13 && gt <= 16)) return 'W'
-      return 'F'
-    }
-    const n = getType(row - 1, col), ne = getType(row - 1, col + 1)
-    const e = getType(row, col + 1), se = getType(row + 1, col + 1)
-    const s = getType(row + 1, col), sw = getType(row + 1, col - 1)
-    const w = getType(row, col - 1), nw = getType(row - 1, col - 1)
-    info += `\nneighbors: n=${n}, ne=${ne}, e=${e}, se=${se}, s=${s}, sw=${sw}, w=${w}, nw=${nw}`
-    info += `\n  ${nw} ${n} ${ne}\n  ${w} * ${e}\n  ${sw} ${s} ${se}`
-    info += `\nshould be => `
-  }
-  navigator.clipboard.writeText(info)
-}
-
 // ===== Phaser Game =====
 let game: Phaser.Game | null = null
-
-function getClassicScene(): OfficeScene | null {
-  if (!game) return null
-  return game.scene.getScene('OfficeScene') as OfficeScene | null
-}
 
 function getTiledScene(): Room2Scene | null {
   if (!game) return null
@@ -349,11 +209,7 @@ function pushDataToScene() {
     memberCount: members.value.length,
   }
 
-  if (layoutType.value === 'tiled') {
-    getTiledScene()?.updateData?.(commonData)
-  } else {
-    getClassicScene()?.updateData?.(commonData)
-  }
+  getTiledScene()?.updateData?.(commonData)
 }
 
 // ===== Character Dialog =====
@@ -387,7 +243,7 @@ function onMemberDialoguePopup(e: Event) {
 }
 
 function setupCharacterClickListener() {
-  const scene = layoutType.value === 'tiled' ? getTiledScene() : getClassicScene()
+  const scene = getTiledScene()
   if (!scene) return
   scene.events.on('character-clicked', (data: CharacterInfo) => {
     const member = members.value.find(m => m.id === data.memberId)
@@ -421,31 +277,23 @@ async function rebuildGame() {
   await nextTick()
 
   if (isEditing.value) return
+  if (!canvasRef.value) return
 
-  if (layoutType.value === 'tiled') {
-    if (!canvasRef.value) return
-    tileError.value = ''
-    try {
-      const { createRoom2Game } = await import('../game2/Room2Scene')
-      game = createRoom2Game('room-canvas', customMapJson.value ?? undefined)
-      setupGameListeners()
-      pushDataToScene()
-    } catch (e: unknown) {
-      tileError.value = e instanceof Error ? e.message : String(e)
-      console.error('[Rooms] Failed to create tiled game:', e)
-    }
-  } else {
-    const el = document.getElementById('room-canvas')
-    if (!el) return
-    const layout = currentLayout.value || buildDefaultLayout(totalDesks.value || 4)
-    game = createOfficeGame('room-canvas', layout)
+  tileError.value = ''
+  try {
+    const { createRoom2Game } = await import('../game2/Room2Scene')
+    game = createRoom2Game('room-canvas', customMapJson.value ?? undefined)
     setupGameListeners()
+    pushDataToScene()
+  } catch (e: unknown) {
+    tileError.value = e instanceof Error ? e.message : String(e)
+    console.error('[Rooms] Failed to create tiled game:', e)
   }
 }
 
 // ===== Lifecycle =====
 onMounted(async () => {
-  // 沒帶 roomId 時，自動導向第一間可用 Room（避免永遠載 classic fallback）
+  // 沒帶 roomId 時，自動導向第一間可用 Room
   if (!currentRoomId.value) {
     try {
       const rooms = await apiClient.get<Array<{ id: number; is_active: boolean }>>('/api/v1/rooms')
@@ -454,7 +302,7 @@ onMounted(async () => {
         await router.replace(`/rooms/${first.id}`)
         return
       }
-    } catch { /* fallback to classic */ }
+    } catch { /* use default tiled map */ }
   }
 
   await loadRoom()
@@ -502,21 +350,10 @@ watch(
 </script>
 
 <template>
-  <div
-    class="h-full w-full relative"
-    :class="layoutType === 'tiled' ? 'bg-[#1a1a2e]' : 'bg-[#1a1510]'"
-  >
-    <!-- Classic editor -->
-    <OfficeEditor
-      v-if="isEditing && layoutType === 'classic' && currentLayout"
-      :layout="currentLayout"
-      @save="handleSaveClassicLayout"
-      @cancel="handleExitEdit"
-    />
-
+  <div class="h-full w-full relative bg-[#1a1a2e]">
     <!-- Tiled editor -->
     <Room2Editor
-      v-else-if="isEditing && layoutType === 'tiled'"
+      v-if="isEditing"
       :custom-map-json="customMapJson"
       @save="handleSaveTiledMap"
       @cancel="handleExitEdit"
@@ -537,8 +374,6 @@ watch(
           id="room-canvas"
           ref="canvasRef"
           class="flex-1 min-h-0"
-          @mousemove="onCanvasMouseMove"
-          @click="copyPos"
         />
 
         <!-- Footer -->
@@ -550,15 +385,6 @@ watch(
           <span class="text-[8px] text-slate-400">IDLE:{{ restingMembers.length }}</span>
           <span class="text-[8px] text-slate-400">TOTAL:{{ members.length }}</span>
           <span class="flex-1"></span>
-          <!-- Classic debug info -->
-          <span
-            v-if="!isMobile && layoutType === 'classic'"
-            class="text-[8px] text-amber-400 cursor-pointer"
-            @click.stop="copyPos"
-            title="Click to copy"
-          >
-            row={{ hoverPos.row }}, col={{ hoverPos.col }}, frame={{ hoverPos.frame }}
-          </span>
           <button
             @click="goTo3D"
             class="flex items-center gap-1 px-1.5 py-0.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors"

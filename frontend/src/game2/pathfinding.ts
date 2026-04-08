@@ -1,5 +1,3 @@
-import type { OfficeLayout } from './types'
-
 interface Node {
   col: number
   row: number
@@ -19,24 +17,11 @@ function nodeKey(col: number, row: number): string {
 }
 
 /**
- * Check if a tile is walkable (not wall, not void, not blocked by furniture)
- */
-function isWalkable(
-  _layout: OfficeLayout,
-  col: number,
-  row: number,
-  walkableSet: Set<string>
-): boolean {
-  return walkableSet.has(nodeKey(col, row))
-}
-
-/**
  * A* pathfinding algorithm
  * Returns array of {col, row} from start to end (excluding start, including end)
  * Returns empty array if no path found
  */
 export function findPath(
-  layout: OfficeLayout,
   startCol: number,
   startRow: number,
   endCol: number,
@@ -54,7 +39,7 @@ export function findPath(
   const end = { col: Math.round(endCol), row: Math.round(endRow) }
 
   // Check if end is walkable
-  if (!isWalkable(layout, end.col, end.row, walkableSet)) {
+  if (!walkableSet.has(nodeKey(end.col, end.row))) {
     return []
   }
 
@@ -111,7 +96,7 @@ export function findPath(
       const key = nodeKey(nc, nr)
 
       if (closedSet.has(key)) continue
-      if (!isWalkable(layout, nc, nr, walkableSet)) continue
+      if (!walkableSet.has(key)) continue
 
       const g = current.g + 1
       const h = heuristic({ col: nc, row: nr }, end)

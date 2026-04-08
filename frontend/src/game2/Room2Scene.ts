@@ -2,7 +2,7 @@
  * Room2Scene — SkyOffice 圖集 + Tiled 地圖 + 角色系統
  */
 import Phaser from 'phaser'
-import { findPath, simplifyPath } from '../game/pathfinding'
+import { findPath, simplifyPath } from './pathfinding'
 import {
   preloadDefaultChars, createAllDefaultAnims, createAnimsForKey,
   CHAR_FRAME_W, CHAR_LEGACY_W, MAX_CHAR_COUNT,
@@ -547,8 +547,7 @@ export default class Room2Scene extends Phaser.Scene {
       const nearbyCount = Math.max(3, Math.floor(byDist.length * 0.3))
       const target = byDist[Math.floor(Math.random() * nearbyCount)]!
 
-      // pathfinding.ts 的 layout 參數未使用，傳空物件
-      const path = findPath({} as any, curCol, curRow, target.col, target.row, roomTiles)
+      const path = findPath(curCol, curRow, target.col, target.row, roomTiles)
       if (path.length === 0) {
         this.wanderTimers.set(key, this.time.delayedCall(1000, wander))
         return
