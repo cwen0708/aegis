@@ -160,6 +160,7 @@ def post_task_hooks(idx, result, new_status, token_info, card_data, project_name
         exit_code=result.get("exit_code", 0),
         token_info=token_info,
         card_content=card_data.content or "",
+        acceptance_criteria=card_data.acceptance_criteria or "",
         workspace_dir=workspace_dir or "",
         cron_job_id=cron_job_id,
     )

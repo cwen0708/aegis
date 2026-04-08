@@ -51,6 +51,7 @@ class TaskContext:
 
     # 卡片資料
     card_content: str = ""
+    acceptance_criteria: str = ""  # Sprint Contract 完成條件
     workspace_dir: str = ""
 
     # Chat 專用
