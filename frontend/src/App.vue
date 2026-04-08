@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Shield, ListTodo, Settings, Clock, FolderOpen, Wifi, WifiOff, Sun, Moon, Zap, Building2, Home, PanelLeftClose, PanelLeftOpen, Rocket, LogIn, LogOut, Monitor, LayoutGrid } from 'lucide-vue-next'
+import { Shield, ListTodo, Settings, Clock, FolderOpen, Wifi, WifiOff, Sun, Moon, Zap, Building2, PanelLeftClose, PanelLeftOpen, Rocket, LogIn, LogOut, Monitor, LayoutGrid } from 'lucide-vue-next'
 import { useWebSocket } from './composables/useWebSocket'
 import { useResponsive } from './composables/useResponsive'
 import { useAegisStore } from './stores/aegis'
@@ -166,7 +166,7 @@ function mobileNavClass(path: string) {
           <!-- Dynamic room entries -->
           <template v-if="rooms.length > 0">
             <router-link
-              v-for="(room, idx) in rooms"
+              v-for="room in rooms"
               :key="room.id"
               :to="`/rooms/${room.id}`"
               class="w-full flex items-center gap-3 py-2 rounded-lg transition-colors text-sm font-medium"
