@@ -24,6 +24,7 @@ def _build_config_content(
     stage_name: str = "",
     stage_description: str = "",
     stage_instruction: str = "",
+    acceptance_criteria: str = "",
 ) -> str:
     """Assemble config content — 委託給 executor.config_md。"""
     from app.core.executor.config_md import build_config_md
@@ -36,6 +37,7 @@ def _build_config_content(
         stage_name=stage_name,
         stage_description=stage_description,
         stage_instruction=stage_instruction,
+        acceptance_criteria=acceptance_criteria,
     )
 
 
@@ -48,6 +50,7 @@ def prepare_workspace(
     stage_name: str = "",
     stage_description: str = "",
     stage_instruction: str = "",
+    acceptance_criteria: str = "",
 ) -> Path:
     """
     Create a temp workspace directory for the AI task.
@@ -64,6 +67,7 @@ def prepare_workspace(
         stage_name=stage_name,
         stage_description=stage_description,
         stage_instruction=stage_instruction,
+        acceptance_criteria=acceptance_criteria,
     )
     (ws / cfg["config_file"]).write_text(content, encoding="utf-8")
 

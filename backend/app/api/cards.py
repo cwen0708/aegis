@@ -32,6 +32,7 @@ class CardCreateRequest(BaseModel):
     tags: Optional[List[str]] = None  # 標籤名稱列表
     parent_id: Optional[int] = None  # 父卡片 ID（Leader-Worker 委派）
     max_rounds: Optional[int] = None  # Ralph Loop 最大迭代輪數（1~10）
+    acceptance_criteria: Optional[str] = None  # 完成條件（Sprint Contract）
 
     @field_validator("max_rounds")
     @classmethod
@@ -48,6 +49,7 @@ class CardUpdateRequest(BaseModel):
     content: Optional[str] = None
     tags: Optional[List[str]] = None  # 標籤名稱列表
     max_rounds: Optional[int] = None  # Ralph Loop 最大迭代輪數（1~10）
+    acceptance_criteria: Optional[str] = None  # 完成條件（Sprint Contract）
 
     @field_validator("max_rounds")
     @classmethod
@@ -102,6 +104,7 @@ def create_card(card_in: CardCreateRequest, session: Session = Depends(get_sessi
         description=card_in.description, content=card_in.content or "", status=initial_status,
         tags=card_in.tags or [], parent_id=card_in.parent_id,
         max_rounds=card_in.max_rounds if card_in.max_rounds is not None else 1,
+        acceptance_criteria=card_in.acceptance_criteria,
         created_at=now, updated_at=now,
     )
 
@@ -148,6 +151,8 @@ def update_card(card_id: int, update_data: CardUpdateRequest, session: Session =
             cd.tags = update_data.tags
         if update_data.max_rounds is not None:
             cd.max_rounds = update_data.max_rounds
+        if update_data.acceptance_criteria is not None:
+            cd.acceptance_criteria = update_data.acceptance_criteria
         cd.updated_at = now
 
         write_card(Path(idx.file_path), cd)

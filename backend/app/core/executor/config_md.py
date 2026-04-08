@@ -61,6 +61,7 @@ def build_config_md(
     stage_name: str = "",
     stage_description: str = "",
     stage_instruction: str = "",
+    acceptance_criteria: str = "",
     # Chat-specific
     user_context=None,
     accessible_projects: Optional[List] = None,
@@ -83,6 +84,7 @@ def build_config_md(
             stage_name=stage_name,
             stage_description=stage_description,
             stage_instruction=stage_instruction,
+            acceptance_criteria=acceptance_criteria,
         )
     else:
         return _build_chat_md(
@@ -213,6 +215,7 @@ def _build_task_md(
     stage_name: str = "",
     stage_description: str = "",
     stage_instruction: str = "",
+    acceptance_criteria: str = "",
 ) -> str:
     """生成 task 專用設定檔（含 workspace 資訊、記憶路徑、階段指令、歷史記憶注入）。"""
     from app.core.member_profile import get_member_memory_dir
@@ -289,7 +292,7 @@ git 操作在此目錄中可直接執行（.git 已連結）。
 - long-term/ 長期記憶（累積的經驗與模式）
 需要回憶時可以去讀取。{memories_section}
 {stage_section}
-# 本次任務
+{"# 完成條件（Acceptance Criteria）\n" + acceptance_criteria + "\n\n" if acceptance_criteria else ""}# 本次任務
 {card_content}
 
 # 任務完成後

@@ -1081,6 +1081,7 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
                 stage_name=stage_list.name if stage_list else "",
                 stage_description=stage_list.description or "" if stage_list else "",
                 stage_instruction=stage_list.system_instruction or "" if stage_list else "",
+                acceptance_criteria=card_data.acceptance_criteria or "",
             ))
 
         # CWD 策略：workspace 為 CWD（CLAUDE.md + skills 在這裡）

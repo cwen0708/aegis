@@ -93,6 +93,7 @@ def collect_hooks(source: str = "worker") -> list[Hook]:
     from app.hooks.event_log import EventLogHook
     from app.hooks.skill_generator import SkillGeneratorHook
     from app.hooks.token_counting import TokenCountingHook
+    from app.hooks.sprint_contract import SprintContractHook
     from app.hooks.verification import VerificationHook
     from app.hooks.content_detector import ContentDetectorHook
     from app.hooks.taste_propagation import TastePropagationHook
@@ -109,6 +110,7 @@ def collect_hooks(source: str = "worker") -> list[Hook]:
             TokenCountingHook(),    # POST: 記錄 token 使用量和成本
             MemoryHook(),           # POST: 成員記憶
             SkillGeneratorHook(),   # POST: 自動生成 skill 模板
+            SprintContractHook(),   # POST: acceptance_criteria 驗證日誌
             VerificationHook(),     # POST: anti-fabrication 驗證
             TastePropagationHook(), # POST: taste 標記 → golden-rules
             CleanupHook(),          # POST: 清理（永遠最後）
