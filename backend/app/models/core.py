@@ -699,6 +699,23 @@ class PromptQueueEntry(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class NamedSession(SQLModel, table=True):
+    """命名工作區 Session — 跨卡片的持久工作區，AI 成員可在多張卡片間共用"""
+    __table_args__ = (
+        UniqueConstraint("member_id", "name", name="uq_namedsession_member_name"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    member_id: int = Field(foreign_key="member.id", index=True)
+    name: str = Field(index=True)          # session 名稱，如 "refactor-auth"
+    project_id: Optional[int] = Field(default=None, foreign_key="project.id")
+    description: str = Field(default="")   # 用途描述
+    workspace_path: str = Field(default="")  # 實際工作區絕對路徑
+
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class Domain(SQLModel, table=True):
     """網域綁定 — 控制該網域的登入和引導頁設定"""
     id: Optional[int] = Field(default=None, primary_key=True)
