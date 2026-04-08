@@ -122,6 +122,7 @@ def sync_card_to_index(
         existing.tags_json = tags_json
         existing.model = card.model
         existing.parent_id = card.parent_id
+        existing.max_rounds = card.max_rounds
         existing.is_archived = card.is_archived
         existing.created_at = card.created_at
         existing.updated_at = card.updated_at
@@ -142,6 +143,7 @@ def sync_card_to_index(
             tags_json=tags_json,
             model=card.model,
             parent_id=card.parent_id,
+            max_rounds=card.max_rounds,
             is_archived=card.is_archived,
             created_at=card.created_at,
             updated_at=card.updated_at,

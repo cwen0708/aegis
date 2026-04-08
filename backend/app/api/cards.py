@@ -3,7 +3,7 @@ from fastapi.responses import FileResponse
 from sqlmodel import Session, select
 from sqlalchemy import func as sa_func
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from datetime import datetime, timezone
 from app.database import get_session
 from app.models.core import Project, Card, StageList, CardIndex
@@ -31,6 +31,14 @@ class CardCreateRequest(BaseModel):
     status: Optional[str] = None  # idle (default) or pending
     tags: Optional[List[str]] = None  # 標籤名稱列表
     parent_id: Optional[int] = None  # 父卡片 ID（Leader-Worker 委派）
+    max_rounds: Optional[int] = None  # Ralph Loop 最大迭代輪數（1~10）
+
+    @field_validator("max_rounds")
+    @classmethod
+    def validate_max_rounds(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and not (1 <= v <= 10):
+            raise ValueError("max_rounds must be between 1 and 10")
+        return v
 
 class CardUpdateRequest(BaseModel):
     list_id: Optional[int] = None
@@ -39,6 +47,14 @@ class CardUpdateRequest(BaseModel):
     description: Optional[str] = None
     content: Optional[str] = None
     tags: Optional[List[str]] = None  # 標籤名稱列表
+    max_rounds: Optional[int] = None  # Ralph Loop 最大迭代輪數（1~10）
+
+    @field_validator("max_rounds")
+    @classmethod
+    def validate_max_rounds(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and not (1 <= v <= 10):
+            raise ValueError("max_rounds must be between 1 and 10")
+        return v
 
 
 # ==========================================
@@ -85,6 +101,7 @@ def create_card(card_in: CardCreateRequest, session: Session = Depends(get_sessi
         id=new_id, list_id=card_in.list_id, title=card_in.title,
         description=card_in.description, content=card_in.content or "", status=initial_status,
         tags=card_in.tags or [], parent_id=card_in.parent_id,
+        max_rounds=card_in.max_rounds if card_in.max_rounds is not None else 1,
         created_at=now, updated_at=now,
     )
 
@@ -129,6 +146,8 @@ def update_card(card_id: int, update_data: CardUpdateRequest, session: Session =
             cd.content = update_data.content
         if update_data.tags is not None:
             cd.tags = update_data.tags
+        if update_data.max_rounds is not None:
+            cd.max_rounds = update_data.max_rounds
         cd.updated_at = now
 
         write_card(Path(idx.file_path), cd)
