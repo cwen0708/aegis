@@ -4,9 +4,12 @@ import pytest
 from app.core.sync_matrix import (
     ConflictStrategy,
     FieldRule,
+    RejectedField,
     SyncDirection,
+    SyncEnforcer,
     SyncRule,
     SyncRuleRegistry,
+    ValidatedChanges,
 )
 
 
@@ -157,3 +160,130 @@ class TestSyncRuleRegistry:
         result = registry.get_rule("card")
         assert result is not None
         assert result.default_direction == SyncDirection.BIDIRECTIONAL
+
+
+# ---------------------------------------------------------------------------
+# RejectedField / ValidatedChanges (frozen dataclass)
+# ---------------------------------------------------------------------------
+
+class TestRejectedField:
+    def test_creation(self):
+        rf = RejectedField(field_name="title", reason="not allowed")
+        assert rf.field_name == "title"
+        assert rf.reason == "not allowed"
+
+    def test_frozen_immutability(self):
+        rf = RejectedField(field_name="title", reason="no")
+        with pytest.raises(AttributeError):
+            rf.field_name = "other"
+
+
+class TestValidatedChanges:
+    def test_creation(self):
+        vc = ValidatedChanges(
+            approved={"title": "new"},
+            rejected=(RejectedField("notes", "denied"),),
+        )
+        assert vc.approved == {"title": "new"}
+        assert len(vc.rejected) == 1
+
+    def test_frozen_immutability(self):
+        vc = ValidatedChanges()
+        with pytest.raises(AttributeError):
+            vc.approved = {}
+
+    def test_defaults(self):
+        vc = ValidatedChanges()
+        assert vc.approved == {}
+        assert vc.rejected == ()
+
+
+# ---------------------------------------------------------------------------
+# SyncEnforcer
+# ---------------------------------------------------------------------------
+
+class TestSyncEnforcer:
+    @staticmethod
+    def _make_enforcer() -> SyncEnforcer:
+        """card 實體：title=ai-only, notes=bidirectional, default=HUMAN_TO_AI"""
+        registry = SyncRuleRegistry()
+        fr_title = FieldRule(
+            "title", SyncDirection.AI_TO_HUMAN,
+            ConflictStrategy.LAST_WRITE_WINS, frozenset({"ai"}),
+        )
+        fr_notes = FieldRule(
+            "notes", SyncDirection.BIDIRECTIONAL,
+            ConflictStrategy.MANUAL_MERGE, frozenset({"ai", "human"}),
+        )
+        rule = SyncRule(
+            "card", (fr_title, fr_notes),
+            SyncDirection.HUMAN_TO_AI, ConflictStrategy.LAST_WRITE_WINS,
+        )
+        registry.register(rule)
+        return SyncEnforcer(registry)
+
+    # -- validate: 全部通過 --
+    def test_validate_all_approved(self):
+        enforcer = self._make_enforcer()
+        result = enforcer.validate("card", {"title": "new", "notes": "note"}, "ai")
+        assert len(result.approved) == 2
+        assert result.approved["title"] == "new"
+        assert result.approved["notes"] == "note"
+        assert len(result.rejected) == 0
+
+    # -- validate: 全部拒絕 --
+    def test_validate_all_rejected(self):
+        enforcer = self._make_enforcer()
+        result = enforcer.validate("card", {"title": "new"}, "human")
+        assert len(result.approved) == 0
+        assert len(result.rejected) == 1
+        assert result.rejected[0].field_name == "title"
+        assert "human" in result.rejected[0].reason
+
+    # -- validate: 部分通過 --
+    def test_validate_partial(self):
+        enforcer = self._make_enforcer()
+        result = enforcer.validate("card", {"title": "new", "notes": "note"}, "human")
+        assert "notes" in result.approved
+        assert "title" not in result.approved
+        assert len(result.rejected) == 1
+        assert result.rejected[0].field_name == "title"
+
+    # -- enforce: 只保留允許的欄位 --
+    def test_enforce_returns_only_approved(self):
+        enforcer = self._make_enforcer()
+        result = enforcer.enforce("card", {"title": "new", "notes": "note"}, "human")
+        assert result == {"notes": "note"}
+        assert "title" not in result
+
+    # -- enforce: 不修改傳入的 changes dict --
+    def test_enforce_does_not_mutate_input(self):
+        enforcer = self._make_enforcer()
+        original = {"title": "new", "notes": "note"}
+        enforcer.enforce("card", original, "human")
+        assert original == {"title": "new", "notes": "note"}
+
+    # -- entity_type 不存在 --
+    def test_validate_unknown_entity_rejects_all(self):
+        enforcer = self._make_enforcer()
+        result = enforcer.validate("unknown", {"field": "val"}, "ai")
+        assert len(result.approved) == 0
+        assert len(result.rejected) == 1
+        assert result.rejected[0].field_name == "field"
+
+    def test_enforce_unknown_entity_returns_empty(self):
+        enforcer = self._make_enforcer()
+        result = enforcer.enforce("unknown", {"field": "val"}, "ai")
+        assert result == {}
+
+    # -- 空 changes dict --
+    def test_validate_empty_changes(self):
+        enforcer = self._make_enforcer()
+        result = enforcer.validate("card", {}, "ai")
+        assert result.approved == {}
+        assert result.rejected == ()
+
+    def test_enforce_empty_changes(self):
+        enforcer = self._make_enforcer()
+        result = enforcer.enforce("card", {}, "ai")
+        assert result == {}

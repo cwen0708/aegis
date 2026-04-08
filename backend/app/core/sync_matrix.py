@@ -6,9 +6,9 @@ Sync Matrix Engine — 同步規則引擎核心
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Protocol
+from typing import Any, Protocol
 
 
 class SyncDirection(Enum):
@@ -46,6 +46,22 @@ class SyncRule:
     field_rules: tuple[FieldRule, ...]
     default_direction: SyncDirection
     default_strategy: ConflictStrategy
+
+
+@dataclass(frozen=True)
+class RejectedField:
+    """被拒絕的欄位變更 (field_name, reason) 對"""
+
+    field_name: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class ValidatedChanges:
+    """通過驗證的欄位變更結果"""
+
+    approved: dict[str, Any] = field(default_factory=dict)
+    rejected: tuple[RejectedField, ...] = ()
 
 
 class SyncRuleProvider(Protocol):
@@ -94,6 +110,40 @@ class SyncRuleRegistry:
     def list_rules(self) -> list[SyncRule]:
         """列出所有已註冊的同步規則。"""
         return list(self._rules.values())
+
+
+class SyncEnforcer:
+    """同步強制器 — 基於 SyncRuleProvider 在寫入時驗證欄位級存取權限"""
+
+    def __init__(self, provider: SyncRuleProvider) -> None:
+        self._provider = provider
+
+    def validate(
+        self, entity_type: str, changes: dict[str, Any], actor: str,
+    ) -> ValidatedChanges:
+        """逐欄位檢查 writable 權限，回傳驗證結果。"""
+        approved: dict[str, Any] = {}
+        rejected: list[RejectedField] = []
+
+        for field_name, value in changes.items():
+            if self._provider.check_field_writable(entity_type, field_name, actor):
+                approved[field_name] = value
+            else:
+                rejected.append(
+                    RejectedField(
+                        field_name=field_name,
+                        reason=f"actor '{actor}' cannot write field '{field_name}' on '{entity_type}'",
+                    ),
+                )
+
+        return ValidatedChanges(approved=approved, rejected=tuple(rejected))
+
+    def enforce(
+        self, entity_type: str, changes: dict[str, Any], actor: str,
+    ) -> dict[str, Any]:
+        """過濾掉被拒欄位，只回傳允許的變更（新 dict，不修改原 changes）。"""
+        result = self.validate(entity_type, changes, actor)
+        return dict(result.approved)
 
 
 def _direction_allows(direction: SyncDirection, actor: str) -> bool:
