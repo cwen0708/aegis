@@ -46,6 +46,7 @@ from app.models.core import (
     Member, MemberAccount, Account, TaskLog, CronLog, MemberDialogue
 )
 from app.core.card_file import CardData, read_card, write_card
+from app.core.ralph_loop import parse_loop_signal, build_next_round_prompt, LoopSignal
 from app.core.card_index import sync_card_to_index, remove_card_from_index, block_similar_cards
 
 # Abort 信號目錄
@@ -610,8 +611,7 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
 
     env = (EnvironmentBuilder()
         .with_system_keys()
-        .with_project_vars(_project_id)
-        .with_global_api_keys()
+        .with_db_settings(_project_id)
         .with_entry_point("worker")
         .with_git_config(ws_gitconfig)
         .with_auth(provider_name, auth_info, log_prefix=f"[Task {card_id}]")
@@ -1156,6 +1156,10 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
         return
 
     result = None
+    # 追蹤實際成功的 provider/model/auth（用於 Ralph Loop 後續輪次）
+    used_provider = None
+    used_model = None
+    used_auth: dict = {}
     for attempt_idx, (acct_provider, acct_model, acct_auth, acct_name) in enumerate(accounts_list):
         if attempt_idx > 0:
             logger.info(f"[Worker] Card {idx.card_id}: fallback → '{acct_name}' (priority={attempt_idx})")
@@ -1177,6 +1181,9 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
         )
 
         if result["status"] == "success":
+            used_provider = acct_provider
+            used_model = acct_model
+            used_auth = acct_auth
             if attempt_idx > 0:
                 logger.info(f"[Worker] Card {idx.card_id}: succeeded with fallback account '{acct_name}'")
             break
@@ -1213,10 +1220,75 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
             )
 
             if result["status"] == "success":
+                used_provider = fo_provider
+                used_model = fo_model
+                used_auth = {}
                 logger.info(f"[Worker] Card {idx.card_id}: succeeded with provider failover → {fo_provider}")
                 break
 
             logger.warning(f"[Worker] Card {idx.card_id}: provider failover '{fo_provider}' failed (exit={result.get('exit_code')})")
+
+    # Ralph Loop：多輪迭代（max_rounds > 1 且 AI 回傳 loop:continue）
+    if (
+        result
+        and result["status"] == "success"
+        and card_data.max_rounds > 1
+        and not is_chat_mode
+    ):
+        all_outputs = [result.get("output", "")]
+        current_round = 1
+
+        while current_round < card_data.max_rounds:
+            signal = parse_loop_signal(result.get("output", ""))
+            if signal != LoopSignal.CONTINUE:
+                break
+
+            current_round += 1
+            logger.info(f"[Worker] Card {idx.card_id}: Ralph Loop round {current_round}/{card_data.max_rounds}")
+            broadcast_event("task_progress", {
+                "card_id": idx.card_id,
+                "type": "ralph_loop",
+                "round": current_round,
+                "max_rounds": card_data.max_rounds,
+            })
+            task_emitter.emit_output(f"\n🔄 Ralph Loop — Round {current_round}/{card_data.max_rounds}\n")
+
+            next_prompt = build_next_round_prompt(
+                original_prompt=effective_prompt,
+                previous_output=result.get("output", ""),
+                round_num=current_round,
+                max_rounds=card_data.max_rounds,
+            )
+
+            # 使用實際成功的帳號執行（可能是原始帳號或 failover provider）
+            result = run_task(
+                card_id=idx.card_id,
+                project_path=effective_cwd,
+                prompt=next_prompt,
+                phase=list_name.upper(),
+                forced_provider=used_provider,
+                forced_model=used_model,
+                card_title=idx.title,
+                project_name=project_name,
+                member_id=member_id,
+                auth_info=used_auth,
+                emitter=task_emitter,
+            )
+
+            if result["status"] != "success":
+                logger.warning(f"[Worker] Card {idx.card_id}: Ralph Loop round {current_round} failed, stopping loop")
+                break
+
+            all_outputs.append(result.get("output", ""))
+
+        # 合併所有輪次輸出
+        if current_round > 1:
+            separator = "\n\n---\n\n"
+            merged_parts = []
+            for i, out in enumerate(all_outputs, 1):
+                merged_parts.append(f"## Round {i}/{current_round}\n\n{out}")
+            result["output"] = separator.join(merged_parts)
+            logger.info(f"[Worker] Card {idx.card_id}: Ralph Loop completed — {current_round} rounds")
 
     # Data Classification Restore：還原 S2 佔位符為原始值
     if redact_map and result and result.get("output"):

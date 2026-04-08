@@ -134,8 +134,7 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
 
     env = (EnvironmentBuilder()
         .with_system_keys()
-        .with_project_vars(project_id)
-        .with_global_api_keys()
+        .with_db_settings(project_id)
         .with_member_extra(extra_env)
         .with_auth(provider_name, auth_info or {})
         .build())
