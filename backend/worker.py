@@ -997,6 +997,15 @@ def _handle_regular_result(idx, result, new_status, card_data, project_path, mem
                                 auto_commit_on_success=_auto_commit_on_success, auto_shelve_on_failure=_auto_shelve_on_failure,
                                 parse_and_create_cards=_parse_and_create_cards)
 
+    # 自動存檔 Execution Plan
+    if new_status == "completed" and result.get("output"):
+        try:
+            from app.core.plan_store import save_plan, list_plans
+            round_num = len(list_plans(idx.card_id)) + 1
+            save_plan(idx.card_id, round_num, result["output"])
+        except Exception as e:
+            logger.warning(f"[Task] Failed to save plan for card {idx.card_id}: {e}")
+
 
 def _post_task_hooks(idx, result, new_status, token_info, card_data, project_name, member_id, member_slug, workspace_dir, cron_job_id):
     _post_task_hooks_impl(idx, result, new_status, token_info, card_data, project_name, member_id, member_slug, workspace_dir, cron_job_id)
