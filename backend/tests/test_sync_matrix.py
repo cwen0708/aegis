@@ -1,10 +1,17 @@
 """Tests for Sync Matrix Engine."""
 import pytest
 
+from datetime import datetime
+
 from app.core.sync_matrix import (
+    ConflictResolver,
+    ConflictResult,
     ConflictStrategy,
+    DeferredField,
     FieldRule,
+    FieldVersion,
     RejectedField,
+    ResolvedField,
     SyncDirection,
     SyncEnforcer,
     SyncRule,
@@ -287,3 +294,204 @@ class TestSyncEnforcer:
         enforcer = self._make_enforcer()
         result = enforcer.enforce("card", {}, "ai")
         assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# FieldVersion / ResolvedField / DeferredField / ConflictResult (frozen)
+# ---------------------------------------------------------------------------
+
+class TestFieldVersion:
+    def test_creation(self):
+        fv = FieldVersion(value="hello", updated_at=datetime(2026, 1, 1), actor="ai")
+        assert fv.value == "hello"
+        assert fv.actor == "ai"
+
+    def test_frozen_immutability(self):
+        fv = FieldVersion(value="x", updated_at=datetime(2026, 1, 1), actor="ai")
+        with pytest.raises(AttributeError):
+            fv.value = "y"
+
+
+class TestResolvedField:
+    def test_creation(self):
+        rf = ResolvedField("title", "val", ConflictStrategy.LAST_WRITE_WINS)
+        assert rf.field_name == "title"
+        assert rf.value == "val"
+        assert rf.strategy == ConflictStrategy.LAST_WRITE_WINS
+
+    def test_frozen_immutability(self):
+        rf = ResolvedField("title", "val", ConflictStrategy.LAST_WRITE_WINS)
+        with pytest.raises(AttributeError):
+            rf.field_name = "other"
+
+
+class TestDeferredField:
+    def test_creation(self):
+        local = FieldVersion("a", datetime(2026, 1, 1), "ai")
+        remote = FieldVersion("b", datetime(2026, 1, 2), "human")
+        df = DeferredField("notes", local, remote, ConflictStrategy.MANUAL_MERGE)
+        assert df.field_name == "notes"
+        assert df.local.value == "a"
+        assert df.remote.value == "b"
+        assert df.strategy == ConflictStrategy.MANUAL_MERGE
+
+
+class TestConflictResult:
+    def test_defaults(self):
+        cr = ConflictResult()
+        assert cr.resolved == ()
+        assert cr.deferred == ()
+
+    def test_frozen_immutability(self):
+        cr = ConflictResult()
+        with pytest.raises(AttributeError):
+            cr.resolved = ()
+
+
+# ---------------------------------------------------------------------------
+# ConflictResolver
+# ---------------------------------------------------------------------------
+
+class TestConflictResolver:
+    """衝突解決器測試 — 覆蓋三種策略、tiebreak、空輸入、unknown entity"""
+
+    @staticmethod
+    def _make_resolver() -> ConflictResolver:
+        """card: title=LWW, notes=MANUAL_MERGE, default=AI_MERGE"""
+        registry = SyncRuleRegistry()
+        fr_title = FieldRule(
+            "title", SyncDirection.AI_TO_HUMAN,
+            ConflictStrategy.LAST_WRITE_WINS, frozenset({"ai"}),
+        )
+        fr_notes = FieldRule(
+            "notes", SyncDirection.BIDIRECTIONAL,
+            ConflictStrategy.MANUAL_MERGE, frozenset({"ai", "human"}),
+        )
+        fr_tags = FieldRule(
+            "tags", SyncDirection.BIDIRECTIONAL,
+            ConflictStrategy.AI_MERGE, frozenset({"ai", "human"}),
+        )
+        rule = SyncRule(
+            "card", (fr_title, fr_notes, fr_tags),
+            SyncDirection.BIDIRECTIONAL, ConflictStrategy.AI_MERGE,
+        )
+        registry.register(rule)
+        return ConflictResolver(registry)
+
+    # -- LAST_WRITE_WINS: local 較新 --
+    def test_lww_local_wins(self):
+        resolver = self._make_resolver()
+        local = {"title": FieldVersion("Local", datetime(2026, 3, 2), "ai")}
+        remote = {"title": FieldVersion("Remote", datetime(2026, 3, 1), "human")}
+        result = resolver.resolve("card", local, remote)
+        assert len(result.resolved) == 1
+        assert result.resolved[0].value == "Local"
+        assert result.resolved[0].strategy == ConflictStrategy.LAST_WRITE_WINS
+        assert len(result.deferred) == 0
+
+    # -- LAST_WRITE_WINS: remote 較新 --
+    def test_lww_remote_wins(self):
+        resolver = self._make_resolver()
+        local = {"title": FieldVersion("Local", datetime(2026, 3, 1), "ai")}
+        remote = {"title": FieldVersion("Remote", datetime(2026, 3, 2), "human")}
+        result = resolver.resolve("card", local, remote)
+        assert result.resolved[0].value == "Remote"
+
+    # -- LAST_WRITE_WINS: tiebreak → remote wins --
+    def test_lww_tiebreak_remote_wins(self):
+        resolver = self._make_resolver()
+        same_time = datetime(2026, 3, 1, 12, 0, 0)
+        local = {"title": FieldVersion("Local", same_time, "ai")}
+        remote = {"title": FieldVersion("Remote", same_time, "human")}
+        result = resolver.resolve("card", local, remote)
+        assert result.resolved[0].value == "Remote"
+
+    # -- MANUAL_MERGE → deferred --
+    def test_manual_merge_deferred(self):
+        resolver = self._make_resolver()
+        local = {"notes": FieldVersion("L-note", datetime(2026, 3, 1), "ai")}
+        remote = {"notes": FieldVersion("R-note", datetime(2026, 3, 2), "human")}
+        result = resolver.resolve("card", local, remote)
+        assert len(result.resolved) == 0
+        assert len(result.deferred) == 1
+        assert result.deferred[0].field_name == "notes"
+        assert result.deferred[0].strategy == ConflictStrategy.MANUAL_MERGE
+        assert result.deferred[0].local.value == "L-note"
+        assert result.deferred[0].remote.value == "R-note"
+
+    # -- AI_MERGE → deferred --
+    def test_ai_merge_deferred(self):
+        resolver = self._make_resolver()
+        local = {"tags": FieldVersion(["a"], datetime(2026, 3, 1), "ai")}
+        remote = {"tags": FieldVersion(["b"], datetime(2026, 3, 2), "human")}
+        result = resolver.resolve("card", local, remote)
+        assert len(result.deferred) == 1
+        assert result.deferred[0].field_name == "tags"
+        assert result.deferred[0].strategy == ConflictStrategy.AI_MERGE
+
+    # -- 非衝突：只有 local --
+    def test_local_only_auto_resolved(self):
+        resolver = self._make_resolver()
+        local = {"title": FieldVersion("New", datetime(2026, 3, 1), "ai")}
+        result = resolver.resolve("card", local, {})
+        assert len(result.resolved) == 1
+        assert result.resolved[0].value == "New"
+        assert len(result.deferred) == 0
+
+    # -- 非衝突：只有 remote --
+    def test_remote_only_auto_resolved(self):
+        resolver = self._make_resolver()
+        remote = {"title": FieldVersion("New", datetime(2026, 3, 1), "human")}
+        result = resolver.resolve("card", {}, remote)
+        assert len(result.resolved) == 1
+        assert result.resolved[0].value == "New"
+
+    # -- 空輸入 --
+    def test_empty_inputs(self):
+        resolver = self._make_resolver()
+        result = resolver.resolve("card", {}, {})
+        assert result.resolved == ()
+        assert result.deferred == ()
+
+    # -- unknown entity → fallback LWW --
+    def test_unknown_entity_fallback_lww(self):
+        resolver = self._make_resolver()
+        local = {"field": FieldVersion("L", datetime(2026, 3, 2), "ai")}
+        remote = {"field": FieldVersion("R", datetime(2026, 3, 1), "human")}
+        result = resolver.resolve("unknown", local, remote)
+        assert len(result.resolved) == 1
+        assert result.resolved[0].value == "L"
+        assert result.resolved[0].strategy == ConflictStrategy.LAST_WRITE_WINS
+
+    # -- 混合情境：多欄位同時有衝突與非衝突 --
+    def test_mixed_conflict_and_no_conflict(self):
+        resolver = self._make_resolver()
+        local = {
+            "title": FieldVersion("LT", datetime(2026, 3, 2), "ai"),
+            "notes": FieldVersion("LN", datetime(2026, 3, 1), "ai"),
+        }
+        remote = {
+            "title": FieldVersion("RT", datetime(2026, 3, 1), "human"),
+            "tags": FieldVersion(["t"], datetime(2026, 3, 1), "human"),
+        }
+        result = resolver.resolve("card", local, remote)
+        # title: LWW, local 較新 → resolved
+        # notes: local only → resolved
+        # tags: remote only → resolved
+        assert len(result.resolved) == 3
+        assert len(result.deferred) == 0
+        resolved_map = {r.field_name: r for r in result.resolved}
+        assert resolved_map["title"].value == "LT"
+        assert resolved_map["notes"].value == "LN"
+        assert resolved_map["tags"].value == ["t"]
+
+    # -- default_strategy fallback（未定義 field_rule 的欄位）--
+    def test_default_strategy_fallback(self):
+        resolver = self._make_resolver()
+        # "description" 不在 field_rules 中 → default_strategy = AI_MERGE → deferred
+        local = {"description": FieldVersion("L", datetime(2026, 3, 1), "ai")}
+        remote = {"description": FieldVersion("R", datetime(2026, 3, 2), "human")}
+        result = resolver.resolve("card", local, remote)
+        assert len(result.deferred) == 1
+        assert result.deferred[0].field_name == "description"
+        assert result.deferred[0].strategy == ConflictStrategy.AI_MERGE

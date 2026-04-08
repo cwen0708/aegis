@@ -7,6 +7,7 @@ Sync Matrix Engine — 同步規則引擎核心
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from typing import Any, Protocol
 
@@ -62,6 +63,42 @@ class ValidatedChanges:
 
     approved: dict[str, Any] = field(default_factory=dict)
     rejected: tuple[RejectedField, ...] = ()
+
+
+@dataclass(frozen=True)
+class FieldVersion:
+    """欄位版本快照 — 記錄值、更新時間與操作者"""
+
+    value: Any
+    updated_at: datetime
+    actor: str
+
+
+@dataclass(frozen=True)
+class ResolvedField:
+    """已解決的衝突欄位"""
+
+    field_name: str
+    value: Any
+    strategy: ConflictStrategy
+
+
+@dataclass(frozen=True)
+class DeferredField:
+    """需人工或 AI 介入的延遲衝突欄位"""
+
+    field_name: str
+    local: FieldVersion
+    remote: FieldVersion
+    strategy: ConflictStrategy
+
+
+@dataclass(frozen=True)
+class ConflictResult:
+    """衝突解決結果 — resolved 為已自動解決，deferred 為待處理"""
+
+    resolved: tuple[ResolvedField, ...] = ()
+    deferred: tuple[DeferredField, ...] = ()
 
 
 class SyncRuleProvider(Protocol):
@@ -144,6 +181,83 @@ class SyncEnforcer:
         """過濾掉被拒欄位，只回傳允許的變更（新 dict，不修改原 changes）。"""
         result = self.validate(entity_type, changes, actor)
         return dict(result.approved)
+
+
+class ConflictResolver:
+    """衝突解決器 — 根據 FieldRule 的 conflict_strategy 偵測並解決欄位級衝突"""
+
+    def __init__(self, provider: SyncRuleProvider) -> None:
+        self._provider = provider
+
+    def resolve(
+        self,
+        entity_type: str,
+        local_changes: dict[str, FieldVersion],
+        remote_changes: dict[str, FieldVersion],
+    ) -> ConflictResult:
+        """偵測並解決 local 與 remote 之間的欄位級衝突。
+
+        - 僅出現在一方的欄位自動 resolve（取該方的值）
+        - 雙方都有的欄位依策略處理：
+          - LAST_WRITE_WINS: 比較 updated_at，取較新者；相同時 remote wins
+          - MANUAL_MERGE / AI_MERGE: 放入 deferred
+        """
+        rule = self._provider.get_rule(entity_type)
+
+        all_fields = set(local_changes) | set(remote_changes)
+        resolved: list[ResolvedField] = []
+        deferred: list[DeferredField] = []
+
+        for field_name in sorted(all_fields):
+            local_ver = local_changes.get(field_name)
+            remote_ver = remote_changes.get(field_name)
+            strategy = _field_strategy(rule, field_name)
+
+            # 非衝突：只有一方有變更 → 自動 resolve
+            if local_ver is None and remote_ver is not None:
+                resolved.append(
+                    ResolvedField(field_name, remote_ver.value, strategy),
+                )
+                continue
+            if remote_ver is None and local_ver is not None:
+                resolved.append(
+                    ResolvedField(field_name, local_ver.value, strategy),
+                )
+                continue
+
+            # 雙方都有變更 → 根據策略處理
+            assert local_ver is not None and remote_ver is not None
+            if strategy == ConflictStrategy.LAST_WRITE_WINS:
+                winner = (
+                    remote_ver
+                    if remote_ver.updated_at >= local_ver.updated_at
+                    else local_ver
+                )
+                resolved.append(
+                    ResolvedField(field_name, winner.value, strategy),
+                )
+            else:
+                # MANUAL_MERGE / AI_MERGE → deferred
+                deferred.append(
+                    DeferredField(field_name, local_ver, remote_ver, strategy),
+                )
+
+        return ConflictResult(
+            resolved=tuple(resolved),
+            deferred=tuple(deferred),
+        )
+
+
+def _field_strategy(rule: SyncRule | None, field_name: str) -> ConflictStrategy:
+    """取得欄位的衝突策略：field_rules 明確規則 -> default_strategy fallback。"""
+    if rule is None:
+        return ConflictStrategy.LAST_WRITE_WINS
+
+    for fr in rule.field_rules:
+        if fr.field_name == field_name:
+            return fr.conflict_strategy
+
+    return rule.default_strategy
 
 
 def _direction_allows(direction: SyncDirection, actor: str) -> bool:
