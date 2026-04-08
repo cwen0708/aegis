@@ -34,9 +34,12 @@ class InternalAPI:
             return None
 
     @staticmethod
-    def broadcast_log(card_id: int, line: str):
+    def broadcast_log(card_id: int, line: str, structured_data: dict = None):
         """Worker 廣播 task log 到 FastAPI（WS + OneStack 轉發）"""
-        InternalAPI.post("internal/broadcast-log", {"card_id": card_id, "line": line})
+        payload = {"card_id": card_id, "line": line}
+        if structured_data is not None:
+            payload["structured_data"] = structured_data
+        InternalAPI.post("internal/broadcast-log", payload)
 
     @staticmethod
     def broadcast_event(event_type: str, payload: dict):

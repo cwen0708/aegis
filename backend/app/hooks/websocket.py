@@ -43,9 +43,12 @@ class WebSocketHook(Hook):
                 session.commit()
         except Exception:
             pass
-        # WS
+        # WS（含 structured_data 供 ACP 下游消費者使用）
         try:
             from app.core.http_client import InternalAPI
-            InternalAPI.broadcast_log(self.card_id, clean)
+            InternalAPI.broadcast_log(
+                self.card_id, clean,
+                structured_data=event.structured_data,
+            )
         except Exception as e:
             logger.warning(f"[WebSocketHook] {e}")

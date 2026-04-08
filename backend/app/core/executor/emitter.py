@@ -100,6 +100,7 @@ class StreamEvent:
     raw_line: str = ""  # 原始 JSON 行（某些 target 需要）
     event_type: str = ""  # OneStack event_type（tool_call / output）
     token_info: dict = field(default_factory=dict)  # result 行的 token 資訊
+    structured_data: Optional[dict] = None  # ACP 結構化資料（tool_name, arguments, content_blocks）
 
 
 def parse_stream_event(raw_line: str) -> Optional[StreamEvent]:
@@ -111,6 +112,7 @@ def parse_stream_event(raw_line: str) -> Optional[StreamEvent]:
         parse_tool_call,
         parse_stream_json_text,
         parse_stream_json_tokens,
+        parse_structured_content,
     )
 
     try:
@@ -129,15 +131,23 @@ def parse_stream_event(raw_line: str) -> Optional[StreamEvent]:
         token_info = parse_stream_json_tokens(raw_line) or {}
         return StreamEvent(
             kind="result", content="", raw_line=raw_line, token_info=token_info,
+            structured_data={"event_type": "result", "token_info": token_info},
         )
 
     # assistant → 嘗試解析 tool_call / text / thinking
     if msg_type == "assistant":
         tool = parse_tool_call(raw_line)
         if tool:
-            event_type, summary = tool
+            event_type = tool["event_type"]
+            summary = tool["summary"]
             return StreamEvent(
                 kind=event_type, content=summary, raw_line=raw_line, event_type=event_type,
+                structured_data={
+                    "event_type": event_type,
+                    "tool_name": tool.get("tool_name"),
+                    "arguments": tool.get("arguments"),
+                    "content_blocks": tool.get("content_blocks"),
+                },
             )
 
         text = parse_stream_json_text(raw_line)
@@ -152,11 +162,18 @@ def parse_stream_event(raw_line: str) -> Optional[StreamEvent]:
                         content=text,
                         raw_line=raw_line,
                         token_info=directive_data,  # 借用 token_info 存放 directive payload
+                        structured_data={"event_type": "directive", "directive": directive_data},
                     )
                 except (json.JSONDecodeError, ValueError):
                     pass
+
+            content_blocks = parse_structured_content(raw_line)
             return StreamEvent(
                 kind="text", content=text, raw_line=raw_line,
+                structured_data={
+                    "event_type": "text",
+                    "content_blocks": content_blocks,
+                },
             )
 
     return None

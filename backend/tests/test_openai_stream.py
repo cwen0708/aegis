@@ -135,9 +135,9 @@ def test_assistant_text_not_tool_call():
     line = json.dumps(_make_assistant_text("分析完成"))
     result = parse_tool_call(line)
     # message wrapper 下的 content 會被解析
-    # 短文字 < 200 字元 → ("output", "💬 ...")
+    # 短文字 < 200 字��� → {"event_type": "output", "summary": "💬 ..."}
     assert result is not None
-    assert result[0] == "output"
+    assert result["event_type"] == "output"
 
 
 # ── Provider 設定 ─────────────────────────────────────────────
