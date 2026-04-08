@@ -13,6 +13,19 @@ from typing import Optional, List, Literal
 
 logger = logging.getLogger(__name__)
 
+# ── 安全限制（內聯 failsafe，即使 .claude/rules/ 缺失也生效）──
+_SECURITY_RESTRICTIONS = """
+禁止存取：
+- ~/.claude/、~/.ssh/、~/.config/
+- 任何 .env、*.db、credentials 檔案
+禁止操作：
+- 禁止修改系統檔案（MCP 原始碼、設定檔、.env、CLAUDE.md、skill 檔案等）
+- 禁止安裝套件（pip install、npm install、apt install 等）
+- 禁止執行破壞性指令（rm -rf、kill、systemctl 等）
+- 禁止執行 kill/pkill/killall/taskkill 等進程管理命令
+- 禁止修改系統設定或安裝全域套件
+""".strip()
+
 _INSTALL_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 # ── Provider 設定檔映射 ──
@@ -62,17 +75,14 @@ def build_config_md(
     mode="task": 卡片任務用（Worker 臨時 workspace）
     """
     if mode == "task":
-        # 使用 asyncio.run 執行 async 任務
-        return asyncio.run(
-            _build_task_md(
-                soul=soul,
-                member_slug=member_slug,
-                project_path=project_path,
-                card_content=card_content,
-                stage_name=stage_name,
-                stage_description=stage_description,
-                stage_instruction=stage_instruction,
-            )
+        return _build_task_md(
+            soul=soul,
+            member_slug=member_slug,
+            project_path=project_path,
+            card_content=card_content,
+            stage_name=stage_name,
+            stage_description=stage_description,
+            stage_instruction=stage_instruction,
         )
     else:
         return _build_chat_md(
@@ -162,7 +172,10 @@ def _build_chat_md(
             lines.append(f"任務描述最後請加上：「完成後請透過 {platform} 通知 chat_id={chat_id}」")
         lines.append("")
 
-    # 安全限制：靜態規則已移至 .claude/rules/security.md，由 Claude Code 自動載入
+    # 安全限制（內聯 failsafe + .claude/rules/ 雙重保障）
+    lines.append("# 安全限制")
+    lines.append(_SECURITY_RESTRICTIONS)
+    lines.append("")
 
     # 回應風格
     lines.append("# 回應風格")
@@ -192,7 +205,7 @@ def _build_chat_md(
 
 # ── Task 模板 ──
 
-async def _build_task_md(
+def _build_task_md(
     soul: str,
     member_slug: str,
     project_path: str,
@@ -207,21 +220,27 @@ async def _build_task_md(
 
     memory_path = get_member_memory_dir(member_slug)
 
-    # 獲取相關過往經驗
-    task_memories = []
+    # 獲取相關過往經驗（在新 event loop 中執行，避免巢狀 loop crash）
+    task_memories: list = []
     try:
-        task_memories = await asyncio.wait_for(
-            retrieve_task_memory(
-                card_title=card_content.split('\n')[0][:100],  # 標題通常在第一行
-                card_description=card_content,
-                member_slug=member_slug,
-            ),
-            timeout=2.0
-        )
+        loop = asyncio.new_event_loop()
+        try:
+            task_memories = loop.run_until_complete(
+                asyncio.wait_for(
+                    retrieve_task_memory(
+                        card_title=card_content.split('\n')[0][:100],
+                        card_description=card_content,
+                        member_slug=member_slug,
+                    ),
+                    timeout=2.0
+                )
+            )
+        finally:
+            loop.close()
     except asyncio.TimeoutError:
-        logger.warning(f"Task memory retrieval timeout for {member_slug}")
+        logger.warning("Task memory retrieval timeout for %s", member_slug)
     except Exception as e:
-        logger.warning(f"Failed to retrieve task memory: {e}")
+        logger.warning("Failed to retrieve task memory: %s", e)
 
     # 階段說明區塊
     stage_section = ""
@@ -233,15 +252,16 @@ async def _build_task_md(
             parts.append(f"\n## 階段指令\n{stage_instruction}")
         stage_section = "\n".join(parts) + "\n"
 
-    # 安全限制：動態路徑部分（靜態規則已移至 .claude/rules/security.md）
+    # 安全限制（內聯 failsafe + .claude/rules/ 雙重保障）
     install_root = str(_INSTALL_ROOT)
-    security_section = f"""# 安全限制（路徑）
+    security_section = f"""# 安全限制
 你只能在以下目錄操作：
 1. {project_path} — 專案目錄
 2. 當前工作區目錄（臨時）
 
 禁止存取的路徑：
 - Aegis 安裝目錄（{install_root}）
+{_SECURITY_RESTRICTIONS}
 """
 
     # 相關過往經驗 section

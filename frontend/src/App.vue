@@ -69,6 +69,10 @@ onMounted(() => {
 
 const settingsReady = ref(false)
 
+// 事件處理與清理放在 setup 層級，確保一定會註冊 onUnmounted
+const onAuthChangedHandler = () => fetchRooms()
+onUnmounted(() => window.removeEventListener('aegis-auth-changed', onAuthChangedHandler))
+
 onMounted(async () => {
   await store.fetchSettings()
 
@@ -86,9 +90,7 @@ onMounted(async () => {
   await fetchRooms()
 
   // 登入後重新載入 rooms
-  const onAuthChanged = () => fetchRooms()
-  window.addEventListener('aegis-auth-changed', onAuthChanged)
-  onUnmounted(() => window.removeEventListener('aegis-auth-changed', onAuthChanged))
+  window.addEventListener('aegis-auth-changed', onAuthChangedHandler)
 
   settingsReady.value = true
 

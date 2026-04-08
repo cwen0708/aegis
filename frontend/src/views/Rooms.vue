@@ -13,8 +13,11 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
+import { defineAsyncComponent } from 'vue'
 import { Settings, Box } from 'lucide-vue-next'
-import Room2Editor from '../components/Room2Editor.vue'
+
+// Phaser (~1.2MB) 只在開啟編輯器時按需載入
+const Room2Editor = defineAsyncComponent(() => import('../components/Room2Editor.vue'))
 import CharacterDialog from '../components/CharacterDialog.vue'
 import type Phaser from 'phaser'
 import type Room2Scene from '../game2/Room2Scene'

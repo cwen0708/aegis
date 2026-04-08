@@ -84,13 +84,7 @@ def _short_path(fp: str) -> str:
     return "/".join(parts[-2:]) if len(parts) > 2 else fp
 
 
-def translate_tool(tool: str, inp: dict) -> Optional[Dict[str, Any]]:
-    """將工具名稱和參數翻譯成結構化 dict
-
-    Returns: dict with event_type, summary, tool_name, arguments
-             或 None（不值得顯示的工具，如 TodoWrite）
-    """
-    _TOOL_SUMMARIES = {
+_TOOL_SUMMARIES = {
         "Read":      lambda t, i: f"📖 讀取 {_short_path(i.get('file_path', ''))}",
         "Edit":      lambda t, i: f"✏️ 修改 {_short_path(i.get('file_path', ''))}",
         "Write":     lambda t, i: f"📝 建立 {_short_path(i.get('file_path', ''))}",
@@ -100,9 +94,16 @@ def translate_tool(tool: str, inp: dict) -> Optional[Dict[str, Any]]:
         "WebFetch":  lambda t, i: f"🌐 取得 {i.get('url', '')[:60]}",
         "WebSearch":  lambda t, i: f"🔎 搜尋 {i.get('query', '')[:40]}",
         "Agent":     lambda t, i: f"🤖 {i.get('description', '子代理')[:40]}",
-        "Skill":     lambda t, i: f"⚡ 技能 {i.get('skill', '')}",
-    }
+    "Skill":     lambda t, i: f"⚡ 技能 {i.get('skill', '')}",
+}
 
+
+def translate_tool(tool: str, inp: dict) -> Optional[Dict[str, Any]]:
+    """將工具名稱和參數翻譯成結構化 dict
+
+    Returns: dict with event_type, summary, tool_name, arguments
+             或 None（不值得顯示的工具，如 TodoWrite）
+    """
     if tool == "TodoWrite":
         return None
 

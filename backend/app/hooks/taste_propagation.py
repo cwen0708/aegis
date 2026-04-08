@@ -9,12 +9,14 @@ import logging
 import re
 from pathlib import Path
 
+from app.core.member_profile import get_member_dir
 from app.hooks import Hook, TaskContext
 
 logger = logging.getLogger(__name__)
 
 # 匹配 <!-- taste: 規則文字 --> 標記
 _TASTE_PATTERN = re.compile(r"<!--\s*taste:\s*(.+?)\s*-->")
+_MAX_RULE_LENGTH = 200  # 單條規則最大長度，防止 prompt injection
 
 # golden-rules.md 的 YAML frontmatter
 _FRONTMATTER = """---
@@ -54,17 +56,22 @@ class TastePropagationHook(Hook):
             return
         if not ctx.member_slug:
             return
+        # 只在任務成功時萃取規則，防止失敗任務注入惡意內容
+        if ctx.exit_code != 0:
+            return
 
         # 萃取所有 taste 標記
         matches = _TASTE_PATTERN.findall(ctx.output)
         if not matches:
             return
 
-        # 去重：保持順序
-        new_rules: list[str] = list(dict.fromkeys(m.strip() for m in matches))
+        # 去重 + 長度限制：過長的規則可能是 prompt injection
+        new_rules: list[str] = list(dict.fromkeys(
+            m.strip() for m in matches
+            if len(m.strip()) <= _MAX_RULE_LENGTH
+        ))
 
         # 取得 golden-rules.md 路徑
-        from app.core.member_profile import get_member_dir
         member_dir = get_member_dir(ctx.member_slug)
         rules_path = member_dir / "golden-rules.md"
 

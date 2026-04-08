@@ -20,12 +20,12 @@ logger = logging.getLogger(__name__)
 S3_WARNING_MARKER = "\n\n<!-- warning: S3 sensitive data detected in output -->"
 
 
-@dataclass
+@dataclass(frozen=True)
 class Detection:
-    """單筆偵測紀錄"""
+    """單筆偵測紀錄（不儲存原始 matched 值，防止 secret 洩漏）"""
     pattern_name: str
     level: SecurityLevel
-    matched: str
+    matched_preview: str  # 前 4 字元 + ***
     phase: str  # "stream" | "complete"
 
 
@@ -46,7 +46,7 @@ class ContentDetectorHook(Hook):
             detection = Detection(
                 pattern_name=m.pattern_name,
                 level=m.level,
-                matched=m.matched,
+                matched_preview=m.matched[:4] + "***" if len(m.matched) > 4 else "***",
                 phase="stream",
             )
             self._detections.append(detection)
@@ -79,7 +79,7 @@ class ContentDetectorHook(Hook):
                 self._detections.append(Detection(
                     pattern_name=m.pattern_name,
                     level=m.level,
-                    matched=m.matched,
+                    matched_preview=m.matched[:4] + "***" if len(m.matched) > 4 else "***",
                     phase="complete",
                 ))
 
@@ -108,6 +108,12 @@ class ContentDetectorHook(Hook):
             len(self._detections),
         )
 
-        # S3 命中：在 output 末尾附加警告標記
+        # S3 命中：透過 flags 通知下游 hook（不 mutate ctx.output）
         if s3_names:
-            ctx.output = ctx.output + S3_WARNING_MARKER
+            if not hasattr(ctx, 'flags'):
+                ctx.flags = {}
+            ctx.flags["s3_detected"] = True
+            ctx.flags["s3_patterns"] = s3_names
+
+        # 清空內部偵測紀錄
+        self._detections.clear()

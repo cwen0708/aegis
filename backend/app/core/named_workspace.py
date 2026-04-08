@@ -61,7 +61,7 @@ def create_named_workspace(
     db.commit()
     db.refresh(session)
 
-    logger.info(f"[NamedWorkspace] Created session '{name}' for member {member_id} at {ws_dir}")
+    logger.info("[NamedWorkspace] Created session '%s' for member %d at %s", name, member_id, ws_dir)
     return session
 
 

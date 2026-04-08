@@ -6,7 +6,7 @@ import json
 import logging
 import threading
 import urllib.request
-from typing import Optional
+from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +30,11 @@ class InternalAPI:
             resp = urllib.request.urlopen(req, timeout=timeout)
             return json.loads(resp.read())
         except Exception as e:
-            logger.warning(f"[InternalAPI] POST {path} failed: {e}")
+            logger.warning("[InternalAPI] POST %s failed: %s", path, e)
             return None
 
     @staticmethod
-    def broadcast_log(card_id: int, line: str, structured_data: dict = None):
+    def broadcast_log(card_id: int, line: str, structured_data: Optional[Dict[str, Any]] = None) -> None:
         """Worker 廣播 task log 到 FastAPI（WS + OneStack 轉發）"""
         payload = {"card_id": card_id, "line": line}
         if structured_data is not None:
@@ -84,4 +84,4 @@ class InternalAPIAsync:
             async with httpx.AsyncClient(timeout=10) as client:
                 await client.post(f"{API_BASE}/internal/channel-send", json=data)
         except Exception as e:
-            logger.warning(f"[InternalAPIAsync] channel_send failed: {e}")
+            logger.warning("[InternalAPIAsync] channel_send failed: %s", e)
