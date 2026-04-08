@@ -7,6 +7,7 @@ Executor — 統一 Worker/Runner 的共用邏輯模組
 - config_md.py: build_config_md() + PROVIDER_CONFIG
 - emitter.py: StreamEmitter + HookEmitter + StreamEvent + parse_stream_event
 - heartbeat.py: heartbeat_monitor context manager
+- token_estimator.py: estimate_tokens + check_context_budget + ContextBudget
 
 串流輸出和任務後處理由 app/hooks/ 統一管理。
 """
@@ -29,6 +30,9 @@ from app.core.executor.emitter import (  # noqa: F401
 )
 from app.core.executor.heartbeat import heartbeat_monitor  # noqa: F401
 from app.core.executor.memory import retrieve_task_memory  # noqa: F401
+from app.core.executor.token_estimator import (  # noqa: F401
+    estimate_tokens, check_context_budget, ContextBudget,
+)
 
 __all__ = [
     "PROVIDERS", "build_command", "get_provider", "register_provider",
@@ -40,4 +44,5 @@ __all__ = [
     "parse_stream_event", "clean_ansi", "sanitize_output",
     "heartbeat_monitor",
     "retrieve_task_memory",
+    "estimate_tokens", "check_context_budget", "ContextBudget",
 ]
