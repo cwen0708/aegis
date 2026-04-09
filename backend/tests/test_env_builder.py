@@ -202,14 +202,17 @@ class TestEnvironmentBuilderGlobalKeys:
         mock_google_setting = Mock()
         mock_google_setting.value = 'google_key_456'
 
+        mock_openai_setting = Mock()
+        mock_openai_setting.value = 'sk-test-openai-key'
+
         with patch('sqlmodel.Session') as mock_session_class:
             mock_session_instance = MagicMock()
             mock_session_class.return_value.__enter__.return_value = mock_session_instance
 
-            # Mock 兩次呼叫 session.get()
             mock_session_instance.get.side_effect = [
                 mock_gemini_setting,
-                mock_google_setting
+                mock_google_setting,
+                mock_openai_setting,
             ]
 
             builder = EnvironmentBuilder()
@@ -218,6 +221,7 @@ class TestEnvironmentBuilderGlobalKeys:
 
             assert env['GEMINI_API_KEY'] == 'gemini_key_123'
             assert env['GOOGLE_API_KEY'] == 'google_key_456'
+            assert env['OPENAI_API_KEY'] == 'sk-test-openai-key'
 
     def test_with_global_api_keys_skips_empty_values(self):
         """with_global_api_keys() 應跳過空值"""
@@ -227,12 +231,16 @@ class TestEnvironmentBuilderGlobalKeys:
         mock_google_setting = Mock()
         mock_google_setting.value = None
 
+        mock_openai_setting = Mock()
+        mock_openai_setting.value = None
+
         with patch('sqlmodel.Session') as mock_session_class:
             mock_session_instance = MagicMock()
             mock_session_class.return_value.__enter__.return_value = mock_session_instance
             mock_session_instance.get.side_effect = [
                 mock_gemini_setting,
-                mock_google_setting
+                mock_google_setting,
+                mock_openai_setting,
             ]
 
             builder = EnvironmentBuilder()
@@ -241,6 +249,7 @@ class TestEnvironmentBuilderGlobalKeys:
 
             assert env['GEMINI_API_KEY'] == 'gemini_key_123'
             assert 'GOOGLE_API_KEY' not in env
+            assert 'OPENAI_API_KEY' not in env
 
     def test_with_global_api_keys_handles_db_error(self):
         """with_global_api_keys() 應優雅處理 DB 錯誤"""
@@ -270,7 +279,7 @@ class TestEnvironmentBuilderDbSettings:
             mock_session_instance = MagicMock()
             mock_session_class.return_value.__enter__.return_value = mock_session_instance
             mock_session_instance.exec.return_value.all.return_value = [mock_env_var]
-            mock_session_instance.get.side_effect = [mock_gemini, None]
+            mock_session_instance.get.side_effect = [mock_gemini, None, None]
 
             builder = EnvironmentBuilder()
             builder.with_db_settings(123)
@@ -279,6 +288,7 @@ class TestEnvironmentBuilderDbSettings:
             assert env['PROJECT_VAR'] == 'project_value'
             assert env['GEMINI_API_KEY'] == 'gemini_key'
             assert 'GOOGLE_API_KEY' not in env
+            assert 'OPENAI_API_KEY' not in env
             # 確認只開了一次 session
             assert mock_session_class.call_count == 1
 
@@ -290,13 +300,14 @@ class TestEnvironmentBuilderDbSettings:
         with patch('sqlmodel.Session') as mock_session_class:
             mock_session_instance = MagicMock()
             mock_session_class.return_value.__enter__.return_value = mock_session_instance
-            mock_session_instance.get.side_effect = [None, mock_google]
+            mock_session_instance.get.side_effect = [None, mock_google, None]
 
             builder = EnvironmentBuilder()
             builder.with_db_settings(None)
             env = builder.build()
 
             assert env['GOOGLE_API_KEY'] == 'google_key'
+            assert 'OPENAI_API_KEY' not in env
             # 不應呼叫 exec（無專案變數查詢）
             mock_session_instance.exec.assert_not_called()
 
@@ -330,7 +341,7 @@ class TestEnvironmentBuilderChaining:
             mock_session_instance = MagicMock()
             mock_session_class.return_value.__enter__.return_value = mock_session_instance
             mock_session_instance.exec.return_value.all.return_value = [mock_env_var]
-            mock_session_instance.get.side_effect = [None, None]  # No API keys
+            mock_session_instance.get.side_effect = [None, None, None]  # No API keys
             mock_exists.return_value = True
 
             builder = EnvironmentBuilder()
@@ -359,7 +370,7 @@ class TestEnvironmentBuilderChaining:
             mock_session_instance = MagicMock()
             mock_session_class.return_value.__enter__.return_value = mock_session_instance
             mock_session_instance.exec.return_value.all.return_value = []  # No project vars
-            mock_session_instance.get.side_effect = [None, None]  # No API keys
+            mock_session_instance.get.side_effect = [None, None, None]  # No API keys
 
             builder = EnvironmentBuilder()
             env = (builder
@@ -384,7 +395,7 @@ class TestEnvironmentBuilderChaining:
             mock_session_instance = MagicMock()
             mock_session_class.return_value.__enter__.return_value = mock_session_instance
             mock_session_instance.exec.return_value.all.return_value = [mock_env_var]
-            mock_session_instance.get.side_effect = [None, None]
+            mock_session_instance.get.side_effect = [None, None, None]
 
             builder = EnvironmentBuilder()
             env = (builder

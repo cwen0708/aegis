@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 _GLOBAL_KEY_MAPPING: tuple[tuple[str, str], ...] = (
     ("gemini_api_key", "GEMINI_API_KEY"),
     ("google_api_key", "GOOGLE_API_KEY"),
+    ("openai_api_key", "OPENAI_API_KEY"),
 )
 
 

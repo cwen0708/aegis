@@ -120,6 +120,13 @@ class TestGetConfigFilenameAndDotDir:
             assert get_dot_dir(provider) == expected_dir, \
                 f"{provider}: expected dot dir {expected_dir}"
 
+    def test_openai_provider_returns_correct_config(self):
+        """openai provider 回傳 OPENAI.md 和 .openai"""
+        from app.core.executor.config_md import get_config_filename, get_dot_dir
+
+        assert get_config_filename("openai") == "OPENAI.md"
+        assert get_dot_dir("openai") == ".openai"
+
     def test_unknown_provider_falls_back_to_claude(self):
         """未知 provider 應 fallback 至 claude 設定"""
         from app.core.executor.config_md import get_config_filename, get_dot_dir

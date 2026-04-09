@@ -35,6 +35,7 @@ PROVIDER_CONFIG = {
     "gemini": {"config_file": "Gemini.md", "dot_dir": ".gemini"},
     "codex":  {"config_file": "CODEX.md",  "dot_dir": ".codex"},
     "ollama": {"config_file": "OLLAMA.md", "dot_dir": ".ollama"},
+    "openai": {"config_file": "OPENAI.md", "dot_dir": ".openai"},
 }
 
 
