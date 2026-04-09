@@ -228,6 +228,9 @@ async def run_ai_task(task_id: int, project_path: str, prompt: str, phase: str,
                 token_info = parse_openai_json(output)
                 if token_info.get("result_text"):
                     actual_output = token_info["result_text"]
+                # 後處理標記（OpenAI 非串流 json_output 路徑）
+                for tl in actual_output.split("\n"):
+                    _intercept_channel_marker(tl.strip())
 
         # Data Classification Restore：還原 S2 佔位符為原始值
         if redact_map:

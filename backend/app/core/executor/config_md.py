@@ -175,10 +175,7 @@ def _build_chat_md(
             lines.append(f"任務描述最後請加上：「完成後請透過 {platform} 通知 chat_id={chat_id}」")
         lines.append("")
 
-    # 安全限制（內聯 failsafe + .claude/rules/ 雙重保障）
-    lines.append("# 安全限制")
-    lines.append(_SECURITY_RESTRICTIONS)
-    lines.append("")
+    # 安全限制：靜態規則已移至 .claude/rules/security.md，chat 模式不再內嵌
 
     # 回應風格
     lines.append("# 回應風格")
