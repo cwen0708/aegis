@@ -41,6 +41,20 @@ class CardCreateRequest(BaseModel):
             raise ValueError("max_rounds must be between 1 and 10")
         return v
 
+class CardResponse(BaseModel):
+    """GET 回傳用 schema — 包含 Card 欄位 + acceptance_criteria"""
+    id: int
+    list_id: int
+    title: str
+    description: Optional[str] = None
+    content: Optional[str] = None
+    status: str = "idle"
+    is_archived: bool = False
+    acceptance_criteria: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
 class CardUpdateRequest(BaseModel):
     list_id: Optional[int] = None
     status: Optional[str] = None
@@ -62,28 +76,58 @@ class CardUpdateRequest(BaseModel):
 # ==========================================
 # Card Routes
 # ==========================================
-@router.get("/cards/", response_model=List[Card])
+@router.get("/cards/", response_model=List[CardResponse])
 def read_cards(session: Session = Depends(get_session)):
+    results: list[CardResponse] = []
+    # 優先從 CardIndex → MD 檔讀取（含 acceptance_criteria）
+    indexes = session.exec(select(CardIndex)).all()
+    seen_ids: set[int] = set()
+    for idx in indexes:
+        if idx.file_path and Path(idx.file_path).exists():
+            cd = read_card_md(Path(idx.file_path))
+            results.append(CardResponse(
+                id=cd.id, list_id=cd.list_id, title=cd.title,
+                description=cd.description, content=cd.content,
+                status=cd.status, is_archived=cd.is_archived,
+                acceptance_criteria=cd.acceptance_criteria,
+                created_at=cd.created_at, updated_at=cd.updated_at,
+            ))
+            seen_ids.add(cd.id)
+    # Fallback: 舊 Card 表中未被 index 覆蓋的卡片
     cards = session.exec(select(Card)).all()
-    return cards
+    for card in cards:
+        if card.id not in seen_ids:
+            results.append(CardResponse(
+                id=card.id, list_id=card.list_id, title=card.title,
+                description=card.description, content=card.content,
+                status=card.status, is_archived=card.is_archived,
+                created_at=card.created_at, updated_at=card.updated_at,
+            ))
+    return results
 
-@router.get("/cards/{card_id}", response_model=Card)
+@router.get("/cards/{card_id}", response_model=CardResponse)
 def read_card_endpoint(card_id: int, session: Session = Depends(get_session)):
     # Primary: look up CardIndex -> read MD file
     idx = session.get(CardIndex, card_id)
     if idx and idx.file_path and Path(idx.file_path).exists():
         cd = read_card_md(Path(idx.file_path))
-        # Return as Card-compatible dict (response_model=Card)
-        return Card(
+        return CardResponse(
             id=cd.id, list_id=cd.list_id, title=cd.title,
             description=cd.description, content=cd.content,
-            status=cd.status, created_at=cd.created_at, updated_at=cd.updated_at,
+            status=cd.status, is_archived=cd.is_archived,
+            acceptance_criteria=cd.acceptance_criteria,
+            created_at=cd.created_at, updated_at=cd.updated_at,
         )
     # Fallback: old Card table
     card = session.get(Card, card_id)
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
-    return card
+    return CardResponse(
+        id=card.id, list_id=card.list_id, title=card.title,
+        description=card.description, content=card.content,
+        status=card.status, is_archived=card.is_archived,
+        created_at=card.created_at, updated_at=card.updated_at,
+    )
 
 @router.post("/cards/", response_model=Card)
 def create_card(card_in: CardCreateRequest, session: Session = Depends(get_session)):
