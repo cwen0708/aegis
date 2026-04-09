@@ -357,7 +357,8 @@ class TestConflictResolver:
 
     @staticmethod
     def _make_resolver() -> ConflictResolver:
-        """card: title=LWW, notes=MANUAL_MERGE, default=AI_MERGE"""
+        """card: title=LWW, notes=MANUAL_MERGE, tags=AI_MERGE,
+        priority=HUMAN_WINS, source=AI_WINS, default=AI_MERGE"""
         registry = SyncRuleRegistry()
         fr_title = FieldRule(
             "title", SyncDirection.AI_TO_HUMAN,
@@ -371,8 +372,16 @@ class TestConflictResolver:
             "tags", SyncDirection.BIDIRECTIONAL,
             ConflictStrategy.AI_MERGE, frozenset({"ai", "human"}),
         )
+        fr_priority = FieldRule(
+            "priority", SyncDirection.BIDIRECTIONAL,
+            ConflictStrategy.HUMAN_WINS, frozenset({"ai", "human"}),
+        )
+        fr_source = FieldRule(
+            "source", SyncDirection.BIDIRECTIONAL,
+            ConflictStrategy.AI_WINS, frozenset({"ai", "human"}),
+        )
         rule = SyncRule(
-            "card", (fr_title, fr_notes, fr_tags),
+            "card", (fr_title, fr_notes, fr_tags, fr_priority, fr_source),
             SyncDirection.BIDIRECTIONAL, ConflictStrategy.AI_MERGE,
         )
         registry.register(rule)
@@ -495,3 +504,58 @@ class TestConflictResolver:
         assert len(result.deferred) == 1
         assert result.deferred[0].field_name == "description"
         assert result.deferred[0].strategy == ConflictStrategy.AI_MERGE
+
+    # -- HUMAN_WINS: human actor 的一方勝出 --
+    def test_human_wins_local_is_human(self):
+        resolver = self._make_resolver()
+        local = {"priority": FieldVersion("High", datetime(2026, 3, 1), "human")}
+        remote = {"priority": FieldVersion("Low", datetime(2026, 3, 2), "ai")}
+        result = resolver.resolve("card", local, remote)
+        assert len(result.resolved) == 1
+        assert result.resolved[0].value == "High"
+        assert result.resolved[0].strategy == ConflictStrategy.HUMAN_WINS
+
+    def test_human_wins_remote_is_human(self):
+        resolver = self._make_resolver()
+        local = {"priority": FieldVersion("Low", datetime(2026, 3, 2), "ai")}
+        remote = {"priority": FieldVersion("High", datetime(2026, 3, 1), "human")}
+        result = resolver.resolve("card", local, remote)
+        assert len(result.resolved) == 1
+        assert result.resolved[0].value == "High"
+        assert result.resolved[0].strategy == ConflictStrategy.HUMAN_WINS
+
+    # -- AI_WINS: ai actor 的一方勝出 --
+    def test_ai_wins_local_is_ai(self):
+        resolver = self._make_resolver()
+        local = {"source": FieldVersion("auto", datetime(2026, 3, 1), "ai")}
+        remote = {"source": FieldVersion("manual", datetime(2026, 3, 2), "human")}
+        result = resolver.resolve("card", local, remote)
+        assert len(result.resolved) == 1
+        assert result.resolved[0].value == "auto"
+        assert result.resolved[0].strategy == ConflictStrategy.AI_WINS
+
+    def test_ai_wins_remote_is_ai(self):
+        resolver = self._make_resolver()
+        local = {"source": FieldVersion("manual", datetime(2026, 3, 2), "human")}
+        remote = {"source": FieldVersion("auto", datetime(2026, 3, 1), "ai")}
+        result = resolver.resolve("card", local, remote)
+        assert len(result.resolved) == 1
+        assert result.resolved[0].value == "auto"
+        assert result.resolved[0].strategy == ConflictStrategy.AI_WINS
+
+    # -- HUMAN_WINS / AI_WINS: 雙方 actor 相同 → 退化為 last_write_wins --
+    def test_human_wins_same_actor_fallback_lww(self):
+        resolver = self._make_resolver()
+        local = {"priority": FieldVersion("Old", datetime(2026, 3, 1), "human")}
+        remote = {"priority": FieldVersion("New", datetime(2026, 3, 2), "human")}
+        result = resolver.resolve("card", local, remote)
+        assert len(result.resolved) == 1
+        assert result.resolved[0].value == "New"
+
+    def test_ai_wins_same_actor_fallback_lww(self):
+        resolver = self._make_resolver()
+        local = {"source": FieldVersion("v2", datetime(2026, 3, 2), "ai")}
+        remote = {"source": FieldVersion("v1", datetime(2026, 3, 1), "ai")}
+        result = resolver.resolve("card", local, remote)
+        assert len(result.resolved) == 1
+        assert result.resolved[0].value == "v2"

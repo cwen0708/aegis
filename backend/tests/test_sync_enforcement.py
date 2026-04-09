@@ -105,11 +105,11 @@ class TestLoadRegistryFromDB:
         assert status_fr.sync_direction == SyncDirection.AI_TO_HUMAN
         assert status_fr.conflict_strategy == ConflictStrategy.LAST_WRITE_WINS
 
-        # title: writable_by=both → frozenset({"ai", "human"})
+        # title: writable_by=both, conflict_strategy=human_wins → HUMAN_WINS
         title_fr = next(fr for fr in rule.field_rules if fr.field_name == "title")
         assert title_fr.writable_by == frozenset({"ai", "human"})
         assert title_fr.sync_direction == SyncDirection.BIDIRECTIONAL
-        assert title_fr.conflict_strategy == ConflictStrategy.LAST_WRITE_WINS
+        assert title_fr.conflict_strategy == ConflictStrategy.HUMAN_WINS
 
     def test_disabled_rules_excluded(self, db_session):
         """is_enabled=False 的規則不應載入。"""
@@ -465,8 +465,8 @@ class TestStrategyMapping:
         """所有策略值都應正確映射。"""
         strategies = [
             ("last_write_wins", ConflictStrategy.LAST_WRITE_WINS),
-            ("human_wins", ConflictStrategy.LAST_WRITE_WINS),
-            ("ai_wins", ConflictStrategy.LAST_WRITE_WINS),
+            ("human_wins", ConflictStrategy.HUMAN_WINS),
+            ("ai_wins", ConflictStrategy.AI_WINS),
             ("manual_merge", ConflictStrategy.MANUAL_MERGE),
             ("ai_merge", ConflictStrategy.AI_MERGE),
         ]
@@ -484,6 +484,76 @@ class TestStrategyMapping:
             assert rule.field_rules[0].conflict_strategy == expected, (
                 f"{db_val} should map to {expected}"
             )
+
+    def test_human_wins_maps_to_human_wins_enum(self, db_session):
+        """human_wins 應映射為 ConflictStrategy.HUMAN_WINS。"""
+        db_session.add(SyncRuleModel(
+            entity_type="card", field_name="priority",
+            writable_by="both", conflict_strategy="human_wins", is_enabled=True,
+        ))
+        db_session.commit()
+
+        registry = load_registry_from_db(db_session)
+        rule = registry.get_rule("card")
+        assert rule is not None
+        fr = rule.field_rules[0]
+        assert fr.conflict_strategy == ConflictStrategy.HUMAN_WINS
+
+    def test_ai_wins_maps_to_ai_wins_enum(self, db_session):
+        """ai_wins 應映射為 ConflictStrategy.AI_WINS。"""
+        db_session.add(SyncRuleModel(
+            entity_type="card", field_name="source",
+            writable_by="both", conflict_strategy="ai_wins", is_enabled=True,
+        ))
+        db_session.commit()
+
+        registry = load_registry_from_db(db_session)
+        rule = registry.get_rule("card")
+        assert rule is not None
+        fr = rule.field_rules[0]
+        assert fr.conflict_strategy == ConflictStrategy.AI_WINS
+
+
+class TestConflictResolverDBStrategy:
+    """ConflictResolver 整合測試 — 從 DB 載入 human_wins / ai_wins 策略並驗證解決行為"""
+
+    @staticmethod
+    def _resolve_with_db(db_session, entity_type, local_changes, remote_changes):
+        registry = load_registry_from_db(db_session)
+        resolver = ConflictResolver(registry)
+        return resolver.resolve(entity_type, local_changes, remote_changes)
+
+    def test_human_wins_from_db_prefers_human(self, db_session, setup_project):
+        """DB human_wins 策略：human actor 的變更勝出"""
+        db_session.add(SyncRuleModel(
+            entity_type="card", field_name="priority",
+            writable_by="both", conflict_strategy="human_wins", is_enabled=True,
+        ))
+        db_session.commit()
+
+        local = {"priority": FieldVersion("High", datetime(2026, 4, 1, tzinfo=timezone.utc), "human")}
+        remote = {"priority": FieldVersion("Low", datetime(2026, 4, 2, tzinfo=timezone.utc), "ai")}
+
+        result = self._resolve_with_db(db_session, "card", local, remote)
+        assert len(result.resolved) == 1
+        assert result.resolved[0].value == "High"
+        assert result.resolved[0].strategy == ConflictStrategy.HUMAN_WINS
+
+    def test_ai_wins_from_db_prefers_ai(self, db_session, setup_project):
+        """DB ai_wins 策略：ai actor 的變更勝出"""
+        db_session.add(SyncRuleModel(
+            entity_type="card", field_name="source",
+            writable_by="both", conflict_strategy="ai_wins", is_enabled=True,
+        ))
+        db_session.commit()
+
+        local = {"source": FieldVersion("manual", datetime(2026, 4, 2, tzinfo=timezone.utc), "human")}
+        remote = {"source": FieldVersion("auto", datetime(2026, 4, 1, tzinfo=timezone.utc), "ai")}
+
+        result = self._resolve_with_db(db_session, "card", local, remote)
+        assert len(result.resolved) == 1
+        assert result.resolved[0].value == "auto"
+        assert result.resolved[0].strategy == ConflictStrategy.AI_WINS
 
 
 # ==========================================================

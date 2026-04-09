@@ -25,6 +25,8 @@ class ConflictStrategy(Enum):
     """衝突解決策略"""
 
     LAST_WRITE_WINS = "last_write_wins"
+    HUMAN_WINS = "human_wins"
+    AI_WINS = "ai_wins"
     MANUAL_MERGE = "manual_merge"
     AI_MERGE = "ai_merge"
 
@@ -236,6 +238,20 @@ class ConflictResolver:
                 resolved.append(
                     ResolvedField(field_name, winner.value, strategy),
                 )
+            elif strategy == ConflictStrategy.HUMAN_WINS:
+                winner = _actor_priority_winner(
+                    local_ver, remote_ver, preferred="human",
+                )
+                resolved.append(
+                    ResolvedField(field_name, winner.value, strategy),
+                )
+            elif strategy == ConflictStrategy.AI_WINS:
+                winner = _actor_priority_winner(
+                    local_ver, remote_ver, preferred="ai",
+                )
+                resolved.append(
+                    ResolvedField(field_name, winner.value, strategy),
+                )
             else:
                 # MANUAL_MERGE / AI_MERGE → deferred
                 deferred.append(
@@ -246,6 +262,21 @@ class ConflictResolver:
             resolved=tuple(resolved),
             deferred=tuple(deferred),
         )
+
+
+def _actor_priority_winner(
+    local: FieldVersion, remote: FieldVersion, *, preferred: str,
+) -> FieldVersion:
+    """依 actor 優先級選出勝方。
+
+    - 若其中一方的 actor 為 preferred，該方勝出
+    - 若雙方 actor 相同（無法區分優先級），退化為 last_write_wins
+    """
+    if local.actor == remote.actor:
+        return remote if remote.updated_at >= local.updated_at else local
+    if local.actor == preferred:
+        return local
+    return remote
 
 
 def _field_strategy(rule: SyncRule | None, field_name: str) -> ConflictStrategy:
@@ -282,8 +313,8 @@ def _db_strategy_to_enum(strategy: str) -> ConflictStrategy:
     """DB conflict_strategy 字串 → ConflictStrategy enum。"""
     _MAP = {
         "last_write_wins": ConflictStrategy.LAST_WRITE_WINS,
-        "human_wins": ConflictStrategy.LAST_WRITE_WINS,
-        "ai_wins": ConflictStrategy.LAST_WRITE_WINS,
+        "human_wins": ConflictStrategy.HUMAN_WINS,
+        "ai_wins": ConflictStrategy.AI_WINS,
         "manual_merge": ConflictStrategy.MANUAL_MERGE,
         "ai_merge": ConflictStrategy.AI_MERGE,
     }
