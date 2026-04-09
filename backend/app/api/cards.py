@@ -9,11 +9,15 @@ from app.database import get_session
 from app.models.core import Project, Card, StageList, CardIndex
 from app.core.card_file import CardData, read_card as read_card_md, write_card, card_file_path
 from app.core.card_index import sync_card_to_index, remove_card_from_index, next_card_id
+from app.core.sync_matrix import SyncEnforcer, load_registry_from_db
 from app.core.paths import WORKSPACES_ROOT
 from app.api.deps import get_card_lock, get_project_for_list
 from pathlib import Path
 import asyncio
+import logging
 import mimetypes
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Cards"])
 
@@ -172,38 +176,67 @@ def create_card(card_in: CardCreateRequest, session: Session = Depends(get_sessi
     return orm_card
 
 @router.patch("/cards/{card_id}", response_model=Card)
-def update_card(card_id: int, update_data: CardUpdateRequest, session: Session = Depends(get_session)):
-    # Try MD-driven path first
+def update_card(
+    card_id: int,
+    update_data: CardUpdateRequest,
+    actor: str = Query("human"),
+    session: Session = Depends(get_session),
+):
+    # --- SyncEnforcer：欄位級寫入權限控制 ---
+    registry = load_registry_from_db(session)
+    enforcer = SyncEnforcer(registry)
+
+    # metadata 欄位不受 SyncRule 控制，直接通過
+    _METADATA_FIELDS = {"tags", "max_rounds", "acceptance_criteria"}
+
+    # 組出非 None 且受 SyncRule 控制的 changes
+    all_changes = {
+        k: v for k, v in update_data.model_dump().items()
+        if v is not None
+    }
+    sync_changes = {k: v for k, v in all_changes.items() if k not in _METADATA_FIELDS}
+    metadata_changes = {k: v for k, v in all_changes.items() if k in _METADATA_FIELDS}
+
+    # 驗證欄位寫入權限
+    result = enforcer.validate("card", sync_changes, actor)
+    if result.rejected:
+        rejected_names = [r.field_name for r in result.rejected]
+        logger.info("SyncEnforcer rejected fields for card %d (actor=%s): %s", card_id, actor, rejected_names)
+
+    # 合併：approved sync fields + metadata fields
+    approved = {**result.approved, **metadata_changes}
+
+    # --- 套用已核准的欄位 ---
     idx = session.get(CardIndex, card_id)
     now = datetime.now(timezone.utc)
 
     if idx and idx.file_path and Path(idx.file_path).exists():
         cd = read_card_md(Path(idx.file_path))
 
-        if update_data.list_id is not None:
-            cd.list_id = update_data.list_id
+        if "list_id" in approved:
+            cd.list_id = approved["list_id"]
             cd.status = "pending"
-        if update_data.status is not None:
-            cd.status = update_data.status
-        if update_data.title is not None:
-            cd.title = update_data.title
-        if update_data.description is not None:
-            cd.description = update_data.description
-        if update_data.content is not None:
-            cd.content = update_data.content
-        if update_data.tags is not None:
-            cd.tags = update_data.tags
-        if update_data.max_rounds is not None:
-            cd.max_rounds = update_data.max_rounds
-        if update_data.acceptance_criteria is not None:
-            cd.acceptance_criteria = update_data.acceptance_criteria
+        if "status" in approved:
+            cd.status = approved["status"]
+        if "title" in approved:
+            cd.title = approved["title"]
+        if "description" in approved:
+            cd.description = approved["description"]
+        if "content" in approved:
+            cd.content = approved["content"]
+        if "tags" in approved:
+            cd.tags = approved["tags"]
+        if "max_rounds" in approved:
+            cd.max_rounds = approved["max_rounds"]
+        if "acceptance_criteria" in approved:
+            cd.acceptance_criteria = approved["acceptance_criteria"]
         cd.updated_at = now
 
         write_card(Path(idx.file_path), cd)
 
         # Re-derive project_id from list_id for index sync
         project_id = idx.project_id
-        if update_data.list_id is not None:
+        if "list_id" in approved:
             sl = session.get(StageList, cd.list_id)
             if sl:
                 project_id = sl.project_id
@@ -212,17 +245,17 @@ def update_card(card_id: int, update_data: CardUpdateRequest, session: Session =
     # Dual-write: also update old Card ORM record
     orm_card = session.get(Card, card_id)
     if orm_card:
-        if update_data.list_id is not None:
-            orm_card.list_id = update_data.list_id
+        if "list_id" in approved:
+            orm_card.list_id = approved["list_id"]
             orm_card.status = "pending"
-        if update_data.status is not None:
-            orm_card.status = update_data.status
-        if update_data.title is not None:
-            orm_card.title = update_data.title
-        if update_data.description is not None:
-            orm_card.description = update_data.description
-        if update_data.content is not None:
-            orm_card.content = update_data.content
+        if "status" in approved:
+            orm_card.status = approved["status"]
+        if "title" in approved:
+            orm_card.title = approved["title"]
+        if "description" in approved:
+            orm_card.description = approved["description"]
+        if "content" in approved:
+            orm_card.content = approved["content"]
         orm_card.updated_at = now
         session.add(orm_card)
 

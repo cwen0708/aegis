@@ -260,6 +260,70 @@ def _field_strategy(rule: SyncRule | None, field_name: str) -> ConflictStrategy:
     return rule.default_strategy
 
 
+def _writable_to_set(writable_by: str) -> frozenset[str]:
+    """DB writable_by ('ai'/'human'/'both') → frozenset of actor strings。"""
+    if writable_by == "both":
+        return frozenset({"ai", "human"})
+    if writable_by in ("ai", "human"):
+        return frozenset({writable_by})
+    return frozenset()
+
+
+def _writable_to_direction(writable_by: str) -> SyncDirection:
+    """DB writable_by → SyncDirection enum。"""
+    if writable_by == "ai":
+        return SyncDirection.AI_TO_HUMAN
+    if writable_by == "human":
+        return SyncDirection.HUMAN_TO_AI
+    return SyncDirection.BIDIRECTIONAL
+
+
+def load_registry_from_db(session: "Session") -> SyncRuleRegistry:
+    """從 DB 載入所有啟用的 SyncRule，轉換為 SyncRuleRegistry。
+
+    Parameters:
+        session: SQLModel Session
+
+    Returns:
+        填充好的 SyncRuleRegistry
+    """
+    from sqlmodel import select
+    from app.models.core import SyncRule as SyncRuleModel
+
+    rules = session.exec(
+        select(SyncRuleModel).where(SyncRuleModel.is_enabled == True)  # noqa: E712
+    ).all()
+
+    # 按 entity_type 分組
+    grouped: dict[str, list] = {}
+    for r in rules:
+        grouped.setdefault(r.entity_type, []).append(r)
+
+    registry = SyncRuleRegistry()
+    for entity_type, db_rules in grouped.items():
+        field_rules = tuple(
+            FieldRule(
+                field_name=r.field_name,
+                sync_direction=_writable_to_direction(r.writable_by),
+                conflict_strategy=(
+                    ConflictStrategy.LAST_WRITE_WINS
+                    if r.conflict_strategy in ("last_write_wins", "human_wins", "ai_wins")
+                    else ConflictStrategy.MANUAL_MERGE
+                ),
+                writable_by=_writable_to_set(r.writable_by),
+            )
+            for r in db_rules
+        )
+        registry.register(SyncRule(
+            entity_type=entity_type,
+            field_rules=field_rules,
+            default_direction=SyncDirection.BIDIRECTIONAL,
+            default_strategy=ConflictStrategy.LAST_WRITE_WINS,
+        ))
+
+    return registry
+
+
 def _direction_allows(direction: SyncDirection, actor: str) -> bool:
     """根據同步方向判斷角色是否可寫入。"""
     if direction == SyncDirection.BIDIRECTIONAL:
