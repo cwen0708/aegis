@@ -1,5 +1,6 @@
 """SyncEnforcer 整合測試 — DB 規則載入 + Card PATCH 欄位級權限控制"""
 import pytest
+import httpx
 from datetime import datetime, timezone
 from pathlib import Path
 from sqlmodel import Session, SQLModel, create_engine
@@ -424,3 +425,240 @@ class TestConflictResolverIntegration:
         assert result.resolved[0].field_name == "title"
         assert result.resolved[0].value == "New Title"
         assert len(result.deferred) == 0
+
+
+# ==========================================================
+# load_registry_from_db — ai_merge 策略映射修正
+# ==========================================================
+
+class TestStrategyMapping:
+    """確認 DB conflict_strategy 正確映射為 ConflictStrategy enum"""
+
+    def test_ai_merge_maps_to_ai_merge_enum(self, db_session):
+        """ai_merge 應映射為 ConflictStrategy.AI_MERGE，而非 MANUAL_MERGE。"""
+        db_session.add(SyncRuleModel(
+            entity_type="card", field_name="content",
+            writable_by="both", conflict_strategy="ai_merge", is_enabled=True,
+        ))
+        db_session.commit()
+
+        registry = load_registry_from_db(db_session)
+        rule = registry.get_rule("card")
+        assert rule is not None
+        fr = rule.field_rules[0]
+        assert fr.conflict_strategy == ConflictStrategy.AI_MERGE
+
+    def test_manual_merge_maps_to_manual_merge_enum(self, db_session):
+        """manual_merge 應映射為 ConflictStrategy.MANUAL_MERGE。"""
+        db_session.add(SyncRuleModel(
+            entity_type="card", field_name="description",
+            writable_by="both", conflict_strategy="manual_merge", is_enabled=True,
+        ))
+        db_session.commit()
+
+        registry = load_registry_from_db(db_session)
+        rule = registry.get_rule("card")
+        fr = rule.field_rules[0]
+        assert fr.conflict_strategy == ConflictStrategy.MANUAL_MERGE
+
+    def test_all_strategies_mapped_correctly(self, db_session):
+        """所有策略值都應正確映射。"""
+        strategies = [
+            ("last_write_wins", ConflictStrategy.LAST_WRITE_WINS),
+            ("human_wins", ConflictStrategy.LAST_WRITE_WINS),
+            ("ai_wins", ConflictStrategy.LAST_WRITE_WINS),
+            ("manual_merge", ConflictStrategy.MANUAL_MERGE),
+            ("ai_merge", ConflictStrategy.AI_MERGE),
+        ]
+        for i, (db_val, expected) in enumerate(strategies):
+            db_session.add(SyncRuleModel(
+                entity_type=f"entity_{i}", field_name="field",
+                writable_by="both", conflict_strategy=db_val, is_enabled=True,
+            ))
+        db_session.commit()
+
+        registry = load_registry_from_db(db_session)
+        for i, (db_val, expected) in enumerate(strategies):
+            rule = registry.get_rule(f"entity_{i}")
+            assert rule is not None, f"entity_{i} should exist"
+            assert rule.field_rules[0].conflict_strategy == expected, (
+                f"{db_val} should map to {expected}"
+            )
+
+
+# ==========================================================
+# SyncRule CRUD API 端點測試
+# ==========================================================
+
+@pytest.fixture
+async def api_client(tmp_path):
+    """建立指向臨時 DB 的 async httpx 測試客戶端。"""
+    db_path = tmp_path / "test_api.db"
+    engine = create_engine(f"sqlite:///{db_path}")
+    SQLModel.metadata.create_all(engine)
+
+    from app.main import app
+    from app.database import get_session
+
+    def _override():
+        with Session(engine) as s:
+            yield s
+
+    app.dependency_overrides[get_session] = _override
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
+class TestSyncRuleCreateAPI:
+    """POST /api/v1/sync-rules 端點測試"""
+
+    async def test_create_sync_rule(self, api_client):
+        """成功建立新規則。"""
+        resp = await api_client.post("/api/v1/sync-rules", json={
+            "entity_type": "card",
+            "field_name": "title",
+            "writable_by": "both",
+            "conflict_strategy": "last_write_wins",
+        })
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["entity_type"] == "card"
+        assert data["field_name"] == "title"
+        assert data["writable_by"] == "both"
+        assert data["conflict_strategy"] == "last_write_wins"
+        assert data["is_enabled"] is True
+        assert "id" in data
+
+    async def test_create_duplicate_returns_409(self, api_client):
+        """重複 entity_type + field_name 應回傳 409。"""
+        payload = {
+            "entity_type": "card",
+            "field_name": "status",
+            "writable_by": "ai",
+            "conflict_strategy": "last_write_wins",
+        }
+        resp1 = await api_client.post("/api/v1/sync-rules", json=payload)
+        assert resp1.status_code == 201
+
+        resp2 = await api_client.post("/api/v1/sync-rules", json=payload)
+        assert resp2.status_code == 409
+
+    async def test_create_invalid_writable_by_returns_422(self, api_client):
+        """無效 writable_by 應回傳 422。"""
+        resp = await api_client.post("/api/v1/sync-rules", json={
+            "entity_type": "card",
+            "field_name": "title",
+            "writable_by": "invalid",
+        })
+        assert resp.status_code == 422
+
+    async def test_create_invalid_conflict_strategy_returns_422(self, api_client):
+        """無效 conflict_strategy 應回傳 422。"""
+        resp = await api_client.post("/api/v1/sync-rules", json={
+            "entity_type": "card",
+            "field_name": "title",
+            "conflict_strategy": "invalid",
+        })
+        assert resp.status_code == 422
+
+    async def test_create_with_manual_merge_strategy(self, api_client):
+        """使用 manual_merge 策略建立規則。"""
+        resp = await api_client.post("/api/v1/sync-rules", json={
+            "entity_type": "card",
+            "field_name": "description",
+            "conflict_strategy": "manual_merge",
+        })
+        assert resp.status_code == 201
+        assert resp.json()["conflict_strategy"] == "manual_merge"
+
+    async def test_create_with_ai_merge_strategy(self, api_client):
+        """使用 ai_merge 策略建立規則。"""
+        resp = await api_client.post("/api/v1/sync-rules", json={
+            "entity_type": "card",
+            "field_name": "content",
+            "conflict_strategy": "ai_merge",
+        })
+        assert resp.status_code == 201
+        assert resp.json()["conflict_strategy"] == "ai_merge"
+
+    async def test_created_rule_visible_in_get(self, api_client):
+        """POST 建立後 GET 可查到。"""
+        await api_client.post("/api/v1/sync-rules", json={
+            "entity_type": "card",
+            "field_name": "title",
+        })
+
+        resp = await api_client.get("/api/v1/sync-rules", params={"entity_type": "card"})
+        assert resp.status_code == 200
+        rules = resp.json()
+        assert any(r["field_name"] == "title" for r in rules)
+
+
+class TestSyncRuleDeleteAPI:
+    """DELETE /api/v1/sync-rules/{rule_id} 端點測試"""
+
+    async def test_delete_sync_rule(self, api_client):
+        """成功刪除規則。"""
+        create_resp = await api_client.post("/api/v1/sync-rules", json={
+            "entity_type": "card",
+            "field_name": "title",
+        })
+        rule_id = create_resp.json()["id"]
+
+        del_resp = await api_client.delete(f"/api/v1/sync-rules/{rule_id}")
+        assert del_resp.status_code == 204
+
+    async def test_delete_nonexistent_returns_404(self, api_client):
+        """刪除不存在的規則應回傳 404。"""
+        resp = await api_client.delete("/api/v1/sync-rules/99999")
+        assert resp.status_code == 404
+
+    async def test_deleted_rule_not_in_get(self, api_client):
+        """DELETE 刪除後 GET 不再回傳。"""
+        create_resp = await api_client.post("/api/v1/sync-rules", json={
+            "entity_type": "card",
+            "field_name": "title",
+        })
+        rule_id = create_resp.json()["id"]
+
+        await api_client.delete(f"/api/v1/sync-rules/{rule_id}")
+
+        get_resp = await api_client.get("/api/v1/sync-rules", params={"entity_type": "card"})
+        rules = get_resp.json()
+        assert not any(r["id"] == rule_id for r in rules)
+
+
+class TestSyncRuleUpdateStrategyAPI:
+    """PUT /api/v1/sync-rules/{rule_id} — manual_merge / ai_merge 策略更新"""
+
+    async def test_update_to_manual_merge(self, api_client):
+        """PUT 設定 manual_merge 策略成功。"""
+        create_resp = await api_client.post("/api/v1/sync-rules", json={
+            "entity_type": "card",
+            "field_name": "title",
+            "conflict_strategy": "last_write_wins",
+        })
+        rule_id = create_resp.json()["id"]
+
+        put_resp = await api_client.put(f"/api/v1/sync-rules/{rule_id}", json={
+            "conflict_strategy": "manual_merge",
+        })
+        assert put_resp.status_code == 200
+        assert put_resp.json()["conflict_strategy"] == "manual_merge"
+
+    async def test_update_to_ai_merge(self, api_client):
+        """PUT 設定 ai_merge 策略成功。"""
+        create_resp = await api_client.post("/api/v1/sync-rules", json={
+            "entity_type": "card",
+            "field_name": "title",
+            "conflict_strategy": "last_write_wins",
+        })
+        rule_id = create_resp.json()["id"]
+
+        put_resp = await api_client.put(f"/api/v1/sync-rules/{rule_id}", json={
+            "conflict_strategy": "ai_merge",
+        })
+        assert put_resp.status_code == 200
+        assert put_resp.json()["conflict_strategy"] == "ai_merge"

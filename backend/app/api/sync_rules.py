@@ -22,6 +22,14 @@ class SyncRuleResponse(BaseModel):
     is_enabled: bool
 
 
+class SyncRuleCreateRequest(BaseModel):
+    entity_type: str
+    field_name: str
+    writable_by: str = "both"
+    conflict_strategy: str = "last_write_wins"
+    is_enabled: bool = True
+
+
 class SyncRuleUpdateRequest(BaseModel):
     writable_by: Optional[str] = None
     conflict_strategy: Optional[str] = None
@@ -32,7 +40,7 @@ class SyncRuleUpdateRequest(BaseModel):
 # Allowed values
 # ==========================================
 _WRITABLE_BY_VALUES = {"ai", "human", "both"}
-_CONFLICT_STRATEGY_VALUES = {"last_write_wins", "human_wins", "ai_wins"}
+_CONFLICT_STRATEGY_VALUES = {"last_write_wins", "human_wins", "ai_wins", "manual_merge", "ai_merge"}
 
 
 # ==========================================
@@ -93,3 +101,52 @@ def update_sync_rule(
     session.commit()
     session.refresh(rule)
     return rule
+
+
+@router.post("/sync-rules", response_model=SyncRuleResponse, status_code=201)
+def create_sync_rule(
+    req: SyncRuleCreateRequest,
+    session: Session = Depends(get_session),
+):
+    """建立新的同步規則（entity_type + field_name 不可重複）。"""
+    if req.writable_by not in _WRITABLE_BY_VALUES:
+        raise HTTPException(422, f"writable_by must be one of {_WRITABLE_BY_VALUES}")
+    if req.conflict_strategy not in _CONFLICT_STRATEGY_VALUES:
+        raise HTTPException(422, f"conflict_strategy must be one of {_CONFLICT_STRATEGY_VALUES}")
+
+    existing = session.exec(
+        select(SyncRule).where(
+            SyncRule.entity_type == req.entity_type,
+            SyncRule.field_name == req.field_name,
+        )
+    ).first()
+    if existing:
+        raise HTTPException(
+            409,
+            f"SyncRule for {req.entity_type}.{req.field_name} already exists (id={existing.id})",
+        )
+
+    rule = SyncRule(
+        entity_type=req.entity_type,
+        field_name=req.field_name,
+        writable_by=req.writable_by,
+        conflict_strategy=req.conflict_strategy,
+        is_enabled=req.is_enabled,
+    )
+    session.add(rule)
+    session.commit()
+    session.refresh(rule)
+    return rule
+
+
+@router.delete("/sync-rules/{rule_id}", status_code=204)
+def delete_sync_rule(
+    rule_id: int,
+    session: Session = Depends(get_session),
+):
+    """刪除指定的同步規則。"""
+    rule = session.get(SyncRule, rule_id)
+    if not rule:
+        raise HTTPException(404, f"SyncRule #{rule_id} not found")
+    session.delete(rule)
+    session.commit()

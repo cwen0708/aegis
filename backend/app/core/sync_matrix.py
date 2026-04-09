@@ -278,6 +278,18 @@ def _writable_to_direction(writable_by: str) -> SyncDirection:
     return SyncDirection.BIDIRECTIONAL
 
 
+def _db_strategy_to_enum(strategy: str) -> ConflictStrategy:
+    """DB conflict_strategy 字串 → ConflictStrategy enum。"""
+    _MAP = {
+        "last_write_wins": ConflictStrategy.LAST_WRITE_WINS,
+        "human_wins": ConflictStrategy.LAST_WRITE_WINS,
+        "ai_wins": ConflictStrategy.LAST_WRITE_WINS,
+        "manual_merge": ConflictStrategy.MANUAL_MERGE,
+        "ai_merge": ConflictStrategy.AI_MERGE,
+    }
+    return _MAP.get(strategy, ConflictStrategy.LAST_WRITE_WINS)
+
+
 def load_registry_from_db(session: "Session") -> SyncRuleRegistry:
     """從 DB 載入所有啟用的 SyncRule，轉換為 SyncRuleRegistry。
 
@@ -305,11 +317,7 @@ def load_registry_from_db(session: "Session") -> SyncRuleRegistry:
             FieldRule(
                 field_name=r.field_name,
                 sync_direction=_writable_to_direction(r.writable_by),
-                conflict_strategy=(
-                    ConflictStrategy.LAST_WRITE_WINS
-                    if r.conflict_strategy in ("last_write_wins", "human_wins", "ai_wins")
-                    else ConflictStrategy.MANUAL_MERGE
-                ),
+                conflict_strategy=_db_strategy_to_enum(r.conflict_strategy),
                 writable_by=_writable_to_set(r.writable_by),
             )
             for r in db_rules
