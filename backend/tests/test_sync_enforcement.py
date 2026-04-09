@@ -10,6 +10,8 @@ from app.core.card_file import CardData, write_card, read_card, card_file_path
 from app.core.card_index import sync_card_to_index
 from app.core.sync_matrix import (
     SyncEnforcer,
+    ConflictResolver,
+    FieldVersion,
     SyncDirection,
     ConflictStrategy,
     load_registry_from_db,
@@ -326,3 +328,99 @@ class TestPatchCardSyncEnforcement:
 
         cd = read_card(fpath)
         assert cd.status == "idle"
+
+
+# ==========================================================
+# ConflictResolver + DB 規則整合測試
+# ==========================================================
+
+class TestConflictResolverIntegration:
+    """ConflictResolver 整合測試 — 結合 DB 規則載入與卡片 MD 資料"""
+
+    @staticmethod
+    def _resolve_with_db(db_session, entity_type, local_changes, remote_changes):
+        """從 DB 載入 registry，建立 ConflictResolver 並執行解決"""
+        registry = load_registry_from_db(db_session)
+        resolver = ConflictResolver(registry)
+        return resolver.resolve(entity_type, local_changes, remote_changes)
+
+    def test_conflict_resolve_lww_auto(self, db_session, setup_project, setup_card):
+        """LWW 策略：local 較新自動解決，remote 較舊被覆蓋"""
+        # 設定 title 為 LWW 策略
+        db_session.add(SyncRuleModel(
+            entity_type="card", field_name="title",
+            writable_by="both", conflict_strategy="last_write_wins", is_enabled=True,
+        ))
+        db_session.commit()
+
+        fpath = setup_card["fpath"]
+        cd = read_card(fpath)
+
+        # local 時間戳必須比 card 的 updated_at 還新
+        from datetime import timedelta
+        local_ts = cd.updated_at + timedelta(hours=1)
+
+        local = {
+            "title": FieldVersion("Local Title", local_ts, "human"),
+        }
+        # remote 使用卡片 MD 的 updated_at
+        remote = {
+            "title": FieldVersion(cd.title, cd.updated_at, "remote"),
+        }
+
+        result = self._resolve_with_db(db_session, "card", local, remote)
+
+        assert len(result.resolved) == 1
+        assert result.resolved[0].field_name == "title"
+        assert result.resolved[0].value == "Local Title"
+        assert result.resolved[0].strategy == ConflictStrategy.LAST_WRITE_WINS
+        assert len(result.deferred) == 0
+
+    def test_conflict_resolve_manual_merge_deferred(self, db_session, setup_project, setup_card):
+        """MANUAL_MERGE 策略：雙方都有變更時進入 deferred"""
+        # 設定 description 為 manual_merge 策略
+        db_session.add(SyncRuleModel(
+            entity_type="card", field_name="description",
+            writable_by="both", conflict_strategy="manual_merge", is_enabled=True,
+        ))
+        db_session.commit()
+
+        fpath = setup_card["fpath"]
+        cd = read_card(fpath)
+
+        local = {
+            "description": FieldVersion("Local Desc", datetime(2026, 4, 2, tzinfo=timezone.utc), "human"),
+        }
+        remote = {
+            "description": FieldVersion(cd.description, cd.updated_at, "remote"),
+        }
+
+        result = self._resolve_with_db(db_session, "card", local, remote)
+
+        assert len(result.resolved) == 0
+        assert len(result.deferred) == 1
+        assert result.deferred[0].field_name == "description"
+        assert result.deferred[0].strategy == ConflictStrategy.MANUAL_MERGE
+        assert result.deferred[0].local.value == "Local Desc"
+        assert result.deferred[0].remote.value == cd.description
+
+    def test_conflict_resolve_local_only(self, db_session, setup_project, setup_card):
+        """單方變更（只有 local）：無衝突，直接 resolve"""
+        db_session.add(SyncRuleModel(
+            entity_type="card", field_name="title",
+            writable_by="both", conflict_strategy="last_write_wins", is_enabled=True,
+        ))
+        db_session.commit()
+
+        local = {
+            "title": FieldVersion("New Title", datetime(2026, 4, 2, tzinfo=timezone.utc), "human"),
+        }
+        # remote 無變更
+        remote: dict[str, FieldVersion] = {}
+
+        result = self._resolve_with_db(db_session, "card", local, remote)
+
+        assert len(result.resolved) == 1
+        assert result.resolved[0].field_name == "title"
+        assert result.resolved[0].value == "New Title"
+        assert len(result.deferred) == 0

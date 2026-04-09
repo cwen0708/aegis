@@ -9,7 +9,10 @@ from app.database import get_session
 from app.models.core import Project, Card, StageList, CardIndex
 from app.core.card_file import CardData, read_card as read_card_md, write_card, card_file_path
 from app.core.card_index import sync_card_to_index, remove_card_from_index, next_card_id
-from app.core.sync_matrix import SyncEnforcer, load_registry_from_db
+from app.core.sync_matrix import (
+    SyncEnforcer, ConflictResolver, FieldVersion,
+    load_registry_from_db,
+)
 from app.core.paths import WORKSPACES_ROOT
 from app.api.deps import get_card_lock, get_project_for_list
 from pathlib import Path
@@ -75,6 +78,29 @@ class CardUpdateRequest(BaseModel):
         if v is not None and not (1 <= v <= 10):
             raise ValueError("max_rounds must be between 1 and 10")
         return v
+
+
+# ==========================================
+# Conflict Resolution Schemas
+# ==========================================
+class FieldVersionInput(BaseModel):
+    """前端送入的欄位版本快照"""
+    value: Optional[str] = None
+    updated_at: datetime
+    actor: str
+
+
+class ConflictCheckRequest(BaseModel):
+    """衝突檢查請求 — 前端送出 local 端的欄位版本"""
+    local_changes: dict[str, FieldVersionInput]
+    apply_resolved: bool = False
+
+
+class ConflictCheckResponse(BaseModel):
+    """衝突檢查結果"""
+    resolved: list[dict]
+    deferred: list[dict]
+    applied: bool = False
 
 
 # ==========================================
@@ -443,6 +469,96 @@ def abort_card(card_id: int, session: Session = Depends(get_session)):
             session.add(orm_card)
         session.commit()
     return {"ok": True, "status": "aborted"}
+
+
+# ==========================================
+# Conflict Resolution
+# ==========================================
+@router.post("/cards/{card_id}/resolve-conflicts", response_model=ConflictCheckResponse)
+def resolve_conflicts(
+    card_id: int,
+    req: ConflictCheckRequest,
+    session: Session = Depends(get_session),
+):
+    """偵測並解決 local 與 remote 之間的欄位級衝突。
+
+    remote 版本自動從卡片 MD 檔讀取（updated_at 作為時間戳）。
+    若 apply_resolved=True，已解決的欄位會自動寫回卡片。
+    """
+    idx = session.get(CardIndex, card_id)
+    if not idx or not idx.file_path or not Path(idx.file_path).exists():
+        raise HTTPException(status_code=404, detail="Card not found")
+
+    cd = read_card_md(Path(idx.file_path))
+
+    # 建構 local FieldVersion 字典
+    local_versions: dict[str, FieldVersion] = {}
+    for field_name, fv_input in req.local_changes.items():
+        local_versions[field_name] = FieldVersion(
+            value=fv_input.value,
+            updated_at=fv_input.updated_at,
+            actor=fv_input.actor,
+        )
+
+    # 建構 remote FieldVersion 字典（從 MD 檔讀取）
+    remote_versions: dict[str, FieldVersion] = {}
+    card_fields = {"title", "description", "content", "status"}
+    for field_name in local_versions:
+        if field_name in card_fields and hasattr(cd, field_name):
+            remote_versions[field_name] = FieldVersion(
+                value=getattr(cd, field_name),
+                updated_at=cd.updated_at,
+                actor="remote",
+            )
+
+    # 載入 SyncRuleRegistry，建立 ConflictResolver
+    registry = load_registry_from_db(session)
+    resolver = ConflictResolver(registry)
+    result = resolver.resolve("card", local_versions, remote_versions)
+
+    # 序列化結果
+    resolved_list = [
+        {"field_name": r.field_name, "value": r.value, "strategy": r.strategy.value}
+        for r in result.resolved
+    ]
+    deferred_list = [
+        {
+            "field_name": d.field_name,
+            "local": {"value": d.local.value, "updated_at": d.local.updated_at.isoformat(), "actor": d.local.actor},
+            "remote": {"value": d.remote.value, "updated_at": d.remote.updated_at.isoformat(), "actor": d.remote.actor},
+            "strategy": d.strategy.value,
+        }
+        for d in result.deferred
+    ]
+
+    applied = False
+    # apply_resolved: 自動將已解決欄位寫回卡片
+    if req.apply_resolved and result.resolved:
+        now = datetime.now(timezone.utc)
+        for r in result.resolved:
+            if r.field_name in card_fields and hasattr(cd, r.field_name):
+                setattr(cd, r.field_name, r.value)
+        cd.updated_at = now
+        write_card(Path(idx.file_path), cd)
+        sync_card_to_index(session, cd, project_id=idx.project_id, file_path=idx.file_path)
+
+        # Dual-write: 同步到 ORM Card
+        orm_card = session.get(Card, card_id)
+        if orm_card:
+            for r in result.resolved:
+                if r.field_name in ("title", "description", "content", "status"):
+                    setattr(orm_card, r.field_name, r.value)
+            orm_card.updated_at = now
+            session.add(orm_card)
+
+        session.commit()
+        applied = True
+
+    return ConflictCheckResponse(
+        resolved=resolved_list,
+        deferred=deferred_list,
+        applied=applied,
+    )
 
 
 @router.post("/cards/{card_id}/archive")
