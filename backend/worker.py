@@ -109,7 +109,7 @@ DEFAULT_TASK_TIMEOUT = 3600  # 任務執行時間上限（秒），預設 60 分
 
 # Provider 設定統一由 executor 管理
 from app.core.executor import PROVIDERS, build_command
-from app.core.executor.providers import get_provider_config
+from app.core.executor.providers import get_provider_config, get_provider
 from app.core.executor.emitter import clean_ansi as _clean_ansi
 
 
@@ -761,7 +761,8 @@ def run_task_pty_windows(
                                 clean_line = _clean_ansi(line)
                                 if clean_line.strip().startswith("{"):
                                     emitter.emit_raw(clean_line)
-                                    text = parse_stream_json_text(clean_line)
+                                    _prov = get_provider(provider_name)
+                                    text = _prov.parse_stream_line(clean_line) if _prov else parse_stream_json_text(clean_line)
                                     if text:
                                         result_text_parts.append(text)
                             else:
@@ -790,7 +791,8 @@ def run_task_pty_windows(
                     clean_line = _clean_ansi(line)
                     if clean_line.strip().startswith("{"):
                         emitter.emit_raw(clean_line)
-                        text = parse_stream_json_text(clean_line)
+                        _prov = get_provider(provider_name)
+                        text = _prov.parse_stream_line(clean_line) if _prov else parse_stream_json_text(clean_line)
                         if text:
                             result_text_parts.append(text)
             else:
@@ -831,18 +833,34 @@ def run_task_pty_windows(
         token_info["duration_ms"] = duration_ms
         if token_info.get("result_text"):
             actual_output = token_info["result_text"]
-    elif provider_name == "openai" and config.get("stream_json"):
-        # OpenAI stream_json 模式：與 Claude 相同的 stream-json 解析路徑
-        if result_text_parts:
-            actual_output = "".join(result_text_parts)
-        token_info = emitter.token_info if emitter else {}
-        token_info["duration_ms"] = duration_ms
-    elif provider_name == "openai" and config.get("json_output"):
-        from app.core.stream_parsers import parse_openai_json
-        token_info = parse_openai_json(output)
-        token_info["duration_ms"] = duration_ms
-        if token_info.get("result_text"):
-            actual_output = token_info["result_text"]
+    elif provider_name == "openai":
+        _openai_prov = get_provider("openai")
+        if _openai_prov is not None:
+            # 優先使用 OpenAIProvider.parse_output()
+            parsed = _openai_prov.parse_output(output)
+            if parsed:
+                token_info = parsed
+                token_info["duration_ms"] = duration_ms
+                if token_info.get("result_text"):
+                    actual_output = token_info["result_text"]
+                elif result_text_parts:
+                    actual_output = "".join(result_text_parts)
+            elif result_text_parts:
+                actual_output = "".join(result_text_parts)
+                token_info = emitter.token_info if emitter else {}
+                token_info["duration_ms"] = duration_ms
+        elif config.get("stream_json"):
+            # Fallback：舊式 stream_json 路徑
+            if result_text_parts:
+                actual_output = "".join(result_text_parts)
+            token_info = emitter.token_info if emitter else {}
+            token_info["duration_ms"] = duration_ms
+        elif config.get("json_output"):
+            from app.core.stream_parsers import parse_openai_json
+            token_info = parse_openai_json(output)
+            token_info["duration_ms"] = duration_ms
+            if token_info.get("result_text"):
+                actual_output = token_info["result_text"]
 
     save_task_log(card_id, card_title, project_name, provider_name, member_id, status, actual_output, token_info)
 
@@ -897,7 +915,8 @@ def run_task_subprocess(
                     clean = line.strip()
                     if clean.startswith("{") and emitter:
                         emitter.emit_raw(clean)
-                        text = parse_stream_json_text(clean)
+                        _prov = get_provider(provider_name)
+                        text = _prov.parse_stream_line(clean) if _prov else parse_stream_json_text(clean)
                         if text:
                             result_text_parts.append(text)
                 elif emitter:
@@ -947,12 +966,21 @@ def run_task_subprocess(
             token_info["duration_ms"] = duration_ms
             if token_info.get("result_text"):
                 actual_output = token_info["result_text"]
-        elif provider_name == "openai" and config.get("json_output"):
-            from app.core.stream_parsers import parse_openai_json
-            token_info = parse_openai_json(output)
-            token_info["duration_ms"] = duration_ms
-            if token_info.get("result_text"):
-                actual_output = token_info["result_text"]
+        elif provider_name == "openai":
+            _openai_prov = get_provider("openai")
+            if _openai_prov is not None:
+                parsed = _openai_prov.parse_output(output)
+                if parsed:
+                    token_info = parsed
+                    token_info["duration_ms"] = duration_ms
+                    if token_info.get("result_text"):
+                        actual_output = token_info["result_text"]
+            elif config.get("json_output"):
+                from app.core.stream_parsers import parse_openai_json
+                token_info = parse_openai_json(output)
+                token_info["duration_ms"] = duration_ms
+                if token_info.get("result_text"):
+                    actual_output = token_info["result_text"]
 
         save_task_log(card_id, card_title, project_name, provider_name, member_id, status, actual_output, token_info)
 

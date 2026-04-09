@@ -88,9 +88,13 @@ def build_command(
         return cmd, False
 
     elif provider == "openai":
+        # 優先委託給 OpenAIProvider 類別
+        openai_provider = get_provider("openai")
+        if openai_provider is not None:
+            return openai_provider.build_command(prompt, model, mode=mode)
+        # Fallback 到舊式 dict 邏輯
         resolved_model = model or config.get("default_model", "gpt-4o")
         cmd.extend(["--model", resolved_model])
-        # prompt 從 stdin 傳入（避免 shell 特殊字元問題）
         return cmd, True
 
     elif provider == "ollama":
