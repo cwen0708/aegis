@@ -34,7 +34,8 @@ class TestSelectBestAccountOpenAI:
         binding, account = _make_binding_and_account()
 
         with patch("sqlmodel.Session") as mock_session_class, \
-             patch("app.core.env_builder.EnvironmentBuilder") as mock_builder_class:
+             patch("app.core.env_builder.EnvironmentBuilder") as mock_builder_class, \
+             patch("app.core.account_manager.activate_account") as mock_activate:
             mock_session = MagicMock()
             mock_session_class.return_value.__enter__.return_value = mock_session
             mock_session.exec.return_value.all.return_value = [binding]
@@ -50,6 +51,7 @@ class TestSelectBestAccountOpenAI:
             result = select_best_account(mock_session, member_id=1)
 
             assert result is account
+            mock_activate.assert_called_once_with(account)
 
     def test_openai_missing_key_skips(self):
         """缺少 API Key 時應跳過 OpenAI 帳號"""
