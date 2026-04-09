@@ -17,7 +17,7 @@ router = APIRouter(tags=["Plans"])
 
 class PlanInfo(BaseModel):
     round_num: int
-    path: str
+    filename: str
 
 
 class PlanListResponse(BaseModel):
@@ -36,13 +36,19 @@ def list_card_plans(card_id: int):
     return PlanListResponse(
         card_id=card_id,
         plans=[
-            PlanInfo(round_num=e.round_num, path=str(e.path))
+            PlanInfo(round_num=e.round_num, filename=e.path.name)
             for e in entries
         ],
     )
 
 
-@router.get("/plans/{card_id}/{round_num}")
+class PlanContentResponse(BaseModel):
+    card_id: int
+    round_num: int
+    content: str
+
+
+@router.get("/plans/{card_id}/{round_num}", response_model=PlanContentResponse)
 def get_card_plan(card_id: int, round_num: int):
     """取得特定版本的 plan 內容。"""
     text = load_plan(card_id, round_num)
@@ -51,4 +57,4 @@ def get_card_plan(card_id: int, round_num: int):
             status_code=404,
             detail=f"Plan not found: card={card_id} round={round_num}",
         )
-    return {"card_id": card_id, "round_num": round_num, "content": text}
+    return PlanContentResponse(card_id=card_id, round_num=round_num, content=text)

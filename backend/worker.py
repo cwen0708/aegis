@@ -1000,11 +1000,11 @@ def _handle_regular_result(idx, result, new_status, card_data, project_path, mem
     # 自動存檔 Execution Plan
     if new_status == "completed" and result.get("output"):
         try:
-            from app.core.plan_store import save_plan, list_plans
-            round_num = len(list_plans(idx.card_id)) + 1
+            from app.core.plan_store import save_plan, next_round_num
+            round_num = next_round_num(idx.card_id)
             save_plan(idx.card_id, round_num, result["output"])
-        except Exception as e:
-            logger.warning(f"[Task] Failed to save plan for card {idx.card_id}: {e}")
+        except Exception:
+            logger.warning("[Task] Failed to save plan for card %s", idx.card_id, exc_info=True)
 
 
 def _post_task_hooks(idx, result, new_status, token_info, card_data, project_name, member_id, member_slug, workspace_dir, cron_job_id):

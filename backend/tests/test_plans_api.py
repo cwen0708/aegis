@@ -30,7 +30,9 @@ def test_list_after_save(tmp_path: Path):
     assert result.card_id == 42
     assert len(result.plans) == 2
     assert result.plans[0].round_num == 1
+    assert result.plans[0].filename == "round-1.md"
     assert result.plans[1].round_num == 2
+    assert result.plans[1].filename == "round-2.md"
 
 
 def test_get_specific_round(tmp_path: Path):
@@ -42,9 +44,9 @@ def test_get_specific_round(tmp_path: Path):
     with patch("app.api.plans.load_plan", return_value=loaded):
         result = get_card_plan(10, 3)
 
-    assert result["card_id"] == 10
-    assert result["round_num"] == 3
-    assert result["content"] == text
+    assert result.card_id == 10
+    assert result.round_num == 3
+    assert result.content == text
 
 
 def test_get_missing_round():

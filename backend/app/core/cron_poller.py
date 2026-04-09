@@ -178,8 +178,8 @@ async def _execute_gc_action(session: Session, job, tz_name: str):
             logger.info(
                 "[Cron Poller] '%s' → gc → %d cards created", job.name, len(cards)
             )
-        except Exception as e:
-            logger.error("[Cron Poller] '%s' gc failed: %s", job.name, e)
+        except Exception:
+            logger.error("[Cron Poller] '%s' gc failed", job.name, exc_info=True)
 
     next_time = _calculate_next_time(job.cron_expression, tz_name)
     if next_time:

@@ -27,7 +27,10 @@ class PlanEntry:
 
 
 def _card_dir(card_id: int, *, base: Path = PLANS_DIR) -> Path:
-    return base / str(card_id)
+    resolved = (base / str(card_id)).resolve()
+    if not resolved.is_relative_to(base.resolve()):
+        raise ValueError(f"Invalid card_id: path escapes base directory")
+    return resolved
 
 
 def save_plan(
@@ -78,3 +81,13 @@ def list_plans(
             )
 
     return sorted(entries, key=lambda e: e.round_num)
+
+
+def next_round_num(card_id: int, *, base: Path = PLANS_DIR) -> int:
+    """Return the next available round number for *card_id*.
+
+    Scans existing files to find the max round, avoiding TOCTOU races
+    by letting callers combine this with exclusive-create if needed.
+    """
+    entries = list_plans(card_id, base=base)
+    return (entries[-1].round_num + 1) if entries else 1
