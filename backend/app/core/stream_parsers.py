@@ -258,7 +258,33 @@ def parse_openai_stream(line: str) -> Optional[str]:
 
 
 def parse_openai_json(output: str) -> Dict[str, Any]:
-    """從 OpenAI CLI wrapper 的 JSON 輸出解析結果與 token 用量"""
+    """從 OpenAI CLI wrapper 的 JSON 輸出解析結果與 token 用量
+
+    支援兩種格式：
+    - 多行 stream-json：逐行掃描找 type=result 的行
+    - 單一 JSON（舊格式）：直接解析整段輸出
+    """
+    # 多行 stream-json：逐行掃描找 type=result
+    for line in output.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            data = json.loads(line)
+            if data.get("type") == "result":
+                usage = data.get("usage", {})
+                return {
+                    "result_text": data.get("result", ""),
+                    "model": data.get("model", ""),
+                    "duration_ms": data.get("duration_ms", 0),
+                    "cost_usd": data.get("total_cost_usd", 0),
+                    "input_tokens": usage.get("input_tokens", 0),
+                    "output_tokens": usage.get("output_tokens", 0),
+                }
+        except (json.JSONDecodeError, ValueError):
+            continue
+
+    # 舊格式 fallback：單一 JSON，key 在頂層
     try:
         data = json.loads(output.strip())
         return {

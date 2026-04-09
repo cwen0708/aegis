@@ -456,8 +456,45 @@ class TestParseOpenaiStream:
 class TestParseOpenaiJson:
     """parse_openai_json 函式測試。"""
 
-    def test_full_payload(self):
-        """完整 payload 解析所有欄位。"""
+    def test_new_format_result_line(self):
+        """新格式 stream-json：type=result 行正確解析。"""
+        data = json.dumps({
+            "type": "result",
+            "result": "回答完成",
+            "model": "gpt-4o",
+            "duration_ms": 2345,
+            "total_cost_usd": 0.03,
+            "usage": {"input_tokens": 150, "output_tokens": 80},
+        })
+        r = parse_openai_json(data)
+        assert r["result_text"] == "回答完成"
+        assert r["model"] == "gpt-4o"
+        assert r["duration_ms"] == 2345
+        assert r["cost_usd"] == 0.03
+        assert r["input_tokens"] == 150
+        assert r["output_tokens"] == 80
+
+    def test_new_format_multiline(self):
+        """多行 stream-json：從多行中找到 type=result 行解析。"""
+        lines = "\n".join([
+            json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "Hello"}]}}),
+            json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": " world"}]}}),
+            json.dumps({
+                "type": "result",
+                "result": "Hello world",
+                "model": "gpt-4o",
+                "duration_ms": 1000,
+                "total_cost_usd": 0.01,
+                "usage": {"input_tokens": 50, "output_tokens": 10},
+            }),
+        ])
+        r = parse_openai_json(lines)
+        assert r["result_text"] == "Hello world"
+        assert r["input_tokens"] == 50
+        assert r["output_tokens"] == 10
+
+    def test_legacy_format_full_payload(self):
+        """舊格式 fallback：頂層 key 仍能正確解析。"""
         data = json.dumps({
             "result_text": "回答完成",
             "model": "gpt-4o",
@@ -492,12 +529,20 @@ class TestParseOpenaiJson:
         """空字串 → 空 dict。"""
         assert parse_openai_json("") == {}
 
-    def test_partial_fields(self):
-        """部分欄位缺失 → 缺失欄位使用預設值。"""
+    def test_legacy_partial_fields(self):
+        """舊格式部分欄位缺失 → 缺失欄位使用預設值。"""
         data = json.dumps({"result_text": "ok", "model": "gpt-4o-mini"})
         r = parse_openai_json(data)
         assert r["result_text"] == "ok"
         assert r["model"] == "gpt-4o-mini"
         assert r["duration_ms"] == 0
+        assert r["input_tokens"] == 0
+        assert r["output_tokens"] == 0
+
+    def test_new_format_missing_usage(self):
+        """新格式 usage 缺失 → token 欄位回傳 0。"""
+        data = json.dumps({"type": "result", "result": "ok"})
+        r = parse_openai_json(data)
+        assert r["result_text"] == "ok"
         assert r["input_tokens"] == 0
         assert r["output_tokens"] == 0

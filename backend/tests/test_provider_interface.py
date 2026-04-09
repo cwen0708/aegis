@@ -116,11 +116,20 @@ class TestOpenAIBuildCommand:
 
 class TestOpenAIParseStreamLine:
     def test_stream_json_format(self, openai_provider):
+        """舊格式：content 在頂層。"""
         line = json.dumps({
             "type": "assistant",
             "content": [{"type": "text", "text": "Hello"}],
         })
         assert openai_provider.parse_stream_line(line) == "Hello"
+
+    def test_stream_json_message_wrapper(self, openai_provider):
+        """新格式：content 包在 message 層下。"""
+        line = json.dumps({
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "你好世界"}]},
+        })
+        assert openai_provider.parse_stream_line(line) == "你好世界"
 
     def test_stream_json_non_assistant(self, openai_provider):
         line = json.dumps({"type": "result", "result": "done"})
@@ -149,7 +158,43 @@ class TestOpenAIParseStreamLine:
 
 
 class TestOpenAIParseOutput:
-    def test_full_output(self, openai_provider):
+    def test_new_format_result(self, openai_provider):
+        """新格式 stream-json：type=result 正確解析。"""
+        output = json.dumps({
+            "type": "result",
+            "result": "done",
+            "model": "gpt-4o",
+            "duration_ms": 500,
+            "total_cost_usd": 0.01,
+            "usage": {"input_tokens": 100, "output_tokens": 50},
+        })
+        result = openai_provider.parse_output(output)
+        assert result["result_text"] == "done"
+        assert result["model"] == "gpt-4o"
+        assert result["input_tokens"] == 100
+        assert result["output_tokens"] == 50
+        assert result["cost_usd"] == 0.01
+
+    def test_new_format_multiline(self, openai_provider):
+        """多行 stream-json 輸出：從多行中找到 result 行。"""
+        output = "\n".join([
+            json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "Hi"}]}}),
+            json.dumps({
+                "type": "result",
+                "result": "Hi",
+                "model": "gpt-4o",
+                "duration_ms": 300,
+                "total_cost_usd": 0.005,
+                "usage": {"input_tokens": 20, "output_tokens": 5},
+            }),
+        ])
+        result = openai_provider.parse_output(output)
+        assert result["result_text"] == "Hi"
+        assert result["input_tokens"] == 20
+        assert result["output_tokens"] == 5
+
+    def test_legacy_full_output(self, openai_provider):
+        """舊格式 fallback：頂層 key 仍能正確解析。"""
         output = json.dumps({
             "result_text": "done",
             "model": "gpt-4o",
@@ -165,7 +210,7 @@ class TestOpenAIParseOutput:
         assert result["output_tokens"] == 50
         assert result["cost_usd"] == 0.01
 
-    def test_partial_output(self, openai_provider):
+    def test_legacy_partial_output(self, openai_provider):
         output = json.dumps({"result_text": "hi"})
         result = openai_provider.parse_output(output)
         assert result["result_text"] == "hi"
