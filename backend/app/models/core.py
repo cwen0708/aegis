@@ -154,6 +154,22 @@ class SystemSetting(SQLModel, table=True):
 
 
 # ==========================================
+# 同步規則 (Sync Matrix)
+# ==========================================
+class SyncRule(SQLModel, table=True):
+    """欄位級同步規則 — 控制每個實體欄位的寫入權限與衝突策略"""
+    __table_args__ = (UniqueConstraint("entity_type", "field_name"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    entity_type: str = Field(index=True)  # "card" | "stagelist" | "member" | "project"
+    field_name: str  # "title" | "description" | "status" 等
+    writable_by: str = Field(default="both")  # "ai" | "human" | "both"
+    conflict_strategy: str = Field(default="last_write_wins")  # "last_write_wins" | "human_wins" | "ai_wins"
+    is_enabled: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# ==========================================
 # 多帳號管理 (Multi-Account)
 # ==========================================
 class Account(SQLModel, table=True):

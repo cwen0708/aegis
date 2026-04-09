@@ -28,6 +28,7 @@ from app.api import member_messages as member_messages_routes
 from app.api import history as history_routes
 from app.api import gc as gc_routes
 from app.api import plans as plans_routes
+from app.api import sync_rules as sync_rules_routes
 from app.core.telemetry import get_system_metrics
 from app.core.cron_poller import start_cron_poller
 from app.core.usage_poller import start_usage_poller
@@ -517,6 +518,7 @@ app.include_router(member_messages_routes.router, prefix="/api/v1")
 app.include_router(history_routes.router, prefix="/api/v1")
 app.include_router(gc_routes.router, prefix="/api/v1")
 app.include_router(plans_routes.router, prefix="/api/v1")
+app.include_router(sync_rules_routes.router, prefix="/api/v1")
 
 # ==========================================
 # SPA Frontend (serve from frontend/dist)

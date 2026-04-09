@@ -5,7 +5,7 @@ from sqlmodel import Session, select
 from app.database import engine, init_db
 from app.models.core import (
     Project, StageList, Card, Tag, CardTagLink,
-    Member, Account, MemberAccount, CronJob, SystemSetting,
+    Member, Account, MemberAccount, CronJob, SystemSetting, SyncRule,
 )
 from app.core.card_file import CardData, write_card, card_file_path
 from app.core.default_office_layout import get_default_office_layout_json
@@ -195,15 +195,15 @@ def _sync_system_cron_jobs(session: Session):
         print("  AEGIS system project not found, skipping cron sync.")
         return
 
-    # 補建缺少的系統列表（如 Inbound）
+    # 補建缺少的系統列表（如 Inbound, Backlog）
     existing_lists = {sl.name for sl in session.exec(
         select(StageList).where(StageList.project_id == aegis.id)
     ).all()}
-    for pos, list_name in enumerate(["Scheduled", "Inbound"]):
+    for pos, list_name in enumerate(["Scheduled", "Inbound", "Backlog"]):
         if list_name not in existing_lists:
             session.add(StageList(
                 project_id=aegis.id, name=list_name, position=pos,
-                is_ai_stage=True,
+                is_ai_stage=list_name != "Backlog",
             ))
             print(f"  - Added missing system list: {list_name}")
     session.commit()
@@ -417,6 +417,20 @@ def _sync_system_cron_jobs(session: Session):
             target_list_id=liang_inbox.id if liang_inbox else None,
         ))
 
+    # GC 技術債掃描（每晚 2 點）
+    if "GC 技術債掃描" not in existing_crons:
+        cron_expr = "0 2 * * *"
+        crons_to_add.append(CronJob(
+            project_id=aegis.id,
+            name="GC 技術債掃描",
+            description="每晚凌晨 2 點掃描專案技術債（大檔案、過多 TODO、過期文件），自動建卡到 Backlog。",
+            cron_expression=cron_expr,
+            next_scheduled_at=_calculate_next_scheduled_at(cron_expr),
+            is_enabled=True,
+            is_system=True,
+            api_url="gc",
+        ))
+
     if crons_to_add:
         session.add_all(crons_to_add)
         session.commit()
@@ -425,14 +439,47 @@ def _sync_system_cron_jobs(session: Session):
         print("  - All system cron jobs already exist.")
 
 
+def _sync_default_sync_rules(session: Session):
+    """確保預設 SyncRule 存在（跳過已存在的 entity_type+field_name 組合）。"""
+    defaults = [
+        ("card", "title", "both", "last_write_wins"),
+        ("card", "description", "both", "last_write_wins"),
+        ("card", "status", "ai", "ai_wins"),
+        ("card", "content", "both", "last_write_wins"),
+        ("card", "is_archived", "human", "human_wins"),
+        ("stagelist", "name", "human", "human_wins"),
+        ("stagelist", "position", "human", "human_wins"),
+    ]
+    existing = {
+        (r.entity_type, r.field_name)
+        for r in session.exec(select(SyncRule)).all()
+    }
+    added = 0
+    for entity_type, field_name, writable_by, conflict_strategy in defaults:
+        if (entity_type, field_name) not in existing:
+            session.add(SyncRule(
+                entity_type=entity_type,
+                field_name=field_name,
+                writable_by=writable_by,
+                conflict_strategy=conflict_strategy,
+            ))
+            added += 1
+    if added:
+        session.commit()
+        print(f"  - Added {added} default sync rules")
+    else:
+        print("  - All default sync rules already exist.")
+
+
 def seed_data():
     init_db()
     with Session(engine) as session:
         has_existing_data = session.exec(select(Project)).first() is not None
 
         if has_existing_data:
-            print("Database has existing data. Syncing system cron jobs...")
+            print("Database has existing data. Syncing...")
             _sync_system_cron_jobs(session)
+            _sync_default_sync_rules(session)
             print("Sync completed!")
             return
 
@@ -575,18 +622,25 @@ def seed_data():
             print(f"  - Added AEGIS system project (dev: {dev_dir})")
 
             # AEGIS 系統列表
-            for pos, list_name in enumerate(["Scheduled", "Inbound"]):
+            for pos, (list_name, is_ai) in enumerate([
+                ("Scheduled", True),
+                ("Inbound", True),
+                ("Backlog", False),
+            ]):
                 sl = StageList(
                     project_id=aegis.id,
                     name=list_name,
                     position=pos,
-                    is_ai_stage=True,
+                    is_ai_stage=is_ai,
                 )
                 session.add(sl)
             session.commit()
 
         # ── 4. AEGIS 系統排程 ──
         _sync_system_cron_jobs(session)
+
+        # ── 4b. 預設同步規則 ──
+        _sync_default_sync_rules(session)
 
         # ── 5. Demo 專案（跳過已存在）──
         p1 = session.exec(select(Project).where(Project.name == "Aegis Demo")).first()
