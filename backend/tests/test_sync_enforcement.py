@@ -332,6 +332,121 @@ class TestPatchCardSyncEnforcement:
 
 
 # ==========================================================
+# StageList PATCH + SyncEnforcer 整合測試
+# ==========================================================
+
+class TestStageListSyncEnforcement:
+    """模擬 PATCH /lists/{list_id} 的 SyncEnforcer 邏輯"""
+
+    @staticmethod
+    def _apply_patch(db_session, list_id, update_fields: dict, actor: str):
+        """模擬 projects.py update_stage_list 中的 SyncEnforcer 邏輯"""
+        registry = load_registry_from_db(db_session)
+        enforcer = SyncEnforcer(registry)
+
+        _METADATA_FIELDS = {
+            "description", "member_id", "system_instruction",
+            "prompt_template", "is_ai_stage", "on_success_action",
+            "on_fail_action", "auto_commit",
+        }
+
+        sync_changes = {k: v for k, v in update_fields.items() if k not in _METADATA_FIELDS}
+        metadata_changes = {k: v for k, v in update_fields.items() if k in _METADATA_FIELDS}
+
+        result = enforcer.validate("stagelist", sync_changes, actor)
+        approved = {**result.approved, **metadata_changes}
+
+        # 套用到 ORM
+        stage_list = db_session.get(StageList, list_id)
+        if stage_list:
+            if "name" in approved:
+                stage_list.name = approved["name"]
+            if "position" in approved:
+                stage_list.position = approved["position"]
+            db_session.add(stage_list)
+        db_session.commit()
+        return result
+
+    def test_ai_change_name_rejected(self, db_session, setup_project):
+        """actor=ai 不能更改 name（human_to_ai 規則，writable_by=human）"""
+        db_session.add(SyncRuleModel(
+            entity_type="stagelist", field_name="name",
+            writable_by="human", conflict_strategy="human_wins", is_enabled=True,
+        ))
+        db_session.commit()
+
+        result = self._apply_patch(db_session, 1, {"name": "AI-Renamed"}, "ai")
+
+        assert "name" not in result.approved
+        assert len(result.rejected) == 1
+        assert result.rejected[0].field_name == "name"
+
+        stage_list = db_session.get(StageList, 1)
+        assert stage_list.name == "Backlog"
+
+    def test_ai_change_position_rejected(self, db_session, setup_project):
+        """actor=ai 不能更改 position（human_to_ai 規則，writable_by=human）"""
+        db_session.add(SyncRuleModel(
+            entity_type="stagelist", field_name="position",
+            writable_by="human", conflict_strategy="human_wins", is_enabled=True,
+        ))
+        db_session.commit()
+
+        result = self._apply_patch(db_session, 1, {"position": 99}, "ai")
+
+        assert "position" not in result.approved
+        assert len(result.rejected) == 1
+        assert result.rejected[0].field_name == "position"
+
+        stage_list = db_session.get(StageList, 1)
+        assert stage_list.position == 0
+
+    def test_human_change_name_approved(self, db_session, setup_project):
+        """actor=human 可以更改 name（writable_by=human）"""
+        db_session.add(SyncRuleModel(
+            entity_type="stagelist", field_name="name",
+            writable_by="human", conflict_strategy="human_wins", is_enabled=True,
+        ))
+        db_session.commit()
+
+        result = self._apply_patch(db_session, 1, {"name": "Renamed"}, "human")
+
+        assert "name" in result.approved
+        assert len(result.rejected) == 0
+
+        stage_list = db_session.get(StageList, 1)
+        assert stage_list.name == "Renamed"
+
+    def test_mixed_approved_and_rejected(self, db_session, setup_project):
+        """AI 送多欄位：name 被拒、position 被拒、description 通過（metadata）"""
+        db_session.add(SyncRuleModel(
+            entity_type="stagelist", field_name="name",
+            writable_by="human", conflict_strategy="human_wins", is_enabled=True,
+        ))
+        db_session.add(SyncRuleModel(
+            entity_type="stagelist", field_name="position",
+            writable_by="human", conflict_strategy="human_wins", is_enabled=True,
+        ))
+        db_session.commit()
+
+        result = self._apply_patch(
+            db_session, 1,
+            {"name": "AI-Name", "position": 5, "description": "AI desc"},
+            "ai",
+        )
+
+        # name 和 position 被拒
+        assert "name" not in result.approved
+        assert "position" not in result.approved
+        assert len(result.rejected) == 2
+
+        # description 是 metadata，不經 SyncEnforcer，直接通過
+        stage_list = db_session.get(StageList, 1)
+        assert stage_list.name == "Backlog"
+        assert stage_list.position == 0
+
+
+# ==========================================================
 # ConflictResolver + DB 規則整合測試
 # ==========================================================
 
@@ -512,6 +627,78 @@ class TestStrategyMapping:
         assert rule is not None
         fr = rule.field_rules[0]
         assert fr.conflict_strategy == ConflictStrategy.AI_WINS
+
+
+class TestLoadRegistrySyncDirection:
+    """確認 DB sync_direction 欄位正確載入並覆蓋 writable_by 推導"""
+
+    def test_explicit_sync_direction_overrides_writable_by(self, db_session):
+        """sync_direction='read_only' 應覆蓋 writable_by='both' 的推導"""
+        db_session.add(SyncRuleModel(
+            entity_type="card", field_name="locked_field",
+            writable_by="both", sync_direction="read_only",
+            conflict_strategy="last_write_wins", is_enabled=True,
+        ))
+        db_session.commit()
+
+        registry = load_registry_from_db(db_session)
+        rule = registry.get_rule("card")
+        assert rule is not None
+        fr = rule.field_rules[0]
+        assert fr.sync_direction == SyncDirection.READ_ONLY
+
+    def test_none_sync_direction_falls_back_to_writable_by(self, db_session):
+        """sync_direction=None 應從 writable_by='ai' 推導為 AI_TO_HUMAN"""
+        db_session.add(SyncRuleModel(
+            entity_type="card", field_name="status",
+            writable_by="ai", sync_direction=None,
+            conflict_strategy="last_write_wins", is_enabled=True,
+        ))
+        db_session.commit()
+
+        registry = load_registry_from_db(db_session)
+        rule = registry.get_rule("card")
+        assert rule is not None
+        fr = rule.field_rules[0]
+        assert fr.sync_direction == SyncDirection.AI_TO_HUMAN
+
+    def test_explicit_bidirectional_with_ai_writable(self, db_session):
+        """sync_direction='bidirectional' + writable_by='ai' → BIDIRECTIONAL（sync_direction 優先）"""
+        db_session.add(SyncRuleModel(
+            entity_type="card", field_name="notes",
+            writable_by="ai", sync_direction="bidirectional",
+            conflict_strategy="last_write_wins", is_enabled=True,
+        ))
+        db_session.commit()
+
+        registry = load_registry_from_db(db_session)
+        rule = registry.get_rule("card")
+        fr = rule.field_rules[0]
+        assert fr.sync_direction == SyncDirection.BIDIRECTIONAL
+
+    def test_all_four_directions(self, db_session):
+        """四種 sync_direction 值都能正確映射"""
+        directions = [
+            ("ai_to_human", SyncDirection.AI_TO_HUMAN),
+            ("human_to_ai", SyncDirection.HUMAN_TO_AI),
+            ("bidirectional", SyncDirection.BIDIRECTIONAL),
+            ("read_only", SyncDirection.READ_ONLY),
+        ]
+        for i, (db_val, _expected) in enumerate(directions):
+            db_session.add(SyncRuleModel(
+                entity_type=f"entity_{i}", field_name="field",
+                writable_by="both", sync_direction=db_val,
+                conflict_strategy="last_write_wins", is_enabled=True,
+            ))
+        db_session.commit()
+
+        registry = load_registry_from_db(db_session)
+        for i, (db_val, expected) in enumerate(directions):
+            rule = registry.get_rule(f"entity_{i}")
+            assert rule is not None
+            assert rule.field_rules[0].sync_direction == expected, (
+                f"{db_val} should map to {expected}"
+            )
 
 
 class TestConflictResolverDBStrategy:
@@ -732,3 +919,78 @@ class TestSyncRuleUpdateStrategyAPI:
         })
         assert put_resp.status_code == 200
         assert put_resp.json()["conflict_strategy"] == "ai_merge"
+
+
+class TestSyncDirectionAPI:
+    """POST / PUT / GET sync_direction 欄位的 CRUD 測試"""
+
+    async def test_create_with_sync_direction(self, api_client):
+        """POST 指定 sync_direction=read_only 成功建立。"""
+        resp = await api_client.post("/api/v1/sync-rules", json={
+            "entity_type": "card",
+            "field_name": "locked",
+            "writable_by": "both",
+            "sync_direction": "read_only",
+        })
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["sync_direction"] == "read_only"
+
+    async def test_create_without_sync_direction_returns_none(self, api_client):
+        """POST 不指定 sync_direction 時回傳 None（向後相容）。"""
+        resp = await api_client.post("/api/v1/sync-rules", json={
+            "entity_type": "card",
+            "field_name": "title",
+        })
+        assert resp.status_code == 201
+        assert resp.json()["sync_direction"] is None
+
+    async def test_create_invalid_sync_direction_returns_422(self, api_client):
+        """POST 無效 sync_direction 應回傳 422。"""
+        resp = await api_client.post("/api/v1/sync-rules", json={
+            "entity_type": "card",
+            "field_name": "title",
+            "sync_direction": "invalid_direction",
+        })
+        assert resp.status_code == 422
+
+    async def test_get_returns_sync_direction(self, api_client):
+        """GET 回傳含 sync_direction 欄位。"""
+        await api_client.post("/api/v1/sync-rules", json={
+            "entity_type": "card",
+            "field_name": "content",
+            "sync_direction": "ai_to_human",
+        })
+        resp = await api_client.get("/api/v1/sync-rules", params={"entity_type": "card"})
+        assert resp.status_code == 200
+        rules = resp.json()
+        content_rule = next(r for r in rules if r["field_name"] == "content")
+        assert content_rule["sync_direction"] == "ai_to_human"
+
+    async def test_update_sync_direction(self, api_client):
+        """PUT 更新 sync_direction 成功。"""
+        create_resp = await api_client.post("/api/v1/sync-rules", json={
+            "entity_type": "card",
+            "field_name": "desc",
+            "sync_direction": "bidirectional",
+        })
+        rule_id = create_resp.json()["id"]
+
+        put_resp = await api_client.put(f"/api/v1/sync-rules/{rule_id}", json={
+            "sync_direction": "human_to_ai",
+        })
+        assert put_resp.status_code == 200
+        assert put_resp.json()["sync_direction"] == "human_to_ai"
+
+    async def test_update_invalid_sync_direction_returns_422(self, api_client):
+        """PUT 無效 sync_direction 應回傳 422。"""
+        create_resp = await api_client.post("/api/v1/sync-rules", json={
+            "entity_type": "card",
+            "field_name": "notes",
+        })
+        rule_id = create_resp.json()["id"]
+
+        put_resp = await api_client.put(f"/api/v1/sync-rules/{rule_id}", json={
+            "sync_direction": "bad_value",
+        })
+        assert put_resp.status_code == 422
