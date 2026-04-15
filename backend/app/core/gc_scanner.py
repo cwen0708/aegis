@@ -62,6 +62,73 @@ class LargeFileRule:
         return findings
 
 
+class LongFunctionRule:
+    """Python 函式超過 50 行 -> warning"""
+
+    MAX_LINES = 50
+
+    def scan(self, project_path: str) -> list[TechDebtFinding]:
+        findings: list[TechDebtFinding] = []
+        root = Path(project_path)
+
+        for py_file in root.rglob("*.py"):
+            if _is_excluded(py_file):
+                continue
+            try:
+                content = py_file.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            findings.extend(self._check_functions(content, py_file, root))
+        return findings
+
+    def _check_functions(
+        self, content: str, py_file: Path, root: Path
+    ) -> list[TechDebtFinding]:
+        results: list[TechDebtFinding] = []
+        lines = content.splitlines()
+        func_stack: list[tuple[str, int, int]] = []  # (name, start_line, indent)
+
+        for i, line in enumerate(lines):
+            stripped = line.lstrip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            indent = len(line) - len(stripped)
+
+            while func_stack and indent <= func_stack[-1][2]:
+                name, start, _ = func_stack.pop()
+                length = i - start
+                if length > self.MAX_LINES:
+                    results.append(
+                        TechDebtFinding(
+                            file=str(py_file.relative_to(root)),
+                            line=start + 1,
+                            rule_id="long-function",
+                            message=f"Function '{name}' has {length} lines (max {self.MAX_LINES})",
+                            severity="warning",
+                        )
+                    )
+
+            if stripped.startswith("def "):
+                paren = stripped.find("(")
+                name = stripped[4:paren] if paren > 4 else stripped[4:].rstrip(":")
+                func_stack.append((name, i, indent))
+
+        total = len(lines)
+        for name, start, _ in func_stack:
+            length = total - start
+            if length > self.MAX_LINES:
+                results.append(
+                    TechDebtFinding(
+                        file=str(py_file.relative_to(root)),
+                        line=start + 1,
+                        rule_id="long-function",
+                        message=f"Function '{name}' has {length} lines (max {self.MAX_LINES})",
+                        severity="warning",
+                    )
+                )
+        return results
+
+
 class TodoCountRule:
     """單檔 TODO/FIXME/HACK 超過 5 個 -> warning"""
 
@@ -156,6 +223,7 @@ def _git_last_modified(file_path: str, cwd: str) -> datetime | None:
 
 DEFAULT_GC_RULES: list[GCRule] = [
     LargeFileRule(),
+    LongFunctionRule(),
     TodoCountRule(),
     StaleDocRule(),
 ]
