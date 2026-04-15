@@ -2087,3 +2087,71 @@ class TestResolvePendingConflictAPI:
             "status": "resolved",
         })
         assert resp.status_code == 404
+
+    async def test_resolve_ai_merge_auto_stub(self, conflict_client):
+        """ai_merge 策略且 resolved_value=None 時自動生成 stub"""
+        client = conflict_client["client"]
+        engine = conflict_client["engine"]
+        now = conflict_client["now"]
+
+        with Session(engine) as s:
+            s.add(SyncRuleModel(
+                entity_type="card", field_name="description",
+                writable_by="both", conflict_strategy="ai_merge", is_enabled=True,
+            ))
+            s.commit()
+
+        local_ts = (now + timedelta(hours=1)).isoformat()
+        await client.post("/api/v1/cards/1/resolve-conflicts", json={
+            "local_changes": {
+                "description": {"value": "Local Desc", "updated_at": local_ts, "actor": "ai"},
+            },
+        })
+        resp = await client.get("/api/v1/cards/1/pending-conflicts", params={"status": "pending"})
+        conflict_id = resp.json()[0]["id"]
+        pc_data = resp.json()[0]
+
+        resp = await client.patch(f"/api/v1/cards/1/pending-conflicts/{conflict_id}", json={
+            "status": "resolved",
+        })
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["resolved_value"] == f"[AI-MERGED] {pc_data['local_value']} | {pc_data['remote_value']}"
+
+        with Session(engine) as s:
+            orm_card = s.get(Card, 1)
+            assert orm_card.description == data["resolved_value"]
+
+    async def test_resolve_is_archived_field(self, conflict_client):
+        """動態欄位集能正確寫回 is_archived"""
+        client = conflict_client["client"]
+        engine = conflict_client["engine"]
+        now = conflict_client["now"]
+
+        with Session(engine) as s:
+            s.add(SyncRuleModel(
+                entity_type="card", field_name="is_archived",
+                writable_by="both", conflict_strategy="manual_merge", is_enabled=True,
+            ))
+            s.commit()
+
+        local_ts = (now + timedelta(hours=1)).isoformat()
+        await client.post("/api/v1/cards/1/resolve-conflicts", json={
+            "local_changes": {
+                "is_archived": {"value": "True", "updated_at": local_ts, "actor": "human"},
+            },
+        })
+        resp = await client.get("/api/v1/cards/1/pending-conflicts", params={"status": "pending"})
+        conflict_id = resp.json()[0]["id"]
+
+        resp = await client.patch(f"/api/v1/cards/1/pending-conflicts/{conflict_id}", json={
+            "resolved_value": "True",
+            "status": "resolved",
+        })
+
+        assert resp.status_code == 200
+
+        with Session(engine) as s:
+            orm_card = s.get(Card, 1)
+            assert str(orm_card.is_archived) == "True"

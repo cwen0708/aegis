@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlmodel import Session, select
+import sqlalchemy as sa
 from sqlalchemy import func as sa_func
 from typing import List, Optional
 from pydantic import BaseModel, field_validator
@@ -538,7 +539,8 @@ def resolve_conflicts(
 
     # 建構 remote FieldVersion 字典（從 MD 檔讀取）
     remote_versions: dict[str, FieldVersion] = {}
-    card_fields = {"title", "description", "content", "status"}
+    _NON_WRITABLE = frozenset({"id", "list_id", "created_at", "updated_at"})
+    card_fields = {c.name for c in Card.__table__.columns} - _NON_WRITABLE
     for field_name in local_versions:
         if field_name in card_fields and hasattr(cd, field_name):
             remote_versions[field_name] = FieldVersion(
@@ -668,21 +670,30 @@ def resolve_pending_conflict(
     pc.resolved_at = now
 
     if req.status == "resolved":
-        pc.resolved_value = req.resolved_value
+        resolved = req.resolved_value
+        if resolved is None and pc.strategy == "ai_merge":
+            resolved = f"[AI-MERGED] {pc.local_value} | {pc.remote_value}"
+        pc.resolved_value = resolved
 
-        card_fields = {"title", "description", "content", "status"}
+        _CARD_NON_WRITABLE = frozenset({"id", "list_id", "created_at", "updated_at"})
+        card_fields = {c.name for c in Card.__table__.columns} - _CARD_NON_WRITABLE
         if pc.field_name in card_fields:
+            col = Card.__table__.columns[pc.field_name]
+            typed_val = resolved
+            if resolved is not None and isinstance(col.type, sa.Boolean):
+                typed_val = resolved.lower() in ("true", "1", "yes")
+
             idx = session.get(CardIndex, card_id)
             if idx and idx.file_path and Path(idx.file_path).exists():
                 cd = read_card_md(Path(idx.file_path))
-                setattr(cd, pc.field_name, req.resolved_value)
+                setattr(cd, pc.field_name, typed_val)
                 cd.updated_at = now
                 write_card(Path(idx.file_path), cd)
                 sync_card_to_index(session, cd, project_id=idx.project_id, file_path=idx.file_path)
 
             orm_card = session.get(Card, card_id)
             if orm_card and hasattr(orm_card, pc.field_name):
-                setattr(orm_card, pc.field_name, req.resolved_value)
+                setattr(orm_card, pc.field_name, typed_val)
                 orm_card.updated_at = now
                 session.add(orm_card)
 
