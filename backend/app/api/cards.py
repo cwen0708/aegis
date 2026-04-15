@@ -6,7 +6,7 @@ from typing import List, Optional
 from pydantic import BaseModel, field_validator
 from datetime import datetime, timezone
 from app.database import get_session
-from app.models.core import Project, Card, StageList, CardIndex
+from app.models.core import Project, Card, StageList, CardIndex, PendingConflict
 from app.core.card_file import CardData, read_card as read_card_md, write_card, card_file_path
 from app.core.card_index import sync_card_to_index, remove_card_from_index, next_card_id
 from app.core.sync_matrix import (
@@ -102,6 +102,37 @@ class ConflictCheckResponse(BaseModel):
     resolved: list[dict]
     deferred: list[dict]
     applied: bool = False
+
+
+class PendingConflictResponse(BaseModel):
+    """待處理衝突回應"""
+    id: int
+    card_id: int
+    field_name: str
+    local_value: Optional[str] = None
+    local_updated_at: Optional[datetime] = None
+    local_actor: str = ""
+    remote_value: Optional[str] = None
+    remote_updated_at: Optional[datetime] = None
+    remote_actor: str = ""
+    strategy: str = ""
+    status: str = "pending"
+    resolved_value: Optional[str] = None
+    resolved_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+
+class ResolvePendingConflictRequest(BaseModel):
+    """解衝請求 — 人類決定 resolved_value 或 dismiss"""
+    resolved_value: Optional[str] = None
+    status: str
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        if v not in ("resolved", "dismissed"):
+            raise ValueError("status must be 'resolved' or 'dismissed'")
+        return v
 
 
 # ==========================================
@@ -536,6 +567,43 @@ def resolve_conflicts(
         for d in result.deferred
     ]
 
+    # 持久化 deferred 衝突到 PendingConflict 表
+    for d in result.deferred:
+        existing = session.exec(
+            select(PendingConflict).where(
+                PendingConflict.card_id == card_id,
+                PendingConflict.field_name == d.field_name,
+                PendingConflict.status == "pending",
+            )
+        ).first()
+        local_val = d.local.value if isinstance(d.local.value, str) else str(d.local.value) if d.local.value is not None else None
+        remote_val = d.remote.value if isinstance(d.remote.value, str) else str(d.remote.value) if d.remote.value is not None else None
+        if existing:
+            existing.local_value = local_val
+            existing.local_updated_at = d.local.updated_at
+            existing.local_actor = d.local.actor
+            existing.remote_value = remote_val
+            existing.remote_updated_at = d.remote.updated_at
+            existing.remote_actor = d.remote.actor
+            existing.strategy = d.strategy.value
+            session.add(existing)
+        else:
+            pc = PendingConflict(
+                card_id=card_id,
+                field_name=d.field_name,
+                local_value=local_val,
+                local_updated_at=d.local.updated_at,
+                local_actor=d.local.actor,
+                remote_value=remote_val,
+                remote_updated_at=d.remote.updated_at,
+                remote_actor=d.remote.actor,
+                strategy=d.strategy.value,
+                status="pending",
+            )
+            session.add(pc)
+    if result.deferred:
+        session.commit()
+
     applied = False
     # apply_resolved: 自動將已解決欄位寫回卡片
     if req.apply_resolved and result.resolved:
@@ -564,6 +632,64 @@ def resolve_conflicts(
         deferred=deferred_list,
         applied=applied,
     )
+
+
+@router.get("/cards/{card_id}/pending-conflicts", response_model=List[PendingConflictResponse])
+def get_pending_conflicts(
+    card_id: int,
+    status: Optional[str] = Query(None, description="篩選狀態：pending / resolved / dismissed"),
+    session: Session = Depends(get_session),
+):
+    """取得卡片的待處理衝突記錄"""
+    stmt = select(PendingConflict).where(PendingConflict.card_id == card_id)
+    if status:
+        stmt = stmt.where(PendingConflict.status == status)
+    stmt = stmt.order_by(PendingConflict.created_at)
+    return session.exec(stmt).all()
+
+
+@router.patch("/cards/{card_id}/pending-conflicts/{conflict_id}", response_model=PendingConflictResponse)
+def resolve_pending_conflict(
+    card_id: int,
+    conflict_id: int,
+    req: ResolvePendingConflictRequest,
+    session: Session = Depends(get_session),
+):
+    """解決或駁回單筆待處理衝突。resolved 時寫回卡片 MD + ORM Card（dual-write）。"""
+    pc = session.get(PendingConflict, conflict_id)
+    if not pc or pc.card_id != card_id:
+        raise HTTPException(status_code=404, detail="PendingConflict not found")
+
+    if pc.status != "pending":
+        raise HTTPException(status_code=409, detail=f"Conflict already {pc.status}")
+
+    now = datetime.now(timezone.utc)
+    pc.status = req.status
+    pc.resolved_at = now
+
+    if req.status == "resolved":
+        pc.resolved_value = req.resolved_value
+
+        card_fields = {"title", "description", "content", "status"}
+        if pc.field_name in card_fields:
+            idx = session.get(CardIndex, card_id)
+            if idx and idx.file_path and Path(idx.file_path).exists():
+                cd = read_card_md(Path(idx.file_path))
+                setattr(cd, pc.field_name, req.resolved_value)
+                cd.updated_at = now
+                write_card(Path(idx.file_path), cd)
+                sync_card_to_index(session, cd, project_id=idx.project_id, file_path=idx.file_path)
+
+            orm_card = session.get(Card, card_id)
+            if orm_card and hasattr(orm_card, pc.field_name):
+                setattr(orm_card, pc.field_name, req.resolved_value)
+                orm_card.updated_at = now
+                session.add(orm_card)
+
+    session.add(pc)
+    session.commit()
+    session.refresh(pc)
+    return pc
 
 
 @router.post("/cards/{card_id}/archive")

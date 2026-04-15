@@ -3,7 +3,7 @@ import pytest
 import httpx
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.models.core import Project, Card, StageList, CardIndex
 from app.models.core import SyncRule as SyncRuleModel
@@ -1079,6 +1079,64 @@ class TestSyncRuleGetByEntityAPI:
         assert all(r["entity_type"] == "stagelist" for r in rules)
 
 
+class TestSyncRuleGetByIdAPI:
+    """GET /sync-rules/{rule_id} 端點測試"""
+
+    async def test_get_existing_rule_by_id(self, api_client):
+        """成功取得單一規則。"""
+        create_resp = await api_client.post("/api/v1/sync-rules", json={
+            "entity_type": "card",
+            "field_name": "title",
+            "writable_by": "both",
+            "conflict_strategy": "last_write_wins",
+        })
+        rule_id = create_resp.json()["id"]
+
+        resp = await api_client.get(f"/api/v1/sync-rules/{rule_id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["id"] == rule_id
+        assert data["entity_type"] == "card"
+        assert data["field_name"] == "title"
+        assert data["writable_by"] == "both"
+        assert data["conflict_strategy"] == "last_write_wins"
+        assert data["is_enabled"] is True
+
+    async def test_get_nonexistent_rule_returns_404(self, api_client):
+        """不存在的 rule_id 應回傳 404。"""
+        resp = await api_client.get("/api/v1/sync-rules/99999")
+        assert resp.status_code == 404
+
+    async def test_get_by_id_after_update(self, api_client):
+        """更新後 GET by ID 回傳最新值。"""
+        create_resp = await api_client.post("/api/v1/sync-rules", json={
+            "entity_type": "card",
+            "field_name": "description",
+            "conflict_strategy": "human_wins",
+        })
+        rule_id = create_resp.json()["id"]
+
+        await api_client.put(f"/api/v1/sync-rules/{rule_id}", json={
+            "conflict_strategy": "ai_merge",
+        })
+
+        resp = await api_client.get(f"/api/v1/sync-rules/{rule_id}")
+        assert resp.status_code == 200
+        assert resp.json()["conflict_strategy"] == "ai_merge"
+
+    async def test_get_by_entity_still_works(self, api_client):
+        """確認 GET /sync-rules/{entity_type} 路由不受影響。"""
+        await api_client.post("/api/v1/sync-rules", json={
+            "entity_type": "card",
+            "field_name": "status",
+        })
+        resp = await api_client.get("/api/v1/sync-rules/card")
+        assert resp.status_code == 200
+        rules = resp.json()
+        assert isinstance(rules, list)
+        assert len(rules) >= 1
+
+
 # ==========================================================
 # is_enabled 停用/啟用整合測試
 # ==========================================================
@@ -1786,3 +1844,246 @@ class TestRemoteActorField:
         assert len(data["resolved"]) == 1
         assert data["resolved"][0]["strategy"] == "human_wins"
         assert data["resolved"][0]["value"] == "Original Title"
+
+
+# ==========================================================
+# PendingConflict 持久化測試
+# ==========================================================
+
+class TestPendingConflictPersistence:
+    """deferred 衝突持久化到 PendingConflict 表的整合測試"""
+
+    async def test_deferred_conflict_persisted(self, conflict_client):
+        """manual_merge 觸發後，DB 中應有 PendingConflict 記錄"""
+        client = conflict_client["client"]
+        engine = conflict_client["engine"]
+        now = conflict_client["now"]
+
+        with Session(engine) as s:
+            s.add(SyncRuleModel(
+                entity_type="card", field_name="description",
+                writable_by="both", conflict_strategy="manual_merge", is_enabled=True,
+            ))
+            s.commit()
+
+        local_ts = (now + timedelta(hours=1)).isoformat()
+        resp = await client.post("/api/v1/cards/1/resolve-conflicts", json={
+            "local_changes": {
+                "description": {"value": "Local Desc", "updated_at": local_ts, "actor": "ai"},
+            },
+            "apply_resolved": False,
+        })
+
+        assert resp.status_code == 200
+        assert len(resp.json()["deferred"]) == 1
+
+        from app.models.core import PendingConflict
+        with Session(engine) as s:
+            conflicts = s.exec(
+                select(PendingConflict).where(
+                    PendingConflict.card_id == 1,
+                    PendingConflict.status == "pending",
+                )
+            ).all()
+            assert len(conflicts) == 1
+            pc = conflicts[0]
+            assert pc.field_name == "description"
+            assert pc.local_value == "Local Desc"
+            assert pc.local_actor == "ai"
+            assert pc.remote_value == "Original Desc"
+            assert pc.remote_actor == "human"
+            assert pc.strategy == "manual_merge"
+
+    async def test_get_pending_conflicts(self, conflict_client):
+        """GET /cards/{card_id}/pending-conflicts 回傳正確的待處理衝突"""
+        client = conflict_client["client"]
+        engine = conflict_client["engine"]
+        now = conflict_client["now"]
+
+        with Session(engine) as s:
+            s.add(SyncRuleModel(
+                entity_type="card", field_name="description",
+                writable_by="both", conflict_strategy="manual_merge", is_enabled=True,
+            ))
+            s.commit()
+
+        local_ts = (now + timedelta(hours=1)).isoformat()
+        await client.post("/api/v1/cards/1/resolve-conflicts", json={
+            "local_changes": {
+                "description": {"value": "Local Desc", "updated_at": local_ts, "actor": "ai"},
+            },
+        })
+
+        resp = await client.get("/api/v1/cards/1/pending-conflicts")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["field_name"] == "description"
+        assert data[0]["status"] == "pending"
+        assert data[0]["local_value"] == "Local Desc"
+        assert data[0]["remote_value"] == "Original Desc"
+
+        resp_filtered = await client.get("/api/v1/cards/1/pending-conflicts", params={"status": "resolved"})
+        assert resp_filtered.status_code == 200
+        assert len(resp_filtered.json()) == 0
+
+    async def test_duplicate_pending_conflict_updates(self, conflict_client):
+        """同一 card_id+field_name 重複觸發 deferred 時，更新而非建立多筆"""
+        client = conflict_client["client"]
+        engine = conflict_client["engine"]
+        now = conflict_client["now"]
+
+        with Session(engine) as s:
+            s.add(SyncRuleModel(
+                entity_type="card", field_name="description",
+                writable_by="both", conflict_strategy="manual_merge", is_enabled=True,
+            ))
+            s.commit()
+
+        local_ts_1 = (now + timedelta(hours=1)).isoformat()
+        await client.post("/api/v1/cards/1/resolve-conflicts", json={
+            "local_changes": {
+                "description": {"value": "V1", "updated_at": local_ts_1, "actor": "ai"},
+            },
+        })
+
+        local_ts_2 = (now + timedelta(hours=2)).isoformat()
+        await client.post("/api/v1/cards/1/resolve-conflicts", json={
+            "local_changes": {
+                "description": {"value": "V2", "updated_at": local_ts_2, "actor": "ai"},
+            },
+        })
+
+        from app.models.core import PendingConflict
+        with Session(engine) as s:
+            conflicts = s.exec(
+                select(PendingConflict).where(
+                    PendingConflict.card_id == 1,
+                    PendingConflict.status == "pending",
+                )
+            ).all()
+            assert len(conflicts) == 1
+            assert conflicts[0].local_value == "V2"
+
+
+# ==========================================================
+# PATCH /cards/{card_id}/pending-conflicts/{conflict_id} 端點測試
+# ==========================================================
+
+class TestResolvePendingConflictAPI:
+    """PATCH /cards/{card_id}/pending-conflicts/{conflict_id} 端點測試"""
+
+    async def _create_pending_conflict(self, client, now):
+        """輔助：建立一筆 pending 衝突並回傳 conflict_id"""
+        local_ts = (now + timedelta(hours=1)).isoformat()
+        await client.post("/api/v1/cards/1/resolve-conflicts", json={
+            "local_changes": {
+                "description": {"value": "Local Desc", "updated_at": local_ts, "actor": "ai"},
+            },
+        })
+        resp = await client.get("/api/v1/cards/1/pending-conflicts", params={"status": "pending"})
+        data = resp.json()
+        assert len(data) >= 1
+        return data[0]["id"]
+
+    async def test_resolve_pending_conflict_happy_path(self, conflict_client):
+        """resolved 時寫回 card MD + ORM Card（dual-write）"""
+        client = conflict_client["client"]
+        engine = conflict_client["engine"]
+        fpath = conflict_client["fpath"]
+        now = conflict_client["now"]
+
+        with Session(engine) as s:
+            s.add(SyncRuleModel(
+                entity_type="card", field_name="description",
+                writable_by="both", conflict_strategy="manual_merge", is_enabled=True,
+            ))
+            s.commit()
+
+        conflict_id = await self._create_pending_conflict(client, now)
+
+        resp = await client.patch(f"/api/v1/cards/1/pending-conflicts/{conflict_id}", json={
+            "resolved_value": "Merged Desc",
+            "status": "resolved",
+        })
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "resolved"
+        assert data["resolved_value"] == "Merged Desc"
+        assert data["resolved_at"] is not None
+
+        cd = read_card(fpath)
+        assert cd.description == "Merged Desc"
+
+        with Session(engine) as s:
+            orm_card = s.get(Card, 1)
+            assert orm_card.description == "Merged Desc"
+
+    async def test_dismiss_pending_conflict(self, conflict_client):
+        """dismissed 時不寫回卡片，狀態正確更新"""
+        client = conflict_client["client"]
+        engine = conflict_client["engine"]
+        fpath = conflict_client["fpath"]
+        now = conflict_client["now"]
+
+        with Session(engine) as s:
+            s.add(SyncRuleModel(
+                entity_type="card", field_name="description",
+                writable_by="both", conflict_strategy="manual_merge", is_enabled=True,
+            ))
+            s.commit()
+
+        conflict_id = await self._create_pending_conflict(client, now)
+
+        resp = await client.patch(f"/api/v1/cards/1/pending-conflicts/{conflict_id}", json={
+            "status": "dismissed",
+        })
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "dismissed"
+        assert data["resolved_value"] is None
+
+        cd = read_card(fpath)
+        assert cd.description == "Original Desc"
+
+        with Session(engine) as s:
+            orm_card = s.get(Card, 1)
+            assert orm_card.description == "Original Desc"
+
+    async def test_resolve_already_resolved_returns_409(self, conflict_client):
+        """已解決的衝突再次 resolve 應回傳 409"""
+        client = conflict_client["client"]
+        engine = conflict_client["engine"]
+        now = conflict_client["now"]
+
+        with Session(engine) as s:
+            s.add(SyncRuleModel(
+                entity_type="card", field_name="description",
+                writable_by="both", conflict_strategy="manual_merge", is_enabled=True,
+            ))
+            s.commit()
+
+        conflict_id = await self._create_pending_conflict(client, now)
+
+        await client.patch(f"/api/v1/cards/1/pending-conflicts/{conflict_id}", json={
+            "resolved_value": "Merged",
+            "status": "resolved",
+        })
+
+        resp = await client.patch(f"/api/v1/cards/1/pending-conflicts/{conflict_id}", json={
+            "resolved_value": "Again",
+            "status": "resolved",
+        })
+        assert resp.status_code == 409
+
+    async def test_resolve_not_found_returns_404(self, conflict_client):
+        """不存在的 conflict_id 應回傳 404"""
+        client = conflict_client["client"]
+
+        resp = await client.patch("/api/v1/cards/1/pending-conflicts/99999", json={
+            "resolved_value": "X",
+            "status": "resolved",
+        })
+        assert resp.status_code == 404
