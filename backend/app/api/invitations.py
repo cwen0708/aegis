@@ -1,9 +1,10 @@
 """邀請碼 + Bot User + Person 管理 API"""
 from collections import defaultdict
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
 from datetime import datetime, timezone
 from app.database import get_session
+from app.core.sync_matrix import SyncEnforcer, load_registry_from_db, validate_actor
 from app.models.core import InviteCode, BotUser, Person, PersonProject, PersonMember, Member
 from app.api.schemas import (
     InvitationCreate, InvitationUpdate, BotUserUpdate, TTSRequest,
@@ -12,6 +13,9 @@ from app.api.schemas import (
 )
 from app.core.auth import require_admin_token
 import json as json_module
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["invitations"])
 
@@ -596,25 +600,46 @@ def create_person(data: PersonCreate, session: Session = Depends(get_session)):
 
 
 @router.patch("/persons/{person_id}", dependencies=[Depends(require_admin_token)])
-def update_person(person_id: int, data: PersonUpdate, session: Session = Depends(get_session)):
+def update_person(
+    person_id: int,
+    data: PersonUpdate,
+    actor: str = Query("human"),
+    session: Session = Depends(get_session),
+):
     """更新 Person"""
+    validate_actor(actor)
+
     person = session.get(Person, person_id)
     if not person:
         raise HTTPException(status_code=404, detail="Person 不存在")
 
-    if data.display_name is not None:
-        person.display_name = data.display_name
-    if data.description is not None:
-        person.description = data.description
-    if data.level is not None:
-        person.level = data.level
-    if data.access_expires_at is not None:
-        if data.access_expires_at == "" or data.access_expires_at == "null":
-            person.access_expires_at = None
+    # --- SyncEnforcer：欄位級寫入權限控制 ---
+    registry = load_registry_from_db(session)
+    enforcer = SyncEnforcer(registry)
+
+    _METADATA_FIELDS = {"extra_json", "default_member_id"}
+
+    all_changes = {k: v for k, v in data.model_dump(exclude_unset=True).items()}
+    sync_changes = {k: v for k, v in all_changes.items() if k not in _METADATA_FIELDS}
+    metadata_changes = {k: v for k, v in all_changes.items() if k in _METADATA_FIELDS}
+
+    result = enforcer.validate("person", sync_changes, actor)
+    if result.rejected:
+        rejected_names = [r.field_name for r in result.rejected]
+        logger.info("SyncEnforcer rejected fields for person %d (actor=%s): %s", person_id, actor, rejected_names)
+
+    approved = {**result.approved, **metadata_changes}
+
+    for field, val in approved.items():
+        if field == "access_expires_at":
+            if val == "" or val == "null":
+                person.access_expires_at = None
+            else:
+                person.access_expires_at = datetime.fromisoformat(
+                    val.replace("Z", "+00:00")
+                )
         else:
-            person.access_expires_at = datetime.fromisoformat(
-                data.access_expires_at.replace("Z", "+00:00")
-            )
+            setattr(person, field, val)
 
     session.commit()
     session.refresh(person)

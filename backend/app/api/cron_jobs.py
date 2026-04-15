@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from app.database import get_session
 from app.models.core import Project, CronJob, CronLog, SystemSetting, TaskLog, CardIndex
-from app.core.sync_matrix import SyncEnforcer, load_registry_from_db
+from app.core.sync_matrix import SyncEnforcer, load_registry_from_db, validate_actor
 from croniter import croniter
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,8 @@ def update_cron_job(
     actor: str = Query("human"),
     session: Session = Depends(get_session),
 ):
+    validate_actor(actor)
+
     job = session.get(CronJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="CronJob not found")

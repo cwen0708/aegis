@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from datetime import datetime, timezone
 from app.database import get_session
 from app.models.core import Project, Card, StageList, SystemSetting, Account, Member, MemberAccount, TaskLog
-from app.core.sync_matrix import SyncEnforcer, load_registry_from_db
+from app.core.sync_matrix import SyncEnforcer, load_registry_from_db, validate_actor
 from app.api.deps import get_domain_filter, generate_slug
 from pathlib import Path
 import logging
@@ -258,6 +258,8 @@ def update_member(
     actor: str = Query("human"),
     session: Session = Depends(get_session),
 ):
+    validate_actor(actor)
+
     member = session.get(Member, member_id)
     if not member:
         raise HTTPException(status_code=404, detail="Member not found")

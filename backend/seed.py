@@ -443,7 +443,7 @@ def _sync_default_sync_rules(session: Session):
     """確保預設 SyncRule 存在（跳過已存在的 entity_type+field_name 組合）。"""
     defaults = [
         ("card", "title", "both", "bidirectional", "last_write_wins"),
-        ("card", "description", "both", "bidirectional", "last_write_wins"),
+        ("card", "description", "both", "bidirectional", "manual_merge"),
         ("card", "status", "ai", "ai_to_human", "ai_wins"),
         ("card", "content", "both", "bidirectional", "last_write_wins"),
         ("card", "is_archived", "human", "human_to_ai", "human_wins"),
@@ -465,6 +465,11 @@ def _sync_default_sync_rules(session: Session):
         ("cronjob", "prompt_template", "both", "bidirectional", "last_write_wins"),
         ("cronjob", "description", "both", "bidirectional", "last_write_wins"),
         ("cronjob", "target_list_id", "human", "human_to_ai", "human_wins"),
+        ("person", "display_name", "human", "human_to_ai", "human_wins"),
+        ("person", "description", "both", "bidirectional", "last_write_wins"),
+        ("person", "level", "human", "human_to_ai", "human_wins"),
+        ("person", "access_expires_at", "human", "human_to_ai", "human_wins"),
+        ("person", "is_active", "human", "human_to_ai", "human_wins"),
     ]
     existing = {
         (r.entity_type, r.field_name)

@@ -1604,3 +1604,185 @@ class TestCronJobSyncEnforcement:
         rejected_fields = {r.field_name for r in result.rejected}
         assert rejected_fields == {"cron_expression", "is_enabled", "name"}
         assert len(result.rejected) == 3
+
+
+# ==========================================================
+# Person SyncEnforcer 整合測試
+# ==========================================================
+
+def _make_person_registry() -> SyncRuleRegistry:
+    """建立 person entity 的 SyncRuleRegistry（對齊 seed.py 預設規則）。"""
+    registry = SyncRuleRegistry()
+    field_rules = (
+        FieldRule("display_name", SyncDirection.HUMAN_TO_AI, ConflictStrategy.HUMAN_WINS, frozenset({"human"})),
+        FieldRule("description", SyncDirection.BIDIRECTIONAL, ConflictStrategy.LAST_WRITE_WINS, frozenset({"ai", "human"})),
+        FieldRule("level", SyncDirection.HUMAN_TO_AI, ConflictStrategy.HUMAN_WINS, frozenset({"human"})),
+        FieldRule("access_expires_at", SyncDirection.HUMAN_TO_AI, ConflictStrategy.HUMAN_WINS, frozenset({"human"})),
+        FieldRule("is_active", SyncDirection.HUMAN_TO_AI, ConflictStrategy.HUMAN_WINS, frozenset({"human"})),
+    )
+    registry.register(SyncRuleDomain(
+        entity_type="person",
+        field_rules=field_rules,
+        default_direction=SyncDirection.BIDIRECTIONAL,
+        default_strategy=ConflictStrategy.LAST_WRITE_WINS,
+    ))
+    return registry
+
+
+class TestPersonSyncEnforcement:
+    """Person entity 的 SyncEnforcer 整合測試。"""
+
+    def test_person_update_human_fields_by_ai_rejected(self):
+        """AI actor 嘗試修改 human-only 欄位被拒絕"""
+        enforcer = SyncEnforcer(_make_person_registry())
+        changes = {"display_name": "AI-Name", "level": 3, "is_active": False}
+        result = enforcer.validate("person", changes, "ai")
+        assert len(result.approved) == 0
+        assert len(result.rejected) == 3
+        rejected_fields = {r.field_name for r in result.rejected}
+        assert rejected_fields == {"display_name", "level", "is_active"}
+
+    def test_person_update_both_fields_by_ai_accepted(self):
+        """AI actor 修改 writable_by=both 的 description 被允許"""
+        enforcer = SyncEnforcer(_make_person_registry())
+        result = enforcer.validate("person", {"description": "AI desc"}, "ai")
+        assert result.approved == {"description": "AI desc"}
+        assert len(result.rejected) == 0
+
+    def test_person_update_by_human_all_accepted(self):
+        """Human actor 可修改所有欄位"""
+        enforcer = SyncEnforcer(_make_person_registry())
+        changes = {
+            "display_name": "Human-Name",
+            "description": "human desc",
+            "level": 2,
+            "access_expires_at": "2026-12-31T00:00:00Z",
+            "is_active": True,
+        }
+        result = enforcer.validate("person", changes, "human")
+        assert result.approved == changes
+        assert len(result.rejected) == 0
+
+    def test_person_ai_change_access_expires_at_rejected(self):
+        """AI actor 不能修改 access_expires_at"""
+        enforcer = SyncEnforcer(_make_person_registry())
+        result = enforcer.validate("person", {"access_expires_at": "2026-01-01"}, "ai")
+        assert len(result.approved) == 0
+        assert result.rejected[0].field_name == "access_expires_at"
+
+    def test_person_mixed_fields_partial_approval(self):
+        """AI 同時修改 human-only 和 both 欄位：部分通過、部分拒絕"""
+        enforcer = SyncEnforcer(_make_person_registry())
+        changes = {"display_name": "AI-Name", "description": "new desc", "level": 5}
+        result = enforcer.validate("person", changes, "ai")
+        assert "description" in result.approved
+        assert len(result.approved) == 1
+        rejected_fields = {r.field_name for r in result.rejected}
+        assert rejected_fields == {"display_name", "level"}
+        assert len(result.rejected) == 2
+
+
+# ==========================================================
+# Actor 參數驗證測試
+# ==========================================================
+
+class TestActorValidation:
+    """驗證 actor query param 不合法時回 400"""
+
+    async def test_patch_card_invalid_actor_returns_400(self, conflict_client):
+        """PATCH /cards/{card_id}?actor=robot → 400"""
+        client = conflict_client["client"]
+        resp = await client.patch(
+            "/api/v1/cards/1",
+            json={"title": "New Title"},
+            params={"actor": "robot"},
+        )
+        assert resp.status_code == 400
+        assert "Invalid actor" in resp.json()["detail"]
+
+    async def test_patch_card_valid_actor_ai_accepted(self, conflict_client):
+        """PATCH /cards/{card_id}?actor=ai → 不回 400（actor 合法）"""
+        client = conflict_client["client"]
+        resp = await client.patch(
+            "/api/v1/cards/1",
+            json={"title": "AI Title"},
+            params={"actor": "ai"},
+        )
+        assert resp.status_code != 400
+
+    async def test_resolve_conflicts_invalid_remote_actor_returns_400(self, conflict_client):
+        """remote_actor="bot" → 400"""
+        client = conflict_client["client"]
+        now = conflict_client["now"]
+        resp = await client.post("/api/v1/cards/1/resolve-conflicts", json={
+            "local_changes": {
+                "title": {"value": "X", "updated_at": now.isoformat(), "actor": "human"},
+            },
+            "remote_actor": "bot",
+        })
+        assert resp.status_code == 400
+        assert "Invalid actor" in resp.json()["detail"]
+
+
+# ==========================================================
+# remote_actor 欄位功能測試
+# ==========================================================
+
+class TestRemoteActorField:
+    """驗證 resolve-conflicts 使用 remote_actor 欄位判斷遠端版本的 actor 身份"""
+
+    async def test_ai_wins_with_remote_actor_ai(self, conflict_client):
+        """ai_wins 策略 + remote_actor=ai → remote 版本勝出"""
+        client = conflict_client["client"]
+        engine = conflict_client["engine"]
+        fpath = conflict_client["fpath"]
+        now = conflict_client["now"]
+
+        with Session(engine) as s:
+            s.add(SyncRuleModel(
+                entity_type="card", field_name="title",
+                writable_by="both", conflict_strategy="ai_wins", is_enabled=True,
+            ))
+            s.commit()
+
+        local_ts = (now + timedelta(hours=1)).isoformat()
+        resp = await client.post("/api/v1/cards/1/resolve-conflicts", json={
+            "local_changes": {
+                "title": {"value": "Human Title", "updated_at": local_ts, "actor": "human"},
+            },
+            "apply_resolved": True,
+            "remote_actor": "ai",
+        })
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["resolved"]) == 1
+        assert data["resolved"][0]["strategy"] == "ai_wins"
+        assert data["resolved"][0]["value"] == "Original Title"
+
+    async def test_human_wins_with_remote_actor_human(self, conflict_client):
+        """human_wins 策略 + remote_actor=human（預設值） → remote 版本勝出"""
+        client = conflict_client["client"]
+        engine = conflict_client["engine"]
+        now = conflict_client["now"]
+
+        with Session(engine) as s:
+            s.add(SyncRuleModel(
+                entity_type="card", field_name="title",
+                writable_by="both", conflict_strategy="human_wins", is_enabled=True,
+            ))
+            s.commit()
+
+        local_ts = (now + timedelta(hours=1)).isoformat()
+        resp = await client.post("/api/v1/cards/1/resolve-conflicts", json={
+            "local_changes": {
+                "title": {"value": "AI Title", "updated_at": local_ts, "actor": "ai"},
+            },
+            "apply_resolved": False,
+        })
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["resolved"]) == 1
+        assert data["resolved"][0]["strategy"] == "human_wins"
+        assert data["resolved"][0]["value"] == "Original Title"

@@ -11,7 +11,7 @@ from app.core.card_file import CardData, read_card as read_card_md, write_card, 
 from app.core.card_index import sync_card_to_index, remove_card_from_index, next_card_id
 from app.core.sync_matrix import (
     SyncEnforcer, ConflictResolver, FieldVersion,
-    load_registry_from_db,
+    load_registry_from_db, validate_actor,
 )
 from app.core.paths import WORKSPACES_ROOT
 from app.api.deps import get_card_lock, get_project_for_list
@@ -94,6 +94,7 @@ class ConflictCheckRequest(BaseModel):
     """衝突檢查請求 — 前端送出 local 端的欄位版本"""
     local_changes: dict[str, FieldVersionInput]
     apply_resolved: bool = False
+    remote_actor: str = "human"
 
 
 class ConflictCheckResponse(BaseModel):
@@ -208,6 +209,8 @@ def update_card(
     actor: str = Query("human"),
     session: Session = Depends(get_session),
 ):
+    validate_actor(actor)
+
     # --- SyncEnforcer：欄位級寫入權限控制 ---
     registry = load_registry_from_db(session)
     enforcer = SyncEnforcer(registry)
@@ -485,6 +488,8 @@ def resolve_conflicts(
     remote 版本自動從卡片 MD 檔讀取（updated_at 作為時間戳）。
     若 apply_resolved=True，已解決的欄位會自動寫回卡片。
     """
+    validate_actor(req.remote_actor)
+
     idx = session.get(CardIndex, card_id)
     if not idx or not idx.file_path or not Path(idx.file_path).exists():
         raise HTTPException(status_code=404, detail="Card not found")
@@ -508,7 +513,7 @@ def resolve_conflicts(
             remote_versions[field_name] = FieldVersion(
                 value=getattr(cd, field_name),
                 updated_at=cd.updated_at,
-                actor="remote",
+                actor=req.remote_actor,
             )
 
     # 載入 SyncRuleRegistry，建立 ConflictResolver

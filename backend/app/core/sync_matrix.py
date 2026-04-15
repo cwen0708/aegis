@@ -11,6 +11,19 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Protocol
 
+from fastapi import HTTPException
+
+VALID_ACTORS = frozenset({"ai", "human"})
+
+
+def validate_actor(actor: str) -> str:
+    if actor not in VALID_ACTORS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid actor '{actor}'. Must be one of: {', '.join(sorted(VALID_ACTORS))}",
+        )
+    return actor
+
 
 class SyncDirection(Enum):
     """同步方向"""
@@ -309,6 +322,23 @@ def _writable_to_direction(writable_by: str) -> SyncDirection:
     return SyncDirection.BIDIRECTIONAL
 
 
+_SYNC_DIRECTION_MAP: dict[str, SyncDirection] = {
+    "ai_to_human": SyncDirection.AI_TO_HUMAN,
+    "human_to_ai": SyncDirection.HUMAN_TO_AI,
+    "bidirectional": SyncDirection.BIDIRECTIONAL,
+    "read_only": SyncDirection.READ_ONLY,
+}
+
+
+def _derive_direction(writable_by: str, sync_direction: str | None) -> SyncDirection:
+    """DB sync_direction 有值時直接映射；None 時從 writable_by 推導（向後相容）。"""
+    if sync_direction is not None:
+        mapped = _SYNC_DIRECTION_MAP.get(sync_direction)
+        if mapped is not None:
+            return mapped
+    return _writable_to_direction(writable_by)
+
+
 def _db_strategy_to_enum(strategy: str) -> ConflictStrategy:
     """DB conflict_strategy 字串 → ConflictStrategy enum。"""
     _MAP = {
@@ -347,7 +377,7 @@ def load_registry_from_db(session: "Session") -> SyncRuleRegistry:
         field_rules = tuple(
             FieldRule(
                 field_name=r.field_name,
-                sync_direction=_writable_to_direction(r.writable_by),
+                sync_direction=_derive_direction(r.writable_by, r.sync_direction),
                 conflict_strategy=_db_strategy_to_enum(r.conflict_strategy),
                 writable_by=_writable_to_set(r.writable_by),
             )
