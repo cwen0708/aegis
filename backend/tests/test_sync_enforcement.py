@@ -1487,6 +1487,51 @@ class TestResolveConflictsAPI:
         assert data["deferred"][0]["local"]["value"] == "Local Desc"
         assert data["deferred"][0]["remote"]["value"] == "Original Desc"
 
+    async def test_resolve_conflicts_card_not_found(self, conflict_client):
+        """card_id 不存在時回傳 404"""
+        client = conflict_client["client"]
+        now = conflict_client["now"]
+
+        resp = await client.post("/api/v1/cards/9999/resolve-conflicts", json={
+            "local_changes": {
+                "title": {"value": "X", "updated_at": now.isoformat(), "actor": "human"},
+            },
+        })
+        assert resp.status_code == 404
+
+    async def test_resolve_conflicts_human_wins(self, conflict_client):
+        """human_wins 策略：local actor=ai 時 remote（human 端）版本勝出"""
+        client = conflict_client["client"]
+        engine = conflict_client["engine"]
+        fpath = conflict_client["fpath"]
+        now = conflict_client["now"]
+
+        with Session(engine) as s:
+            s.add(SyncRuleModel(
+                entity_type="card", field_name="title",
+                writable_by="both", conflict_strategy="human_wins", is_enabled=True,
+            ))
+            s.commit()
+
+        local_ts = (now + timedelta(hours=1)).isoformat()
+        resp = await client.post("/api/v1/cards/1/resolve-conflicts", json={
+            "local_changes": {
+                "title": {"value": "AI Title", "updated_at": local_ts, "actor": "ai"},
+            },
+            "apply_resolved": True,
+        })
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["applied"] is True
+        assert len(data["resolved"]) == 1
+        assert data["resolved"][0]["field_name"] == "title"
+        assert data["resolved"][0]["value"] == "Original Title"
+        assert data["resolved"][0]["strategy"] == "human_wins"
+
+        cd = read_card(fpath)
+        assert cd.title == "Original Title"
+
 
 # ==========================================================
 # CronJob SyncEnforcer 整合測試
@@ -1559,48 +1604,3 @@ class TestCronJobSyncEnforcement:
         rejected_fields = {r.field_name for r in result.rejected}
         assert rejected_fields == {"cron_expression", "is_enabled", "name"}
         assert len(result.rejected) == 3
-
-    async def test_resolve_conflicts_card_not_found(self, conflict_client):
-        """card_id 不存在時回傳 404"""
-        client = conflict_client["client"]
-        now = conflict_client["now"]
-
-        resp = await client.post("/api/v1/cards/9999/resolve-conflicts", json={
-            "local_changes": {
-                "title": {"value": "X", "updated_at": now.isoformat(), "actor": "human"},
-            },
-        })
-        assert resp.status_code == 404
-
-    async def test_resolve_conflicts_human_wins(self, conflict_client):
-        """human_wins 策略：local actor=ai 時 remote（human 端）版本勝出"""
-        client = conflict_client["client"]
-        engine = conflict_client["engine"]
-        fpath = conflict_client["fpath"]
-        now = conflict_client["now"]
-
-        with Session(engine) as s:
-            s.add(SyncRuleModel(
-                entity_type="card", field_name="title",
-                writable_by="both", conflict_strategy="human_wins", is_enabled=True,
-            ))
-            s.commit()
-
-        local_ts = (now + timedelta(hours=1)).isoformat()
-        resp = await client.post("/api/v1/cards/1/resolve-conflicts", json={
-            "local_changes": {
-                "title": {"value": "AI Title", "updated_at": local_ts, "actor": "ai"},
-            },
-            "apply_resolved": True,
-        })
-
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["applied"] is True
-        assert len(data["resolved"]) == 1
-        assert data["resolved"][0]["field_name"] == "title"
-        assert data["resolved"][0]["value"] == "Original Title"
-        assert data["resolved"][0]["strategy"] == "human_wins"
-
-        cd = read_card(fpath)
-        assert cd.title == "Original Title"
