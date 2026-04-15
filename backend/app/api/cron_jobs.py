@@ -1,6 +1,8 @@
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlmodel import Session, select
 from sqlalchemy import func as sa_func
 from typing import List, Optional
@@ -9,7 +11,10 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from app.database import get_session
 from app.models.core import Project, CronJob, CronLog, SystemSetting, TaskLog, CardIndex
+from app.core.sync_matrix import SyncEnforcer, load_registry_from_db
 from croniter import croniter
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["CronJobs"])
 
@@ -48,23 +53,50 @@ def read_cron_jobs(project_id: Optional[int] = None, session: Session = Depends(
     return session.exec(query).all()
 
 
-@router.patch("/cron-jobs/{job_id}", response_model=CronJob)
-def update_cron_job(job_id: int, update_data: CronJobUpdate, session: Session = Depends(get_session)):
+@router.patch("/cron-jobs/{job_id}")
+def update_cron_job(
+    job_id: int,
+    update_data: CronJobUpdate,
+    actor: str = Query("human"),
+    session: Session = Depends(get_session),
+):
     job = session.get(CronJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="CronJob not found")
+
+    # --- SyncEnforcer：欄位級寫入權限控制 ---
+    registry = load_registry_from_db(session)
+    enforcer = SyncEnforcer(registry)
+
+    _METADATA_FIELDS = {"api_url"}
+
+    all_changes = {
+        k: v for k, v in update_data.model_dump().items()
+        if v is not None
+    }
+    sync_changes = {k: v for k, v in all_changes.items() if k not in _METADATA_FIELDS}
+    metadata_changes = {k: v for k, v in all_changes.items() if k in _METADATA_FIELDS}
+
+    result = enforcer.validate("cronjob", sync_changes, actor)
+    if result.rejected:
+        rejected_names = [r.field_name for r in result.rejected]
+        logger.info("SyncEnforcer rejected fields for cronjob %d (actor=%s): %s", job_id, actor, rejected_names)
+
+    approved = {**result.approved, **metadata_changes}
+
+    # --- 套用已核准的欄位 ---
     cron_changed = False
-    for field in ["name", "description", "cron_expression", "system_instruction", "prompt_template", "is_enabled"]:
-        val = getattr(update_data, field)
-        if val is not None:
-            if field == "cron_expression" and val != job.cron_expression:
+    for field_name in ["name", "description", "cron_expression", "system_instruction", "prompt_template", "is_enabled"]:
+        if field_name in approved:
+            if field_name == "cron_expression" and approved[field_name] != job.cron_expression:
                 cron_changed = True
-            setattr(job, field, val)
-    # 目標列表：0 = 清除，正數 = 設定
-    if update_data.target_list_id is not None:
-        job.target_list_id = update_data.target_list_id if update_data.target_list_id != 0 else None
+            setattr(job, field_name, approved[field_name])
+    if "target_list_id" in approved:
+        job.target_list_id = approved["target_list_id"] if approved["target_list_id"] != 0 else None
+    if "api_url" in approved:
+        job.api_url = approved["api_url"]
     # cron 表達式或啟用狀態改變時，重算下次執行時間
-    if cron_changed or (update_data.is_enabled is not None):
+    if cron_changed or ("is_enabled" in approved):
         from app.core.cron_poller import _calculate_next_time, _get_system_timezone
         tz_name = _get_system_timezone(session)
         next_time = _calculate_next_time(job.cron_expression, tz_name)
@@ -73,7 +105,13 @@ def update_cron_job(job_id: int, update_data: CronJobUpdate, session: Session = 
     session.add(job)
     session.commit()
     session.refresh(job)
-    return job
+
+    response = job.model_dump() if hasattr(job, "model_dump") else dict(job)
+    if result.rejected:
+        response["_sync_warnings"] = [
+            {"field": r.field_name, "reason": r.reason} for r in result.rejected
+        ]
+    return response
 
 
 @router.post("/cron-jobs/", response_model=CronJob)
@@ -146,6 +184,8 @@ async def trigger_cron_job(job_id: int, session: Session = Depends(get_session))
         return execute_worker(job_id, session)
     elif action == "meeting":
         return await execute_meeting(job_id, session)
+    elif action == "gc":
+        return await execute_gc(job_id, session)
     elif action.startswith("/") or action.startswith("http"):
         # 只有自訂 URL 才走 HTTP
         import asyncio
@@ -197,6 +237,31 @@ async def execute_meeting(job_id: int, session: Session = Depends(get_session)):
 
     from app.api.agent_chat import start_meeting, MeetingRequest
     return await start_meeting(MeetingRequest(**meeting_params))
+
+
+@router.post("/cron-jobs/{job_id}/gc")
+async def execute_gc(job_id: int, session: Session = Depends(get_session)):
+    """觸發 GC 技術債掃描 → 自動建卡到 Backlog。"""
+    from app.core.gc_scheduler import schedule_gc_scan
+
+    job = session.get(CronJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="CronJob not found")
+
+    project = session.get(Project, job.project_id)
+    if not project or not project.path:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Project {job.project_id} has no path configured",
+        )
+
+    cards = schedule_gc_scan(job.project_id, project.path)
+    return {
+        "ok": True,
+        "action": "gc",
+        "cards_created": len(cards),
+        "message": f"GC 掃描完成，建立 {len(cards)} 張卡片",
+    }
 
 
 @router.get("/cron-jobs/{job_id}")

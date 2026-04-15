@@ -1487,6 +1487,79 @@ class TestResolveConflictsAPI:
         assert data["deferred"][0]["local"]["value"] == "Local Desc"
         assert data["deferred"][0]["remote"]["value"] == "Original Desc"
 
+
+# ==========================================================
+# CronJob SyncEnforcer 整合測試
+# ==========================================================
+
+def _make_cronjob_registry() -> SyncRuleRegistry:
+    """建立 cronjob entity 的 SyncRuleRegistry（對齊 seed.py 預設規則）。"""
+    registry = SyncRuleRegistry()
+    field_rules = (
+        FieldRule("cron_expression", SyncDirection.HUMAN_TO_AI, ConflictStrategy.HUMAN_WINS, frozenset({"human"})),
+        FieldRule("is_enabled", SyncDirection.HUMAN_TO_AI, ConflictStrategy.HUMAN_WINS, frozenset({"human"})),
+        FieldRule("name", SyncDirection.HUMAN_TO_AI, ConflictStrategy.HUMAN_WINS, frozenset({"human"})),
+        FieldRule("system_instruction", SyncDirection.HUMAN_TO_AI, ConflictStrategy.HUMAN_WINS, frozenset({"human"})),
+        FieldRule("prompt_template", SyncDirection.BIDIRECTIONAL, ConflictStrategy.LAST_WRITE_WINS, frozenset({"human", "ai"})),
+        FieldRule("description", SyncDirection.BIDIRECTIONAL, ConflictStrategy.LAST_WRITE_WINS, frozenset({"human", "ai"})),
+        FieldRule("target_list_id", SyncDirection.HUMAN_TO_AI, ConflictStrategy.HUMAN_WINS, frozenset({"human"})),
+    )
+    registry.register(SyncRuleDomain(
+        entity_type="cronjob",
+        field_rules=field_rules,
+        default_direction=SyncDirection.BIDIRECTIONAL,
+        default_strategy=ConflictStrategy.LAST_WRITE_WINS,
+    ))
+    return registry
+
+
+class TestCronJobSyncEnforcement:
+    """CronJob entity 的 SyncEnforcer 整合測試。"""
+
+    def test_ai_change_cron_expression_rejected(self):
+        """actor=ai 修改 cron_expression 被拒（writable_by=human）"""
+        enforcer = SyncEnforcer(_make_cronjob_registry())
+        result = enforcer.validate("cronjob", {"cron_expression": "*/5 * * * *"}, "ai")
+        assert len(result.approved) == 0
+        assert len(result.rejected) == 1
+        assert result.rejected[0].field_name == "cron_expression"
+
+    def test_human_change_cron_expression_approved(self):
+        """actor=human 修改 cron_expression 正常通過"""
+        enforcer = SyncEnforcer(_make_cronjob_registry())
+        result = enforcer.validate("cronjob", {"cron_expression": "0 9 * * *"}, "human")
+        assert result.approved == {"cron_expression": "0 9 * * *"}
+        assert len(result.rejected) == 0
+
+    def test_both_change_description_approved(self):
+        """writable_by=both 的 description，AI 和 human 都能修改"""
+        enforcer = SyncEnforcer(_make_cronjob_registry())
+        result_ai = enforcer.validate("cronjob", {"description": "AI desc"}, "ai")
+        assert result_ai.approved == {"description": "AI desc"}
+        assert len(result_ai.rejected) == 0
+
+        result_human = enforcer.validate("cronjob", {"description": "Human desc"}, "human")
+        assert result_human.approved == {"description": "Human desc"}
+        assert len(result_human.rejected) == 0
+
+    def test_mixed_fields_partial_approval(self):
+        """AI 同時修改 human-only 和 both 欄位：部分通過、部分拒絕"""
+        enforcer = SyncEnforcer(_make_cronjob_registry())
+        changes = {
+            "cron_expression": "*/10 * * * *",
+            "is_enabled": False,
+            "name": "AI Job",
+            "description": "AI 修改的描述",
+            "prompt_template": "new prompt",
+        }
+        result = enforcer.validate("cronjob", changes, "ai")
+        assert "description" in result.approved
+        assert "prompt_template" in result.approved
+        assert len(result.approved) == 2
+        rejected_fields = {r.field_name for r in result.rejected}
+        assert rejected_fields == {"cron_expression", "is_enabled", "name"}
+        assert len(result.rejected) == 3
+
     async def test_resolve_conflicts_card_not_found(self, conflict_client):
         """card_id 不存在時回傳 404"""
         client = conflict_client["client"]

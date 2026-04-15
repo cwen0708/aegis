@@ -454,6 +454,17 @@ def _sync_default_sync_rules(session: Session):
         ("member", "avatar", "human", "human_to_ai", "human_wins"),
         ("member", "description", "both", "bidirectional", "last_write_wins"),
         ("member", "hook_profile", "human", "human_to_ai", "human_wins"),
+        ("project", "name", "human", "human_to_ai", "human_wins"),
+        ("project", "path", "human", "human_to_ai", "human_wins"),
+        ("project", "is_active", "human", "human_to_ai", "human_wins"),
+        ("project", "deploy_type", "human", "human_to_ai", "human_wins"),
+        ("cronjob", "cron_expression", "human", "human_to_ai", "human_wins"),
+        ("cronjob", "is_enabled", "human", "human_to_ai", "human_wins"),
+        ("cronjob", "name", "human", "human_to_ai", "human_wins"),
+        ("cronjob", "system_instruction", "human", "human_to_ai", "human_wins"),
+        ("cronjob", "prompt_template", "both", "bidirectional", "last_write_wins"),
+        ("cronjob", "description", "both", "bidirectional", "last_write_wins"),
+        ("cronjob", "target_list_id", "human", "human_to_ai", "human_wins"),
     ]
     existing = {
         (r.entity_type, r.field_name)
