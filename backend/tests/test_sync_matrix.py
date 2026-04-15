@@ -17,6 +17,8 @@ from app.core.sync_matrix import (
     SyncRule,
     SyncRuleRegistry,
     ValidatedChanges,
+    _derive_direction,
+    load_registry_from_db,
 )
 
 
@@ -559,3 +561,116 @@ class TestConflictResolver:
         result = resolver.resolve("card", local, remote)
         assert len(result.resolved) == 1
         assert result.resolved[0].value == "v2"
+
+
+# ---------------------------------------------------------------------------
+# _derive_direction
+# ---------------------------------------------------------------------------
+
+class TestDeriveDirection:
+    """sync_direction 有值時直接映射，None 時從 writable_by 推導"""
+
+    def test_explicit_ai_to_human(self):
+        assert _derive_direction("both", "ai_to_human") == SyncDirection.AI_TO_HUMAN
+
+    def test_explicit_human_to_ai(self):
+        assert _derive_direction("both", "human_to_ai") == SyncDirection.HUMAN_TO_AI
+
+    def test_explicit_bidirectional(self):
+        assert _derive_direction("ai", "bidirectional") == SyncDirection.BIDIRECTIONAL
+
+    def test_explicit_read_only(self):
+        assert _derive_direction("both", "read_only") == SyncDirection.READ_ONLY
+
+    def test_none_fallback_to_writable_by_ai(self):
+        assert _derive_direction("ai", None) == SyncDirection.AI_TO_HUMAN
+
+    def test_none_fallback_to_writable_by_human(self):
+        assert _derive_direction("human", None) == SyncDirection.HUMAN_TO_AI
+
+    def test_none_fallback_to_writable_by_both(self):
+        assert _derive_direction("both", None) == SyncDirection.BIDIRECTIONAL
+
+    def test_invalid_sync_direction_fallback(self):
+        """無效的 sync_direction 值應退化為 writable_by 推導"""
+        assert _derive_direction("ai", "invalid") == SyncDirection.AI_TO_HUMAN
+
+
+# ---------------------------------------------------------------------------
+# load_registry_from_db — __default__ entity-level defaults
+# ---------------------------------------------------------------------------
+
+class _FakeSyncRuleRow:
+    """模擬 DB SyncRule row，提供 load_registry_from_db 需要的欄位。"""
+    def __init__(self, entity_type, field_name, writable_by, sync_direction, conflict_strategy, is_enabled=True):
+        self.entity_type = entity_type
+        self.field_name = field_name
+        self.writable_by = writable_by
+        self.sync_direction = sync_direction
+        self.conflict_strategy = conflict_strategy
+        self.is_enabled = is_enabled
+
+
+class _FakeExecResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+
+class _FakeSession:
+    def __init__(self, rows):
+        self._result = _FakeExecResult(rows)
+
+    def exec(self, _stmt):
+        return self._result
+
+
+class TestLoadRegistryFromDb:
+    """驗證 load_registry_from_db 正確使用 __default__ 條目設定 entity-level 預設值。"""
+
+    def test_default_entry_sets_entity_defaults(self):
+        rows = [
+            _FakeSyncRuleRow("project", "__default__", "human", "human_to_ai", "human_wins"),
+            _FakeSyncRuleRow("project", "name", "human", "human_to_ai", "human_wins"),
+        ]
+        registry = load_registry_from_db(_FakeSession(rows))
+        rule = registry.get_rule("project")
+        assert rule is not None
+        assert rule.default_direction == SyncDirection.HUMAN_TO_AI
+        assert rule.default_strategy == ConflictStrategy.HUMAN_WINS
+        assert len(rule.field_rules) == 1
+        assert rule.field_rules[0].field_name == "name"
+
+    def test_no_default_entry_uses_hardcoded_fallback(self):
+        rows = [
+            _FakeSyncRuleRow("card", "title", "both", "bidirectional", "last_write_wins"),
+        ]
+        registry = load_registry_from_db(_FakeSession(rows))
+        rule = registry.get_rule("card")
+        assert rule is not None
+        assert rule.default_direction == SyncDirection.BIDIRECTIONAL
+        assert rule.default_strategy == ConflictStrategy.LAST_WRITE_WINS
+
+    def test_default_entry_excluded_from_field_rules(self):
+        rows = [
+            _FakeSyncRuleRow("member", "__default__", "human", "human_to_ai", "human_wins"),
+            _FakeSyncRuleRow("member", "name", "human", "human_to_ai", "human_wins"),
+            _FakeSyncRuleRow("member", "role", "human", "human_to_ai", "human_wins"),
+        ]
+        registry = load_registry_from_db(_FakeSession(rows))
+        rule = registry.get_rule("member")
+        field_names = {fr.field_name for fr in rule.field_rules}
+        assert "__default__" not in field_names
+        assert field_names == {"name", "role"}
+
+    def test_card_default_bidirectional(self):
+        rows = [
+            _FakeSyncRuleRow("card", "__default__", "both", "bidirectional", "last_write_wins"),
+            _FakeSyncRuleRow("card", "title", "both", "bidirectional", "last_write_wins"),
+        ]
+        registry = load_registry_from_db(_FakeSession(rows))
+        rule = registry.get_rule("card")
+        assert rule.default_direction == SyncDirection.BIDIRECTIONAL
+        assert rule.default_strategy == ConflictStrategy.LAST_WRITE_WINS

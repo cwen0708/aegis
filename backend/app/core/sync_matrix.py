@@ -374,6 +374,23 @@ def load_registry_from_db(session: "Session") -> SyncRuleRegistry:
 
     registry = SyncRuleRegistry()
     for entity_type, db_rules in grouped.items():
+        default_direction = SyncDirection.BIDIRECTIONAL
+        default_strategy = ConflictStrategy.LAST_WRITE_WINS
+
+        default_entry = None
+        normal_rules = []
+        for r in db_rules:
+            if r.field_name == "__default__":
+                default_entry = r
+            else:
+                normal_rules.append(r)
+
+        if default_entry is not None:
+            default_direction = _derive_direction(
+                default_entry.writable_by, default_entry.sync_direction,
+            )
+            default_strategy = _db_strategy_to_enum(default_entry.conflict_strategy)
+
         field_rules = tuple(
             FieldRule(
                 field_name=r.field_name,
@@ -381,13 +398,13 @@ def load_registry_from_db(session: "Session") -> SyncRuleRegistry:
                 conflict_strategy=_db_strategy_to_enum(r.conflict_strategy),
                 writable_by=_writable_to_set(r.writable_by),
             )
-            for r in db_rules
+            for r in normal_rules
         )
         registry.register(SyncRule(
             entity_type=entity_type,
             field_rules=field_rules,
-            default_direction=SyncDirection.BIDIRECTIONAL,
-            default_strategy=ConflictStrategy.LAST_WRITE_WINS,
+            default_direction=default_direction,
+            default_strategy=default_strategy,
         ))
 
     return registry
