@@ -442,25 +442,31 @@ def _sync_system_cron_jobs(session: Session):
 def _sync_default_sync_rules(session: Session):
     """確保預設 SyncRule 存在（跳過已存在的 entity_type+field_name 組合）。"""
     defaults = [
-        ("card", "title", "both", "last_write_wins"),
-        ("card", "description", "both", "last_write_wins"),
-        ("card", "status", "ai", "ai_wins"),
-        ("card", "content", "both", "last_write_wins"),
-        ("card", "is_archived", "human", "human_wins"),
-        ("stagelist", "name", "human", "human_wins"),
-        ("stagelist", "position", "human", "human_wins"),
+        ("card", "title", "both", "bidirectional", "last_write_wins"),
+        ("card", "description", "both", "bidirectional", "last_write_wins"),
+        ("card", "status", "ai", "ai_to_human", "ai_wins"),
+        ("card", "content", "both", "bidirectional", "last_write_wins"),
+        ("card", "is_archived", "human", "human_to_ai", "human_wins"),
+        ("stagelist", "name", "human", "human_to_ai", "human_wins"),
+        ("stagelist", "position", "human", "human_to_ai", "human_wins"),
+        ("member", "name", "human", "human_to_ai", "human_wins"),
+        ("member", "role", "human", "human_to_ai", "human_wins"),
+        ("member", "avatar", "human", "human_to_ai", "human_wins"),
+        ("member", "description", "both", "bidirectional", "last_write_wins"),
+        ("member", "hook_profile", "human", "human_to_ai", "human_wins"),
     ]
     existing = {
         (r.entity_type, r.field_name)
         for r in session.exec(select(SyncRule)).all()
     }
     added = 0
-    for entity_type, field_name, writable_by, conflict_strategy in defaults:
+    for entity_type, field_name, writable_by, sync_direction, conflict_strategy in defaults:
         if (entity_type, field_name) not in existing:
             session.add(SyncRule(
                 entity_type=entity_type,
                 field_name=field_name,
                 writable_by=writable_by,
+                sync_direction=sync_direction,
                 conflict_strategy=conflict_strategy,
             ))
             added += 1

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile, File, Request
 from fastapi.responses import FileResponse, JSONResponse
 from sqlmodel import Session, select
 from typing import List, Optional
@@ -6,11 +6,15 @@ from pydantic import BaseModel
 from datetime import datetime, timezone
 from app.database import get_session
 from app.models.core import Project, Card, StageList, SystemSetting, Account, Member, MemberAccount, TaskLog
+from app.core.sync_matrix import SyncEnforcer, load_registry_from_db
 from app.api.deps import get_domain_filter, generate_slug
 from pathlib import Path
+import logging
 import uuid
 import re
 import time as _t
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Members"])
 
@@ -248,11 +252,34 @@ def create_member(data: MemberCreateRequest, session: Session = Depends(get_sess
 
 
 @router.put("/members/{member_id}")
-def update_member(member_id: int, data: MemberUpdateRequest, session: Session = Depends(get_session)):
+def update_member(
+    member_id: int,
+    data: MemberUpdateRequest,
+    actor: str = Query("human"),
+    session: Session = Depends(get_session),
+):
     member = session.get(Member, member_id)
     if not member:
         raise HTTPException(status_code=404, detail="Member not found")
-    for field, val in data.model_dump(exclude_unset=True).items():
+
+    # --- SyncEnforcer：欄位級寫入權限控制 ---
+    registry = load_registry_from_db(session)
+    enforcer = SyncEnforcer(registry)
+
+    _METADATA_FIELDS = {"slug", "sprite_index", "portrait", "sprite_sheet", "sprite_scale"}
+
+    all_changes = {k: v for k, v in data.model_dump(exclude_unset=True).items()}
+    sync_changes = {k: v for k, v in all_changes.items() if k not in _METADATA_FIELDS}
+    metadata_changes = {k: v for k, v in all_changes.items() if k in _METADATA_FIELDS}
+
+    result = enforcer.validate("member", sync_changes, actor)
+    if result.rejected:
+        rejected_names = [r.field_name for r in result.rejected]
+        logger.info("SyncEnforcer rejected fields for member %d (actor=%s): %s", member_id, actor, rejected_names)
+
+    approved = {**result.approved, **metadata_changes}
+
+    for field, val in approved.items():
         setattr(member, field, val)
 
     # 如果沒有 slug，自動生成
