@@ -1,7 +1,7 @@
 """SyncEnforcer 整合測試 — DB 規則載入 + Card PATCH 欄位級權限控制"""
 import pytest
 import httpx
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from sqlmodel import Session, SQLModel, create_engine
 
@@ -1234,3 +1234,300 @@ class TestMemberSyncEnforcement:
         assert "name" not in result.approved
         assert "avatar" not in result.approved
         assert len(result.rejected) == 2
+
+
+# ==========================================================
+# Project SyncEnforcer 整合測試
+# ==========================================================
+
+def _make_project_registry() -> SyncRuleRegistry:
+    """建立 project entity 的 SyncRuleRegistry（對齊 seed.py 預設規則）。"""
+    registry = SyncRuleRegistry()
+    field_rules = (
+        FieldRule("name", SyncDirection.HUMAN_TO_AI, ConflictStrategy.HUMAN_WINS, frozenset({"human"})),
+        FieldRule("path", SyncDirection.HUMAN_TO_AI, ConflictStrategy.HUMAN_WINS, frozenset({"human"})),
+        FieldRule("is_active", SyncDirection.HUMAN_TO_AI, ConflictStrategy.HUMAN_WINS, frozenset({"human"})),
+        FieldRule("deploy_type", SyncDirection.HUMAN_TO_AI, ConflictStrategy.HUMAN_WINS, frozenset({"human"})),
+    )
+    registry.register(SyncRuleDomain(
+        entity_type="project",
+        field_rules=field_rules,
+        default_direction=SyncDirection.BIDIRECTIONAL,
+        default_strategy=ConflictStrategy.LAST_WRITE_WINS,
+    ))
+    return registry
+
+
+class TestProjectSyncEnforcement:
+    """Project entity 的 SyncEnforcer 整合測試。"""
+
+    def test_ai_rejected_on_human_only_project_field(self):
+        """actor=ai 修改 name 被拒（writable_by=human）"""
+        enforcer = SyncEnforcer(_make_project_registry())
+        result = enforcer.validate("project", {"name": "AI-Project"}, "ai")
+        assert len(result.approved) == 0
+        assert len(result.rejected) == 1
+        assert result.rejected[0].field_name == "name"
+
+    def test_human_can_update_project_name(self):
+        """actor=human 修改 name 正常通過"""
+        enforcer = SyncEnforcer(_make_project_registry())
+        result = enforcer.validate("project", {"name": "Human-Project"}, "human")
+        assert result.approved == {"name": "Human-Project"}
+        assert len(result.rejected) == 0
+
+    def test_metadata_bypass_sync_rules(self):
+        """default_member_id 等 metadata 欄位不在 SyncRule 中，走 default_direction (BIDIRECTIONAL)。"""
+        enforcer = SyncEnforcer(_make_project_registry())
+        result = enforcer.validate("project", {"default_member_id": 42}, "ai")
+        assert result.approved == {"default_member_id": 42}
+        assert len(result.rejected) == 0
+
+    def test_no_rules_rejects_all(self):
+        """無任何 project rule 時，entity 未註冊，所有欄位被拒。"""
+        registry = SyncRuleRegistry()
+        enforcer = SyncEnforcer(registry)
+        result = enforcer.validate("project", {"name": "Any", "path": "/tmp"}, "ai")
+        assert len(result.approved) == 0
+        assert len(result.rejected) == 2
+
+    def test_ai_rejected_on_all_sync_fields(self):
+        """actor=ai 同時修改多個 sync 欄位全部被拒"""
+        enforcer = SyncEnforcer(_make_project_registry())
+        changes = {"name": "AI", "path": "/ai", "is_active": False, "deploy_type": "cloud"}
+        result = enforcer.validate("project", changes, "ai")
+        assert len(result.approved) == 0
+        assert len(result.rejected) == 4
+
+    def test_human_approved_on_all_sync_fields(self):
+        """actor=human 同時修改多個 sync 欄位全部通過"""
+        enforcer = SyncEnforcer(_make_project_registry())
+        changes = {"name": "Human", "path": "/human", "is_active": True, "deploy_type": "local"}
+        result = enforcer.validate("project", changes, "human")
+        assert len(result.approved) == 4
+        assert len(result.rejected) == 0
+
+    def test_mixed_sync_and_metadata(self):
+        """AI 送 sync + metadata 欄位：sync 被拒、metadata 走 default 通過"""
+        enforcer = SyncEnforcer(_make_project_registry())
+        changes = {"name": "AI-Name", "deploy_type": "cloud", "default_member_id": 5, "room_id": 3}
+        result = enforcer.validate("project", changes, "ai")
+        assert "name" not in result.approved
+        assert "deploy_type" not in result.approved
+        assert result.approved["default_member_id"] == 5
+        assert result.approved["room_id"] == 3
+        assert len(result.rejected) == 2
+
+
+# ==========================================================
+# POST /cards/{card_id}/resolve-conflicts 端點測試
+# ==========================================================
+
+@pytest.fixture
+async def conflict_client(tmp_path):
+    """建立含 project/card 的 async httpx 測試客戶端（for resolve-conflicts 測試）。"""
+    db_path = tmp_path / "test_conflict.db"
+    engine = create_engine(f"sqlite:///{db_path}")
+    SQLModel.metadata.create_all(engine)
+
+    now = datetime(2026, 4, 10, 12, 0, 0, tzinfo=timezone.utc)
+    project_path = tmp_path / "test-project"
+    cards_dir = project_path / ".aegis" / "cards"
+    cards_dir.mkdir(parents=True)
+
+    with Session(engine) as session:
+        project = Project(id=1, name="Test Project", path=str(project_path))
+        session.add(project)
+        backlog = StageList(id=1, project_id=1, name="Backlog", position=0, is_ai_stage=False)
+        session.add(backlog)
+        session.commit()
+
+        card_data = CardData(
+            id=1, list_id=1, title="Original Title",
+            description="Original Desc", content="Original Content",
+            status="idle", tags=[],
+            created_at=now, updated_at=now,
+        )
+        fpath = card_file_path(str(project_path), 1)
+        fpath.parent.mkdir(parents=True, exist_ok=True)
+        write_card(fpath, card_data)
+        sync_card_to_index(session, card_data, project_id=1, file_path=str(fpath))
+
+        orm_card = Card(
+            id=1, list_id=1, title="Original Title",
+            description="Original Desc", status="idle",
+            created_at=now, updated_at=now,
+        )
+        session.add(orm_card)
+        session.commit()
+
+    from app.main import app
+    from app.database import get_session
+
+    def _override():
+        with Session(engine) as s:
+            yield s
+
+    app.dependency_overrides[get_session] = _override
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        yield {
+            "client": client,
+            "engine": engine,
+            "fpath": fpath,
+            "now": now,
+        }
+    app.dependency_overrides.clear()
+
+
+class TestResolveConflictsAPI:
+    """POST /cards/{card_id}/resolve-conflicts 端點測試"""
+
+    async def test_resolve_conflicts_lww_apply_true(self, conflict_client):
+        """apply_resolved=True + last_write_wins：已解決欄位寫回卡片 MD 和 ORM"""
+        client = conflict_client["client"]
+        engine = conflict_client["engine"]
+        fpath = conflict_client["fpath"]
+        now = conflict_client["now"]
+
+        with Session(engine) as s:
+            s.add(SyncRuleModel(
+                entity_type="card", field_name="title",
+                writable_by="both", conflict_strategy="last_write_wins", is_enabled=True,
+            ))
+            s.commit()
+
+        local_ts = (now + timedelta(hours=1)).isoformat()
+        resp = await client.post("/api/v1/cards/1/resolve-conflicts", json={
+            "local_changes": {
+                "title": {"value": "Updated Title", "updated_at": local_ts, "actor": "human"},
+            },
+            "apply_resolved": True,
+        })
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["applied"] is True
+        assert len(data["resolved"]) == 1
+        assert data["resolved"][0]["field_name"] == "title"
+        assert data["resolved"][0]["value"] == "Updated Title"
+        assert data["resolved"][0]["strategy"] == "last_write_wins"
+        assert len(data["deferred"]) == 0
+
+        cd = read_card(fpath)
+        assert cd.title == "Updated Title"
+
+        with Session(engine) as s:
+            orm_card = s.get(Card, 1)
+            assert orm_card.title == "Updated Title"
+
+    async def test_resolve_conflicts_lww_apply_false(self, conflict_client):
+        """apply_resolved=False + last_write_wins：回傳解決方案但卡片內容不變"""
+        client = conflict_client["client"]
+        engine = conflict_client["engine"]
+        fpath = conflict_client["fpath"]
+        now = conflict_client["now"]
+
+        with Session(engine) as s:
+            s.add(SyncRuleModel(
+                entity_type="card", field_name="title",
+                writable_by="both", conflict_strategy="last_write_wins", is_enabled=True,
+            ))
+            s.commit()
+
+        local_ts = (now + timedelta(hours=1)).isoformat()
+        resp = await client.post("/api/v1/cards/1/resolve-conflicts", json={
+            "local_changes": {
+                "title": {"value": "Updated Title", "updated_at": local_ts, "actor": "human"},
+            },
+            "apply_resolved": False,
+        })
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["applied"] is False
+        assert len(data["resolved"]) == 1
+        assert data["resolved"][0]["value"] == "Updated Title"
+        assert len(data["deferred"]) == 0
+
+        cd = read_card(fpath)
+        assert cd.title == "Original Title"
+
+        with Session(engine) as s:
+            orm_card = s.get(Card, 1)
+            assert orm_card.title == "Original Title"
+
+    async def test_resolve_conflicts_deferred_manual_merge(self, conflict_client):
+        """manual_merge 策略：雙方都有變更時欄位進入 deferred 列表"""
+        client = conflict_client["client"]
+        now = conflict_client["now"]
+
+        with Session(conflict_client["engine"]) as s:
+            s.add(SyncRuleModel(
+                entity_type="card", field_name="description",
+                writable_by="both", conflict_strategy="manual_merge", is_enabled=True,
+            ))
+            s.commit()
+
+        local_ts = (now + timedelta(hours=1)).isoformat()
+        resp = await client.post("/api/v1/cards/1/resolve-conflicts", json={
+            "local_changes": {
+                "description": {"value": "Local Desc", "updated_at": local_ts, "actor": "ai"},
+            },
+            "apply_resolved": True,
+        })
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["applied"] is False
+        assert len(data["resolved"]) == 0
+        assert len(data["deferred"]) == 1
+        assert data["deferred"][0]["field_name"] == "description"
+        assert data["deferred"][0]["strategy"] == "manual_merge"
+        assert data["deferred"][0]["local"]["value"] == "Local Desc"
+        assert data["deferred"][0]["remote"]["value"] == "Original Desc"
+
+    async def test_resolve_conflicts_card_not_found(self, conflict_client):
+        """card_id 不存在時回傳 404"""
+        client = conflict_client["client"]
+        now = conflict_client["now"]
+
+        resp = await client.post("/api/v1/cards/9999/resolve-conflicts", json={
+            "local_changes": {
+                "title": {"value": "X", "updated_at": now.isoformat(), "actor": "human"},
+            },
+        })
+        assert resp.status_code == 404
+
+    async def test_resolve_conflicts_human_wins(self, conflict_client):
+        """human_wins 策略：local actor=ai 時 remote（human 端）版本勝出"""
+        client = conflict_client["client"]
+        engine = conflict_client["engine"]
+        fpath = conflict_client["fpath"]
+        now = conflict_client["now"]
+
+        with Session(engine) as s:
+            s.add(SyncRuleModel(
+                entity_type="card", field_name="title",
+                writable_by="both", conflict_strategy="human_wins", is_enabled=True,
+            ))
+            s.commit()
+
+        local_ts = (now + timedelta(hours=1)).isoformat()
+        resp = await client.post("/api/v1/cards/1/resolve-conflicts", json={
+            "local_changes": {
+                "title": {"value": "AI Title", "updated_at": local_ts, "actor": "ai"},
+            },
+            "apply_resolved": True,
+        })
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["applied"] is True
+        assert len(data["resolved"]) == 1
+        assert data["resolved"][0]["field_name"] == "title"
+        assert data["resolved"][0]["value"] == "Original Title"
+        assert data["resolved"][0]["strategy"] == "human_wins"
+
+        cd = read_card(fpath)
+        assert cd.title == "Original Title"
