@@ -700,6 +700,29 @@ class TestLoadRegistrySyncDirection:
                 f"{db_val} should map to {expected}"
             )
 
+    def test_column_nullable_default(self, db_session):
+        """sync_direction=None（DB 預設值）時，writable_by fallback 正常產生方向與權限。"""
+        db_session.add(SyncRuleModel(
+            entity_type="card", field_name="title",
+            writable_by="both", conflict_strategy="last_write_wins", is_enabled=True,
+        ))
+        db_session.commit()
+
+        from sqlmodel import select as sel
+        db_rule = db_session.exec(
+            sel(SyncRuleModel).where(SyncRuleModel.field_name == "title")
+        ).first()
+        assert db_rule.sync_direction is None
+
+        registry = load_registry_from_db(db_session)
+        rule = registry.get_rule("card")
+        assert rule is not None
+        fr = rule.field_rules[0]
+        assert fr.sync_direction == SyncDirection.BIDIRECTIONAL
+        assert fr.writable_by == frozenset({"ai", "human"})
+        assert registry.check_field_writable("card", "title", "ai") is True
+        assert registry.check_field_writable("card", "title", "human") is True
+
 
 class TestConflictResolverDBStrategy:
     """ConflictResolver 整合測試 — 從 DB 載入 human_wins / ai_wins 策略並驗證解決行為"""
@@ -994,3 +1017,138 @@ class TestSyncDirectionAPI:
             "sync_direction": "bad_value",
         })
         assert put_resp.status_code == 422
+
+
+# ==========================================================
+# GET /sync-rules/{entity_type} 端點測試
+# ==========================================================
+
+class TestSyncRuleGetByEntityAPI:
+    """GET /sync-rules/{entity_type} 端點測試"""
+
+    async def test_get_card_rules_returns_only_card(self, api_client):
+        """建立 card + stagelist 規則，GET /sync-rules/card 只返回 card 規則。"""
+        await api_client.post("/api/v1/sync-rules", json={
+            "entity_type": "card",
+            "field_name": "title",
+            "writable_by": "both",
+        })
+        await api_client.post("/api/v1/sync-rules", json={
+            "entity_type": "stagelist",
+            "field_name": "name",
+            "writable_by": "human",
+        })
+
+        resp = await api_client.get("/api/v1/sync-rules/card")
+        assert resp.status_code == 200
+        rules = resp.json()
+        assert len(rules) == 1
+        assert rules[0]["entity_type"] == "card"
+        assert rules[0]["field_name"] == "title"
+
+    async def test_get_unknown_entity_returns_empty(self, api_client):
+        """GET /sync-rules/nonexistent 返回空 list。"""
+        resp = await api_client.get("/api/v1/sync-rules/nonexistent")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    async def test_get_stagelist_rules(self, api_client):
+        """確認 stagelist 規則正確返回。"""
+        await api_client.post("/api/v1/sync-rules", json={
+            "entity_type": "stagelist",
+            "field_name": "name",
+            "writable_by": "human",
+            "conflict_strategy": "human_wins",
+        })
+        await api_client.post("/api/v1/sync-rules", json={
+            "entity_type": "stagelist",
+            "field_name": "position",
+            "writable_by": "human",
+            "conflict_strategy": "human_wins",
+        })
+
+        resp = await api_client.get("/api/v1/sync-rules/stagelist")
+        assert resp.status_code == 200
+        rules = resp.json()
+        assert len(rules) == 2
+        field_names = {r["field_name"] for r in rules}
+        assert field_names == {"name", "position"}
+        assert all(r["entity_type"] == "stagelist" for r in rules)
+
+
+# ==========================================================
+# is_enabled 停用/啟用整合測試
+# ==========================================================
+
+class TestSyncRuleIsEnabledToggle:
+    """is_enabled 停用/啟用整合測試 — 驗證停用規則後權限行為變更"""
+
+    def test_disable_rule_allows_previously_blocked_write(self, db_session):
+        """建立 human-only rule → AI 被攔截 → is_enabled=False → AI 可寫（fallback default）"""
+        rule_status = SyncRuleModel(
+            entity_type="card", field_name="status",
+            writable_by="human", conflict_strategy="last_write_wins", is_enabled=True,
+        )
+        rule_title = SyncRuleModel(
+            entity_type="card", field_name="title",
+            writable_by="both", conflict_strategy="last_write_wins", is_enabled=True,
+        )
+        db_session.add(rule_status)
+        db_session.add(rule_title)
+        db_session.commit()
+
+        registry = load_registry_from_db(db_session)
+        enforcer = SyncEnforcer(registry)
+        result_ai = enforcer.validate("card", {"status": "running"}, "ai")
+        assert len(result_ai.rejected) == 1
+        assert result_ai.rejected[0].field_name == "status"
+
+        result_human = enforcer.validate("card", {"status": "running"}, "human")
+        assert "status" in result_human.approved
+
+        db_session.refresh(rule_status)
+        rule_status.is_enabled = False
+        db_session.add(rule_status)
+        db_session.commit()
+
+        registry2 = load_registry_from_db(db_session)
+        enforcer2 = SyncEnforcer(registry2)
+        result2 = enforcer2.validate("card", {"status": "running"}, "ai")
+        assert "status" in result2.approved
+        assert len(result2.rejected) == 0
+
+    def test_reenable_rule_blocks_write(self, db_session):
+        """停用 → 重新啟用 → AI 再次被攔截"""
+        rule_status = SyncRuleModel(
+            entity_type="card", field_name="status",
+            writable_by="human", conflict_strategy="last_write_wins", is_enabled=True,
+        )
+        rule_title = SyncRuleModel(
+            entity_type="card", field_name="title",
+            writable_by="both", conflict_strategy="last_write_wins", is_enabled=True,
+        )
+        db_session.add(rule_status)
+        db_session.add(rule_title)
+        db_session.commit()
+
+        db_session.refresh(rule_status)
+        rule_status.is_enabled = False
+        db_session.add(rule_status)
+        db_session.commit()
+
+        registry = load_registry_from_db(db_session)
+        enforcer = SyncEnforcer(registry)
+        result = enforcer.validate("card", {"status": "running"}, "ai")
+        assert "status" in result.approved
+
+        db_session.refresh(rule_status)
+        rule_status.is_enabled = True
+        db_session.add(rule_status)
+        db_session.commit()
+
+        registry2 = load_registry_from_db(db_session)
+        enforcer2 = SyncEnforcer(registry2)
+        result2 = enforcer2.validate("card", {"status": "running"}, "ai")
+        assert "status" not in result2.approved
+        assert len(result2.rejected) == 1
+        assert result2.rejected[0].field_name == "status"
