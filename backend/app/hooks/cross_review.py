@@ -5,6 +5,8 @@ CrossReviewHook — 任務完成後自動派發交叉審查
 建立審查卡片到「審查中」列表。
 """
 import logging
+import subprocess
+from pathlib import Path
 from typing import Optional
 
 from sqlmodel import Session, select
@@ -22,6 +24,31 @@ logger = logging.getLogger(__name__)
 
 # 摘要最大長度
 _MAX_SUMMARY_LEN = 500
+
+# 變更檔案數量上限
+_MAX_CHANGED_FILES = 50
+
+
+def _collect_changed_files(workspace_dir: str) -> tuple[str, ...]:
+    """從 workspace 的 git 歷史取得最近一次提交的變更檔案清單"""
+    if not workspace_dir or not Path(workspace_dir).is_dir():
+        return ()
+    try:
+        r = subprocess.run(
+            ["git", "diff", "--name-only", "HEAD~1", "HEAD"],
+            cwd=workspace_dir, capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode != 0 or not r.stdout.strip():
+            r = subprocess.run(
+                ["git", "diff", "--name-only", "HEAD"],
+                cwd=workspace_dir, capture_output=True, text=True, timeout=5,
+            )
+        if r.returncode != 0:
+            return ()
+        files = [ln.strip() for ln in r.stdout.splitlines() if ln.strip()]
+        return tuple(files[:_MAX_CHANGED_FILES])
+    except (subprocess.TimeoutExpired, OSError):
+        return ()
 
 
 def _default_registry() -> ReviewPolicyRegistry:
@@ -109,18 +136,22 @@ class CrossReviewHook(Hook):
             card_id=ctx.card_id,
             card_title=ctx.card_title,
             diff_summary=diff_summary,
-            changed_files=(),
+            changed_files=_collect_changed_files(ctx.workspace_dir),
         )
 
         # 建立審查卡片
         reviewer = review_req.reviewer_member_id
         title = f"review(cross): {ctx.card_title} — by {reviewer}"
+        files_section = "\n".join(
+            f"- {f}" for f in review_req.changed_files
+        ) or "- (無法取得)"
         content = (
             f"## 交叉審查\n\n"
             f"- 原始卡片: #{ctx.card_id}\n"
             f"- 產出者: {ctx.member_slug}\n"
             f"- 審查者: {reviewer}\n\n"
-            f"## 變更摘要\n\n{diff_summary}"
+            f"## 變更摘要\n\n{diff_summary}\n\n"
+            f"## 變更檔案\n\n{files_section}"
         )
 
         card = create_card(

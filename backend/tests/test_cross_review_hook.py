@@ -9,6 +9,7 @@ from app.core.cross_review import ReviewPolicy, ReviewPolicyRegistry, ReviewScop
 from app.hooks import TaskContext
 from app.hooks.cross_review import (
     CrossReviewHook,
+    _collect_changed_files,
     _default_registry,
     _extract_diff_summary,
 )
@@ -33,6 +34,44 @@ class TestExtractDiffSummary:
 
     def test_strips_whitespace(self):
         assert _extract_diff_summary("  hello  ") == "hello"
+
+
+# ── _collect_changed_files ──────────────────────────────────────────
+
+
+class TestCollectChangedFiles:
+    def test_empty_workspace_dir_returns_empty(self):
+        assert _collect_changed_files("") == ()
+
+    def test_non_existent_dir_returns_empty(self, tmp_path):
+        assert _collect_changed_files(str(tmp_path / "missing")) == ()
+
+    def test_parses_stdout_into_tuple(self, tmp_path):
+        fake = MagicMock(
+            returncode=0, stdout="a.py\nb.py\n\n  c.py  \n",
+        )
+        with patch(
+            "app.hooks.cross_review.subprocess.run", return_value=fake,
+        ):
+            result = _collect_changed_files(str(tmp_path))
+        assert result == ("a.py", "b.py", "c.py")
+
+    def test_falls_back_to_head_when_head1_empty(self, tmp_path):
+        first = MagicMock(returncode=0, stdout="")
+        second = MagicMock(returncode=0, stdout="x.py\n")
+        with patch(
+            "app.hooks.cross_review.subprocess.run",
+            side_effect=[first, second],
+        ):
+            assert _collect_changed_files(str(tmp_path)) == ("x.py",)
+
+    def test_returns_empty_on_timeout(self, tmp_path):
+        import subprocess as sp
+        with patch(
+            "app.hooks.cross_review.subprocess.run",
+            side_effect=sp.TimeoutExpired(cmd="git", timeout=5),
+        ):
+            assert _collect_changed_files(str(tmp_path)) == ()
 
 
 # ── _default_registry ───────────────────────────────────────────────
@@ -192,6 +231,34 @@ class TestCrossReviewHookCardCreation:
         # 不應拋出例外
         hook.on_complete(ctx)
         mock_create.assert_called_once()
+
+    @patch("app.hooks.cross_review.create_card")
+    @patch("app.hooks.cross_review._find_review_list_id", return_value=99)
+    def test_card_content_includes_changed_files(
+        self, _mock_find, mock_create, tmp_path,
+    ):
+        """卡片 content 應包含「## 變更檔案」區段與 git diff 回傳的檔案清單"""
+        mock_create.return_value = MagicMock(id=202)
+        fake_result = MagicMock(
+            returncode=0,
+            stdout="backend/a.py\nbackend/b.py\nbackend/c.py\n",
+        )
+        hook = CrossReviewHook()
+        ctx = _make_ctx(output="修改了 3 個檔案")
+        ctx.workspace_dir = str(tmp_path)
+
+        with patch(
+            "app.hooks.cross_review.subprocess.run", return_value=fake_result,
+        ) as mock_run:
+            hook.on_complete(ctx)
+
+        mock_run.assert_called()
+        mock_create.assert_called_once()
+        content = mock_create.call_args[1]["content"]
+        assert "## 變更檔案" in content
+        assert "backend/a.py" in content
+        assert "backend/b.py" in content
+        assert "backend/c.py" in content
 
     @patch("app.hooks.cross_review.create_card")
     @patch("app.hooks.cross_review._find_review_list_id", return_value=99)
