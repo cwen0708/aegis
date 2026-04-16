@@ -60,6 +60,7 @@ class CardResponse(BaseModel):
     status: str = "idle"
     is_archived: bool = False
     acceptance_criteria: Optional[str] = None
+    max_rounds: int = 1  # Ralph Loop 最大迭代輪數
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -154,6 +155,7 @@ def read_cards(session: Session = Depends(get_session)):
                 description=cd.description, content=cd.content,
                 status=cd.status, is_archived=cd.is_archived,
                 acceptance_criteria=cd.acceptance_criteria,
+                max_rounds=cd.max_rounds,
                 created_at=cd.created_at, updated_at=cd.updated_at,
             ))
             seen_ids.add(cd.id)
@@ -180,6 +182,7 @@ def read_card_endpoint(card_id: int, session: Session = Depends(get_session)):
             description=cd.description, content=cd.content,
             status=cd.status, is_archived=cd.is_archived,
             acceptance_criteria=cd.acceptance_criteria,
+            max_rounds=cd.max_rounds,
             created_at=cd.created_at, updated_at=cd.updated_at,
         )
     # Fallback: old Card table
