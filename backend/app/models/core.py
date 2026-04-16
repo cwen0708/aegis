@@ -1,5 +1,6 @@
 from typing import Optional, List
 from datetime import datetime, timezone
+from pydantic import field_validator
 from sqlmodel import SQLModel, Field, Relationship
 from sqlalchemy import UniqueConstraint
 
@@ -659,8 +660,16 @@ class Room(SQLModel, table=True):
     name: str                                    # "研發部", "維運中心"
     description: str = Field(default="")
     layout_json: str = Field(default="{}")       # Phaser 辦公室佈局
-    layout_type: str = Field(default="tiled")    # "tiled" | "classic"
+    layout_type: str = Field(default="tiled")
     position: int = Field(default=0)             # 顯示順序
+
+    @field_validator("layout_type")
+    @classmethod
+    def _validate_layout_type(cls, v: str) -> str:
+        if v not in ("classic", "tiled"):
+            raise ValueError(f"layout_type must be 'classic' or 'tiled', got '{v}'")
+        return v
+
     is_active: bool = Field(default=True)
     allow_anonymous: bool = Field(default=False)  # 允許未登入瀏覽
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
