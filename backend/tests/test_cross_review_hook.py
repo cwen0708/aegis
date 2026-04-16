@@ -158,6 +158,17 @@ class TestCrossReviewHookTriggerCondition:
                 hook.on_complete(ctx)
                 mock_create.assert_not_called()
 
+    def test_skips_when_card_already_in_review_list(self):
+        """卡片本身在「審查中」列表 → 不派發審查（防遞迴）"""
+        hook = CrossReviewHook()
+        ctx = _make_ctx(list_id=99)
+        with patch(
+            "app.hooks.cross_review._find_review_list_id", return_value=99,
+        ):
+            with patch("app.hooks.cross_review.create_card") as mock_create:
+                hook.on_complete(ctx)
+                mock_create.assert_not_called()
+
 
 class TestCrossReviewHookCardCreation:
     """測試審查卡片建立邏輯"""

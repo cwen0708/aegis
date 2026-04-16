@@ -129,6 +129,14 @@ class CrossReviewHook(Hook):
             )
             return
 
+        # 防遞迴 — 若當前卡片本身就在審查中列表，跳過派發
+        if ctx.list_id == review_list_id:
+            logger.debug(
+                "[CrossReview] Card #%d is already in review list, skip to avoid recursion",
+                ctx.card_id,
+            )
+            return
+
         # 建立審查請求
         diff_summary = _extract_diff_summary(ctx.output)
         review_req = build_review_request(
