@@ -280,7 +280,31 @@ def mark_card_running(card_id: int, member_id: Optional[int]):
 # ==========================================
 # JSON 解析
 # ==========================================
-from app.core.stream_parsers import parse_claude_json, parse_stream_json_text  # 統一解析器
+from app.core.stream_parsers import parse_claude_json, parse_stream_json_text, parse_openai_stream  # 統一解析器
+
+
+def _emit_openai_sse_line(clean_line: str, emitter, result_text_parts: list) -> bool:
+    """處理 OpenAI SSE 串流行（`data: {...}` / `data: [DONE]`）。
+
+    識別為 SSE 時解析 delta content，包裝成 stream-json assistant 事件送入 emitter.emit_raw，
+    讓下游 hook chain（WebSocket / OneStack）收到即時 token 事件。
+
+    Returns True 代表 line 是 SSE 格式（已消化），False 代表不是 SSE。
+    """
+    if not clean_line.strip().startswith("data:"):
+        return False
+    delta = parse_openai_stream(clean_line)
+    if delta:
+        wrapped = json.dumps(
+            {
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": delta}]},
+            },
+            ensure_ascii=False,
+        )
+        emitter.emit_raw(wrapped)
+        result_text_parts.append(delta)
+    return True
 
 
 def save_task_log(card_id: int, card_title: str, project_name: str, provider: str,
@@ -759,12 +783,15 @@ def run_task_pty_windows(
                             line, buffer = buffer.split("\n", 1)
                             if stream_json:
                                 clean_line = _clean_ansi(line)
-                                if clean_line.strip().startswith("{"):
+                                stripped = clean_line.strip()
+                                if stripped.startswith("{"):
                                     emitter.emit_raw(clean_line)
                                     _prov = get_provider(provider_name)
                                     text = _prov.parse_stream_line(clean_line) if _prov else parse_stream_json_text(clean_line)
                                     if text:
                                         result_text_parts.append(text)
+                                elif provider_name == "openai" and stripped.startswith("data:"):
+                                    _emit_openai_sse_line(clean_line, emitter, result_text_parts)
                             else:
                                 emitter.emit_output(line + "\n")
                 except EOFError:
@@ -789,12 +816,15 @@ def run_task_pty_windows(
             if stream_json:
                 for line in buffer.split("\n"):
                     clean_line = _clean_ansi(line)
-                    if clean_line.strip().startswith("{"):
+                    stripped = clean_line.strip()
+                    if stripped.startswith("{"):
                         emitter.emit_raw(clean_line)
                         _prov = get_provider(provider_name)
                         text = _prov.parse_stream_line(clean_line) if _prov else parse_stream_json_text(clean_line)
                         if text:
                             result_text_parts.append(text)
+                    elif provider_name == "openai" and stripped.startswith("data:"):
+                        _emit_openai_sse_line(clean_line, emitter, result_text_parts)
             else:
                 emitter.emit_output(buffer)
 
@@ -919,6 +949,8 @@ def run_task_subprocess(
                         text = _prov.parse_stream_line(clean) if _prov else parse_stream_json_text(clean)
                         if text:
                             result_text_parts.append(text)
+                    elif provider_name == "openai" and clean.startswith("data:") and emitter:
+                        _emit_openai_sse_line(clean, emitter, result_text_parts)
                 elif emitter:
                     emitter.emit_output(line)
                 # 檢查 abort 信號
