@@ -15,6 +15,7 @@ from app.core.sync_matrix import (
     load_registry_from_db, validate_actor,
 )
 from app.core.paths import WORKSPACES_ROOT
+from app.core.runner import run_ai_task
 from app.api.deps import get_card_lock, get_project_for_list
 from pathlib import Path
 import asyncio
@@ -650,8 +651,26 @@ def get_pending_conflicts(
     return session.exec(stmt).all()
 
 
+async def _ai_merge_values(field_name: str, local_value: str, remote_value: str) -> str:
+    prompt = (
+        f"You are a merge assistant. Merge the following two versions of the '{field_name}' field "
+        f"into a single coherent result. Return ONLY the merged text, no explanation.\n\n"
+        f"Version A (local):\n{local_value}\n\n"
+        f"Version B (remote):\n{remote_value}"
+    )
+    result = await run_ai_task(
+        task_id=0,
+        project_path=".",
+        prompt=prompt,
+        phase="CHAT",
+        forced_provider="gemini",
+        model_override="gemini-flash",
+    )
+    return (result.get("output") or "").strip()
+
+
 @router.patch("/cards/{card_id}/pending-conflicts/{conflict_id}", response_model=PendingConflictResponse)
-def resolve_pending_conflict(
+async def resolve_pending_conflict(
     card_id: int,
     conflict_id: int,
     req: ResolvePendingConflictRequest,
@@ -672,7 +691,13 @@ def resolve_pending_conflict(
     if req.status == "resolved":
         resolved = req.resolved_value
         if resolved is None and pc.strategy == "ai_merge":
-            resolved = f"[AI-MERGED] {pc.local_value} | {pc.remote_value}"
+            try:
+                resolved = await _ai_merge_values(pc.field_name, pc.local_value, pc.remote_value)
+                if not resolved:
+                    resolved = pc.local_value
+            except Exception:
+                logger.warning("AI merge failed for conflict %d, falling back to local_value", conflict_id)
+                resolved = pc.local_value
         pc.resolved_value = resolved
 
         _CARD_NON_WRITABLE = frozenset({"id", "list_id", "created_at", "updated_at"})

@@ -2088,11 +2088,16 @@ class TestResolvePendingConflictAPI:
         })
         assert resp.status_code == 404
 
-    async def test_resolve_ai_merge_auto_stub(self, conflict_client):
-        """ai_merge 策略且 resolved_value=None 時自動生成 stub"""
+    async def test_resolve_ai_merge_calls_ai(self, conflict_client, monkeypatch):
+        """ai_merge 策略且 resolved_value=None 時呼叫 AI 合併"""
         client = conflict_client["client"]
         engine = conflict_client["engine"]
         now = conflict_client["now"]
+
+        async def fake_run_ai_task(**kwargs):
+            return {"output": "AI-merged description"}
+
+        monkeypatch.setattr("app.api.cards.run_ai_task", fake_run_ai_task)
 
         with Session(engine) as s:
             s.add(SyncRuleModel(
@@ -2109,7 +2114,6 @@ class TestResolvePendingConflictAPI:
         })
         resp = await client.get("/api/v1/cards/1/pending-conflicts", params={"status": "pending"})
         conflict_id = resp.json()[0]["id"]
-        pc_data = resp.json()[0]
 
         resp = await client.patch(f"/api/v1/cards/1/pending-conflicts/{conflict_id}", json={
             "status": "resolved",
@@ -2117,11 +2121,11 @@ class TestResolvePendingConflictAPI:
 
         assert resp.status_code == 200
         data = resp.json()
-        assert data["resolved_value"] == f"[AI-MERGED] {pc_data['local_value']} | {pc_data['remote_value']}"
+        assert data["resolved_value"] == "AI-merged description"
 
         with Session(engine) as s:
             orm_card = s.get(Card, 1)
-            assert orm_card.description == data["resolved_value"]
+            assert orm_card.description == "AI-merged description"
 
     async def test_resolve_is_archived_field(self, conflict_client):
         """動態欄位集能正確寫回 is_archived"""
@@ -2155,3 +2159,160 @@ class TestResolvePendingConflictAPI:
         with Session(engine) as s:
             orm_card = s.get(Card, 1)
             assert str(orm_card.is_archived) == "True"
+
+
+class TestAiMergeResolution:
+    """AI merge 策略端到端測試：驗證 run_ai_task 被正確呼叫並寫回結果"""
+
+    async def test_ai_merge_passes_correct_prompt(self, conflict_client, monkeypatch):
+        """驗證 AI merge 傳入正確的 field_name、local_value、remote_value"""
+        client = conflict_client["client"]
+        engine = conflict_client["engine"]
+        now = conflict_client["now"]
+
+        captured_kwargs = {}
+
+        async def capture_run_ai_task(**kwargs):
+            captured_kwargs.update(kwargs)
+            return {"output": "Merged result"}
+
+        monkeypatch.setattr("app.api.cards.run_ai_task", capture_run_ai_task)
+
+        with Session(engine) as s:
+            s.add(SyncRuleModel(
+                entity_type="card", field_name="description",
+                writable_by="both", conflict_strategy="ai_merge", is_enabled=True,
+            ))
+            s.commit()
+
+        local_ts = (now + timedelta(hours=1)).isoformat()
+        await client.post("/api/v1/cards/1/resolve-conflicts", json={
+            "local_changes": {
+                "description": {"value": "Local Desc", "updated_at": local_ts, "actor": "ai"},
+            },
+        })
+        resp = await client.get("/api/v1/cards/1/pending-conflicts", params={"status": "pending"})
+        conflict_id = resp.json()[0]["id"]
+
+        await client.patch(f"/api/v1/cards/1/pending-conflicts/{conflict_id}", json={
+            "status": "resolved",
+        })
+
+        assert captured_kwargs["phase"] == "CHAT"
+        assert captured_kwargs["forced_provider"] == "gemini"
+        assert captured_kwargs["model_override"] == "gemini-flash"
+        assert "description" in captured_kwargs["prompt"]
+        assert "Local Desc" in captured_kwargs["prompt"]
+        assert "Original Desc" in captured_kwargs["prompt"]
+
+    async def test_ai_merge_fallback_on_failure(self, conflict_client, monkeypatch):
+        """AI 呼叫失敗時 fallback 到 local_value"""
+        client = conflict_client["client"]
+        engine = conflict_client["engine"]
+        now = conflict_client["now"]
+
+        async def failing_run_ai_task(**kwargs):
+            raise RuntimeError("AI service unavailable")
+
+        monkeypatch.setattr("app.api.cards.run_ai_task", failing_run_ai_task)
+
+        with Session(engine) as s:
+            s.add(SyncRuleModel(
+                entity_type="card", field_name="description",
+                writable_by="both", conflict_strategy="ai_merge", is_enabled=True,
+            ))
+            s.commit()
+
+        local_ts = (now + timedelta(hours=1)).isoformat()
+        await client.post("/api/v1/cards/1/resolve-conflicts", json={
+            "local_changes": {
+                "description": {"value": "Local Desc", "updated_at": local_ts, "actor": "ai"},
+            },
+        })
+        resp = await client.get("/api/v1/cards/1/pending-conflicts", params={"status": "pending"})
+        conflict_id = resp.json()[0]["id"]
+        pc_data = resp.json()[0]
+
+        resp = await client.patch(f"/api/v1/cards/1/pending-conflicts/{conflict_id}", json={
+            "status": "resolved",
+        })
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["resolved_value"] == pc_data["local_value"]
+
+    async def test_ai_merge_empty_output_fallback(self, conflict_client, monkeypatch):
+        """AI 回傳空字串時 fallback 到 local_value"""
+        client = conflict_client["client"]
+        engine = conflict_client["engine"]
+        now = conflict_client["now"]
+
+        async def empty_run_ai_task(**kwargs):
+            return {"output": ""}
+
+        monkeypatch.setattr("app.api.cards.run_ai_task", empty_run_ai_task)
+
+        with Session(engine) as s:
+            s.add(SyncRuleModel(
+                entity_type="card", field_name="description",
+                writable_by="both", conflict_strategy="ai_merge", is_enabled=True,
+            ))
+            s.commit()
+
+        local_ts = (now + timedelta(hours=1)).isoformat()
+        await client.post("/api/v1/cards/1/resolve-conflicts", json={
+            "local_changes": {
+                "description": {"value": "Local Desc", "updated_at": local_ts, "actor": "ai"},
+            },
+        })
+        resp = await client.get("/api/v1/cards/1/pending-conflicts", params={"status": "pending"})
+        conflict_id = resp.json()[0]["id"]
+        pc_data = resp.json()[0]
+
+        resp = await client.patch(f"/api/v1/cards/1/pending-conflicts/{conflict_id}", json={
+            "status": "resolved",
+        })
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["resolved_value"] == pc_data["local_value"]
+
+    async def test_ai_merge_with_explicit_value_skips_ai(self, conflict_client, monkeypatch):
+        """使用者提供 resolved_value 時不呼叫 AI"""
+        client = conflict_client["client"]
+        engine = conflict_client["engine"]
+        now = conflict_client["now"]
+
+        called = False
+
+        async def should_not_be_called(**kwargs):
+            nonlocal called
+            called = True
+            return {"output": "Should not appear"}
+
+        monkeypatch.setattr("app.api.cards.run_ai_task", should_not_be_called)
+
+        with Session(engine) as s:
+            s.add(SyncRuleModel(
+                entity_type="card", field_name="description",
+                writable_by="both", conflict_strategy="ai_merge", is_enabled=True,
+            ))
+            s.commit()
+
+        local_ts = (now + timedelta(hours=1)).isoformat()
+        await client.post("/api/v1/cards/1/resolve-conflicts", json={
+            "local_changes": {
+                "description": {"value": "Local Desc", "updated_at": local_ts, "actor": "ai"},
+            },
+        })
+        resp = await client.get("/api/v1/cards/1/pending-conflicts", params={"status": "pending"})
+        conflict_id = resp.json()[0]["id"]
+
+        resp = await client.patch(f"/api/v1/cards/1/pending-conflicts/{conflict_id}", json={
+            "resolved_value": "Manual merge",
+            "status": "resolved",
+        })
+
+        assert resp.status_code == 200
+        assert resp.json()["resolved_value"] == "Manual merge"
+        assert not called
