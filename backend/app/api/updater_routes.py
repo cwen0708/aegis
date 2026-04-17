@@ -19,9 +19,33 @@ router = APIRouter(tags=["updater"])
 # ==========================================
 # Version SSOT API
 # ==========================================
-def _git_describe_tag() -> str:
-    """取得當前最新的 git tag（權威版本標籤）。失敗回傳空字串。"""
+def _git_head_tag() -> str:
+    """取得指向 HEAD 的 git tag（權威版本標籤）。失敗回傳空字串。
+
+    多個 tag 指向同一 commit 時（如 v0.4.1 與 v0.4.1-stable 同時存在），
+    優先挑帶 `-stable` 後綴的 tag，避免 `git describe` 因字母序誤選較短的 tag。
+    若 HEAD 未打 tag，fallback 到 `git describe --tags --abbrev=0`。
+    """
     install_root = Path(__file__).resolve().parents[3]
+    try:
+        result = subprocess.run(
+            ["git", "tag", "--points-at", "HEAD"],
+            cwd=str(install_root),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            tags = [t.strip() for t in result.stdout.splitlines() if t.strip()]
+            if tags:
+                stable_tags = [t for t in tags if t.endswith("-stable")]
+                if stable_tags:
+                    return sorted(stable_tags, reverse=True)[0]
+                return sorted(tags, reverse=True)[0]
+    except (subprocess.SubprocessError, OSError) as exc:
+        logger.warning("[version] git tag --points-at 失敗: %s", exc)
+
+    # HEAD 無 tag，fallback 到 describe
     try:
         result = subprocess.run(
             ["git", "describe", "--tags", "--abbrev=0"],
@@ -35,6 +59,13 @@ def _git_describe_tag() -> str:
     except (subprocess.SubprocessError, OSError) as exc:
         logger.warning("[version] git describe 失敗: %s", exc)
     return ""
+
+
+def _channel_from_tag(tag: str) -> str:
+    """依 tag 後綴判斷 channel。`-stable` 後綴 → stable，其餘 → development。"""
+    if tag and tag.endswith("-stable"):
+        return "stable"
+    return "development"
 
 
 async def _latest_available_tag(session: Session, channel: str) -> str:
@@ -78,18 +109,16 @@ async def get_version(session: Session = Depends(get_session)):
 
     回傳：
       current: backend/VERSION 檔案內容（運行中服務的版本）
-      tag: git describe --tags --abbrev=0（實際部署的 git tag）
-      channel: "stable" or "development"（依 SystemSetting.update_channel）
+      tag: 指向 HEAD 的 git tag（多 tag 時優先 `-stable` 後綴）
+      channel: "stable" or "development"（依 tag 後綴判定）
       latest: 該頻道 GitHub 上最新可用 tag
     """
-    channel_setting = session.get(SystemSetting, "update_channel")
-    channel = channel_setting.value if channel_setting else "development"
-    if channel not in ("stable", "development"):
-        channel = "development"
+    tag = _git_head_tag()
+    channel = _channel_from_tag(tag)
 
     return {
         "current": read_version(),
-        "tag": _git_describe_tag(),
+        "tag": tag,
         "channel": channel,
         "latest": await _latest_available_tag(session, channel),
     }
