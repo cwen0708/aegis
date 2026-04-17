@@ -165,7 +165,8 @@ class SyncRule(SQLModel, table=True):
     entity_type: str = Field(index=True)  # "card" | "stagelist" | "member" | "project"
     field_name: str  # "title" | "description" | "status" 等
     writable_by: str = Field(default="both")  # "ai" | "human" | "both"
-    conflict_strategy: str = Field(default="last_write_wins")  # "last_write_wins" | "human_wins" | "ai_wins"
+    sync_direction: Optional[str] = Field(default=None)  # "ai_to_human" | "human_to_ai" | "bidirectional" | "read_only" | None(從 writable_by 推導)
+    conflict_strategy: str = Field(default="last_write_wins")  # "last_write_wins" | "human_wins" | "ai_wins" | "manual_merge" | "ai_merge"
     is_enabled: bool = Field(default=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -309,6 +310,7 @@ class Person(SQLModel, table=True):
     level: int = Field(default=0)               # 0=未驗證, 1=訪客, 2=成員, 3=管理員
     default_member_id: Optional[int] = Field(default=None, foreign_key="member.id")
     access_expires_at: Optional[datetime] = None
+    is_active: bool = Field(default=True)
 
     # 額外資料（JSON，如 AD 帳密、自訂欄位）— 跨平台共用
     extra_json: str = Field(default="{}")
@@ -671,7 +673,6 @@ class Room(SQLModel, table=True):
         if v not in ("classic", "tiled"):
             raise ValueError(f"layout_type must be 'classic' or 'tiled', got '{v}'")
         return v
-
     is_active: bool = Field(default=True)
     allow_anonymous: bool = Field(default=False)  # 允許未登入瀏覽
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -743,6 +744,28 @@ class NamedSession(SQLModel, table=True):
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class PendingConflict(SQLModel, table=True):
+    """延遲衝突記錄 — MANUAL_MERGE / AI_MERGE 產生的待處理衝突"""
+    __table_args__ = (
+        UniqueConstraint("card_id", "field_name", "status", name="uq_pending_conflict_card_field_status"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    card_id: int = Field(foreign_key="card.id", index=True)
+    field_name: str
+    local_value: Optional[str] = None
+    local_updated_at: Optional[datetime] = None
+    local_actor: str = ""
+    remote_value: Optional[str] = None
+    remote_updated_at: Optional[datetime] = None
+    remote_actor: str = ""
+    strategy: str = ""  # manual_merge | ai_merge
+    status: str = Field(default="pending", index=True)  # pending | resolved | dismissed
+    resolved_value: Optional[str] = None
+    resolved_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Domain(SQLModel, table=True):

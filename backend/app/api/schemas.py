@@ -112,6 +112,7 @@ class PersonUpdate(BaseModel):
     description: Optional[str] = None
     level: Optional[int] = None
     access_expires_at: Optional[str] = None  # ISO format or empty string to clear
+    is_active: Optional[bool] = None
 
 
 # ==========================================

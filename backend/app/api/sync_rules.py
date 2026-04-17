@@ -18,6 +18,7 @@ class SyncRuleResponse(BaseModel):
     entity_type: str
     field_name: str
     writable_by: str
+    sync_direction: Optional[str] = None
     conflict_strategy: str
     is_enabled: bool
 
@@ -26,12 +27,14 @@ class SyncRuleCreateRequest(BaseModel):
     entity_type: str
     field_name: str
     writable_by: str = "both"
+    sync_direction: Optional[str] = None
     conflict_strategy: str = "last_write_wins"
     is_enabled: bool = True
 
 
 class SyncRuleUpdateRequest(BaseModel):
     writable_by: Optional[str] = None
+    sync_direction: Optional[str] = None
     conflict_strategy: Optional[str] = None
     is_enabled: Optional[bool] = None
 
@@ -40,6 +43,7 @@ class SyncRuleUpdateRequest(BaseModel):
 # Allowed values
 # ==========================================
 _WRITABLE_BY_VALUES = {"ai", "human", "both"}
+_SYNC_DIRECTION_VALUES = {"ai_to_human", "human_to_ai", "bidirectional", "read_only"}
 _CONFLICT_STRATEGY_VALUES = {"last_write_wins", "human_wins", "ai_wins", "manual_merge", "ai_merge"}
 
 
@@ -59,15 +63,20 @@ def list_sync_rules(
     return session.exec(stmt).all()
 
 
-@router.get("/sync-rules/{entity_type}", response_model=List[SyncRuleResponse])
-def get_sync_rules_by_entity(
-    entity_type: str,
+@router.get("/sync-rules/{identifier}")
+def get_sync_rule_or_entity(
+    identifier: str,
     session: Session = Depends(get_session),
 ):
-    """取得特定實體類型的同步規則列表。"""
+    """依 rule_id (數字) 取得單一規則，或依 entity_type (字串) 取得規則列表。"""
+    if identifier.isdigit():
+        rule = session.get(SyncRule, int(identifier))
+        if not rule:
+            raise HTTPException(404, f"SyncRule #{identifier} not found")
+        return rule
     rules = session.exec(
         select(SyncRule)
-        .where(SyncRule.entity_type == entity_type)
+        .where(SyncRule.entity_type == identifier)
         .order_by(SyncRule.field_name)
     ).all()
     return rules
@@ -88,6 +97,11 @@ def update_sync_rule(
         if req.writable_by not in _WRITABLE_BY_VALUES:
             raise HTTPException(422, f"writable_by must be one of {_WRITABLE_BY_VALUES}")
         rule.writable_by = req.writable_by
+
+    if req.sync_direction is not None:
+        if req.sync_direction not in _SYNC_DIRECTION_VALUES:
+            raise HTTPException(422, f"sync_direction must be one of {_SYNC_DIRECTION_VALUES}")
+        rule.sync_direction = req.sync_direction
 
     if req.conflict_strategy is not None:
         if req.conflict_strategy not in _CONFLICT_STRATEGY_VALUES:
@@ -111,6 +125,8 @@ def create_sync_rule(
     """建立新的同步規則（entity_type + field_name 不可重複）。"""
     if req.writable_by not in _WRITABLE_BY_VALUES:
         raise HTTPException(422, f"writable_by must be one of {_WRITABLE_BY_VALUES}")
+    if req.sync_direction is not None and req.sync_direction not in _SYNC_DIRECTION_VALUES:
+        raise HTTPException(422, f"sync_direction must be one of {_SYNC_DIRECTION_VALUES}")
     if req.conflict_strategy not in _CONFLICT_STRATEGY_VALUES:
         raise HTTPException(422, f"conflict_strategy must be one of {_CONFLICT_STRATEGY_VALUES}")
 
@@ -130,6 +146,7 @@ def create_sync_rule(
         entity_type=req.entity_type,
         field_name=req.field_name,
         writable_by=req.writable_by,
+        sync_direction=req.sync_direction,
         conflict_strategy=req.conflict_strategy,
         is_enabled=req.is_enabled,
     )
