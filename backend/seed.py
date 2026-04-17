@@ -288,28 +288,21 @@ def _sync_system_cron_jobs(session: Session):
         ))
 
     # 系統更新檢查
+    # stable 頻道 04:00（台北）、development 頻道 03:00（台北）
     if "系統更新檢查" not in existing_crons:
-        auto_time = session.get(SystemSetting, "auto_update_time")
-        time_str = auto_time.value if auto_time else "03:00"
-        hour, minute = map(int, time_str.split(":"))
-        cron_expr = f"{minute} {hour} * * *"
+        channel_setting = session.get(SystemSetting, "update_channel")
+        channel = channel_setting.value if channel_setting else "development"
+        cron_expr = "0 4 * * *" if channel == "stable" else "0 3 * * *"
         crons_to_add.append(CronJob(
             project_id=aegis.id,
             name="系統更新檢查",
-            description="自動檢查並套用 Aegis 系統更新。",
-            prompt_template=(
-                "你是 Aegis 系統的更新管理 AI。請執行以下步驟：\n\n"
-                "1. 呼叫 GET /api/v1/update/status 檢查更新狀態\n"
-                "2. 如果 has_update=true 且 is_deployed=true，呼叫 POST /api/v1/update/apply 執行更新\n"
-                "3. 如果沒有更新，回報「已是最新版本」\n"
-                "4. 如果更新成功，回報新版本號\n"
-                "5. 如果更新失敗，記錄錯誤訊息\n\n"
-                "注意：更新過程會自動等待執行中的任務完成。"
-            ),
+            description="自動檢查並套用 Aegis 系統更新（source=cron，受單日鎖約束）。",
+            prompt_template="",  # 改走 HTTP 直接呼叫 /update/apply?source=cron
             cron_expression=cron_expr,
             next_scheduled_at=_calculate_next_scheduled_at(cron_expr),
-            is_enabled=False,  # 預設關閉
+            is_enabled=False,  # 預設關閉，由使用者在 UI 開啟
             is_system=True,
+            api_url="/api/v1/update/apply?source=cron",
         ))
 
     # 長期記憶整理（每天，含短期清理）

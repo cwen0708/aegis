@@ -11,8 +11,16 @@ import re
 import time
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Literal, Optional
 from dataclasses import dataclass, field
+from zoneinfo import ZoneInfo
+
+# source 型別別名：區分更新觸發來源
+UpdateSource = Literal["cron", "manual", "ci"]
+
+# 單日鎖設定
+_SINGLE_DAY_LOCK_KEY = "auto_update_last_run_date"
+_SINGLE_DAY_LOCK_TZ = "Asia/Taipei"
 
 logger = logging.getLogger(__name__)
 
@@ -809,15 +817,96 @@ async def git_pull_update() -> bool:
 
 
 # ==========================================
+# 單日鎖（防止同日重複自動更新）
+# ==========================================
+def _today_taipei() -> str:
+    """回傳台北時區今日字串 YYYY-MM-DD。"""
+    return datetime.now(ZoneInfo(_SINGLE_DAY_LOCK_TZ)).strftime("%Y-%m-%d")
+
+
+def _get_last_run_date() -> str:
+    """讀取上次自動更新成功觸發的日期（台北時區）。"""
+    try:
+        from app.database import engine as _eng
+        from app.models.core import SystemSetting as _SS
+        from sqlmodel import Session as _Ses
+        with _Ses(_eng) as _s:
+            setting = _s.get(_SS, _SINGLE_DAY_LOCK_KEY)
+            return setting.value if setting and setting.value else ""
+    except Exception:
+        return ""
+
+
+def _mark_last_run_date(date_str: str) -> None:
+    """寫入本次自動更新觸發日期。"""
+    try:
+        from app.database import engine as _eng
+        from app.models.core import SystemSetting as _SS
+        from sqlmodel import Session as _Ses
+        with _Ses(_eng) as _s:
+            setting = _s.get(_SS, _SINGLE_DAY_LOCK_KEY)
+            if setting:
+                setting.value = date_str
+            else:
+                setting = _SS(key=_SINGLE_DAY_LOCK_KEY, value=date_str)
+            _s.add(setting)
+            _s.commit()
+    except Exception as e:
+        logger.warning("[full_update] 寫入單日鎖失敗: %s", e)
+
+
+# ==========================================
 # 完整更新流程
 # ==========================================
-async def full_update(version: str = None, wait_timeout: int = 300) -> bool:
+async def full_update(
+    version: str = None,
+    wait_timeout: int = 300,
+    source: UpdateSource = "manual",
+    is_admin: bool = False,
+    force: bool = False,
+) -> bool:
     """
     執行完整更新流程
+
     - 符號連結架構：下載 → 建構 → 等待任務 → 套用
     - Git 架構：git pull → 建構 → 重啟
+
+    Args:
+        version: 指定版本（None = 自動抓最新）
+        wait_timeout: 等待任務完成的秒數上限
+        source: 觸發來源
+            - "cron": 排程觸發（受單日鎖約束）
+            - "manual": 人工觸發（需 is_admin=True，受單日鎖約束，force=True 可繞過）
+            - "ci": CI/CD 觸發（直接拒絕，CI 應走 /update/apply 人工審批路徑）
+        is_admin: source="manual" 時必須為 True
+        force: 繞過單日鎖（僅 manual + admin 可用）
+
+    Returns:
+        True = 執行成功或已跳過；False = 執行失敗
     """
     global _state
+
+    # --- Source gating ---
+    if source == "ci":
+        logger.info("[full_update] CI 來源直接拒絕（由人工審批）")
+        return {"skipped": True, "reason": "ci_source_blocked"}
+
+    if source == "manual" and not is_admin:
+        logger.warning("[full_update] 人工觸發但非管理員")
+        return {"skipped": True, "reason": "not_admin"}
+
+    if source not in ("cron", "manual"):
+        logger.error("[full_update] 未知 source: %s", source)
+        return {"skipped": True, "reason": f"unknown_source:{source}"}
+
+    # --- Single-day lock ---
+    today = _today_taipei()
+    can_force = source == "manual" and is_admin and force
+    if not can_force:
+        last_run = _get_last_run_date()
+        if last_run == today:
+            logger.info("[full_update] 今日已執行過（%s），source=%s 跳過", last_run, source)
+            return {"skipped": True, "reason": "already_ran_today"}
 
     # Debounce: 5 分鐘內不重複觸發（DB 層級，跨重啟）
     DEBOUNCE_SECONDS = 300
@@ -842,6 +931,9 @@ async def full_update(version: str = None, wait_timeout: int = 300) -> bool:
             _ds.commit()
     except Exception:
         pass
+
+    # 通過所有閘門後，標記今日已觸發（即便後續失敗也不重試，避免無限循環）
+    _mark_last_run_date(today)
 
     _state.is_updating = True
     _state.error = ""

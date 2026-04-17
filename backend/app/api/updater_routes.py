@@ -311,27 +311,51 @@ async def build_update(version: str):
     }
 
 
-@router.post("/update/apply")
-async def apply_update(payload: ApplyUpdatePayload, request: Request, session: Session = Depends(get_session)):
-    """套用更新（背景執行，立即回應）。需要 admin token 或 AEGIS_DEPLOY_TOKEN。"""
-    import asyncio, os
+def _resolve_apply_auth(request: Request) -> tuple[bool, bool, bool]:
+    """解析請求的認證狀態。回傳 (is_admin, is_deploy, is_local)。"""
+    import os as _os
     from app.core.auth import verify_session_token, decode_session_token
 
-    # 認證：admin token 或 deploy token
     auth_header = request.headers.get("authorization", "")
     token = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else ""
-    deploy_token = os.getenv("AEGIS_DEPLOY_TOKEN", "")
+    deploy_token = _os.getenv("AEGIS_DEPLOY_TOKEN", "")
 
     is_admin = False
     if token and verify_session_token(token):
         payload_data = decode_session_token(token)
-        is_admin = payload_data and payload_data.get("type") == "admin"
-    is_deploy = deploy_token and token == deploy_token
+        is_admin = bool(payload_data and payload_data.get("type") == "admin")
+    is_deploy = bool(deploy_token and token == deploy_token)
 
-    # localhost 也放行（內部呼叫）
     client_host = request.client.host if request.client else ""
     real_ip = request.headers.get("x-real-ip", "")
     is_local = client_host in ("127.0.0.1", "::1") and not real_ip
+
+    return is_admin, is_deploy, is_local
+
+
+def _resolve_manual_source(request: Request) -> str:
+    """從 query 或 header 解析 source，預設 manual。"""
+    source = request.query_params.get("source")
+    if source in ("cron", "manual", "ci"):
+        return source
+    header_source = request.headers.get("x-aegis-source", "")
+    if header_source in ("cron", "manual", "ci"):
+        return header_source
+    return "manual"
+
+
+@router.post("/update/apply")
+async def apply_update(payload: ApplyUpdatePayload, request: Request, session: Session = Depends(get_session)):
+    """套用更新（背景執行，立即回應）。需要 admin token 或 AEGIS_DEPLOY_TOKEN。
+
+    Source 判定：
+    - query 參數 ?source=cron / header X-Aegis-Source: cron → cron（排程呼叫）
+    - 其他 → manual
+    - source=ci 會在 full_update 被拒絕
+    """
+    import asyncio
+
+    is_admin, is_deploy, is_local = _resolve_apply_auth(request)
 
     if not (is_admin or is_deploy or is_local):
         raise HTTPException(status_code=403, detail="需要管理員權限或部署 Token")
@@ -349,16 +373,62 @@ async def apply_update(payload: ApplyUpdatePayload, request: Request, session: S
             "error": "",
         }
 
+    source = _resolve_manual_source(request)
+    # cron 來源由排程走內部路徑；其他均視為 manual
+    effective_source = "cron" if source == "cron" and is_local else "manual"
+    effective_is_admin = is_admin or is_deploy or (is_local and effective_source == "cron")
+
     # 背景執行完整更新流程，API 立即回應
     asyncio.create_task(updater.full_update(
         version=payload.version,
-        wait_timeout=payload.wait_timeout
+        wait_timeout=payload.wait_timeout,
+        source=effective_source,
+        is_admin=effective_is_admin,
+        force=False,
     ))
 
     return {
         "ok": True,
         "version": payload.version or "latest",
         "message": "更新已觸發，請透過 /update/status 查詢進度",
+        "error": "",
+        "source": effective_source,
+    }
+
+
+@router.post("/update/force")
+async def force_update(payload: ApplyUpdatePayload, request: Request):
+    """強制更新（繞過單日鎖）。僅管理員可用，用於手動緊急部署。"""
+    import asyncio
+
+    is_admin, is_deploy, _is_local = _resolve_apply_auth(request)
+    if not (is_admin or is_deploy):
+        raise HTTPException(status_code=403, detail="需要管理員權限")
+
+    if not updater.is_deployed_environment():
+        raise HTTPException(status_code=400, detail="本地開發環境不支援熱更新")
+
+    state = updater.get_update_state()
+    if state.is_updating:
+        return {
+            "ok": False,
+            "version": state.current_version,
+            "message": "已有更新正在進行中",
+            "error": "",
+        }
+
+    asyncio.create_task(updater.full_update(
+        version=payload.version,
+        wait_timeout=payload.wait_timeout,
+        source="manual",
+        is_admin=True,
+        force=True,
+    ))
+
+    return {
+        "ok": True,
+        "version": payload.version or "latest",
+        "message": "強制更新已觸發（繞過單日鎖）",
         "error": "",
     }
 
