@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from sqlmodel import Session, select, func
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel
@@ -6,15 +6,35 @@ from datetime import datetime, timezone
 from app.database import get_session
 from app.models.core import Project, Card, StageList, SystemSetting, Account, Member, MemberAccount, CardIndex, Person, PersonProject
 from app.core.card_index import sync_card_to_index, remove_card_from_index, query_board, rebuild_index
+from app.core.sync_matrix import SyncEnforcer, load_registry_from_db, validate_actor
 from app.api.deps import get_domain_filter, get_visibility_filter, get_card_lock, get_member_primary_provider, get_project_for_list
 from pathlib import Path
 import json
+import logging
 import subprocess
 import time as time_module
 import threading
 import re as _re
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["Projects"])
+
+
+def _safe_parse_tags(tags_json: str) -> list:
+    """安全解析 tags_json，非陣列時自動包裝"""
+    if not tags_json:
+        return []
+    try:
+        parsed = json.loads(tags_json)
+        if isinstance(parsed, list):
+            return parsed
+        if isinstance(parsed, str):
+            return [parsed] if parsed else []
+        return []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
 
 # ==========================================
 # Response Models
@@ -236,30 +256,59 @@ def create_project(data: ProjectCreate, session: Session = Depends(get_session))
     return project
 
 @router.patch("/projects/{project_id}", response_model=Project)
-def update_project(project_id: int, update_data: ProjectUpdate, session: Session = Depends(get_session)):
+def update_project(
+    project_id: int,
+    update_data: ProjectUpdate,
+    actor: str = Query("human"),
+    session: Session = Depends(get_session),
+):
+    validate_actor(actor)
+
     project = session.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     # 系統專案禁止改名（名稱未變更時放行）
     if project.is_system and update_data.name is not None and update_data.name != project.name:
         raise HTTPException(status_code=403, detail="無法修改系統專案名稱")
-    if update_data.name is not None:
-        project.name = update_data.name
-    if update_data.path is not None:
-        new_path = Path(update_data.path)
+
+    # --- SyncEnforcer：欄位級寫入權限控制 ---
+    registry = load_registry_from_db(session)
+    enforcer = SyncEnforcer(registry)
+
+    _METADATA_FIELDS = {"default_member_id", "room_id", "allow_anonymous"}
+
+    all_changes = {
+        k: v for k, v in update_data.model_dump().items()
+        if v is not None
+    }
+    sync_changes = {k: v for k, v in all_changes.items() if k not in _METADATA_FIELDS}
+    metadata_changes = {k: v for k, v in all_changes.items() if k in _METADATA_FIELDS}
+
+    result = enforcer.validate("project", sync_changes, actor)
+    if result.rejected:
+        rejected_names = [r.field_name for r in result.rejected]
+        logger.info("SyncEnforcer rejected fields for project %d (actor=%s): %s", project_id, actor, rejected_names)
+
+    approved = {**result.approved, **metadata_changes}
+
+    # --- 套用已核准的欄位 ---
+    if "name" in approved:
+        project.name = approved["name"]
+    if "path" in approved:
+        new_path = Path(approved["path"])
         if not new_path.exists():
             raise HTTPException(status_code=400, detail="路徑不存在")
         project.path = str(new_path)
-    if update_data.is_active is not None:
-        project.is_active = update_data.is_active
-    if update_data.deploy_type is not None:
-        project.deploy_type = update_data.deploy_type
-    if update_data.default_member_id is not None:
-        project.default_member_id = update_data.default_member_id if update_data.default_member_id != 0 else None
-    if update_data.room_id is not None:
-        project.room_id = update_data.room_id if update_data.room_id != 0 else None
-    if update_data.allow_anonymous is not None:
-        project.allow_anonymous = update_data.allow_anonymous
+    if "is_active" in approved:
+        project.is_active = approved["is_active"]
+    if "deploy_type" in approved:
+        project.deploy_type = approved["deploy_type"]
+    if "default_member_id" in approved:
+        project.default_member_id = approved["default_member_id"] if approved["default_member_id"] != 0 else None
+    if "room_id" in approved:
+        project.room_id = approved["room_id"] if approved["room_id"] != 0 else None
+    if "allow_anonymous" in approved:
+        project.allow_anonymous = approved["allow_anonymous"]
     session.add(project)
     session.commit()
     session.refresh(project)
@@ -355,7 +404,7 @@ def read_project_board(project_id: int, request: Request, session: Session = Dep
             cards=[CardResponse(
                 id=ci.card_id, list_id=ci.list_id, title=ci.title,
                 description=ci.description, status=ci.status,
-                tags=json.loads(ci.tags_json) if ci.tags_json else [],
+                tags=_safe_parse_tags(ci.tags_json),
                 created_at=ci.created_at,
             ) for ci in list_cards],
             # 階段配置
@@ -411,7 +460,14 @@ def list_project_persons(project_id: int, session: Session = Depends(get_session
 # StageList Routes
 # ==========================================
 @router.patch("/lists/{list_id}")
-def update_stage_list(list_id: int, data: StageListUpdateRequest, session: Session = Depends(get_session)):
+def update_stage_list(
+    list_id: int,
+    data: StageListUpdateRequest,
+    actor: str = Query("human"),
+    session: Session = Depends(get_session),
+):
+    validate_actor(actor)
+
     stage_list = session.get(StageList, list_id)
     if not stage_list:
         raise HTTPException(status_code=404, detail="StageList not found")
@@ -420,35 +476,55 @@ def update_stage_list(list_id: int, data: StageListUpdateRequest, session: Sessi
     if stage_list.is_member_bound and data.member_id is not None and data.member_id != stage_list.member_id:
         raise HTTPException(status_code=403, detail="成員綁定列表無法變更成員指派")
 
-    # 更新名稱
-    if data.name is not None and data.name.strip():
-        stage_list.name = data.name.strip()
+    # --- SyncEnforcer：欄位級寫入權限控制 ---
+    registry = load_registry_from_db(session)
+    enforcer = SyncEnforcer(registry)
 
-    # 更新說明
-    if data.description is not None:
-        stage_list.description = data.description if data.description.strip() else None
+    # metadata 欄位不受 SyncRule 控制，直接通過
+    _METADATA_FIELDS = {
+        "description", "member_id", "system_instruction",
+        "prompt_template", "is_ai_stage", "on_success_action",
+        "on_fail_action", "auto_commit",
+    }
 
-    # 更新位置
-    if data.position is not None:
-        stage_list.position = data.position
+    all_changes = {
+        k: v for k, v in data.model_dump().items()
+        if v is not None
+    }
+    sync_changes = {k: v for k, v in all_changes.items() if k not in _METADATA_FIELDS}
+    metadata_changes = {k: v for k, v in all_changes.items() if k in _METADATA_FIELDS}
 
-    # 更新成員指派
-    if data.member_id is not None:
-        stage_list.member_id = data.member_id if data.member_id != 0 else None
+    result = enforcer.validate("stagelist", sync_changes, actor)
+    if result.rejected:
+        rejected_names = [r.field_name for r in result.rejected]
+        logger.info("SyncEnforcer rejected fields for stagelist %d (actor=%s): %s", list_id, actor, rejected_names)
 
-    # 更新階段配置
-    if data.system_instruction is not None:
-        stage_list.system_instruction = data.system_instruction if data.system_instruction else None
-    if data.prompt_template is not None:
-        stage_list.prompt_template = data.prompt_template if data.prompt_template else None
-    if data.is_ai_stage is not None:
-        stage_list.is_ai_stage = data.is_ai_stage
+    approved = {**result.approved, **metadata_changes}
 
-    # 更新完成/失敗動作
-    if data.on_success_action is not None:
-        stage_list.on_success_action = data.on_success_action
-    if data.on_fail_action is not None:
-        stage_list.on_fail_action = data.on_fail_action
+    # --- 套用已核准的欄位 ---
+    if "name" in approved and approved["name"] and str(approved["name"]).strip():
+        stage_list.name = str(approved["name"]).strip()
+
+    if "description" in approved:
+        stage_list.description = approved["description"] if approved["description"] and str(approved["description"]).strip() else None
+
+    if "position" in approved:
+        stage_list.position = approved["position"]
+
+    if "member_id" in approved:
+        stage_list.member_id = approved["member_id"] if approved["member_id"] != 0 else None
+
+    if "system_instruction" in approved:
+        stage_list.system_instruction = approved["system_instruction"] if approved["system_instruction"] else None
+    if "prompt_template" in approved:
+        stage_list.prompt_template = approved["prompt_template"] if approved["prompt_template"] else None
+    if "is_ai_stage" in approved:
+        stage_list.is_ai_stage = approved["is_ai_stage"]
+
+    if "on_success_action" in approved:
+        stage_list.on_success_action = approved["on_success_action"]
+    if "on_fail_action" in approved:
+        stage_list.on_fail_action = approved["on_fail_action"]
 
     session.add(stage_list)
     session.commit()

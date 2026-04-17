@@ -99,20 +99,48 @@
     }
   ],
 
+  "chairGroups": [
+    {
+      "name": "辦公椅",
+      "directions": { "down": 2562, "up": 2566, "left": 2573, "right": 2574 },
+      "variants": {
+        "down_left": 2563,
+        "down_right": 2564
+      }
+    },
+    {
+      "name": "高背椅",
+      "directions": { "down": 2569, "up": 2568 }
+    },
+    {
+      "name": "辦公椅B",
+      "directions": { "up": 2572 }
+    },
+    {
+      "name": "會議椅",
+      "directions": { "down": 2580 },
+      "variants": {
+        "down_b": 2581,
+        "down_c": 2582,
+        "down_d": 2583
+      }
+    }
+  ],
+
   "nativeObjects": [
-    { "gid": 2562, "name": "辦公椅(下)", "layer": "Chair", "category": "chairs" },
-    { "gid": 2563, "name": "辦公椅(下左)", "layer": "Chair", "category": "chairs" },
-    { "gid": 2564, "name": "辦公椅(下右)", "layer": "Chair", "category": "chairs" },
-    { "gid": 2566, "name": "辦公椅(上)", "layer": "Chair", "category": "chairs" },
-    { "gid": 2568, "name": "高背椅(上)", "layer": "Chair", "category": "chairs" },
-    { "gid": 2569, "name": "高背椅(下)", "layer": "Chair", "category": "chairs" },
-    { "gid": 2572, "name": "辦公椅B(上)", "layer": "Chair", "category": "chairs" },
-    { "gid": 2573, "name": "辦公椅(左)", "layer": "Chair", "category": "chairs" },
-    { "gid": 2574, "name": "辦公椅(右)", "layer": "Chair", "category": "chairs" },
-    { "gid": 2580, "name": "會議椅A", "layer": "Chair", "category": "chairs" },
-    { "gid": 2581, "name": "會議椅B", "layer": "Chair", "category": "chairs" },
-    { "gid": 2582, "name": "會議椅C", "layer": "Chair", "category": "chairs" },
-    { "gid": 2583, "name": "會議椅D", "layer": "Chair", "category": "chairs" },
+    { "gid": 2562, "name": "辦公椅(下)", "layer": "Chair", "category": "chairs", "dir": "down" },
+    { "gid": 2563, "name": "辦公椅(下左)", "layer": "Chair", "category": "chairs", "dir": "down" },
+    { "gid": 2564, "name": "辦公椅(下右)", "layer": "Chair", "category": "chairs", "dir": "down" },
+    { "gid": 2566, "name": "辦公椅(上)", "layer": "Chair", "category": "chairs", "dir": "up" },
+    { "gid": 2568, "name": "高背椅(上)", "layer": "Chair", "category": "chairs", "dir": "up" },
+    { "gid": 2569, "name": "高背椅(下)", "layer": "Chair", "category": "chairs", "dir": "down" },
+    { "gid": 2572, "name": "辦公椅B(上)", "layer": "Chair", "category": "chairs", "dir": "up" },
+    { "gid": 2573, "name": "辦公椅(左)", "layer": "Chair", "category": "chairs", "dir": "left" },
+    { "gid": 2574, "name": "辦公椅(右)", "layer": "Chair", "category": "chairs", "dir": "right" },
+    { "gid": 2580, "name": "會議椅A", "layer": "Chair", "category": "chairs", "dir": "down" },
+    { "gid": 2581, "name": "會議椅B", "layer": "Chair", "category": "chairs", "dir": "down" },
+    { "gid": 2582, "name": "會議椅C", "layer": "Chair", "category": "chairs", "dir": "down" },
+    { "gid": 2583, "name": "會議椅D", "layer": "Chair", "category": "chairs", "dir": "down" },
     { "gid": 4680, "name": "電腦A", "layer": "Computer", "category": "computers" },
     { "gid": 4681, "name": "電腦B", "layer": "Computer", "category": "computers" },
     { "gid": 4682, "name": "電腦C", "layer": "Computer", "category": "computers" },

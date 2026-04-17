@@ -215,6 +215,18 @@ def select_best_account(session: Session, member_id: int) -> Optional[Account]:
             activate_account(account)
             return account
 
+        elif account.provider == "openai":
+            # OpenAI API Key 格式驗證（sk- 開頭）
+            try:
+                from app.core.env_builder import EnvironmentBuilder
+                env = EnvironmentBuilder().with_db_settings(None).build()
+                api_key = env.get("OPENAI_API_KEY", "")
+                if api_key and api_key.startswith("sk-"):
+                    activate_account(account)
+                    return account
+            except Exception:
+                pass
+
         elif account.provider == "ollama":
             # Ollama 本地運行，檢查服務是否可用
             try:

@@ -84,42 +84,49 @@ def _short_path(fp: str) -> str:
     return "/".join(parts[-2:]) if len(parts) > 2 else fp
 
 
-def translate_tool(tool: str, inp: dict) -> Tuple[str, str]:
-    """將工具名稱和參數翻譯成人話
+_TOOL_SUMMARIES = {
+        "Read":      lambda t, i: f"📖 讀取 {_short_path(i.get('file_path', ''))}",
+        "Edit":      lambda t, i: f"✏️ 修改 {_short_path(i.get('file_path', ''))}",
+        "Write":     lambda t, i: f"📝 建立 {_short_path(i.get('file_path', ''))}",
+        "Bash":      lambda t, i: f"💻 {i.get('description', '')[:40] or i.get('command', '')[:60]}",
+        "Grep":      lambda t, i: f"🔍 搜尋 {i.get('pattern', '')[:40]}",
+        "Glob":      lambda t, i: f"📁 搜尋檔案 {i.get('pattern', '')[:40]}",
+        "WebFetch":  lambda t, i: f"🌐 取得 {i.get('url', '')[:60]}",
+        "WebSearch":  lambda t, i: f"🔎 搜尋 {i.get('query', '')[:40]}",
+        "Agent":     lambda t, i: f"🤖 {i.get('description', '子代理')[:40]}",
+    "Skill":     lambda t, i: f"⚡ 技能 {i.get('skill', '')}",
+}
 
-    Returns: (event_type, summary)
+
+def translate_tool(tool: str, inp: dict) -> Optional[Dict[str, Any]]:
+    """將工具名稱和參數翻譯成結構化 dict
+
+    Returns: dict with event_type, summary, tool_name, arguments
+             或 None（不值得顯示的工具，如 TodoWrite）
     """
-    if tool == "Read":
-        return ("tool_call", f"📖 讀取 {_short_path(inp.get('file_path', ''))}")
-    elif tool == "Edit":
-        return ("tool_call", f"✏️ 修改 {_short_path(inp.get('file_path', ''))}")
-    elif tool == "Write":
-        return ("tool_call", f"📝 建立 {_short_path(inp.get('file_path', ''))}")
-    elif tool == "Bash":
-        cmd = inp.get("command", "")[:60]
-        desc = inp.get("description", "")
-        label = desc[:40] if desc else cmd
-        return ("tool_call", f"💻 {label}")
-    elif tool == "Grep":
-        return ("tool_call", f"🔍 搜尋 {inp.get('pattern', '')[:40]}")
-    elif tool == "Glob":
-        return ("tool_call", f"📁 搜尋檔案 {inp.get('pattern', '')[:40]}")
-    elif tool == "WebFetch":
-        return ("tool_call", f"🌐 取得 {inp.get('url', '')[:60]}")
-    elif tool == "WebSearch":
-        return ("tool_call", f"🔎 搜尋 {inp.get('query', '')[:40]}")
-    elif tool == "Agent":
-        return ("tool_call", f"🤖 {inp.get('description', '子代理')[:40]}")
-    elif tool == "Skill":
-        return ("tool_call", f"⚡ 技能 {inp.get('skill', '')}")
-    elif tool == "TodoWrite":
+    if tool == "TodoWrite":
         return None
-    else:
-        return ("tool_call", f"🔧 {tool}")
+
+    fmt = _TOOL_SUMMARIES.get(tool)
+    summary = fmt(tool, inp) if fmt else f"🔧 {tool}"
+
+    return {
+        "event_type": "tool_call",
+        "summary": summary,
+        "tool_name": tool,
+        "arguments": inp,
+    }
 
 
-def parse_tool_call(line: str) -> Optional[Tuple[str, str]]:
-    """從 stream-json 行解析工具呼叫，回傳 (event_type, 人話摘要)
+def parse_tool_call(line: str) -> Optional[Dict[str, Any]]:
+    """從 stream-json 行解析工具呼叫，回傳結構化 dict
+
+    Returns dict with keys:
+        event_type: "tool_call" | "output"
+        summary: 人話摘要（emoji + 說明）
+        tool_name: 工具名稱（僅 tool_call）
+        arguments: 工具參數（僅 tool_call）
+        content_blocks: 原始 content blocks
 
     Returns None 表示不是工具呼叫或不值得顯示
     """
@@ -144,16 +151,54 @@ def parse_tool_call(line: str) -> Optional[Tuple[str, str]]:
         if ptype == "tool_use":
             tool = part.get("name", "")
             inp = part.get("input", {})
-            return translate_tool(tool, inp)
+            result = translate_tool(tool, inp)
+            if result is not None:
+                result["content_blocks"] = content
+            return result
 
         if ptype == "text":
             text = part.get("text", "").strip()
             if text and len(text) < 200:
-                return ("output", f"💬 {text[:100]}")
+                return {
+                    "event_type": "output",
+                    "summary": f"💬 {text[:100]}",
+                    "tool_name": None,
+                    "arguments": None,
+                    "content_blocks": content,
+                }
 
         if ptype == "thinking":
-            return ("output", "💭 思考中...")
+            return {
+                "event_type": "output",
+                "summary": "💭 思考中...",
+                "tool_name": None,
+                "arguments": None,
+                "content_blocks": content,
+            }
 
+    return None
+
+
+def parse_structured_content(line: str) -> Optional[list]:
+    """從 assistant 訊息提取完整 content blocks
+
+    Returns: content blocks list 或 None
+    """
+    try:
+        data = json.loads(line.strip())
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+    if data.get("type") != "assistant":
+        return None
+
+    msg = data.get("message", {}) if isinstance(data, dict) else {}
+    if not msg:
+        msg = data
+
+    content = msg.get("content", [])
+    if isinstance(content, list) and content:
+        return content
     return None
 
 
@@ -213,7 +258,33 @@ def parse_openai_stream(line: str) -> Optional[str]:
 
 
 def parse_openai_json(output: str) -> Dict[str, Any]:
-    """從 OpenAI CLI wrapper 的 JSON 輸出解析結果與 token 用量"""
+    """從 OpenAI CLI wrapper 的 JSON 輸出解析結果與 token 用量
+
+    支援兩種格式：
+    - 多行 stream-json：逐行掃描找 type=result 的行
+    - 單一 JSON（舊格式）：直接解析整段輸出
+    """
+    # 多行 stream-json：逐行掃描找 type=result
+    for line in output.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            data = json.loads(line)
+            if data.get("type") == "result":
+                usage = data.get("usage", {})
+                return {
+                    "result_text": data.get("result", ""),
+                    "model": data.get("model", ""),
+                    "duration_ms": data.get("duration_ms", 0),
+                    "cost_usd": data.get("total_cost_usd", 0),
+                    "input_tokens": usage.get("input_tokens", 0),
+                    "output_tokens": usage.get("output_tokens", 0),
+                }
+        except (json.JSONDecodeError, ValueError):
+            continue
+
+    # 舊格式 fallback：單一 JSON，key 在頂層
     try:
         data = json.loads(output.strip())
         return {

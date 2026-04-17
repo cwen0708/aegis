@@ -1,5 +1,6 @@
 from typing import Optional, List
 from datetime import datetime, timezone
+from pydantic import field_validator
 from sqlmodel import SQLModel, Field, Relationship
 from sqlalchemy import UniqueConstraint
 
@@ -47,6 +48,7 @@ class StageList(SQLModel, table=True):
     on_success_action: str = Field(default="none")
     on_fail_action: str = Field(default="none")
     auto_commit: bool = Field(default=False)  # 成功自動 git commit，失敗自動 shelve 到分支
+    gate_enabled: bool = Field(default=False)  # 啟用 build gate 閘門檢查（語法驗證）
 
     project: Optional[Project] = Relationship(back_populates="lists")
     cards: List["Card"] = Relationship(back_populates="stage_list")
@@ -84,6 +86,8 @@ class CardIndex(SQLModel, table=True):
     tags_json: str = Field(default="[]")
     model: Optional[str] = Field(default=None)  # 卡片級模型指定（如 haiku / sonnet / opus）
     parent_id: Optional[int] = Field(default=None, index=True)  # 父卡片 ID（Leader-Worker）
+    max_rounds: int = Field(default=1)  # Ralph Loop 最大迭代輪數
+    acceptance_criteria: Optional[str] = Field(default=None)  # 完成條件（Sprint Contract）
     is_archived: bool = Field(default=False, index=True)  # 封存後在看板隱藏
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -151,6 +155,23 @@ class SystemSetting(SQLModel, table=True):
 
 
 # ==========================================
+# 同步規則 (Sync Matrix)
+# ==========================================
+class SyncRule(SQLModel, table=True):
+    """欄位級同步規則 — 控制每個實體欄位的寫入權限與衝突策略"""
+    __table_args__ = (UniqueConstraint("entity_type", "field_name"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    entity_type: str = Field(index=True)  # "card" | "stagelist" | "member" | "project"
+    field_name: str  # "title" | "description" | "status" 等
+    writable_by: str = Field(default="both")  # "ai" | "human" | "both"
+    sync_direction: Optional[str] = Field(default=None)  # "ai_to_human" | "human_to_ai" | "bidirectional" | "read_only" | None(從 writable_by 推導)
+    conflict_strategy: str = Field(default="last_write_wins")  # "last_write_wins" | "human_wins" | "ai_wins" | "manual_merge" | "ai_merge"
+    is_enabled: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# ==========================================
 # 多帳號管理 (Multi-Account)
 # ==========================================
 class Account(SQLModel, table=True):
@@ -185,6 +206,8 @@ class Member(SQLModel, table=True):
     sprite_sheet: str = ""  # sprite sheet 路徑（如 /uploads/sprites/1/sheet_20260323.png）
     sprite_scale: float = Field(default=1.0)  # sprite 縮放比例（前端用）
     hook_profile: str = Field(default="standard")  # "minimal" | "standard" | "strict" — hook 嚴格度設定
+    # 額外設定 JSON（如 elevenlabs_voice_id、tts_voice、語音偏好等）
+    extra_json: str = Field(default="{}")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -287,6 +310,7 @@ class Person(SQLModel, table=True):
     level: int = Field(default=0)               # 0=未驗證, 1=訪客, 2=成員, 3=管理員
     default_member_id: Optional[int] = Field(default=None, foreign_key="member.id")
     access_expires_at: Optional[datetime] = None
+    is_active: bool = Field(default=True)
 
     # 額外資料（JSON，如 AD 帳密、自訂欄位）— 跨平台共用
     extra_json: str = Field(default="{}")
@@ -640,8 +664,15 @@ class Room(SQLModel, table=True):
     name: str                                    # "研發部", "維運中心"
     description: str = Field(default="")
     layout_json: str = Field(default="{}")       # Phaser 辦公室佈局
-    layout_type: str = Field(default="tiled")    # "tiled" | "classic"
+    layout_type: str = Field(default="tiled")
     position: int = Field(default=0)             # 顯示順序
+
+    @field_validator("layout_type")
+    @classmethod
+    def _validate_layout_type(cls, v: str) -> str:
+        if v not in ("classic", "tiled"):
+            raise ValueError(f"layout_type must be 'classic' or 'tiled', got '{v}'")
+        return v
     is_active: bool = Field(default=True)
     allow_anonymous: bool = Field(default=False)  # 允許未登入瀏覽
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -696,6 +727,45 @@ class PromptQueueEntry(SQLModel, table=True):
     status: str = Field(default="pending", index=True)    # pending | processing | processed | failed
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class NamedSession(SQLModel, table=True):
+    """命名工作區 Session — 跨卡片的持久工作區，AI 成員可在多張卡片間共用"""
+    __table_args__ = (
+        UniqueConstraint("member_id", "name", name="uq_namedsession_member_name"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    member_id: int = Field(foreign_key="member.id", index=True)
+    name: str = Field(index=True)          # session 名稱，如 "refactor-auth"
+    project_id: Optional[int] = Field(default=None, foreign_key="project.id")
+    description: str = Field(default="")   # 用途描述
+    workspace_path: str = Field(default="")  # 實際工作區絕對路徑
+
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class PendingConflict(SQLModel, table=True):
+    """延遲衝突記錄 — MANUAL_MERGE / AI_MERGE 產生的待處理衝突"""
+    __table_args__ = (
+        UniqueConstraint("card_id", "field_name", "status", name="uq_pending_conflict_card_field_status"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    card_id: int = Field(foreign_key="card.id", index=True)
+    field_name: str
+    local_value: Optional[str] = None
+    local_updated_at: Optional[datetime] = None
+    local_actor: str = ""
+    remote_value: Optional[str] = None
+    remote_updated_at: Optional[datetime] = None
+    remote_actor: str = ""
+    strategy: str = ""  # manual_merge | ai_merge
+    status: str = Field(default="pending", index=True)  # pending | resolved | dismissed
+    resolved_value: Optional[str] = None
+    resolved_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Domain(SQLModel, table=True):

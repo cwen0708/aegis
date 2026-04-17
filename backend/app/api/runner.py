@@ -156,7 +156,8 @@ async def internal_broadcast_log(req: BroadcastLogRequest):
             if not event_type:
                 parsed = _parse_tool_call(req.line)
                 if parsed:
-                    event_type, line = parsed
+                    event_type = parsed["event_type"]
+                    line = parsed["summary"]
 
             if event_type:
                 now = time.time()

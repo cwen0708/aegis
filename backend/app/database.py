@@ -264,6 +264,11 @@ def _migrate_db():
             cur.execute("ALTER TABLE member ADD COLUMN hook_profile TEXT DEFAULT 'standard'")
             logger.info("[Migration] Added 'hook_profile' column to member (default='standard')")
 
+        # Member 加 extra_json 欄位（存 TTS 偏好、ElevenLabs voice_id 等）
+        if "extra_json" not in cols:
+            cur.execute("ALTER TABLE member ADD COLUMN extra_json TEXT DEFAULT '{}'")
+            logger.info("[Migration] Added 'extra_json' column to member (default='{}')")
+
         # Room: layout_type 一次性遷移 — 原有房間改為 "classic"（新建房間預設 "tiled"）
         if "room" in tables:
             cols = [row[1] for row in cur.execute("PRAGMA table_info(room)").fetchall()]

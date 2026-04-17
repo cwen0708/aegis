@@ -4,7 +4,7 @@
  */
 import Phaser from 'phaser'
 
-export const ASSET_BASE = 'assets/office2'
+export const ASSET_BASE = '/assets/office2'
 export const TILE_SIZE = 32
 
 // tileset name → spritesheet key 映射

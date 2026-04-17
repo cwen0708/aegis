@@ -6,11 +6,25 @@ AI 設定檔模板產生器 — 多 Provider / Chat / Task 共用
 
 合併原本分散在 chat_workspace.py 和 task_workspace.py 中的模板邏輯。
 """
+import asyncio
 import logging
 from pathlib import Path
 from typing import Optional, List, Literal
 
 logger = logging.getLogger(__name__)
+
+# ── 安全限制（內聯 failsafe，即使 .claude/rules/ 缺失也生效）──
+_SECURITY_RESTRICTIONS = """
+禁止存取：
+- ~/.claude/、~/.ssh/、~/.config/
+- 任何 .env、*.db、credentials 檔案
+禁止操作：
+- 禁止修改系統檔案（MCP 原始碼、設定檔、.env、CLAUDE.md、skill 檔案等）
+- 禁止安裝套件（pip install、npm install、apt install 等）
+- 禁止執行破壞性指令（rm -rf、kill、systemctl 等）
+- 禁止執行 kill/pkill/killall/taskkill 等進程管理命令
+- 禁止修改系統設定或安裝全域套件
+""".strip()
 
 _INSTALL_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
@@ -21,6 +35,7 @@ PROVIDER_CONFIG = {
     "gemini": {"config_file": "Gemini.md", "dot_dir": ".gemini"},
     "codex":  {"config_file": "CODEX.md",  "dot_dir": ".codex"},
     "ollama": {"config_file": "OLLAMA.md", "dot_dir": ".ollama"},
+    "openai": {"config_file": "OPENAI.md", "dot_dir": ".openai"},
 }
 
 
@@ -47,6 +62,7 @@ def build_config_md(
     stage_name: str = "",
     stage_description: str = "",
     stage_instruction: str = "",
+    acceptance_criteria: str = "",
     # Chat-specific
     user_context=None,
     accessible_projects: Optional[List] = None,
@@ -69,6 +85,7 @@ def build_config_md(
             stage_name=stage_name,
             stage_description=stage_description,
             stage_instruction=stage_instruction,
+            acceptance_criteria=acceptance_criteria,
         )
     else:
         return _build_chat_md(
@@ -158,13 +175,7 @@ def _build_chat_md(
             lines.append(f"任務描述最後請加上：「完成後請透過 {platform} 通知 chat_id={chat_id}」")
         lines.append("")
 
-    # 安全限制
-    lines.append("# 安全限制")
-    lines.append("- 禁止修改系統檔案（MCP 原始碼、設定檔、.env、CLAUDE.md、skill 檔案等）")
-    lines.append("- 禁止安裝套件（pip install、npm install、apt install 等）")
-    lines.append("- 禁止執行破壞性指令（rm -rf、kill、systemctl 等）")
-    lines.append("- 如果用戶要求修改系統或程式碼，請建議建立任務卡片或聯繫管理員")
-    lines.append("")
+    # 安全限制：靜態規則已移至 .claude/rules/security.md，chat 模式不再內嵌
 
     # 回應風格
     lines.append("# 回應風格")
@@ -202,10 +213,35 @@ def _build_task_md(
     stage_name: str = "",
     stage_description: str = "",
     stage_instruction: str = "",
+    acceptance_criteria: str = "",
 ) -> str:
-    """生成 task 專用設定檔（含 workspace 資訊、記憶路徑、階段指令）。"""
+    """生成 task 專用設定檔（含 workspace 資訊、記憶路徑、階段指令、歷史記憶注入）。"""
     from app.core.member_profile import get_member_memory_dir
+    from app.core.executor.memory import retrieve_task_memory
+
     memory_path = get_member_memory_dir(member_slug)
+
+    # 獲取相關過往經驗（在新 event loop 中執行，避免巢狀 loop crash）
+    task_memories: list = []
+    try:
+        loop = asyncio.new_event_loop()
+        try:
+            task_memories = loop.run_until_complete(
+                asyncio.wait_for(
+                    retrieve_task_memory(
+                        card_title=card_content.split('\n')[0][:100],
+                        card_description=card_content,
+                        member_slug=member_slug,
+                    ),
+                    timeout=2.0
+                )
+            )
+        finally:
+            loop.close()
+    except asyncio.TimeoutError:
+        logger.warning("Task memory retrieval timeout for %s", member_slug)
+    except Exception as e:
+        logger.warning("Failed to retrieve task memory: %s", e)
 
     # 階段說明區塊
     stage_section = ""
@@ -217,20 +253,23 @@ def _build_task_md(
             parts.append(f"\n## 階段指令\n{stage_instruction}")
         stage_section = "\n".join(parts) + "\n"
 
-    # 安全限制區塊
+    # 安全限制（內聯 failsafe + .claude/rules/ 雙重保障）
     install_root = str(_INSTALL_ROOT)
     security_section = f"""# 安全限制
 你只能在以下目錄操作：
 1. {project_path} — 專案目錄
 2. 當前工作區目錄（臨時）
 
-禁止存取：
+禁止存取的路徑：
 - Aegis 安裝目錄（{install_root}）
-- ~/.claude/、~/.ssh/、~/.config/
-- 任何 .env、*.db、credentials 檔案
-- 禁止執行 kill/pkill/killall/taskkill 等進程管理命令
-- 禁止修改系統設定或安裝全域套件
+{_SECURITY_RESTRICTIONS}
 """
+
+    # 相關過往經驗 section
+    memories_section = ""
+    if task_memories:
+        memories_text = "\n".join([f"- {m['content']}" for m in task_memories])
+        memories_section = f"\n## 相關過往經驗\n{memories_text}\n"
 
     return f"""# 工作目錄
 你的工作目錄（cwd）是臨時工作區，專案檔案已透過 symlink 連結進來。
@@ -249,10 +288,9 @@ git 操作在此目錄中可直接執行（.git 已連結）。
 {memory_path}
 - short-term/ 短期記憶（近期任務摘要）
 - long-term/ 長期記憶（累積的經驗與模式）
-需要回憶時可以去讀取。
-
+需要回憶時可以去讀取。{memories_section}
 {stage_section}
-# 本次任務
+{"# 完成條件（Acceptance Criteria）\n" + acceptance_criteria + "\n\n" if acceptance_criteria else ""}# 本次任務
 {card_content}
 
 # 任務完成後

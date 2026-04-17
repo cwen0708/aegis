@@ -21,6 +21,13 @@ class MessageType(str, Enum):
     DOCUMENT = "document"
 
 
+def classify_message_type(text: str) -> MessageType:
+    """依據訊息文字判斷 MessageType（COMMAND 或 TEXT）"""
+    if text.startswith("/"):
+        return MessageType.COMMAND
+    return MessageType.TEXT
+
+
 class ParseMode(str, Enum):
     """文字解析模式"""
     PLAIN = "plain"

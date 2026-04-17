@@ -5,6 +5,7 @@ from app.core.stream_parsers import (
     parse_claude_json,
     parse_stream_json_text,
     parse_stream_json_tokens,
+    parse_structured_content,
     _short_path,
     translate_tool,
     parse_tool_call,
@@ -155,55 +156,67 @@ def test_short_path_single():
 # ── translate_tool ───────────────────────────────────────────
 
 def test_translate_read():
-    assert translate_tool("Read", {"file_path": "/a/b/c.py"}) == ("tool_call", "📖 讀取 b/c.py")
+    r = translate_tool("Read", {"file_path": "/a/b/c.py"})
+    assert r["event_type"] == "tool_call"
+    assert r["summary"] == "📖 讀取 b/c.py"
+    assert r["tool_name"] == "Read"
+    assert r["arguments"] == {"file_path": "/a/b/c.py"}
 
 
 def test_translate_edit():
-    assert translate_tool("Edit", {"file_path": "/a/b/c.py"}) == ("tool_call", "✏️ 修改 b/c.py")
+    r = translate_tool("Edit", {"file_path": "/a/b/c.py"})
+    assert r["event_type"] == "tool_call"
+    assert r["summary"] == "✏️ 修改 b/c.py"
+    assert r["tool_name"] == "Edit"
 
 
 def test_translate_write():
-    assert translate_tool("Write", {"file_path": "/a/b/c.py"}) == ("tool_call", "📝 建立 b/c.py")
+    r = translate_tool("Write", {"file_path": "/a/b/c.py"})
+    assert r["event_type"] == "tool_call"
+    assert r["summary"] == "📝 建立 b/c.py"
 
 
 def test_translate_bash_with_desc():
     r = translate_tool("Bash", {"command": "ls -la", "description": "列出檔案"})
-    assert r == ("tool_call", "💻 列出檔案")
+    assert r["event_type"] == "tool_call"
+    assert r["summary"] == "💻 列出檔案"
+    assert r["tool_name"] == "Bash"
+    assert r["arguments"]["command"] == "ls -la"
 
 
 def test_translate_bash_no_desc():
     r = translate_tool("Bash", {"command": "git status"})
-    assert r == ("tool_call", "💻 git status")
+    assert r["summary"] == "💻 git status"
 
 
 def test_translate_grep():
     r = translate_tool("Grep", {"pattern": "TODO"})
-    assert r == ("tool_call", "🔍 搜尋 TODO")
+    assert r["summary"] == "🔍 搜尋 TODO"
 
 
 def test_translate_glob():
     r = translate_tool("Glob", {"pattern": "**/*.py"})
-    assert r == ("tool_call", "📁 搜尋檔案 **/*.py")
+    assert r["summary"] == "📁 搜尋檔案 **/*.py"
 
 
 def test_translate_webfetch():
     r = translate_tool("WebFetch", {"url": "https://example.com"})
-    assert r == ("tool_call", "🌐 取得 https://example.com")
+    assert r["summary"] == "🌐 取得 https://example.com"
 
 
 def test_translate_websearch():
     r = translate_tool("WebSearch", {"query": "python asyncio"})
-    assert r == ("tool_call", "🔎 搜尋 python asyncio")
+    assert r["summary"] == "🔎 搜尋 python asyncio"
 
 
 def test_translate_agent():
     r = translate_tool("Agent", {"description": "分析程式碼"})
-    assert r == ("tool_call", "🤖 分析程式碼")
+    assert r["summary"] == "🤖 分析程式碼"
 
 
 def test_translate_skill():
     r = translate_tool("Skill", {"skill": "commit"})
-    assert r == ("tool_call", "⚡ 技能 commit")
+    assert r["summary"] == "⚡ 技能 commit"
 
 
 def test_translate_todowrite():
@@ -212,13 +225,15 @@ def test_translate_todowrite():
 
 def test_translate_unknown():
     r = translate_tool("CustomTool", {})
-    assert r == ("tool_call", "🔧 CustomTool")
+    assert r["event_type"] == "tool_call"
+    assert r["summary"] == "🔧 CustomTool"
+    assert r["tool_name"] == "CustomTool"
 
 
 def test_translate_long_truncation():
     long_pattern = "a" * 100
     r = translate_tool("Grep", {"pattern": long_pattern})
-    assert len(r[1]) < 100  # 被截斷
+    assert len(r["summary"]) < 100  # 被截斷
 
 
 # ── parse_tool_call ──────────────────────────────────────────
@@ -228,8 +243,11 @@ def test_parse_tool_call_tool_use():
         "content": [{"type": "tool_use", "name": "Read", "input": {"file_path": "/x/y.py"}}]
     })
     r = parse_tool_call(line)
-    assert r[0] == "tool_call"
-    assert "讀取" in r[1]
+    assert r["event_type"] == "tool_call"
+    assert "讀取" in r["summary"]
+    assert r["tool_name"] == "Read"
+    assert r["arguments"] == {"file_path": "/x/y.py"}
+    assert r["content_blocks"] is not None
 
 
 def test_parse_tool_call_short_text():
@@ -237,7 +255,10 @@ def test_parse_tool_call_short_text():
         "content": [{"type": "text", "text": "分析完成"}]
     })
     r = parse_tool_call(line)
-    assert r == ("output", "💬 分析完成")
+    assert r["event_type"] == "output"
+    assert r["summary"] == "💬 分析完成"
+    assert r["tool_name"] is None
+    assert r["content_blocks"] is not None
 
 
 def test_parse_tool_call_long_text_skipped():
@@ -251,7 +272,10 @@ def test_parse_tool_call_thinking():
     line = json.dumps({
         "content": [{"type": "thinking", "text": "let me think"}]
     })
-    assert parse_tool_call(line) == ("output", "💭 思考中...")
+    r = parse_tool_call(line)
+    assert r["event_type"] == "output"
+    assert r["summary"] == "💭 思考中..."
+    assert r["tool_name"] is None
 
 
 def test_parse_tool_call_invalid_json():
@@ -277,8 +301,49 @@ def test_parse_tool_call_with_message_wrapper():
         }
     })
     r = parse_tool_call(line)
-    assert r[0] == "tool_call"
-    assert "ls" in r[1]
+    assert r["event_type"] == "tool_call"
+    assert "ls" in r["summary"]
+    assert r["tool_name"] == "Bash"
+
+
+# ── parse_structured_content ────────────────────────────────
+
+def test_parse_structured_content_assistant():
+    line = json.dumps({
+        "type": "assistant",
+        "content": [{"type": "text", "text": "hello"}],
+    })
+    blocks = parse_structured_content(line)
+    assert blocks == [{"type": "text", "text": "hello"}]
+
+
+def test_parse_structured_content_with_message():
+    line = json.dumps({
+        "type": "assistant",
+        "message": {
+            "content": [
+                {"type": "tool_use", "name": "Read", "input": {"file_path": "/a.py"}},
+                {"type": "text", "text": "done"},
+            ]
+        },
+    })
+    blocks = parse_structured_content(line)
+    assert len(blocks) == 2
+    assert blocks[0]["type"] == "tool_use"
+
+
+def test_parse_structured_content_non_assistant():
+    line = json.dumps({"type": "result", "content": [{"type": "text", "text": "x"}]})
+    assert parse_structured_content(line) is None
+
+
+def test_parse_structured_content_empty_content():
+    line = json.dumps({"type": "assistant", "content": []})
+    assert parse_structured_content(line) is None
+
+
+def test_parse_structured_content_invalid_json():
+    assert parse_structured_content("{bad") is None
 
 
 # ── parse_ollama_stream ─────────────────────────────────────
@@ -391,8 +456,45 @@ class TestParseOpenaiStream:
 class TestParseOpenaiJson:
     """parse_openai_json 函式測試。"""
 
-    def test_full_payload(self):
-        """完整 payload 解析所有欄位。"""
+    def test_new_format_result_line(self):
+        """新格式 stream-json：type=result 行正確解析。"""
+        data = json.dumps({
+            "type": "result",
+            "result": "回答完成",
+            "model": "gpt-4o",
+            "duration_ms": 2345,
+            "total_cost_usd": 0.03,
+            "usage": {"input_tokens": 150, "output_tokens": 80},
+        })
+        r = parse_openai_json(data)
+        assert r["result_text"] == "回答完成"
+        assert r["model"] == "gpt-4o"
+        assert r["duration_ms"] == 2345
+        assert r["cost_usd"] == 0.03
+        assert r["input_tokens"] == 150
+        assert r["output_tokens"] == 80
+
+    def test_new_format_multiline(self):
+        """多行 stream-json：從多行中找到 type=result 行解析。"""
+        lines = "\n".join([
+            json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "Hello"}]}}),
+            json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": " world"}]}}),
+            json.dumps({
+                "type": "result",
+                "result": "Hello world",
+                "model": "gpt-4o",
+                "duration_ms": 1000,
+                "total_cost_usd": 0.01,
+                "usage": {"input_tokens": 50, "output_tokens": 10},
+            }),
+        ])
+        r = parse_openai_json(lines)
+        assert r["result_text"] == "Hello world"
+        assert r["input_tokens"] == 50
+        assert r["output_tokens"] == 10
+
+    def test_legacy_format_full_payload(self):
+        """舊格式 fallback：頂層 key 仍能正確解析。"""
         data = json.dumps({
             "result_text": "回答完成",
             "model": "gpt-4o",
@@ -427,12 +529,20 @@ class TestParseOpenaiJson:
         """空字串 → 空 dict。"""
         assert parse_openai_json("") == {}
 
-    def test_partial_fields(self):
-        """部分欄位缺失 → 缺失欄位使用預設值。"""
+    def test_legacy_partial_fields(self):
+        """舊格式部分欄位缺失 → 缺失欄位使用預設值。"""
         data = json.dumps({"result_text": "ok", "model": "gpt-4o-mini"})
         r = parse_openai_json(data)
         assert r["result_text"] == "ok"
         assert r["model"] == "gpt-4o-mini"
         assert r["duration_ms"] == 0
+        assert r["input_tokens"] == 0
+        assert r["output_tokens"] == 0
+
+    def test_new_format_missing_usage(self):
+        """新格式 usage 缺失 → token 欄位回傳 0。"""
+        data = json.dumps({"type": "result", "result": "ok"})
+        r = parse_openai_json(data)
+        assert r["result_text"] == "ok"
         assert r["input_tokens"] == 0
         assert r["output_tokens"] == 0

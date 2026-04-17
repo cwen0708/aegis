@@ -202,14 +202,17 @@ class TestEnvironmentBuilderGlobalKeys:
         mock_google_setting = Mock()
         mock_google_setting.value = 'google_key_456'
 
+        mock_openai_setting = Mock()
+        mock_openai_setting.value = 'sk-test-openai-key'
+
         with patch('sqlmodel.Session') as mock_session_class:
             mock_session_instance = MagicMock()
             mock_session_class.return_value.__enter__.return_value = mock_session_instance
 
-            # Mock 兩次呼叫 session.get()
             mock_session_instance.get.side_effect = [
                 mock_gemini_setting,
-                mock_google_setting
+                mock_google_setting,
+                mock_openai_setting,
             ]
 
             builder = EnvironmentBuilder()
@@ -218,6 +221,7 @@ class TestEnvironmentBuilderGlobalKeys:
 
             assert env['GEMINI_API_KEY'] == 'gemini_key_123'
             assert env['GOOGLE_API_KEY'] == 'google_key_456'
+            assert env['OPENAI_API_KEY'] == 'sk-test-openai-key'
 
     def test_with_global_api_keys_skips_empty_values(self):
         """with_global_api_keys() 應跳過空值"""
@@ -227,12 +231,16 @@ class TestEnvironmentBuilderGlobalKeys:
         mock_google_setting = Mock()
         mock_google_setting.value = None
 
+        mock_openai_setting = Mock()
+        mock_openai_setting.value = None
+
         with patch('sqlmodel.Session') as mock_session_class:
             mock_session_instance = MagicMock()
             mock_session_class.return_value.__enter__.return_value = mock_session_instance
             mock_session_instance.get.side_effect = [
                 mock_gemini_setting,
-                mock_google_setting
+                mock_google_setting,
+                mock_openai_setting,
             ]
 
             builder = EnvironmentBuilder()
@@ -241,6 +249,7 @@ class TestEnvironmentBuilderGlobalKeys:
 
             assert env['GEMINI_API_KEY'] == 'gemini_key_123'
             assert 'GOOGLE_API_KEY' not in env
+            assert 'OPENAI_API_KEY' not in env
 
     def test_with_global_api_keys_handles_db_error(self):
         """with_global_api_keys() 應優雅處理 DB 錯誤"""
@@ -254,11 +263,71 @@ class TestEnvironmentBuilderGlobalKeys:
             assert isinstance(env, dict)
 
 
+class TestEnvironmentBuilderDbSettings:
+    """with_db_settings() 合併 DB session 測試"""
+
+    def test_with_db_settings_loads_both(self):
+        """with_db_settings() 應在單一 session 內讀取專案變數和全域 API Key"""
+        mock_env_var = Mock()
+        mock_env_var.key = 'PROJECT_VAR'
+        mock_env_var.value = 'project_value'
+
+        mock_gemini = Mock()
+        mock_gemini.value = 'gemini_key'
+
+        with patch('sqlmodel.Session') as mock_session_class:
+            mock_session_instance = MagicMock()
+            mock_session_class.return_value.__enter__.return_value = mock_session_instance
+            mock_session_instance.exec.return_value.all.return_value = [mock_env_var]
+            mock_session_instance.get.side_effect = [mock_gemini, None, None]
+
+            builder = EnvironmentBuilder()
+            builder.with_db_settings(123)
+            env = builder.build()
+
+            assert env['PROJECT_VAR'] == 'project_value'
+            assert env['GEMINI_API_KEY'] == 'gemini_key'
+            assert 'GOOGLE_API_KEY' not in env
+            assert 'OPENAI_API_KEY' not in env
+            # 確認只開了一次 session
+            assert mock_session_class.call_count == 1
+
+    def test_with_db_settings_no_project_id(self):
+        """with_db_settings(None) 應僅讀取全域 API Key"""
+        mock_google = Mock()
+        mock_google.value = 'google_key'
+
+        with patch('sqlmodel.Session') as mock_session_class:
+            mock_session_instance = MagicMock()
+            mock_session_class.return_value.__enter__.return_value = mock_session_instance
+            mock_session_instance.get.side_effect = [None, mock_google, None]
+
+            builder = EnvironmentBuilder()
+            builder.with_db_settings(None)
+            env = builder.build()
+
+            assert env['GOOGLE_API_KEY'] == 'google_key'
+            assert 'OPENAI_API_KEY' not in env
+            # 不應呼叫 exec（無專案變數查詢）
+            mock_session_instance.exec.assert_not_called()
+
+    def test_with_db_settings_handles_error(self):
+        """with_db_settings() 應優雅處理 DB 錯誤"""
+        with patch('sqlmodel.Session') as mock_session_class:
+            mock_session_class.side_effect = Exception("DB Error")
+
+            builder = EnvironmentBuilder()
+            builder.with_db_settings(123)
+            env = builder.build()
+
+            assert isinstance(env, dict)
+
+
 class TestEnvironmentBuilderChaining:
     """鏈式 API 組合測試"""
 
     def test_full_chain_worker_scenario(self):
-        """測試完整的 worker 場景鏈"""
+        """測試完整的 worker 場景鏈（使用 with_db_settings）"""
         mock_env_var = Mock()
         mock_env_var.key = 'PROJECT_VAR'
         mock_env_var.value = 'project_value'
@@ -272,14 +341,13 @@ class TestEnvironmentBuilderChaining:
             mock_session_instance = MagicMock()
             mock_session_class.return_value.__enter__.return_value = mock_session_instance
             mock_session_instance.exec.return_value.all.return_value = [mock_env_var]
-            mock_session_instance.get.side_effect = [None, None]  # No API keys
+            mock_session_instance.get.side_effect = [None, None, None]  # No API keys
             mock_exists.return_value = True
 
             builder = EnvironmentBuilder()
             env = (builder
                 .with_system_keys()
-                .with_project_vars(123)
-                .with_global_api_keys()
+                .with_db_settings(123)
                 .with_entry_point("worker")
                 .with_git_config("/path/to/.gitconfig")
                 .with_auth("claude", {'api_key': 'key123'})
@@ -293,7 +361,7 @@ class TestEnvironmentBuilderChaining:
             mock_auth.assert_called_once()
 
     def test_full_chain_runner_scenario(self):
-        """測試完整的 runner 場景鏈"""
+        """測試完整的 runner 場景鏈（使用 with_db_settings）"""
         with patch('app.core.sandbox.build_sanitized_env') as mock_sanitized, \
              patch('sqlmodel.Session') as mock_session_class, \
              patch('app.core.executor.auth.inject_auth_env') as mock_auth:
@@ -302,13 +370,12 @@ class TestEnvironmentBuilderChaining:
             mock_session_instance = MagicMock()
             mock_session_class.return_value.__enter__.return_value = mock_session_instance
             mock_session_instance.exec.return_value.all.return_value = []  # No project vars
-            mock_session_instance.get.side_effect = [None, None]  # No API keys
+            mock_session_instance.get.side_effect = [None, None, None]  # No API keys
 
             builder = EnvironmentBuilder()
             env = (builder
                 .with_system_keys()
-                .with_project_vars(456)
-                .with_global_api_keys()
+                .with_db_settings(456)
                 .with_member_extra({'MY_EXTRA': 'value'})
                 .with_auth("claude", {'oauth_token': 'token123'})
                 .build())
@@ -317,6 +384,26 @@ class TestEnvironmentBuilderChaining:
             assert env['HOME'] == '/home/user'
             assert env['MY_EXTRA'] == 'value'
             mock_auth.assert_called_once()
+
+    def test_legacy_separate_calls_still_work(self):
+        """向前兼容：分開呼叫 with_project_vars + with_global_api_keys 仍可正常運作"""
+        mock_env_var = Mock()
+        mock_env_var.key = 'LEGACY_VAR'
+        mock_env_var.value = 'legacy_value'
+
+        with patch('sqlmodel.Session') as mock_session_class:
+            mock_session_instance = MagicMock()
+            mock_session_class.return_value.__enter__.return_value = mock_session_instance
+            mock_session_instance.exec.return_value.all.return_value = [mock_env_var]
+            mock_session_instance.get.side_effect = [None, None, None]
+
+            builder = EnvironmentBuilder()
+            env = (builder
+                .with_project_vars(99)
+                .with_global_api_keys()
+                .build())
+
+            assert env['LEGACY_VAR'] == 'legacy_value'
 
 
 class TestEnvironmentBuilderIsolation:
@@ -342,5 +429,26 @@ class TestEnvironmentBuilderIsolation:
             .with_entry_point("worker")
             .with_entry_point("runner")  # 後設定應覆蓋
             .build())
-        
+
         assert env['CLAUDE_CODE_ENTRY_POINT'] == 'runner'
+
+    def test_build_returns_copy(self):
+        """build() 回傳的 dict 應與 builder 內部狀態隔離"""
+        builder = EnvironmentBuilder()
+        builder.with_entry_point("worker")
+
+        env1 = builder.build()
+        env1["INJECTED"] = "should_not_leak"
+
+        env2 = builder.build()
+        assert "INJECTED" not in env2, "build() 應回傳獨立拷貝，外部修改不應影響 builder"
+
+    def test_build_multiple_calls_independent(self):
+        """多次 build() 呼叫應回傳獨立的 dict"""
+        builder = EnvironmentBuilder()
+        builder.with_member_extra({"KEY": "value"})
+
+        env1 = builder.build()
+        env2 = builder.build()
+        assert env1 == env2
+        assert env1 is not env2

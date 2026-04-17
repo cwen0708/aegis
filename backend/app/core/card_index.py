@@ -108,7 +108,8 @@ def sync_card_to_index(
     fpath = Path(file_path)
     mtime = fpath.stat().st_mtime if fpath.exists() else 0.0
     content_hash = hashlib.sha256(fpath.read_bytes()).hexdigest() if fpath.exists() else ""
-    tags_json = json.dumps(card.tags, ensure_ascii=False)
+    tags = card.tags if isinstance(card.tags, list) else ([card.tags] if card.tags else [])
+    tags_json = json.dumps(tags, ensure_ascii=False)
 
     existing = session.get(CardIndex, card.id)
     if existing:
@@ -121,6 +122,8 @@ def sync_card_to_index(
         existing.tags_json = tags_json
         existing.model = card.model
         existing.parent_id = card.parent_id
+        existing.max_rounds = card.max_rounds
+        existing.acceptance_criteria = card.acceptance_criteria
         existing.is_archived = card.is_archived
         existing.created_at = card.created_at
         existing.updated_at = card.updated_at
@@ -141,6 +144,8 @@ def sync_card_to_index(
             tags_json=tags_json,
             model=card.model,
             parent_id=card.parent_id,
+            max_rounds=card.max_rounds,
+            acceptance_criteria=card.acceptance_criteria,
             is_archived=card.is_archived,
             created_at=card.created_at,
             updated_at=card.updated_at,

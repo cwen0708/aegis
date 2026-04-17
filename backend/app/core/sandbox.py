@@ -89,12 +89,22 @@ def build_sanitized_env(project_id: Optional[int] = None) -> dict:
     return env
 
 
-def get_popen_kwargs() -> dict:
+def get_popen_kwargs(
+    landlock_paths: Optional[dict] = None,
+) -> dict:
     """Return platform-specific Popen kwargs for process isolation.
 
     - Linux/macOS: start_new_session=True (new process group)
     - Linux with aegis-sandbox user: setuid/setgid
+    - Linux with Landlock: filesystem access restriction
     - Windows: CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+
+    Parameters
+    ----------
+    landlock_paths : dict, optional
+        If provided, apply Landlock filesystem restrictions.
+        Keys: ``allowed_read`` (list[str]), ``allowed_rw`` (list[str]).
+        Ignored on non-Linux or when Landlock is unavailable.
     """
     system = platform.system()
     kwargs: dict = {}
@@ -111,6 +121,24 @@ def get_popen_kwargs() -> dict:
                 logger.info("[Sandbox] Will run as aegis-sandbox user")
             except (KeyError, ImportError):
                 pass  # 使用者不存在或非 Linux，fallback 無隔離
+
+        # Landlock filesystem restriction (Linux only, kernel >= 5.13)
+        if system == "Linux" and landlock_paths is not None:
+            try:
+                from app.core.sandbox_kernel import LandlockSandbox
+
+                sandbox = LandlockSandbox()
+                sandbox.restrict_paths(
+                    allowed_read=landlock_paths.get("allowed_read", []),
+                    allowed_rw=landlock_paths.get("allowed_rw", []),
+                )
+                existing_preexec = kwargs.get("preexec_fn")
+                landlock_preexec = sandbox.apply_to_preexec(existing_preexec)
+                if landlock_preexec is not None:
+                    kwargs["preexec_fn"] = landlock_preexec
+                    logger.info("[Sandbox] Landlock filesystem restriction configured")
+            except Exception as e:
+                logger.warning(f"[Sandbox] Landlock setup failed: {e}")
 
     elif system == "Windows":
         kwargs["creationflags"] = (

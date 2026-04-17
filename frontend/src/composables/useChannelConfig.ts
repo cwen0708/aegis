@@ -1,7 +1,6 @@
 import { ref, onMounted } from 'vue'
 import { useAegisStore } from '../stores/aegis'
-import { config as appConfig } from '../config'
-import { authHeaders } from '../utils/authFetch'
+import { apiClient } from '../services/api/client'
 
 export interface ChannelField {
   key: string
@@ -14,7 +13,6 @@ export interface ChannelField {
 
 export function useChannelConfig(channelName: string) {
   const store = useAegisStore()
-  const API = appConfig.apiUrl
 
   const loading = ref(true)
   const saving = ref(false)
@@ -24,8 +22,7 @@ export function useChannelConfig(channelName: string) {
   async function fetchConfig() {
     loading.value = true
     try {
-      const res = await fetch(`${API}/api/v1/channels`)
-      const allConfigs = await res.json()
+      const allConfigs = await apiClient.get<Record<string, any>>('/api/v1/channels')
       formData.value = allConfigs[channelName] || { enabled: false }
     } catch {
       formData.value = { enabled: false }
@@ -37,16 +34,8 @@ export function useChannelConfig(channelName: string) {
   async function saveConfig() {
     saving.value = true
     try {
-      const res = await fetch(`${API}/api/v1/channels/${channelName}`, {
-        method: 'PUT',
-        headers: authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify(formData.value),
-      })
-      if (res.ok) {
-        store.addToast('頻道設定已儲存', 'success')
-      } else {
-        store.addToast('儲存失敗', 'error')
-      }
+      await apiClient.put(`/api/v1/channels/${channelName}`, formData.value)
+      store.addToast('頻道設定已儲存', 'success')
     } catch {
       store.addToast('儲存失敗', 'error')
     } finally {

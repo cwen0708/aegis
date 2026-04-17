@@ -1,33 +1,35 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import Dashboard from '../views/Dashboard.vue'
-import Kanban from '../views/Kanban.vue'
-import CronJobs from '../views/CronJobs.vue'
-import CronJobDetail from '../views/CronJobDetail.vue'
-import Agents from '../views/Agents.vue'
-import Tasks from '../views/Tasks.vue'
-import Team from '../views/Team.vue'
 import Rooms from '../views/Rooms.vue'
-import Onboarding from '../views/Onboarding.vue'
 import Login from '../views/Login.vue'
-import SettingsLayout from '../views/settings/SettingsLayout.vue'
-import SettingsGeneral from '../views/settings/SettingsGeneral.vue'
-// SettingsTools removed — CLI tools merged into Dashboard (status page)
-import SettingsChannels from '../views/settings/SettingsChannels.vue'
-import SettingsProjects from '../views/settings/SettingsProjects.vue'
-import SettingsArchive from '../views/settings/SettingsArchive.vue'
-import SettingsUsers from '../views/settings/SettingsUsers.vue'
-import SettingsUpdate from '../views/settings/SettingsUpdate.vue'
-import SettingsOneStack from '../views/settings/SettingsOneStack.vue'
-import SettingsProjectDetail from '../views/settings/SettingsProjectDetail.vue'
-import SettingsTeamDetail from '../views/settings/SettingsTeamDetail.vue'
-import SettingsUserDetail from '../views/settings/SettingsUserDetail.vue'
-import SettingsTerminal from '../views/settings/SettingsTerminal.vue'
-import SettingsRoomDetail from '../views/settings/SettingsRoomDetail.vue'
-import FileBrowser from '../views/FileBrowser.vue'
-import GitManager from '../views/GitManager.vue'
-import RelationGraph from '../views/RelationGraph.vue'
-import MatrixStream from '../views/MatrixStream.vue'
 import { useAuthStore } from '../stores/auth'
+
+// Lazy-loaded views — 按需載入，減少首屏 bundle
+const Onboarding = () => import('../views/Onboarding.vue')
+const Kanban = () => import('../views/Kanban.vue')
+const CronJobs = () => import('../views/CronJobs.vue')
+const CronJobDetail = () => import('../views/CronJobDetail.vue')
+const Tasks = () => import('../views/Tasks.vue')
+const FileBrowser = () => import('../views/FileBrowser.vue')
+const GitManager = () => import('../views/GitManager.vue')
+const RelationGraph = () => import('../views/RelationGraph.vue')
+const MatrixStream = () => import('../views/MatrixStream.vue')
+const SettingsLayout = () => import('../views/settings/SettingsLayout.vue')
+const SettingsGeneral = () => import('../views/settings/SettingsGeneral.vue')
+const SettingsChannels = () => import('../views/settings/SettingsChannels.vue')
+const SettingsProjects = () => import('../views/settings/SettingsProjects.vue')
+const SettingsArchive = () => import('../views/settings/SettingsArchive.vue')
+const SettingsUsers = () => import('../views/settings/SettingsUsers.vue')
+const SettingsUpdate = () => import('../views/settings/SettingsUpdate.vue')
+const SettingsOneStack = () => import('../views/settings/SettingsOneStack.vue')
+const SettingsProjectDetail = () => import('../views/settings/SettingsProjectDetail.vue')
+const SettingsTeamDetail = () => import('../views/settings/SettingsTeamDetail.vue')
+const SettingsUserDetail = () => import('../views/settings/SettingsUserDetail.vue')
+const SettingsTerminal = () => import('../views/settings/SettingsTerminal.vue')
+const SettingsRoomDetail = () => import('../views/settings/SettingsRoomDetail.vue')
+const Dashboard = () => import('../views/Dashboard.vue')
+const Agents = () => import('../views/Agents.vue')
+const Team = () => import('../views/Team.vue')
+const Talk = () => import('../views/Talk.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -48,6 +50,7 @@ const router = createRouter({
     { path: '/git', component: GitManager, meta: { requiresAuth: true } },
     { path: '/graph', component: RelationGraph, meta: { requiresAuth: true } },
     { path: '/matrix', component: MatrixStream, meta: { requiresAuth: true } },
+    { path: '/talk/:memberSlug', name: 'talk', component: Talk, meta: { requiresAuth: true } },
     {
       path: '/settings',
       component: SettingsLayout,

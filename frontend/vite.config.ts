@@ -12,7 +12,12 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          'highlight': ['highlight.js'],
+          'vendor-vue': ['vue', 'vue-router', 'pinia'],
+          'vendor-phaser': ['phaser'],
+          'vendor-three': ['three'],
+          'vendor-cytoscape': ['cytoscape'],
+          'vendor-xterm': ['@xterm/xterm', '@xterm/addon-fit', '@xterm/addon-web-links'],
+          'vendor-markdown': ['marked', 'dompurify', 'highlight.js'],
         },
       },
     },

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Building2, Plus, Loader2, ChevronRight, FolderKanban, Users } from 'lucide-vue-next'
+import { Building2, Plus, Loader2, ChevronRight, FolderKanban, Users, LayoutGrid, Monitor } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 import { useDialogState } from '../../composables/useDialogState'
 import { config } from '../../config'
@@ -17,6 +17,7 @@ interface RoomInfo {
   id: number
   name: string
   description: string
+  layout_type: 'classic' | 'tiled'
   project_ids: number[]
   member_ids: number[]
   created_at: string
@@ -32,6 +33,7 @@ const createDialog = useDialogState()
 const createForm = ref({
   name: '',
   description: '',
+  layout_type: 'tiled' as 'classic' | 'tiled',
 })
 const creating = ref(false)
 
@@ -56,7 +58,7 @@ onMounted(() => {
 // ─── Create ─────────────────────────────────────────────
 
 function openCreateDialog() {
-  createForm.value = { name: '', description: '' }
+  createForm.value = { name: '', description: '', layout_type: 'tiled' }
   createDialog.open()
 }
 
@@ -123,6 +125,13 @@ async function createRoom() {
             <div class="flex items-center gap-2">
               <Building2 class="w-4 h-4 text-emerald-400 shrink-0" />
               <span class="font-medium text-slate-200">{{ room.name }}</span>
+              <span
+                class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium"
+                :class="room.layout_type === 'tiled' ? 'bg-sky-500/15 text-sky-400' : 'bg-amber-500/15 text-amber-400'"
+              >
+                <component :is="room.layout_type === 'tiled' ? LayoutGrid : Monitor" class="w-3 h-3" />
+                {{ room.layout_type === 'tiled' ? '磚塊' : '經典' }}
+              </span>
             </div>
             <p v-if="room.description" class="text-xs text-slate-500 mt-1 ml-6 truncate">{{ room.description }}</p>
             <div class="flex items-center gap-4 mt-2 ml-6 text-xs text-slate-500">
@@ -169,6 +178,36 @@ async function createRoom() {
               class="w-full px-3 py-2 bg-slate-900 text-slate-200 border border-slate-600 rounded-lg focus:outline-none focus:border-emerald-500 placeholder-slate-500"
               placeholder="如：前端相關專案和成員"
             />
+          </div>
+
+          <div>
+            <label class="block text-sm text-slate-400 mb-2">佈局模式</label>
+            <div class="flex gap-3">
+              <label
+                v-for="opt in ([
+                  { value: 'tiled', label: '磚塊模式', icon: 'grid', desc: '卡片式成員排列' },
+                  { value: 'classic', label: '經典模式', icon: 'monitor', desc: 'Phaser 虛擬辦公室' },
+                ] as const)"
+                :key="opt.value"
+                class="flex-1 relative cursor-pointer rounded-lg border p-3 transition-all"
+                :class="createForm.layout_type === opt.value
+                  ? 'border-emerald-500 bg-emerald-500/10'
+                  : 'border-slate-600 bg-slate-900 hover:border-slate-500'"
+              >
+                <input
+                  type="radio"
+                  :value="opt.value"
+                  v-model="createForm.layout_type"
+                  class="sr-only"
+                />
+                <div class="flex items-center gap-2">
+                  <LayoutGrid v-if="opt.value === 'tiled'" class="w-4 h-4" :class="createForm.layout_type === opt.value ? 'text-emerald-400' : 'text-slate-500'" />
+                  <Monitor v-else class="w-4 h-4" :class="createForm.layout_type === opt.value ? 'text-emerald-400' : 'text-slate-500'" />
+                  <span class="text-sm font-medium" :class="createForm.layout_type === opt.value ? 'text-slate-200' : 'text-slate-400'">{{ opt.label }}</span>
+                </div>
+                <p class="text-xs mt-1 ml-6" :class="createForm.layout_type === opt.value ? 'text-slate-400' : 'text-slate-600'">{{ opt.desc }}</p>
+              </label>
+            </div>
           </div>
 
           <div class="flex justify-end gap-3 pt-2">

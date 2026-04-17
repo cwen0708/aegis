@@ -143,7 +143,7 @@ def _parse_datetime(dt_str: str) -> datetime | None:
     return None
 
 
-KNOWN_ACTIONS = {"worker", "meeting"}
+KNOWN_ACTIONS = {"worker", "meeting", "gc"}
 
 
 def resolve_cron_url(job) -> str:
@@ -163,10 +163,40 @@ def resolve_cron_url(job) -> str:
     raise ValueError(f"未知 action: {action}")
 
 
+async def _execute_gc_action(session: Session, job, tz_name: str):
+    """gc action: 直接呼叫 schedule_gc_scan（不走 HTTP）。"""
+    from app.core.gc_scheduler import schedule_gc_scan
+
+    project = session.get(Project, job.project_id)
+    if not project or not project.path:
+        logger.error(
+            "[Cron Poller] '%s': project %d has no path", job.name, job.project_id
+        )
+    else:
+        try:
+            cards = schedule_gc_scan(job.project_id, project.path)
+            logger.info(
+                "[Cron Poller] '%s' → gc → %d cards created", job.name, len(cards)
+            )
+        except Exception:
+            logger.error("[Cron Poller] '%s' gc failed", job.name, exc_info=True)
+
+    next_time = _calculate_next_time(job.cron_expression, tz_name)
+    if next_time:
+        job.next_scheduled_at = next_time
+    session.commit()
+
+
 async def _execute_job(session: Session, job, tz_name: str):
     """時間到 → POST resolve_cron_url(job)。blocking 呼叫丟到 thread pool。"""
     import asyncio
     import urllib.request
+
+    # gc action 直接在本地執行，不走 HTTP
+    action = job.api_url or "worker"
+    if action == "gc":
+        await _execute_gc_action(session, job, tz_name)
+        return
 
     try:
         url = resolve_cron_url(job)

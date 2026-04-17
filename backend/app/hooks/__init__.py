@@ -51,6 +51,7 @@ class TaskContext:
 
     # 卡片資料
     card_content: str = ""
+    acceptance_criteria: str = ""  # Sprint Contract 完成條件
     workspace_dir: str = ""
 
     # Chat 專用
@@ -93,18 +94,28 @@ def collect_hooks(source: str = "worker") -> list[Hook]:
     from app.hooks.event_log import EventLogHook
     from app.hooks.skill_generator import SkillGeneratorHook
     from app.hooks.token_counting import TokenCountingHook
+    from app.hooks.sprint_contract import SprintContractHook
+    from app.hooks.cross_review import CrossReviewHook
+    from app.hooks.verification import VerificationHook
+    from app.hooks.content_detector import ContentDetectorHook
+    from app.hooks.taste_propagation import TastePropagationHook
 
     if source == "worker":
         return [
             WebSocketHook(),        # DURING: Kanban log
             EventLogHook(),         # DURING: 事件記錄 → JSONL（Playback 回放）
             OneStackHook(),         # DURING: aegis_stream + POST: 任務回報
+            ContentDetectorHook(),  # DURING+POST: 輸出端敏感資料偵測
             BroadcastHook(),        # POST: task_completed 事件
             DialogueHook(),         # POST: AVG 對話
             MediaHook(),            # POST: send_file 標記 → 頻道發送
             TokenCountingHook(),    # POST: 記錄 token 使用量和成本
             MemoryHook(),           # POST: 成員記憶
             SkillGeneratorHook(),   # POST: 自動生成 skill 模板
+            SprintContractHook(),   # POST: acceptance_criteria 驗證日誌
+            CrossReviewHook(),      # POST: 交叉審查派發
+            VerificationHook(),     # POST: anti-fabrication 驗證
+            TastePropagationHook(), # POST: taste 標記 → golden-rules
             CleanupHook(),          # POST: 清理（永遠最後）
         ]
     elif source == "chat":

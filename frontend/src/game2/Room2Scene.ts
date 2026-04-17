@@ -2,7 +2,7 @@
  * Room2Scene — SkyOffice 圖集 + Tiled 地圖 + 角色系統
  */
 import Phaser from 'phaser'
-import { findPath, simplifyPath } from '../game/pathfinding'
+import { findPath, simplifyPath } from './pathfinding'
 import {
   preloadDefaultChars, createAllDefaultAnims, createAnimsForKey,
   CHAR_FRAME_W, CHAR_LEGACY_W, MAX_CHAR_COUNT,
@@ -267,7 +267,15 @@ export default class Room2Scene extends Phaser.Scene {
     sprite.setTexture(charKey)
     sprite.setScale(charScale)
     sprite.setVisible(true)
-    sprite.play(`${charKey}_idle`)
+
+    // 恢復正確的動畫（工作中 or 閒置）
+    const mode = container.getData('mode') as string | undefined
+    const workDir = container.getData('workDir') as string | undefined
+    if (mode === 'working' && workDir) {
+      sprite.play(`${charKey}_work_${workDir}`)
+    } else {
+      sprite.play(`${charKey}_idle`)
+    }
 
     // 清除 placeholder 紅點（sprite 載入完成，不再需要）
     const dot = this.placeholderDots.get(memberId)
@@ -441,6 +449,8 @@ export default class Room2Scene extends Phaser.Scene {
     const container = this.add.container(cx, cy)
     container.setData('memberId', memberId)
     container.setData('spriteIndex', spriteIndex)
+    container.setData('mode', mode)
+    container.setData('workDir', workDir)
 
     // 優先用成員自訂精靈，其次用預設角色，最後 fallback char_0
     let charKey = this.memberCharAvailable.has(memberId)
@@ -537,8 +547,7 @@ export default class Room2Scene extends Phaser.Scene {
       const nearbyCount = Math.max(3, Math.floor(byDist.length * 0.3))
       const target = byDist[Math.floor(Math.random() * nearbyCount)]!
 
-      // pathfinding.ts 的 layout 參數未使用，傳空物件
-      const path = findPath({} as any, curCol, curRow, target.col, target.row, roomTiles)
+      const path = findPath(curCol, curRow, target.col, target.row, roomTiles)
       if (path.length === 0) {
         this.wanderTimers.set(key, this.time.delayedCall(1000, wander))
         return

@@ -34,9 +34,8 @@ class TestBuildConfigMdChatMode:
         assert fake_memory_path in result
         assert "short-term/" in result
         assert "long-term/" in result
-        # 安全限制
-        assert "# 安全限制" in result
-        assert "禁止修改系統檔案" in result
+        # 安全限制：靜態規則已移至 .claude/rules/security.md，CLAUDE.md 不再內嵌
+        assert "禁止修改系統檔案" not in result
 
     def test_build_config_md_chat_with_user_context(self):
         """user_context 帶 display_name → 渲染「當前用戶」section"""
@@ -120,6 +119,13 @@ class TestGetConfigFilenameAndDotDir:
                 f"{provider}: expected filename {expected_file}"
             assert get_dot_dir(provider) == expected_dir, \
                 f"{provider}: expected dot dir {expected_dir}"
+
+    def test_openai_provider_returns_correct_config(self):
+        """openai provider 回傳 OPENAI.md 和 .openai"""
+        from app.core.executor.config_md import get_config_filename, get_dot_dir
+
+        assert get_config_filename("openai") == "OPENAI.md"
+        assert get_dot_dir("openai") == ".openai"
 
     def test_unknown_provider_falls_back_to_claude(self):
         """未知 provider 應 fallback 至 claude 設定"""

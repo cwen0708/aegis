@@ -46,6 +46,7 @@ from app.models.core import (
     Member, MemberAccount, Account, TaskLog, CronLog, MemberDialogue
 )
 from app.core.card_file import CardData, read_card, write_card
+from app.core.ralph_loop import parse_loop_signal, build_next_round_prompt, LoopSignal
 from app.core.card_index import sync_card_to_index, remove_card_from_index, block_similar_cards
 
 # Abort 信號目錄
@@ -72,6 +73,7 @@ from app.core.poller import _parse_and_create_cards
 
 from app.core.task_workspace import link_project_into_workspace as _link_project_into_workspace
 from app.core.memory_manager import write_member_short_term_memory
+from app.core.gate_check import run_build_gate
 
 # HTTP client for broadcasting
 import urllib.request
@@ -107,7 +109,7 @@ DEFAULT_TASK_TIMEOUT = 3600  # 任務執行時間上限（秒），預設 60 分
 
 # Provider 設定統一由 executor 管理
 from app.core.executor import PROVIDERS, build_command
-from app.core.executor.providers import get_provider_config
+from app.core.executor.providers import get_provider_config, get_provider
 from app.core.executor.emitter import clean_ansi as _clean_ansi
 
 
@@ -220,16 +222,17 @@ def update_card_status(card_id: int, new_status: str, append_content: str = ""):
         if not idx:
             return
 
-        file_path = Path(idx.file_path)
-        try:
-            card_data = read_card(file_path)
-            card_data.status = new_status
-            if append_content:
-                card_data.content += append_content
-            write_card(file_path, card_data)
-            sync_card_to_index(session, card_data, idx.project_id, str(file_path))
-        except Exception as e:
-            logger.error(f"[Card {card_id}] Failed to update MD: {e}")
+        if idx.file_path and idx.file_path not in ("", "."):
+            file_path = Path(idx.file_path)
+            try:
+                card_data = read_card(file_path)
+                card_data.status = new_status
+                if append_content:
+                    card_data.content += append_content
+                write_card(file_path, card_data)
+                sync_card_to_index(session, card_data, idx.project_id, str(file_path))
+            except Exception as e:
+                logger.error(f"[Card {card_id}] Failed to update MD: {e}")
 
         # Dual-write ORM
         orm_card = session.get(Card, card_id)
@@ -252,13 +255,14 @@ def mark_card_running(card_id: int, member_id: Optional[int]):
             session.add(idx)
 
             # 也更新 MD 檔
-            file_path = Path(idx.file_path)
-            try:
-                card_data = read_card(file_path)
-                card_data.status = "running"
-                write_card(file_path, card_data)
-            except Exception as e:
-                logger.warning(f"[Card {card_id}] Failed to update MD to running: {e}")
+            if idx.file_path and idx.file_path not in ("", "."):
+                file_path = Path(idx.file_path)
+                try:
+                    card_data = read_card(file_path)
+                    card_data.status = "running"
+                    write_card(file_path, card_data)
+                except Exception as e:
+                    logger.warning(f"[Card {card_id}] Failed to update MD to running: {e}")
 
             # 封鎖同 milestone 中標題相似的待辦卡片
             blocked = block_similar_cards(card_id, idx.title, session)
@@ -276,7 +280,31 @@ def mark_card_running(card_id: int, member_id: Optional[int]):
 # ==========================================
 # JSON 解析
 # ==========================================
-from app.core.stream_parsers import parse_claude_json, parse_stream_json_text  # 統一解析器
+from app.core.stream_parsers import parse_claude_json, parse_stream_json_text, parse_openai_stream  # 統一解析器
+
+
+def _emit_openai_sse_line(clean_line: str, emitter, result_text_parts: list) -> bool:
+    """處理 OpenAI SSE 串流行（`data: {...}` / `data: [DONE]`）。
+
+    識別為 SSE 時解析 delta content，包裝成 stream-json assistant 事件送入 emitter.emit_raw，
+    讓下游 hook chain（WebSocket / OneStack）收到即時 token 事件。
+
+    Returns True 代表 line 是 SSE 格式（已消化），False 代表不是 SSE。
+    """
+    if not clean_line.strip().startswith("data:"):
+        return False
+    delta = parse_openai_stream(clean_line)
+    if delta:
+        wrapped = json.dumps(
+            {
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": delta}]},
+            },
+            ensure_ascii=False,
+        )
+        emitter.emit_raw(wrapped)
+        result_text_parts.append(delta)
+    return True
 
 
 def save_task_log(card_id: int, card_title: str, project_name: str, provider: str,
@@ -432,6 +460,20 @@ def _apply_worker_stage_action(idx, new_status: str) -> str:
                 # fallback: 找不到列表就刪除（舊行為）
                 delete_card_completely(idx.card_id)
                 return "delete"
+
+            # Build gate 閘門檢查：成功且啟用時，先驗證語法
+            if new_status == "completed" and stage_list.gate_enabled:
+                from app.core.task_workspace import WORKSPACES_ROOT
+                ws_path = str(WORKSPACES_ROOT / f"task-{idx.card_id}")
+                gate_result = run_build_gate(ws_path, idx.project_id)
+                logger.info(f"[Gate] Card {idx.card_id}: {gate_result.message}")
+                if not gate_result.passed:
+                    new_status = "failed"
+                    # 在卡片 content 追加閘門失敗原因
+                    update_card_status(
+                        idx.card_id, "failed",
+                        f"\n\n---\n\n### Build Gate Failed\n```\n{gate_result.message}\n```",
+                    )
 
             action = stage_list.on_success_action if new_status == "completed" else stage_list.on_fail_action
 
@@ -593,8 +635,7 @@ def run_task(card_id: int, project_path: str, prompt: str, phase: str,
 
     env = (EnvironmentBuilder()
         .with_system_keys()
-        .with_project_vars(_project_id)
-        .with_global_api_keys()
+        .with_db_settings(_project_id)
         .with_entry_point("worker")
         .with_git_config(ws_gitconfig)
         .with_auth(provider_name, auth_info, log_prefix=f"[Task {card_id}]")
@@ -742,11 +783,15 @@ def run_task_pty_windows(
                             line, buffer = buffer.split("\n", 1)
                             if stream_json:
                                 clean_line = _clean_ansi(line)
-                                if clean_line.strip().startswith("{"):
+                                stripped = clean_line.strip()
+                                if stripped.startswith("{"):
                                     emitter.emit_raw(clean_line)
-                                    text = parse_stream_json_text(clean_line)
+                                    _prov = get_provider(provider_name)
+                                    text = _prov.parse_stream_line(clean_line) if _prov else parse_stream_json_text(clean_line)
                                     if text:
                                         result_text_parts.append(text)
+                                elif provider_name == "openai" and stripped.startswith("data:"):
+                                    _emit_openai_sse_line(clean_line, emitter, result_text_parts)
                             else:
                                 emitter.emit_output(line + "\n")
                 except EOFError:
@@ -771,11 +816,15 @@ def run_task_pty_windows(
             if stream_json:
                 for line in buffer.split("\n"):
                     clean_line = _clean_ansi(line)
-                    if clean_line.strip().startswith("{"):
+                    stripped = clean_line.strip()
+                    if stripped.startswith("{"):
                         emitter.emit_raw(clean_line)
-                        text = parse_stream_json_text(clean_line)
+                        _prov = get_provider(provider_name)
+                        text = _prov.parse_stream_line(clean_line) if _prov else parse_stream_json_text(clean_line)
                         if text:
                             result_text_parts.append(text)
+                    elif provider_name == "openai" and stripped.startswith("data:"):
+                        _emit_openai_sse_line(clean_line, emitter, result_text_parts)
             else:
                 emitter.emit_output(buffer)
 
@@ -814,18 +863,34 @@ def run_task_pty_windows(
         token_info["duration_ms"] = duration_ms
         if token_info.get("result_text"):
             actual_output = token_info["result_text"]
-    elif provider_name == "openai" and config.get("stream_json"):
-        # OpenAI stream_json 模式：與 Claude 相同的 stream-json 解析路徑
-        if result_text_parts:
-            actual_output = "".join(result_text_parts)
-        token_info = emitter.token_info if emitter else {}
-        token_info["duration_ms"] = duration_ms
-    elif provider_name == "openai" and config.get("json_output"):
-        from app.core.stream_parsers import parse_openai_json
-        token_info = parse_openai_json(output)
-        token_info["duration_ms"] = duration_ms
-        if token_info.get("result_text"):
-            actual_output = token_info["result_text"]
+    elif provider_name == "openai":
+        _openai_prov = get_provider("openai")
+        if _openai_prov is not None:
+            # 優先使用 OpenAIProvider.parse_output()
+            parsed = _openai_prov.parse_output(output)
+            if parsed:
+                token_info = parsed
+                token_info["duration_ms"] = duration_ms
+                if token_info.get("result_text"):
+                    actual_output = token_info["result_text"]
+                elif result_text_parts:
+                    actual_output = "".join(result_text_parts)
+            elif result_text_parts:
+                actual_output = "".join(result_text_parts)
+                token_info = emitter.token_info if emitter else {}
+                token_info["duration_ms"] = duration_ms
+        elif config.get("stream_json"):
+            # Fallback：舊式 stream_json 路徑
+            if result_text_parts:
+                actual_output = "".join(result_text_parts)
+            token_info = emitter.token_info if emitter else {}
+            token_info["duration_ms"] = duration_ms
+        elif config.get("json_output"):
+            from app.core.stream_parsers import parse_openai_json
+            token_info = parse_openai_json(output)
+            token_info["duration_ms"] = duration_ms
+            if token_info.get("result_text"):
+                actual_output = token_info["result_text"]
 
     save_task_log(card_id, card_title, project_name, provider_name, member_id, status, actual_output, token_info)
 
@@ -880,9 +945,12 @@ def run_task_subprocess(
                     clean = line.strip()
                     if clean.startswith("{") and emitter:
                         emitter.emit_raw(clean)
-                        text = parse_stream_json_text(clean)
+                        _prov = get_provider(provider_name)
+                        text = _prov.parse_stream_line(clean) if _prov else parse_stream_json_text(clean)
                         if text:
                             result_text_parts.append(text)
+                    elif provider_name == "openai" and clean.startswith("data:") and emitter:
+                        _emit_openai_sse_line(clean, emitter, result_text_parts)
                 elif emitter:
                     emitter.emit_output(line)
                 # 檢查 abort 信號
@@ -930,12 +998,21 @@ def run_task_subprocess(
             token_info["duration_ms"] = duration_ms
             if token_info.get("result_text"):
                 actual_output = token_info["result_text"]
-        elif provider_name == "openai" and config.get("json_output"):
-            from app.core.stream_parsers import parse_openai_json
-            token_info = parse_openai_json(output)
-            token_info["duration_ms"] = duration_ms
-            if token_info.get("result_text"):
-                actual_output = token_info["result_text"]
+        elif provider_name == "openai":
+            _openai_prov = get_provider("openai")
+            if _openai_prov is not None:
+                parsed = _openai_prov.parse_output(output)
+                if parsed:
+                    token_info = parsed
+                    token_info["duration_ms"] = duration_ms
+                    if token_info.get("result_text"):
+                        actual_output = token_info["result_text"]
+            elif config.get("json_output"):
+                from app.core.stream_parsers import parse_openai_json
+                token_info = parse_openai_json(output)
+                token_info["duration_ms"] = duration_ms
+                if token_info.get("result_text"):
+                    actual_output = token_info["result_text"]
 
         save_task_log(card_id, card_title, project_name, provider_name, member_id, status, actual_output, token_info)
 
@@ -980,6 +1057,15 @@ def _handle_regular_result(idx, result, new_status, card_data, project_path, mem
                                 auto_commit_on_success=_auto_commit_on_success, auto_shelve_on_failure=_auto_shelve_on_failure,
                                 parse_and_create_cards=_parse_and_create_cards)
 
+    # 自動存檔 Execution Plan
+    if new_status == "completed" and result.get("output"):
+        try:
+            from app.core.plan_store import save_plan, next_round_num
+            round_num = next_round_num(idx.card_id)
+            save_plan(idx.card_id, round_num, result["output"])
+        except Exception:
+            logger.warning("[Task] Failed to save plan for card %s", idx.card_id, exc_info=True)
+
 
 def _post_task_hooks(idx, result, new_status, token_info, card_data, project_name, member_id, member_slug, workspace_dir, cron_job_id):
     _post_task_hooks_impl(idx, result, new_status, token_info, card_data, project_name, member_id, member_slug, workspace_dir, cron_job_id)
@@ -1005,7 +1091,7 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
             card_data.content = card_data.description
     except Exception as e:
         logger.error(f"[Worker] Failed to read card {idx.card_id}: {e}")
-        cron_job_id = _parse_cron_job_id(idx.title)
+        cron_job_id = idx.cron_job_id or _parse_cron_job_id(idx.title)
         if cron_job_id is not None:
             with Session(engine) as session:
                 from app.models.core import CronJob as CJ
@@ -1064,6 +1150,7 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
                 stage_name=stage_list.name if stage_list else "",
                 stage_description=stage_list.description or "" if stage_list else "",
                 stage_instruction=stage_list.system_instruction or "" if stage_list else "",
+                acceptance_criteria=card_data.acceptance_criteria or "",
             ))
 
         # CWD 策略：workspace 為 CWD（CLAUDE.md + skills 在這裡）
@@ -1110,18 +1197,19 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
         ]
         logger.info(f"[Worker] Card {idx.card_id}: card-level model override → {card_model}")
     else:
-        # 成本感知模型路由：tag-based > complexity-based > 帳號預設
+        # 成本感知模型路由：tag-based > max(complexity, member_model) > 帳號預設
         try:
             card_tags = json.loads(getattr(idx, "tags_json", "[]") or "[]")
         except (json.JSONDecodeError, TypeError):
             card_tags = []
-        routed_model = resolve_model(card_tags, effective_prompt)
+        member_model = accounts_list[0][1] if accounts_list else ""
+        routed_model = resolve_model(card_tags, effective_prompt, member_model=member_model)
         if routed_model:
             accounts_list = [
                 (provider, routed_model, auth, name)
                 for provider, _model, auth, name in accounts_list
             ]
-            logger.info(f"[Worker] Card {idx.card_id}: model route → {routed_model}")
+            logger.info(f"[Worker] Card {idx.card_id}: model route → {routed_model} (member default: {member_model})")
 
     # Prompt Hardening：附加安全規則提醒，防止長對話稀釋安全限制
     from app.core.prompt_hardening import harden_prompt
@@ -1138,6 +1226,10 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
         return
 
     result = None
+    # 追蹤實際成功的 provider/model/auth（用於 Ralph Loop 後續輪次）
+    used_provider = None
+    used_model = None
+    used_auth: dict = {}
     for attempt_idx, (acct_provider, acct_model, acct_auth, acct_name) in enumerate(accounts_list):
         if attempt_idx > 0:
             logger.info(f"[Worker] Card {idx.card_id}: fallback → '{acct_name}' (priority={attempt_idx})")
@@ -1159,6 +1251,9 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
         )
 
         if result["status"] == "success":
+            used_provider = acct_provider
+            used_model = acct_model
+            used_auth = acct_auth
             if attempt_idx > 0:
                 logger.info(f"[Worker] Card {idx.card_id}: succeeded with fallback account '{acct_name}'")
             break
@@ -1195,10 +1290,75 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
             )
 
             if result["status"] == "success":
+                used_provider = fo_provider
+                used_model = fo_model
+                used_auth = {}
                 logger.info(f"[Worker] Card {idx.card_id}: succeeded with provider failover → {fo_provider}")
                 break
 
             logger.warning(f"[Worker] Card {idx.card_id}: provider failover '{fo_provider}' failed (exit={result.get('exit_code')})")
+
+    # Ralph Loop：多輪迭代（max_rounds > 1 且 AI 回傳 loop:continue）
+    if (
+        result
+        and result["status"] == "success"
+        and card_data.max_rounds > 1
+        and not is_chat_mode
+    ):
+        all_outputs = [result.get("output", "")]
+        current_round = 1
+
+        while current_round < card_data.max_rounds:
+            signal = parse_loop_signal(result.get("output", ""))
+            if signal != LoopSignal.CONTINUE:
+                break
+
+            current_round += 1
+            logger.info(f"[Worker] Card {idx.card_id}: Ralph Loop round {current_round}/{card_data.max_rounds}")
+            broadcast_event("task_progress", {
+                "card_id": idx.card_id,
+                "type": "ralph_loop",
+                "round": current_round,
+                "max_rounds": card_data.max_rounds,
+            })
+            task_emitter.emit_output(f"\n🔄 Ralph Loop — Round {current_round}/{card_data.max_rounds}\n")
+
+            next_prompt = build_next_round_prompt(
+                original_prompt=effective_prompt,
+                previous_output=result.get("output", ""),
+                round_num=current_round,
+                max_rounds=card_data.max_rounds,
+            )
+
+            # 使用實際成功的帳號執行（可能是原始帳號或 failover provider）
+            result = run_task(
+                card_id=idx.card_id,
+                project_path=effective_cwd,
+                prompt=next_prompt,
+                phase=list_name.upper(),
+                forced_provider=used_provider,
+                forced_model=used_model,
+                card_title=idx.title,
+                project_name=project_name,
+                member_id=member_id,
+                auth_info=used_auth,
+                emitter=task_emitter,
+            )
+
+            if result["status"] != "success":
+                logger.warning(f"[Worker] Card {idx.card_id}: Ralph Loop round {current_round} failed, stopping loop")
+                break
+
+            all_outputs.append(result.get("output", ""))
+
+        # 合併所有輪次輸出
+        if current_round > 1:
+            separator = "\n\n---\n\n"
+            merged_parts = []
+            for i, out in enumerate(all_outputs, 1):
+                merged_parts.append(f"## Round {i}/{current_round}\n\n{out}")
+            result["output"] = separator.join(merged_parts)
+            logger.info(f"[Worker] Card {idx.card_id}: Ralph Loop completed — {current_round} rounds")
 
     # Data Classification Restore：還原 S2 佔位符為原始值
     if redact_map and result and result.get("output"):
@@ -1247,7 +1407,7 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
         return
 
     # 依卡片類型分派結果處理
-    cron_job_id = _parse_cron_job_id(idx.title)
+    cron_job_id = idx.cron_job_id or _parse_cron_job_id(idx.title)
     if is_chat_mode:
         _handle_chat_result(idx, result, new_status, token_info, member_slug, chat_id)
         return

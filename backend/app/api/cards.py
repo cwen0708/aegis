@@ -1,19 +1,28 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlmodel import Session, select
+import sqlalchemy as sa
 from sqlalchemy import func as sa_func
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from datetime import datetime, timezone
 from app.database import get_session
-from app.models.core import Project, Card, StageList, CardIndex
+from app.models.core import Project, Card, StageList, CardIndex, PendingConflict
 from app.core.card_file import CardData, read_card as read_card_md, write_card, card_file_path
 from app.core.card_index import sync_card_to_index, remove_card_from_index, next_card_id
+from app.core.sync_matrix import (
+    SyncEnforcer, ConflictResolver, FieldVersion,
+    load_registry_from_db, validate_actor,
+)
 from app.core.paths import WORKSPACES_ROOT
+from app.core.runner import run_ai_task
 from app.api.deps import get_card_lock, get_project_for_list
 from pathlib import Path
 import asyncio
+import logging
 import mimetypes
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Cards"])
 
@@ -31,6 +40,30 @@ class CardCreateRequest(BaseModel):
     status: Optional[str] = None  # idle (default) or pending
     tags: Optional[List[str]] = None  # 標籤名稱列表
     parent_id: Optional[int] = None  # 父卡片 ID（Leader-Worker 委派）
+    max_rounds: Optional[int] = None  # Ralph Loop 最大迭代輪數（1~10）
+    acceptance_criteria: Optional[str] = None  # 完成條件（Sprint Contract）
+
+    @field_validator("max_rounds")
+    @classmethod
+    def validate_max_rounds(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and not (1 <= v <= 10):
+            raise ValueError("max_rounds must be between 1 and 10")
+        return v
+
+class CardResponse(BaseModel):
+    """GET 回傳用 schema — 包含 Card 欄位 + acceptance_criteria"""
+    id: int
+    list_id: int
+    title: str
+    description: Optional[str] = None
+    content: Optional[str] = None
+    status: str = "idle"
+    is_archived: bool = False
+    acceptance_criteria: Optional[str] = None
+    max_rounds: int = 1  # Ralph Loop 最大迭代輪數
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
 
 class CardUpdateRequest(BaseModel):
     list_id: Optional[int] = None
@@ -39,33 +72,129 @@ class CardUpdateRequest(BaseModel):
     description: Optional[str] = None
     content: Optional[str] = None
     tags: Optional[List[str]] = None  # 標籤名稱列表
+    max_rounds: Optional[int] = None  # Ralph Loop 最大迭代輪數（1~10）
+    acceptance_criteria: Optional[str] = None  # 完成條件（Sprint Contract）
+
+    @field_validator("max_rounds")
+    @classmethod
+    def validate_max_rounds(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and not (1 <= v <= 10):
+            raise ValueError("max_rounds must be between 1 and 10")
+        return v
+
+
+# ==========================================
+# Conflict Resolution Schemas
+# ==========================================
+class FieldVersionInput(BaseModel):
+    """前端送入的欄位版本快照"""
+    value: Optional[str] = None
+    updated_at: datetime
+    actor: str
+
+
+class ConflictCheckRequest(BaseModel):
+    """衝突檢查請求 — 前端送出 local 端的欄位版本"""
+    local_changes: dict[str, FieldVersionInput]
+    apply_resolved: bool = False
+    remote_actor: str = "human"
+
+
+class ConflictCheckResponse(BaseModel):
+    """衝突檢查結果"""
+    resolved: list[dict]
+    deferred: list[dict]
+    applied: bool = False
+
+
+class PendingConflictResponse(BaseModel):
+    """待處理衝突回應"""
+    id: int
+    card_id: int
+    field_name: str
+    local_value: Optional[str] = None
+    local_updated_at: Optional[datetime] = None
+    local_actor: str = ""
+    remote_value: Optional[str] = None
+    remote_updated_at: Optional[datetime] = None
+    remote_actor: str = ""
+    strategy: str = ""
+    status: str = "pending"
+    resolved_value: Optional[str] = None
+    resolved_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+
+class ResolvePendingConflictRequest(BaseModel):
+    """解衝請求 — 人類決定 resolved_value 或 dismiss"""
+    resolved_value: Optional[str] = None
+    status: str
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        if v not in ("resolved", "dismissed"):
+            raise ValueError("status must be 'resolved' or 'dismissed'")
+        return v
 
 
 # ==========================================
 # Card Routes
 # ==========================================
-@router.get("/cards/", response_model=List[Card])
+@router.get("/cards/", response_model=List[CardResponse])
 def read_cards(session: Session = Depends(get_session)):
+    results: list[CardResponse] = []
+    # 優先從 CardIndex → MD 檔讀取（含 acceptance_criteria）
+    indexes = session.exec(select(CardIndex)).all()
+    seen_ids: set[int] = set()
+    for idx in indexes:
+        if idx.file_path and Path(idx.file_path).exists():
+            cd = read_card_md(Path(idx.file_path))
+            results.append(CardResponse(
+                id=cd.id, list_id=cd.list_id, title=cd.title,
+                description=cd.description, content=cd.content,
+                status=cd.status, is_archived=cd.is_archived,
+                acceptance_criteria=cd.acceptance_criteria,
+                max_rounds=cd.max_rounds,
+                created_at=cd.created_at, updated_at=cd.updated_at,
+            ))
+            seen_ids.add(cd.id)
+    # Fallback: 舊 Card 表中未被 index 覆蓋的卡片
     cards = session.exec(select(Card)).all()
-    return cards
+    for card in cards:
+        if card.id not in seen_ids:
+            results.append(CardResponse(
+                id=card.id, list_id=card.list_id, title=card.title,
+                description=card.description, content=card.content,
+                status=card.status, is_archived=card.is_archived,
+                created_at=card.created_at, updated_at=card.updated_at,
+            ))
+    return results
 
-@router.get("/cards/{card_id}", response_model=Card)
+@router.get("/cards/{card_id}", response_model=CardResponse)
 def read_card_endpoint(card_id: int, session: Session = Depends(get_session)):
     # Primary: look up CardIndex -> read MD file
     idx = session.get(CardIndex, card_id)
     if idx and idx.file_path and Path(idx.file_path).exists():
         cd = read_card_md(Path(idx.file_path))
-        # Return as Card-compatible dict (response_model=Card)
-        return Card(
+        return CardResponse(
             id=cd.id, list_id=cd.list_id, title=cd.title,
             description=cd.description, content=cd.content,
-            status=cd.status, created_at=cd.created_at, updated_at=cd.updated_at,
+            status=cd.status, is_archived=cd.is_archived,
+            acceptance_criteria=cd.acceptance_criteria,
+            max_rounds=cd.max_rounds,
+            created_at=cd.created_at, updated_at=cd.updated_at,
         )
     # Fallback: old Card table
     card = session.get(Card, card_id)
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
-    return card
+    return CardResponse(
+        id=card.id, list_id=card.list_id, title=card.title,
+        description=card.description, content=card.content,
+        status=card.status, is_archived=card.is_archived,
+        created_at=card.created_at, updated_at=card.updated_at,
+    )
 
 @router.post("/cards/", response_model=Card)
 def create_card(card_in: CardCreateRequest, session: Session = Depends(get_session)):
@@ -85,6 +214,8 @@ def create_card(card_in: CardCreateRequest, session: Session = Depends(get_sessi
         id=new_id, list_id=card_in.list_id, title=card_in.title,
         description=card_in.description, content=card_in.content or "", status=initial_status,
         tags=card_in.tags or [], parent_id=card_in.parent_id,
+        max_rounds=card_in.max_rounds if card_in.max_rounds is not None else 1,
+        acceptance_criteria=card_in.acceptance_criteria,
         created_at=now, updated_at=now,
     )
 
@@ -108,34 +239,69 @@ def create_card(card_in: CardCreateRequest, session: Session = Depends(get_sessi
     return orm_card
 
 @router.patch("/cards/{card_id}", response_model=Card)
-def update_card(card_id: int, update_data: CardUpdateRequest, session: Session = Depends(get_session)):
-    # Try MD-driven path first
+def update_card(
+    card_id: int,
+    update_data: CardUpdateRequest,
+    actor: str = Query("human"),
+    session: Session = Depends(get_session),
+):
+    validate_actor(actor)
+
+    # --- SyncEnforcer：欄位級寫入權限控制 ---
+    registry = load_registry_from_db(session)
+    enforcer = SyncEnforcer(registry)
+
+    # metadata 欄位不受 SyncRule 控制，直接通過
+    _METADATA_FIELDS = {"tags", "max_rounds", "acceptance_criteria"}
+
+    # 組出非 None 且受 SyncRule 控制的 changes
+    all_changes = {
+        k: v for k, v in update_data.model_dump().items()
+        if v is not None
+    }
+    sync_changes = {k: v for k, v in all_changes.items() if k not in _METADATA_FIELDS}
+    metadata_changes = {k: v for k, v in all_changes.items() if k in _METADATA_FIELDS}
+
+    # 驗證欄位寫入權限
+    result = enforcer.validate("card", sync_changes, actor)
+    if result.rejected:
+        rejected_names = [r.field_name for r in result.rejected]
+        logger.info("SyncEnforcer rejected fields for card %d (actor=%s): %s", card_id, actor, rejected_names)
+
+    # 合併：approved sync fields + metadata fields
+    approved = {**result.approved, **metadata_changes}
+
+    # --- 套用已核准的欄位 ---
     idx = session.get(CardIndex, card_id)
     now = datetime.now(timezone.utc)
 
     if idx and idx.file_path and Path(idx.file_path).exists():
         cd = read_card_md(Path(idx.file_path))
 
-        if update_data.list_id is not None:
-            cd.list_id = update_data.list_id
+        if "list_id" in approved:
+            cd.list_id = approved["list_id"]
             cd.status = "pending"
-        if update_data.status is not None:
-            cd.status = update_data.status
-        if update_data.title is not None:
-            cd.title = update_data.title
-        if update_data.description is not None:
-            cd.description = update_data.description
-        if update_data.content is not None:
-            cd.content = update_data.content
-        if update_data.tags is not None:
-            cd.tags = update_data.tags
+        if "status" in approved:
+            cd.status = approved["status"]
+        if "title" in approved:
+            cd.title = approved["title"]
+        if "description" in approved:
+            cd.description = approved["description"]
+        if "content" in approved:
+            cd.content = approved["content"]
+        if "tags" in approved:
+            cd.tags = approved["tags"]
+        if "max_rounds" in approved:
+            cd.max_rounds = approved["max_rounds"]
+        if "acceptance_criteria" in approved:
+            cd.acceptance_criteria = approved["acceptance_criteria"]
         cd.updated_at = now
 
         write_card(Path(idx.file_path), cd)
 
         # Re-derive project_id from list_id for index sync
         project_id = idx.project_id
-        if update_data.list_id is not None:
+        if "list_id" in approved:
             sl = session.get(StageList, cd.list_id)
             if sl:
                 project_id = sl.project_id
@@ -144,17 +310,17 @@ def update_card(card_id: int, update_data: CardUpdateRequest, session: Session =
     # Dual-write: also update old Card ORM record
     orm_card = session.get(Card, card_id)
     if orm_card:
-        if update_data.list_id is not None:
-            orm_card.list_id = update_data.list_id
+        if "list_id" in approved:
+            orm_card.list_id = approved["list_id"]
             orm_card.status = "pending"
-        if update_data.status is not None:
-            orm_card.status = update_data.status
-        if update_data.title is not None:
-            orm_card.title = update_data.title
-        if update_data.description is not None:
-            orm_card.description = update_data.description
-        if update_data.content is not None:
-            orm_card.content = update_data.content
+        if "status" in approved:
+            orm_card.status = approved["status"]
+        if "title" in approved:
+            orm_card.title = approved["title"]
+        if "description" in approved:
+            orm_card.description = approved["description"]
+        if "content" in approved:
+            orm_card.content = approved["content"]
         orm_card.updated_at = now
         session.add(orm_card)
 
@@ -342,6 +508,227 @@ def abort_card(card_id: int, session: Session = Depends(get_session)):
             session.add(orm_card)
         session.commit()
     return {"ok": True, "status": "aborted"}
+
+
+# ==========================================
+# Conflict Resolution
+# ==========================================
+@router.post("/cards/{card_id}/resolve-conflicts", response_model=ConflictCheckResponse)
+def resolve_conflicts(
+    card_id: int,
+    req: ConflictCheckRequest,
+    session: Session = Depends(get_session),
+):
+    """偵測並解決 local 與 remote 之間的欄位級衝突。
+
+    remote 版本自動從卡片 MD 檔讀取（updated_at 作為時間戳）。
+    若 apply_resolved=True，已解決的欄位會自動寫回卡片。
+    """
+    validate_actor(req.remote_actor)
+
+    idx = session.get(CardIndex, card_id)
+    if not idx or not idx.file_path or not Path(idx.file_path).exists():
+        raise HTTPException(status_code=404, detail="Card not found")
+
+    cd = read_card_md(Path(idx.file_path))
+
+    # 建構 local FieldVersion 字典
+    local_versions: dict[str, FieldVersion] = {}
+    for field_name, fv_input in req.local_changes.items():
+        local_versions[field_name] = FieldVersion(
+            value=fv_input.value,
+            updated_at=fv_input.updated_at,
+            actor=fv_input.actor,
+        )
+
+    # 建構 remote FieldVersion 字典（從 MD 檔讀取）
+    remote_versions: dict[str, FieldVersion] = {}
+    _NON_WRITABLE = frozenset({"id", "list_id", "created_at", "updated_at"})
+    card_fields = {c.name for c in Card.__table__.columns} - _NON_WRITABLE
+    for field_name in local_versions:
+        if field_name in card_fields and hasattr(cd, field_name):
+            remote_versions[field_name] = FieldVersion(
+                value=getattr(cd, field_name),
+                updated_at=cd.updated_at,
+                actor=req.remote_actor,
+            )
+
+    # 載入 SyncRuleRegistry，建立 ConflictResolver
+    registry = load_registry_from_db(session)
+    resolver = ConflictResolver(registry)
+    result = resolver.resolve("card", local_versions, remote_versions)
+
+    # 序列化結果
+    resolved_list = [
+        {"field_name": r.field_name, "value": r.value, "strategy": r.strategy.value}
+        for r in result.resolved
+    ]
+    deferred_list = [
+        {
+            "field_name": d.field_name,
+            "local": {"value": d.local.value, "updated_at": d.local.updated_at.isoformat(), "actor": d.local.actor},
+            "remote": {"value": d.remote.value, "updated_at": d.remote.updated_at.isoformat(), "actor": d.remote.actor},
+            "strategy": d.strategy.value,
+        }
+        for d in result.deferred
+    ]
+
+    # 持久化 deferred 衝突到 PendingConflict 表
+    for d in result.deferred:
+        existing = session.exec(
+            select(PendingConflict).where(
+                PendingConflict.card_id == card_id,
+                PendingConflict.field_name == d.field_name,
+                PendingConflict.status == "pending",
+            )
+        ).first()
+        local_val = d.local.value if isinstance(d.local.value, str) else str(d.local.value) if d.local.value is not None else None
+        remote_val = d.remote.value if isinstance(d.remote.value, str) else str(d.remote.value) if d.remote.value is not None else None
+        if existing:
+            existing.local_value = local_val
+            existing.local_updated_at = d.local.updated_at
+            existing.local_actor = d.local.actor
+            existing.remote_value = remote_val
+            existing.remote_updated_at = d.remote.updated_at
+            existing.remote_actor = d.remote.actor
+            existing.strategy = d.strategy.value
+            session.add(existing)
+        else:
+            pc = PendingConflict(
+                card_id=card_id,
+                field_name=d.field_name,
+                local_value=local_val,
+                local_updated_at=d.local.updated_at,
+                local_actor=d.local.actor,
+                remote_value=remote_val,
+                remote_updated_at=d.remote.updated_at,
+                remote_actor=d.remote.actor,
+                strategy=d.strategy.value,
+                status="pending",
+            )
+            session.add(pc)
+    if result.deferred:
+        session.commit()
+
+    applied = False
+    # apply_resolved: 自動將已解決欄位寫回卡片
+    if req.apply_resolved and result.resolved:
+        now = datetime.now(timezone.utc)
+        for r in result.resolved:
+            if r.field_name in card_fields and hasattr(cd, r.field_name):
+                setattr(cd, r.field_name, r.value)
+        cd.updated_at = now
+        write_card(Path(idx.file_path), cd)
+        sync_card_to_index(session, cd, project_id=idx.project_id, file_path=idx.file_path)
+
+        # Dual-write: 同步到 ORM Card
+        orm_card = session.get(Card, card_id)
+        if orm_card:
+            for r in result.resolved:
+                if r.field_name in ("title", "description", "content", "status"):
+                    setattr(orm_card, r.field_name, r.value)
+            orm_card.updated_at = now
+            session.add(orm_card)
+
+        session.commit()
+        applied = True
+
+    return ConflictCheckResponse(
+        resolved=resolved_list,
+        deferred=deferred_list,
+        applied=applied,
+    )
+
+
+@router.get("/cards/{card_id}/pending-conflicts", response_model=List[PendingConflictResponse])
+def get_pending_conflicts(
+    card_id: int,
+    status: Optional[str] = Query(None, description="篩選狀態：pending / resolved / dismissed"),
+    session: Session = Depends(get_session),
+):
+    """取得卡片的待處理衝突記錄"""
+    stmt = select(PendingConflict).where(PendingConflict.card_id == card_id)
+    if status:
+        stmt = stmt.where(PendingConflict.status == status)
+    stmt = stmt.order_by(PendingConflict.created_at)
+    return session.exec(stmt).all()
+
+
+async def _ai_merge_values(field_name: str, local_value: str, remote_value: str) -> str:
+    prompt = (
+        f"You are a merge assistant. Merge the following two versions of the '{field_name}' field "
+        f"into a single coherent result. Return ONLY the merged text, no explanation.\n\n"
+        f"Version A (local):\n{local_value}\n\n"
+        f"Version B (remote):\n{remote_value}"
+    )
+    result = await run_ai_task(
+        task_id=0,
+        project_path=".",
+        prompt=prompt,
+        phase="CHAT",
+        forced_provider="gemini",
+        model_override="gemini-flash",
+    )
+    return (result.get("output") or "").strip()
+
+
+@router.patch("/cards/{card_id}/pending-conflicts/{conflict_id}", response_model=PendingConflictResponse)
+async def resolve_pending_conflict(
+    card_id: int,
+    conflict_id: int,
+    req: ResolvePendingConflictRequest,
+    session: Session = Depends(get_session),
+):
+    """解決或駁回單筆待處理衝突。resolved 時寫回卡片 MD + ORM Card（dual-write）。"""
+    pc = session.get(PendingConflict, conflict_id)
+    if not pc or pc.card_id != card_id:
+        raise HTTPException(status_code=404, detail="PendingConflict not found")
+
+    if pc.status != "pending":
+        raise HTTPException(status_code=409, detail=f"Conflict already {pc.status}")
+
+    now = datetime.now(timezone.utc)
+    pc.status = req.status
+    pc.resolved_at = now
+
+    if req.status == "resolved":
+        resolved = req.resolved_value
+        if resolved is None and pc.strategy == "ai_merge":
+            try:
+                resolved = await _ai_merge_values(pc.field_name, pc.local_value, pc.remote_value)
+                if not resolved:
+                    resolved = pc.local_value
+            except Exception:
+                logger.warning("AI merge failed for conflict %d, falling back to local_value", conflict_id)
+                resolved = pc.local_value
+        pc.resolved_value = resolved
+
+        _CARD_NON_WRITABLE = frozenset({"id", "list_id", "created_at", "updated_at"})
+        card_fields = {c.name for c in Card.__table__.columns} - _CARD_NON_WRITABLE
+        if pc.field_name in card_fields:
+            col = Card.__table__.columns[pc.field_name]
+            typed_val = resolved
+            if resolved is not None and isinstance(col.type, sa.Boolean):
+                typed_val = resolved.lower() in ("true", "1", "yes")
+
+            idx = session.get(CardIndex, card_id)
+            if idx and idx.file_path and Path(idx.file_path).exists():
+                cd = read_card_md(Path(idx.file_path))
+                setattr(cd, pc.field_name, typed_val)
+                cd.updated_at = now
+                write_card(Path(idx.file_path), cd)
+                sync_card_to_index(session, cd, project_id=idx.project_id, file_path=idx.file_path)
+
+            orm_card = session.get(Card, card_id)
+            if orm_card and hasattr(orm_card, pc.field_name):
+                setattr(orm_card, pc.field_name, typed_val)
+                orm_card.updated_at = now
+                session.add(orm_card)
+
+    session.add(pc)
+    session.commit()
+    session.refresh(pc)
+    return pc
 
 
 @router.post("/cards/{card_id}/archive")

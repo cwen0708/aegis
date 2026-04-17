@@ -38,8 +38,8 @@ export class EditorBridge {
   setSelectedGid(gid: number) { this.scene?.setSelectedGid(gid) }
   setTargetLayer(layerName: string) { this.scene?.setTargetLayer(layerName) }
   setComposite(comp: CompositeObject | null) {
-    // toRaw 避免 Vue reactive proxy 傳入 Phaser
-    const raw = comp ? { ...comp, tiles: [...comp.tiles] } : null
+    // 深拷貝避免 Vue reactive proxy 傳入 Phaser
+    const raw = comp ? JSON.parse(JSON.stringify(comp)) as CompositeObject : null
     this.scene?.setComposite(raw)
   }
 

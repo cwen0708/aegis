@@ -15,6 +15,7 @@ export interface MemberAccount {
 export interface MemberInfo {
   id: number
   name: string
+  slug?: string
   avatar: string
   role: string
   description: string
@@ -24,6 +25,14 @@ export interface MemberInfo {
   sprite_scale: number
   provider: string
   accounts: MemberAccount[]
+}
+
+export function getMemberBySlug(slug: string) {
+  return apiClient.get<MemberInfo[]>(`/api/v1/members`).then(list => {
+    const found = list.find(m => m.slug === slug)
+    if (!found) throw new Error(`找不到成員：${slug}`)
+    return found
+  })
 }
 
 export interface AccountInfo {

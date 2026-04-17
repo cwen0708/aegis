@@ -3,8 +3,8 @@
 OpenAI SSE 串流適配器 — 將 OpenAI streaming response 轉換為 Aegis stream-json 格式。
 
 用法：
-    echo "你的 prompt" | python scripts/openai_stream_chat.py [--model MODEL]
-    python scripts/openai_stream_chat.py -p "你的 prompt" [--model MODEL]
+    echo "你的 prompt" | python backend/scripts/openai_stream_chat.py [--model MODEL]
+    python backend/scripts/openai_stream_chat.py -p "你的 prompt" [--model MODEL]
 
 環境變數：
     OPENAI_API_KEY  必須設定

@@ -54,10 +54,12 @@ export function extractWorkSlots(map: Phaser.Tilemaps.Tilemap): TiledWorkSlot[] 
   for (const obj of layer.objects) {
     if (!obj.gid || obj.x == null || obj.y == null) continue
 
+    const w = obj.width || 32
     const h = obj.height || 64
-    // 椅子 y 是底部，角色站在椅子中心
-    const pixelX = obj.x + (obj.width || 32) / 2
-    const pixelY = obj.y - h / 2
+    // 椅子 y 是底邊（Tiled 慣例），座位在下半格（第二格）
+    // pixelY = 底邊往上 1/4 高度（座位中心，不是椅子正中間）
+    const pixelX = obj.x + w / 2
+    const pixelY = obj.y - h * 0.25
     const col = Math.floor(obj.x / 32)
     const row = Math.floor((obj.y - h) / 32)
     const dir = CHAIR_GID_DIR[obj.gid] || 'down'

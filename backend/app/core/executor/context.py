@@ -43,21 +43,11 @@ class MemberContext:
         return self.primary_account.model if self.primary_account else ""
 
     def effective_model(self, mode: str = "task") -> str:
-        """帶 fallback 的 model — 成員有設定就用，沒有則按 provider + mode 給預設。
-
-        chat: claude→haiku, gemini→gemini-flash（快速回應）
-        task: claude→sonnet, gemini→gemini-3.1-pro-preview（品質優先）
-        """
+        """帶 fallback 的 model — 成員有設定就用，沒有則按 provider + mode 給預設。"""
         if self.primary_model:
             return self.primary_model
-        provider = self.primary_provider
-        defaults = {
-            ("claude", "chat"): "haiku",
-            ("claude", "task"): "sonnet",
-            ("gemini", "chat"): "gemini-flash",
-            ("gemini", "task"): "gemini-3.1-pro-preview",
-        }
-        return defaults.get((provider, mode), "")
+        from app.core.model_registry import get_provider_default
+        return get_provider_default(self.primary_provider, mode)
 
     @property
     def primary_auth(self) -> dict:

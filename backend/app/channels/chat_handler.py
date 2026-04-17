@@ -115,10 +115,10 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
     history_block = format_history_block(history)
     prompt = f"{history_block}\n{user_message}" if history_block else user_message
 
-    # 9. 取得 AI 帳號和模型（從 MemberContext，fallback 由 effective_model 統一管理）
-    provider = ctx.primary_provider
-    model = ctx.effective_model("chat")
-    auth_info = ctx.primary_auth
+    # 9. 取得 AI 帳號列表（按 priority 排序，支援 fallback）
+    accounts_list = ctx.accounts_as_tuples()
+    if not accounts_list:
+        accounts_list = [("claude", "", {}, "default")]
 
     # 9.5 從 extra_json 建構 MCP 用的環境變數（如 AD 帳密）
     mcp_extra_env: dict[str, str] = {}
@@ -141,31 +141,69 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
 
     emitter = HookEmitter(chat_hooks)
 
-    # 11. 呼叫 AI（Process Pool 持久進程 or CLI fallback）
-    use_pool = provider == "claude"
-    logger.info(f"[Chat] Calling AI: provider={provider} use_pool={use_pool} key={chat_session_key} model={model}")
+    # 11. 呼叫 AI（含帳號 fallback 機制）
+    result = None
+    for attempt_idx, (acct_provider, acct_model, acct_auth, acct_name) in enumerate(accounts_list):
+        model = acct_model or ctx.effective_model("chat")
+        use_pool = acct_provider == "claude"
 
-    try:
-        result = await run_ai_task(
-            task_id=0,
-            project_path=".",
-            prompt=prompt,
-            phase="CHAT",
-            forced_provider=provider,
-            card_title=f"Chat with {bot_user.username or bot_user.platform_user_id}",
-            project_name="Aegis Bot",
-            member_id=ctx.member_id,
-            model_override=model,
-            auth_info=auth_info,
-            extra_env=mcp_extra_env or None,
-            on_stream=emitter.emit_raw if chat_hooks else None,
-            use_process_pool=use_pool,
-            chat_key=chat_session_key if use_pool else None,
-            cwd=ws_path,
-        )
-    except Exception as e:
-        logger.error(f"[Chat] AI task failed: {e}")
+        if attempt_idx > 0:
+            logger.info(f"[Chat] Account fallback → '{acct_name}' (priority={attempt_idx})")
+            # Kill 舊 pool session，強制用新帳號 spawn 新進程
+            if use_pool:
+                try:
+                    from app.core.session_pool import process_pool
+                    process_pool.kill(chat_session_key)
+                    logger.info(f"[Chat] Killed pool session for re-spawn with new account")
+                except Exception:
+                    pass
+
+        logger.info(f"[Chat] Calling AI: provider={acct_provider} account={acct_name} use_pool={use_pool} key={chat_session_key} model={model}")
+
+        try:
+            result = await run_ai_task(
+                task_id=0,
+                project_path=".",
+                prompt=prompt,
+                phase="CHAT",
+                forced_provider=acct_provider,
+                card_title=f"Chat with {bot_user.username or bot_user.platform_user_id}",
+                project_name="Aegis Bot",
+                member_id=ctx.member_id,
+                model_override=model,
+                auth_info=acct_auth,
+                extra_env=mcp_extra_env or None,
+                on_stream=emitter.emit_raw if chat_hooks else None,
+                use_process_pool=use_pool,
+                chat_key=chat_session_key if use_pool else None,
+                cwd=ws_path,
+            )
+        except Exception as e:
+            logger.error(f"[Chat] AI task failed with account '{acct_name}': {e}")
+            result = {"status": "error", "output": str(e)}
+
+        # 檢查是否為帳號額度用盡（應 fallback 到下一個帳號）
+        output_text = result.get("output", "") if result else ""
+        is_quota_error = _is_quota_exhausted(output_text, result)
+
+        if result and result.get("status") == "success" and not is_quota_error:
+            if attempt_idx > 0:
+                logger.info(f"[Chat] Succeeded with fallback account '{acct_name}'")
+            break
+
+        if is_quota_error:
+            logger.warning(f"[Chat] Account '{acct_name}' quota exhausted, trying next...")
+            continue
+
+        # 非額度錯誤 → 也嘗試下一個帳號
+        logger.warning(f"[Chat] Account '{acct_name}' failed (status={result.get('status') if result else 'none'})")
+
+    if not result or (result.get("status") != "success" and not result.get("output")):
         return "❌ AI 回應失敗，請稍後再試"
+
+    # 最終檢查：所有帳號都額度用盡
+    if _is_quota_exhausted(result.get("output", ""), result):
+        return "⚠️ 所有帳號額度已用盡，請稍後再試（額度將於 UTC 04:00 重置）"
 
     if result.get("status") != "success":
         return f"❌ AI 回應錯誤: {result.get('output', '未知錯誤')[:100]}"
@@ -234,6 +272,23 @@ async def handle_chat(msg: InboundMessage, bot_user: BotUser, placeholder_messag
         return None  # Router 不再編輯
 
     return clean_output or output
+
+
+def _is_quota_exhausted(output: str, result: Optional[dict] = None) -> bool:
+    """偵測 AI 回應是否為帳號額度用盡的錯誤訊息"""
+    if not output:
+        return False
+    quota_patterns = [
+        "out of extra usage",
+        "out of usage",
+        "rate limit",
+        "usage limit",
+        "quota exceeded",
+        "too many requests",
+        "capacity",
+    ]
+    output_lower = output.lower()
+    return any(p in output_lower for p in quota_patterns)
 
 
 def _get_member(member_id: Optional[int]) -> Optional[Member]:

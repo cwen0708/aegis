@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 _INSTALL_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _CHAT_WS_ROOT = _INSTALL_ROOT / ".aegis" / "chat-workspaces"
 _SHARED_SKILLS_DIR = _INSTALL_ROOT / ".aegis" / "shared" / "skills"
+_SHARED_RULES_DIR = _INSTALL_ROOT / ".aegis" / "shared" / "rules"
 _MEMBERS_ROOT = _INSTALL_ROOT / ".aegis" / "members"
 
 _SAFE_KEY_RE = re.compile(r'[^a-zA-Z0-9_\-:]')
@@ -75,10 +76,13 @@ def ensure_chat_workspace(
     if not settings_file.exists():
         settings_file.write_text(_SETTINGS_JSON, encoding="utf-8")
 
-    # 3. .claude/skills/ → symlink
+    # 3. .claude/rules/ → symlink
+    _ensure_rules_symlinks(ws)
+
+    # 4. .claude/skills/ → symlink
     _ensure_skill_symlinks(ws, member_slug)
 
-    # 4. .mcp.json → symlink
+    # 5. .mcp.json → symlink
     _ensure_mcp_symlink(ws, member_slug)
 
     return str(ws)
@@ -107,6 +111,35 @@ def _build_chat_claude_md(
         platform=platform,
         user_extra=user_extra,
     )
+
+
+def _ensure_rules_symlinks(ws: Path):
+    """建立 .claude/rules/ 目錄的 symlink（shared rules）。"""
+    if not _SHARED_RULES_DIR.exists():
+        return
+    rules_dir = ws / ".claude" / "rules"
+    rules_dir.mkdir(parents=True, exist_ok=True)
+
+    targets: dict[str, Path] = {}
+    for md in _SHARED_RULES_DIR.glob("*.md"):
+        targets[md.name] = md
+
+    # 清理過期 symlink
+    for existing in rules_dir.iterdir():
+        if existing.is_symlink():
+            if existing.name not in targets:
+                existing.unlink()
+            elif existing.resolve() != targets[existing.name].resolve():
+                existing.unlink()
+
+    # 建立 symlink
+    for name, target in targets.items():
+        link = rules_dir / name
+        if not link.exists():
+            try:
+                link.symlink_to(target.resolve())
+            except OSError as e:
+                logger.warning(f"[ChatWorkspace] Failed to symlink rule {name}: {e}")
 
 
 def _ensure_skill_symlinks(ws: Path, member_slug: str):
