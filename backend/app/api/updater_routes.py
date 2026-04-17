@@ -5,10 +5,94 @@ from pydantic import BaseModel
 from app.database import get_session
 from app.models.core import Project, SystemSetting, CronJob
 from app.core import updater
+from app.version import read_version
 from pathlib import Path
+import logging
 import re
+import subprocess
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["updater"])
+
+
+# ==========================================
+# Version SSOT API
+# ==========================================
+def _git_describe_tag() -> str:
+    """取得當前最新的 git tag（權威版本標籤）。失敗回傳空字串。"""
+    install_root = Path(__file__).resolve().parents[3]
+    try:
+        result = subprocess.run(
+            ["git", "describe", "--tags", "--abbrev=0"],
+            cwd=str(install_root),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except (subprocess.SubprocessError, OSError) as exc:
+        logger.warning("[version] git describe 失敗: %s", exc)
+    return ""
+
+
+async def _latest_available_tag(session: Session, channel: str) -> str:
+    """查詢 GitHub 上該 channel 的最新可用 tag。失敗回傳空字串。"""
+    import httpx
+
+    if channel == "stable":
+        pattern = re.compile(r"^v\d+\.\d+\.\d+-stable$")
+    else:
+        pattern = re.compile(r"^v\d+\.\d+\.\d+(-dev\.\d+)?$")
+
+    gh_headers = {"Accept": "application/vnd.github.v3+json"}
+    pat_setting = session.get(SystemSetting, "github_pat")
+    if pat_setting and pat_setting.value:
+        gh_headers["Authorization"] = f"token {pat_setting.value}"
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                "https://api.github.com/repos/cwen0708/aegis/tags",
+                headers=gh_headers,
+                timeout=10.0,
+            )
+            if resp.status_code != 200:
+                return ""
+            tags = resp.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("[version] GitHub tags 查詢失敗: %s", exc)
+        return ""
+
+    filtered = [t["name"] for t in tags if pattern.match(t["name"])]
+    if not filtered:
+        return ""
+    filtered.sort(key=updater.parse_version, reverse=True)
+    return filtered[0]
+
+
+@router.get("/version")
+async def get_version(session: Session = Depends(get_session)):
+    """版本資訊 SSOT 端點。
+
+    回傳：
+      current: backend/VERSION 檔案內容（運行中服務的版本）
+      tag: git describe --tags --abbrev=0（實際部署的 git tag）
+      channel: "stable" or "development"（依 SystemSetting.update_channel）
+      latest: 該頻道 GitHub 上最新可用 tag
+    """
+    channel_setting = session.get(SystemSetting, "update_channel")
+    channel = channel_setting.value if channel_setting else "development"
+    if channel not in ("stable", "development"):
+        channel = "development"
+
+    return {
+        "current": read_version(),
+        "tag": _git_describe_tag(),
+        "channel": channel,
+        "latest": await _latest_available_tag(session, channel),
+    }
 
 
 # ==========================================
