@@ -615,18 +615,6 @@ def seed_data():
             )
             members_to_add.append(m2)
 
-        if "xiao-mu" not in existing_members:
-            m3 = Member(
-                name="小牧",
-                slug="xiao-mu",
-                avatar="⚡",
-                role="能源管理專家",
-                description="專精太陽能電廠監控、發電量分析、設備健康評估與營運風險判斷。負責 OM AI 專案的智能分析任務。",
-                sprite_index=6,
-                extra_json='{"elevenlabs_voice_id": "Mt6lzVndzJdcRVGRuPbb"}',
-            )
-            members_to_add.append(m3)
-
         if members_to_add:
             session.add_all(members_to_add)
             session.commit()
