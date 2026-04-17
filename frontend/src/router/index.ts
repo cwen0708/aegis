@@ -29,6 +29,7 @@ const SettingsRoomDetail = () => import('../views/settings/SettingsRoomDetail.vu
 const Dashboard = () => import('../views/Dashboard.vue')
 const Agents = () => import('../views/Agents.vue')
 const Team = () => import('../views/Team.vue')
+const Talk = () => import('../views/Talk.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -49,6 +50,7 @@ const router = createRouter({
     { path: '/git', component: GitManager, meta: { requiresAuth: true } },
     { path: '/graph', component: RelationGraph, meta: { requiresAuth: true } },
     { path: '/matrix', component: MatrixStream, meta: { requiresAuth: true } },
+    { path: '/talk/:memberSlug', name: 'talk', component: Talk, meta: { requiresAuth: true } },
     {
       path: '/settings',
       component: SettingsLayout,

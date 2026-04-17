@@ -129,7 +129,7 @@ async def _call_member_agent(member: Member, user_text: str) -> str:
     if not ctx.has_member:
         raise RuntimeError(f"成員 '{member.slug}' 無法載入")
 
-    chat_key = f"talk:{member.slug}"
+    chat_key = f"talk_{member.slug}"  # 不能用 ':'（Windows 路徑非法）
     ws_path = ensure_chat_workspace(
         member_slug=ctx.member_slug,
         chat_key=chat_key,
