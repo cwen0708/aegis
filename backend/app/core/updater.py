@@ -888,16 +888,16 @@ async def full_update(
 
     # --- Source gating ---
     if source == "ci":
-        logger.info("[full_update] CI 來源直接拒絕（由人工審批）")
-        return {"skipped": True, "reason": "ci_source_blocked"}
+        logger.info("[full_update] 跳過：CI 來源直接拒絕（由人工審批），reason=ci_source_blocked")
+        return True
 
     if source == "manual" and not is_admin:
-        logger.warning("[full_update] 人工觸發但非管理員")
-        return {"skipped": True, "reason": "not_admin"}
+        logger.warning("[full_update] 跳過：人工觸發但非管理員，reason=not_admin")
+        return True
 
     if source not in ("cron", "manual"):
-        logger.error("[full_update] 未知 source: %s", source)
-        return {"skipped": True, "reason": f"unknown_source:{source}"}
+        logger.error("[full_update] 跳過：未知 source=%s，reason=unknown_source", source)
+        return True
 
     # --- Single-day lock ---
     today = _today_taipei()
@@ -905,8 +905,8 @@ async def full_update(
     if not can_force:
         last_run = _get_last_run_date()
         if last_run == today:
-            logger.info("[full_update] 今日已執行過（%s），source=%s 跳過", last_run, source)
-            return {"skipped": True, "reason": "already_ran_today"}
+            logger.info("[full_update] 跳過：今日已執行過（%s），source=%s，reason=already_ran_today", last_run, source)
+            return True
 
     # Debounce: 5 分鐘內不重複觸發（DB 層級，跨重啟）
     DEBOUNCE_SECONDS = 300

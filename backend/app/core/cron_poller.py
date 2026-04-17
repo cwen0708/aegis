@@ -170,6 +170,18 @@ def resolve_cron_url(job) -> str:
 ALLOWED_SCRIPTS = {"dev_rebase", "hot_update"}
 
 
+def _advance_next_time(session: Session, job, tz_name: str) -> None:
+    """推進 job.next_scheduled_at 並 commit。
+
+    無論當次執行成功/失敗/被白名單攔下，都必須呼叫一次，
+    否則 poller 會一直重抓同一個過期 job，永遠卡在同一個時間點。
+    """
+    next_time = _calculate_next_time(job.cron_expression, tz_name)
+    if next_time:
+        job.next_scheduled_at = next_time
+    session.commit()
+
+
 async def _execute_script_action(session: Session, job, tz_name: str):
     """script:xxx action: 直接執行 backend/scripts/xxx.py（detached，不阻塞 poller）。"""
     import subprocess
@@ -179,32 +191,38 @@ async def _execute_script_action(session: Session, job, tz_name: str):
     action = job.api_url or ""
     script_name = action.split(":", 1)[1] if ":" in action else ""
 
+    # 白名單檢查：不符合一律不執行，但仍更新 next_scheduled_at（避免壞排程反覆觸發）
     if script_name not in ALLOWED_SCRIPTS:
-        logger.error("[Cron Poller] '%s': script '%s' 不在白名單", job.name, script_name)
-    else:
-        backend_dir = Path(__file__).resolve().parents[2]
-        script_path = backend_dir / "scripts" / f"{script_name}.py"
-        venv_python = backend_dir / "venv" / "bin" / "python"
-        python_cmd = str(venv_python) if venv_python.exists() else sys.executable
+        logger.error(
+            "[Cron Poller] '%s': script '%s' 不在白名單 %s，跳過執行",
+            job.name, script_name, sorted(ALLOWED_SCRIPTS),
+        )
+        _advance_next_time(session, job, tz_name)
+        return
 
-        if not script_path.exists():
-            logger.error("[Cron Poller] '%s': 腳本不存在 %s", job.name, script_path)
-        else:
-            try:
-                subprocess.Popen(
-                    [python_cmd, str(script_path)],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    start_new_session=True,
-                )
-                logger.info("[Cron Poller] '%s' → script:%s → started", job.name, script_name)
-            except OSError as exc:
-                logger.error("[Cron Poller] '%s' 啟動 script 失敗: %s", job.name, exc)
+    backend_dir = Path(__file__).resolve().parents[2]
+    script_path = backend_dir / "scripts" / f"{script_name}.py"
 
-    next_time = _calculate_next_time(job.cron_expression, tz_name)
-    if next_time:
-        job.next_scheduled_at = next_time
-    session.commit()
+    if not script_path.exists():
+        logger.error("[Cron Poller] '%s': 腳本不存在 %s，跳過執行", job.name, script_path)
+        _advance_next_time(session, job, tz_name)
+        return
+
+    venv_python = backend_dir / "venv" / "bin" / "python"
+    python_cmd = str(venv_python) if venv_python.exists() else sys.executable
+
+    try:
+        subprocess.Popen(
+            [python_cmd, str(script_path)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        logger.info("[Cron Poller] '%s' → script:%s → started", job.name, script_name)
+    except OSError as exc:
+        logger.error("[Cron Poller] '%s' 啟動 script 失敗: %s", job.name, exc)
+
+    _advance_next_time(session, job, tz_name)
 
 
 async def _execute_gc_action(session: Session, job, tz_name: str):
