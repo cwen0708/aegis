@@ -195,23 +195,8 @@ def main():
             resume_worker()
             return 1
 
-        # 同步 dev worktree（AI 開發分支）到最新 main
-        DEV_WORKTREE = Path("/home/cwen0708/projects/Aegis-dev")
-        if DEV_WORKTREE.exists():
-            try:
-                # 先 fetch（共用 .git，main worktree 已 fetch 過）
-                # 再 rebase dev onto main
-                ret_rb, _, err_rb = run_command(
-                    ["git", "rebase", "main"], cwd=str(DEV_WORKTREE)
-                )
-                if ret_rb != 0:
-                    # rebase 衝突 → abort，保持 dev 不動（不影響部署）
-                    run_command(["git", "rebase", "--abort"], cwd=str(DEV_WORKTREE))
-                    print(f"[HotUpdate] Dev rebase conflict, skipped: {err_rb}")
-                else:
-                    print("[HotUpdate] Dev worktree rebased onto main")
-            except Exception as e:
-                print(f"[HotUpdate] Dev rebase failed: {e}")
+        # Dev worktree rebase 已抽出至 backend/scripts/dev_rebase.py
+        # 由獨立 CronJob「開發分支同步」每日排程執行，不再嵌於主更新流程
 
         update_status("building", 30, "正在安裝 Python 依賴...")
 
@@ -292,7 +277,8 @@ def main():
 
         update_status("applying", 80, "正在更新版本號並重啟服務...")
 
-        # 從 git tag 更新 VERSION 檔
+        # SSOT: 從 git tag 寫入 VERSION 檔（僅在建構全程成功後執行）
+        # 失敗路徑已於前面 return，不會走到此處，故 VERSION 不會被錯誤覆蓋。
         ret, tag_out, _ = run_command(
             ["git", "describe", "--tags", "--abbrev=0"],
             cwd=str(PROJECT_ROOT)
@@ -300,7 +286,14 @@ def main():
         if ret == 0 and tag_out.strip():
             version_str = tag_out.strip().lstrip("v")
             version_file = BACKEND_DIR / "VERSION"
-            version_file.write_text(version_str)
+            try:
+                version_file.write_text(version_str, encoding="utf-8")
+                print(f"[HotUpdate] VERSION 已更新: {version_str}")
+            except OSError as ve:
+                # VERSION 寫入失敗不中斷部署（git 為真實 SSOT），僅記錄
+                print(f"[HotUpdate] VERSION 寫入失敗（忽略）: {ve}")
+        else:
+            print("[HotUpdate] git describe 失敗，VERSION 保持不變")
 
         # 注意：系統排程同步由 main.py 啟動時自動執行，無需在此執行 seed.py
 
