@@ -5,7 +5,7 @@ Streaming STT — 即時語音辨識抽象介面與 provider 實作
 
 目前支援：
   - ElevenLabs Scribe v2 Realtime（WebSocket streaming，partial + committed）
-  - Deepgram Nova-3（stub，Step 5 實作）
+  - Deepgram Nova-3 Live（WebSocket streaming，interim + speech_final）
   - Gemini → 回 None，caller 走既有整段 buffer + multimodal 路徑（向後相容）
 
 設計要點：
@@ -389,35 +389,311 @@ def _extract_transcript_text(msg: dict) -> str:
 
 
 # ────────────────────────────────────────
-# Deepgram Nova-3 stub（Step 5 實作）
+# Deepgram Nova-3 常數
+# ────────────────────────────────────────
+
+# Deepgram live streaming 官方端點（參考 https://developers.deepgram.com/docs/live-streaming-audio）
+_DEEPGRAM_WS_URL_BASE = "wss://api.deepgram.com/v1/listen"
+_DEEPGRAM_DEFAULT_MODEL = "nova-3"
+_DEEPGRAM_DEFAULT_LANGUAGE = "zh-TW"
+_DEEPGRAM_DEFAULT_SAMPLE_RATE = 16000
+_DEEPGRAM_DEFAULT_ENDPOINTING_MS = 300
+_DEEPGRAM_CLOSE_STREAM_MSG = '{"type":"CloseStream"}'
+
+
+# ────────────────────────────────────────
+# Deepgram Nova-3 streaming 實作
 # ────────────────────────────────────────
 
 class DeepgramStreamingSTT(StreamingSTT):
-    """Deepgram Nova-3 streaming STT — 預留 stub，Step 5 實作。
+    """Deepgram Nova-3 live streaming STT。
 
-    計畫 endpoint：
+    官方端點：
       wss://api.deepgram.com/v1/listen?model=nova-3&language=zh-TW
-      &interim_results=true&endpointing=300&encoding=linear16&sample_rate=16000
+      &interim_results=true&endpointing=300&punctuate=true
+      &encoding=linear16&sample_rate=16000&channels=1
+
+    Auth：HTTP header `Authorization: Token <api_key>`。
+
+    訊息協議（與 ElevenLabs 不同）：
+      - Client → Server：**binary frame** 直接送 PCM16 bytes（無 JSON 包裝）
+      - Client 結束：送 text frame `{"type":"CloseStream"}`
+      - Server → Client：
+          {
+            "type": "Results",
+            "channel": {"alternatives": [{"transcript": "...", "confidence": 0.9}]},
+            "is_final": bool,
+            "speech_final": bool,
+            "start": 0.0, "duration": 2.5
+          }
+          * is_final=false → partial（覆蓋顯示用）
+          * is_final=true + speech_final=true → 一整句 utterance 結束 → final
+          * is_final=true + speech_final=false → utterance 中間段 → 視為 partial
     """
 
-    def __init__(self, api_key: str, language_code: str = "zh-TW") -> None:
+    def __init__(
+        self,
+        api_key: str,
+        language_code: str = _DEEPGRAM_DEFAULT_LANGUAGE,
+        sample_rate: int = _DEEPGRAM_DEFAULT_SAMPLE_RATE,
+        model: str = _DEEPGRAM_DEFAULT_MODEL,
+        endpointing_ms: int = _DEEPGRAM_DEFAULT_ENDPOINTING_MS,
+    ) -> None:
+        if not api_key:
+            raise ValueError("Deepgram API key required")
         self._api_key = api_key
         self._language_code = language_code
+        self._sample_rate = sample_rate
+        self._model = model
+        self._endpointing_ms = endpointing_ms
+
+        self._ws = None  # type: ignore[assignment]
+        self._recv_task: Optional[asyncio.Task[None]] = None
+        self._partial_seq: int = 0
+        self._closed: bool = False
+        self._reconnect_attempts: int = 0
+
+    # ── 連線管理 ──────────────────────────────
+
+    def _build_url(self) -> str:
+        params = [
+            f"model={self._model}",
+            f"language={self._language_code}",
+            "interim_results=true",
+            f"endpointing={self._endpointing_ms}",
+            "punctuate=true",
+            "encoding=linear16",
+            f"sample_rate={self._sample_rate}",
+            "channels=1",
+        ]
+        return f"{_DEEPGRAM_WS_URL_BASE}?{'&'.join(params)}"
 
     async def start(self) -> None:
-        raise NotImplementedError(
-            "DeepgramStreamingSTT not yet implemented (planned for Step 5)"
+        await self._open_ws()
+
+    async def _open_ws(self) -> None:
+        try:
+            from websockets.asyncio.client import connect
+        except ImportError as e:  # pragma: no cover
+            raise RuntimeError(
+                "websockets package required for DeepgramStreamingSTT"
+            ) from e
+
+        headers = [("Authorization", f"Token {self._api_key}")]
+        url = self._build_url()
+        try:
+            self._ws = await connect(
+                url,
+                additional_headers=headers,
+                ping_interval=20,
+                ping_timeout=20,
+                max_size=None,
+            )
+        except Exception as e:
+            logger.warning("[STT] Deepgram connect failed: %s", e)
+            raise
+
+        # Deepgram 不需要 session init 訊息（所有參數已在 URL query string）
+        self._recv_task = asyncio.create_task(
+            self._recv_loop(), name="deepgram-stt-recv"
+        )
+        logger.info(
+            "[STT] Deepgram session started (model=%s, lang=%s, endpointing=%dms)",
+            self._model,
+            self._language_code,
+            self._endpointing_ms,
         )
 
+    # ── 傳送音訊 ──────────────────────────────
+
     async def send_chunk(self, pcm_bytes: bytes) -> None:
-        raise NotImplementedError
+        """直接送 binary PCM16 frame（與 Eleven 的 JSON+base64 不同）。"""
+        if self._closed or not pcm_bytes:
+            return
+        if self._ws is None:
+            await self._ensure_reconnect()
+            if self._ws is None:
+                return
+        try:
+            await self._ws.send(pcm_bytes)
+        except Exception as e:
+            logger.warning("[STT] Deepgram send_chunk failed: %s", e)
+            await self._ensure_reconnect()
 
     async def commit(self) -> None:
-        raise NotImplementedError
+        """送 CloseStream 指示 Deepgram 刷新最終 transcript。"""
+        if self._closed or self._ws is None:
+            return
+        try:
+            await self._ws.send(_DEEPGRAM_CLOSE_STREAM_MSG)
+        except Exception as e:
+            logger.warning("[STT] Deepgram commit (CloseStream) failed: %s", e)
+
+    # ── 接收迴圈 ──────────────────────────────
+
+    async def _recv_loop(self) -> None:
+        ws = self._ws
+        if ws is None:
+            return
+        try:
+            async for raw in ws:
+                if isinstance(raw, bytes):
+                    # Deepgram 不會送 binary，忽略
+                    continue
+                await self._handle_server_message(raw)
+        except Exception as e:
+            logger.info("[STT] Deepgram recv loop ended: %s", e)
+            if not self._closed:
+                await self._fire_error(f"stt_upstream_error: {e}")
+
+    async def _handle_server_message(self, raw: str) -> None:
+        try:
+            msg = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.debug("[STT] Deepgram non-JSON message: %s", raw[:120])
+            return
+
+        mtype = msg.get("type") or ""
+
+        if mtype == "Results":
+            await self._handle_results(msg)
+            return
+
+        # 以下事件為資訊性，僅記 debug
+        if mtype in ("Metadata", "UtteranceEnd", "SpeechStarted"):
+            logger.debug("[STT] Deepgram info event: %s", mtype)
+            return
+
+        if mtype == "Error":
+            err = msg.get("description") or msg.get("message") or "deepgram_error"
+            logger.warning("[STT] Deepgram error event: %s", err)
+            await self._fire_error(str(err))
+            return
+
+        logger.debug("[STT] Deepgram unknown message: %s", mtype)
+
+    async def _handle_results(self, msg: dict) -> None:
+        text = _extract_deepgram_transcript(msg)
+        if not text:
+            return
+
+        is_final = bool(msg.get("is_final"))
+        speech_final = bool(msg.get("speech_final"))
+
+        if is_final and speech_final:
+            # 一整句 utterance 結束 → final
+            await self._fire_final(text)
+            return
+
+        # is_final=False → interim partial
+        # is_final=True + speech_final=False → utterance 中間段，仍視為 partial
+        self._partial_seq += 1
+        await self._fire_partial(text, self._partial_seq)
+
+    # ── 重連 ─────────────────────────────────
+
+    async def _ensure_reconnect(self) -> None:
+        if self._closed:
+            return
+        if self._reconnect_attempts >= len(_RECONNECT_BACKOFFS):
+            logger.error("[STT] Deepgram reconnect exhausted")
+            await self._fire_error("stt_upstream_reconnect_exhausted")
+            return
+
+        backoff = _RECONNECT_BACKOFFS[self._reconnect_attempts]
+        self._reconnect_attempts += 1
+        logger.info(
+            "[STT] Deepgram reconnect attempt %d after %.1fs",
+            self._reconnect_attempts,
+            backoff,
+        )
+        await asyncio.sleep(backoff)
+        await self._close_ws_silently()
+        try:
+            await self._open_ws()
+        except Exception as e:
+            logger.warning("[STT] Deepgram reconnect failed: %s", e)
+            await self._fire_error(f"stt_upstream_reconnect_failed: {e}")
+
+    # ── 關閉 ─────────────────────────────────
 
     async def close(self) -> None:
-        # 允許 close 是 no-op，方便 caller 無條件清理
-        return None
+        self._closed = True
+        await self._close_ws_silently()
+        if self._recv_task is not None:
+            self._recv_task.cancel()
+            try:
+                await self._recv_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+            self._recv_task = None
+        logger.info("[STT] Deepgram session closed")
+
+    async def _close_ws_silently(self) -> None:
+        ws = self._ws
+        self._ws = None
+        if ws is None:
+            return
+        try:
+            await ws.close()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("[STT] Deepgram ws close ignored: %s", e)
+
+    # ── Callback dispatch ────────────────────
+
+    async def _fire_partial(self, text: str, seq: int) -> None:
+        cb = self.on_partial
+        if cb is None:
+            return
+        try:
+            result = cb(text, seq)
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[STT] on_partial callback error: %s", e)
+
+    async def _fire_final(self, text: str) -> None:
+        cb = self.on_final
+        if cb is None:
+            return
+        try:
+            result = cb(text)
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[STT] on_final callback error: %s", e)
+
+    async def _fire_error(self, message: str) -> None:
+        cb = self.on_error
+        if cb is None:
+            return
+        try:
+            result = cb(message)
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[STT] on_error callback error: %s", e)
+
+
+def _extract_deepgram_transcript(msg: dict) -> str:
+    """從 Deepgram Results 事件抽出 transcript 文字。
+
+    Payload 結構：
+      {"channel": {"alternatives": [{"transcript": "...", "confidence": 0.9}]}, ...}
+    """
+    channel = msg.get("channel")
+    if not isinstance(channel, dict):
+        return ""
+    alternatives = channel.get("alternatives")
+    if not isinstance(alternatives, list) or not alternatives:
+        return ""
+    first = alternatives[0]
+    if not isinstance(first, dict):
+        return ""
+    transcript = first.get("transcript")
+    if isinstance(transcript, str):
+        return transcript.strip()
+    return ""
 
 
 # ────────────────────────────────────────
@@ -442,7 +718,7 @@ def get_streaming_stt(
     StreamingSTT | None
         - `gemini` 回 None（caller 走整段 buffer + multimodal 路徑）
         - `elevenlabs` 回 ElevenLabsStreamingSTT
-        - `deepgram` 回 DeepgramStreamingSTT（目前 stub）
+        - `deepgram` 回 DeepgramStreamingSTT
     """
     keys = api_keys or {}
     name = (provider or "").strip().lower()
