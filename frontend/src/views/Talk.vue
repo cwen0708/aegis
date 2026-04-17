@@ -18,10 +18,13 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Mic, Send, AlertTriangle, Ear, Hand } from 'lucide-vue-next'
 import { getMemberBySlug, type MemberInfo } from '../services/api/members'
-import { assetUrl } from '../config'
+import { assetUrl, config } from '../config'
 import { useTalkSocket, type TalkState } from '../composables/useTalkSocket'
 import { usePushToTalk } from '../composables/usePushToTalk'
 import { useVAD } from '../composables/useVAD'
+import { useAmbientBgm } from '../composables/useAmbientBgm'
+
+const THINKING_BGM_DELAY_MS = 3000
 
 type TalkMode = 'ptt' | 'vad'
 const TALK_MODE_STORAGE_KEY = 'aegis.talk.mode'
@@ -98,6 +101,17 @@ function setError(msg: string) {
   }, 5000)
 }
 
+// ── 背景音樂（AI thinking 時填補空白）──
+const bgm = useAmbientBgm()
+let thinkingBgmTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearThinkingBgmTimer() {
+  if (thinkingBgmTimer !== null) {
+    clearTimeout(thinkingBgmTimer)
+    thinkingBgmTimer = null
+  }
+}
+
 // ── WebSocket ──
 // 句子級 streaming：onLlmPartial 即時累加字幕，onLlmResponse 在結尾覆蓋成完整版
 const talk = useTalkSocket(memberSlug.value, {
@@ -114,13 +128,55 @@ const talk = useTalkSocket(memberSlug.value, {
   onLlmResponse: (text) => { lastLlmResponse.value = text },
   onAudioEnd: () => {
     if (state.value === 'speaking') state.value = 'idle'
+    // TTS 結束：若仍在 thinking（多輪工具呼叫）→ resume；否則 stop
+    if (state.value === 'thinking') {
+      bgm.resume()
+    } else {
+      bgm.stop()
+    }
   },
   onError: (err) => {
     setError(err)
     state.value = 'error'
+    clearThinkingBgmTimer()
+    bgm.stop()
   },
   onOpen: () => { state.value = 'idle' },
   onClose: () => { state.value = 'disconnected' },
+})
+
+// 狀態變化 → BGM 控制
+// - thinking 持續 3 秒 → play（淡入）
+// - speaking → duck（TTS 音訊開始播放，降音量）
+// - idle/disconnected → stop
+watch(state, (next, prev) => {
+  // 進入 thinking → 排程 3 秒後 play
+  if (next === 'thinking' && prev !== 'thinking') {
+    clearThinkingBgmTimer()
+    thinkingBgmTimer = setTimeout(() => {
+      thinkingBgmTimer = null
+      if (state.value === 'thinking') {
+        bgm.play()
+      }
+    }, THINKING_BGM_DELAY_MS)
+    return
+  }
+
+  // 離開 thinking → 取消排程
+  if (prev === 'thinking' && next !== 'thinking') {
+    clearThinkingBgmTimer()
+  }
+
+  // 進入 speaking（TTS 播放）→ duck
+  if (next === 'speaking' && prev !== 'speaking') {
+    bgm.duck()
+    return
+  }
+
+  // 回到 idle / disconnected → stop
+  if (next === 'idle' || next === 'disconnected') {
+    bgm.stop()
+  }
 })
 
 // ── 錄音模式 ──
@@ -144,6 +200,8 @@ const ptt = usePushToTalk({
 })
 
 async function onPressStart(e: Event) {
+  // iOS Safari BGM 解鎖：必須在 user gesture 同步鏈第一行（不可在 await 後呼叫）
+  bgm.unlock()
   e.preventDefault()
   if (!talk.connected.value) {
     setError('尚未連線伺服器')
@@ -176,6 +234,8 @@ const vad = useVAD({
 })
 
 async function toggleVad() {
+  // iOS Safari BGM 解鎖：同步鏈第一行
+  bgm.unlock()
   if (!talk.connected.value) {
     setError('尚未連線伺服器')
     return
@@ -205,6 +265,8 @@ const volumeScale = computed(() => {
 
 // 文字測試輸入
 function submitText() {
+  // iOS Safari BGM 解鎖：同步鏈第一行（文字輸入也算 user gesture）
+  bgm.unlock()
   const text = textInput.value.trim()
   if (!text) return
   if (!talk.connected.value) {
@@ -239,14 +301,31 @@ async function loadMember() {
   }
 }
 
+async function loadBgmSetting() {
+  try {
+    const res = await fetch(`${config.apiUrl}/api/v1/settings`)
+    if (!res.ok) return
+    const data = await res.json() as Record<string, string>
+    if (data.talk_bgm_enabled === 'false') {
+      bgm.setEnabled(false)
+    }
+  } catch (err) {
+    console.warn('[Talk] load bgm setting failed', err)
+  }
+}
+
 onMounted(async () => {
   await loadMember()
+  // 並行載入 bgm 設定（不擋主流程）
+  void loadBgmSetting()
   if (member.value) {
     talk.connect()
   }
 })
 
 onUnmounted(() => {
+  clearThinkingBgmTimer()
+  bgm.stop()
   if (vad.isListening.value) vad.stop()
   talk.disconnect()
 })
