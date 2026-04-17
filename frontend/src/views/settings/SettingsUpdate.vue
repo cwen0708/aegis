@@ -5,9 +5,13 @@ import { useAegisStore } from '../../stores/aegis'
 
 import { config } from '../../config'
 import { authHeaders } from '../../utils/authFetch'
+import { useAppVersion } from '../../composables/useAppVersion'
 
 const store = useAegisStore()
 const API = config.apiUrl
+
+// SSOT 版本資訊（優先 /api/v1/version，失敗 fallback 到 __APP_VERSION__）
+const { version: ssotVersion, fetchVersion: refetchVersion } = useAppVersion()
 
 // 更新狀態
 const updateStatus = ref({
@@ -44,6 +48,11 @@ interface VersionEntry {
 const versionHistory = ref<VersionEntry[]>([])
 const versionHistoryLoading = ref(false)
 const switchingVersion = ref<string | null>(null)
+
+// 顯示用版本號：優先 SSOT (/api/v1/version)，fallback 到 /update/status
+const displayVersion = computed(() =>
+  ssotVersion.value || updateStatus.value.current_version || '---'
+)
 
 const updateStageText = computed(() => {
   const stages: Record<string, string> = {
@@ -234,6 +243,8 @@ async function waitForHealthThenReload(maxRetries = 30) {
     try {
       const res = await fetch(`${API}/api/v1/update/status`, { signal: AbortSignal.timeout(3000) })
       if (res.ok) {
+        // 更新後重新抓 SSOT 版本
+        void refetchVersion()
         store.addToast('更新成功！頁面重新載入中...', 'success')
         setTimeout(() => window.location.reload(), 500)
         return
@@ -314,7 +325,7 @@ onUnmounted(() => {
             <Download class="w-4 h-4 text-cyan-400" />
             <h2 class="text-sm font-semibold text-slate-200">系統更新</h2>
           </div>
-          <div class="text-xs text-slate-500 font-mono">v{{ updateStatus.current_version || '---' }}</div>
+          <div class="text-xs text-slate-500 font-mono">v{{ displayVersion }}</div>
         </div>
       </div>
 
