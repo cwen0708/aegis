@@ -205,6 +205,8 @@ class Member(SQLModel, table=True):
     sprite_sheet: str = ""  # sprite sheet 路徑（如 /uploads/sprites/1/sheet_20260323.png）
     sprite_scale: float = Field(default=1.0)  # sprite 縮放比例（前端用）
     hook_profile: str = Field(default="standard")  # "minimal" | "standard" | "strict" — hook 嚴格度設定
+    # 額外設定 JSON（如 elevenlabs_voice_id、tts_voice、語音偏好等）
+    extra_json: str = Field(default="{}")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 

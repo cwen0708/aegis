@@ -34,9 +34,24 @@ def _get_gemini_api_key() -> Optional[str]:
     return None
 
 
+def _get_elevenlabs_api_key() -> Optional[str]:
+    """從 SystemSetting 讀取 ElevenLabs API Key"""
+    try:
+        from sqlmodel import Session
+        from app.database import engine
+        from app.models.core import SystemSetting
+        with Session(engine) as session:
+            setting = session.get(SystemSetting, "elevenlabs_api_key")
+            if setting and setting.value:
+                return setting.value
+    except Exception:
+        pass
+    return None
+
+
 def _get_tts_settings() -> tuple[bool, str]:
     """讀取 TTS 設定：(tts_enabled, tts_provider)
-    tts_provider: 'web' | 'gemini' | 'ttsmaker'
+    tts_provider: 'web' | 'gemini' | 'ttsmaker' | 'elevenlabs'
     """
     try:
         from sqlmodel import Session
@@ -197,6 +212,134 @@ async def synthesize_ttsmaker(text: str, voice_id: int = 1480, api_key: str = ""
     return await asyncio.to_thread(_call)
 
 
+ELEVENLABS_DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # Rachel (公開示範 voice)
+ELEVENLABS_DEFAULT_MODEL = "eleven_multilingual_v2"
+
+
+async def synthesize_elevenlabs(
+    text: str,
+    voice_id: str = ELEVENLABS_DEFAULT_VOICE_ID,
+    api_key: str = "",
+    model: str = ELEVENLABS_DEFAULT_MODEL,
+) -> Optional[bytes]:
+    """呼叫 ElevenLabs TTS API（非 streaming），回傳 MP3 bytes"""
+    if not api_key:
+        return None
+
+    cached = _cache_path(text, f"elevenlabs-{voice_id}-{model}")
+    if cached.exists():
+        return cached.read_bytes()
+
+    def _call() -> Optional[bytes]:
+        try:
+            import requests
+        except ImportError:
+            logger.warning("[TTS] requests module not available for ElevenLabs")
+            return None
+
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+        headers = {
+            "xi-api-key": api_key,
+            "Content-Type": "application/json",
+            "Accept": "audio/mpeg",
+        }
+        body = {
+            "text": text,
+            "model_id": model,
+            "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
+        }
+        try:
+            resp = requests.post(url, headers=headers, json=body, timeout=60)
+        except Exception as e:
+            logger.warning(f"[TTS] ElevenLabs request failed: {e}")
+            return None
+
+        if resp.status_code != 200:
+            logger.error(
+                f"[TTS] ElevenLabs failed {resp.status_code}: {resp.text[:200]}"
+            )
+            return None
+
+        audio_data = resp.content
+        TTS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        cached.write_bytes(audio_data)
+        logger.info(
+            f"[TTS] ElevenLabs synthesized {len(text)} chars → {len(audio_data)} bytes"
+        )
+        return audio_data
+
+    return await asyncio.to_thread(_call)
+
+
+async def synthesize_elevenlabs_stream(
+    text: str,
+    voice_id: str = ELEVENLABS_DEFAULT_VOICE_ID,
+    api_key: str = "",
+    model: str = ELEVENLABS_DEFAULT_MODEL,
+    chunk_size: int = 4096,
+):
+    """ElevenLabs TTS streaming，非同步 yield MP3 chunks。
+
+    使用 `asyncio.to_thread` 包住 blocking `requests.iter_content`，
+    每個 chunk 透過 `asyncio.Queue` 橋接到 async generator。
+    """
+    if not api_key:
+        return
+
+    import queue as _queue
+    import threading
+
+    try:
+        import requests
+    except ImportError:
+        logger.warning("[TTS] requests module not available for ElevenLabs stream")
+        return
+
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
+    headers = {
+        "xi-api-key": api_key,
+        "Content-Type": "application/json",
+        "Accept": "audio/mpeg",
+    }
+    body = {
+        "text": text,
+        "model_id": model,
+        "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
+    }
+
+    loop = asyncio.get_running_loop()
+    q: asyncio.Queue = asyncio.Queue(maxsize=32)
+    _SENTINEL: object = object()
+
+    def _producer() -> None:
+        try:
+            resp = requests.post(
+                url, headers=headers, json=body, stream=True, timeout=60
+            )
+            if resp.status_code != 200:
+                logger.error(
+                    f"[TTS] ElevenLabs stream failed {resp.status_code}: "
+                    f"{resp.text[:200]}"
+                )
+                return
+            for chunk in resp.iter_content(chunk_size=chunk_size):
+                if chunk:
+                    asyncio.run_coroutine_threadsafe(q.put(chunk), loop).result()
+        except Exception as e:
+            logger.warning(f"[TTS] ElevenLabs streaming error: {e}")
+        finally:
+            asyncio.run_coroutine_threadsafe(q.put(_SENTINEL), loop).result()
+
+    thread = threading.Thread(target=_producer, daemon=True)
+    thread.start()
+
+    while True:
+        item = await q.get()
+        if item is _SENTINEL:
+            break
+        yield item
+
+
 async def synthesize(text: str, voice: str = "Kore") -> Optional[bytes]:
     """TTS 入口：根據 tts_provider 設定選擇引擎"""
     tts_enabled, tts_provider = _get_tts_settings()
@@ -213,6 +356,13 @@ async def synthesize(text: str, voice: str = "Kore") -> Optional[bytes]:
         api_key = _get_ttsmaker_api_key()
         if api_key:
             return await synthesize_ttsmaker(text, api_key=api_key)
+
+    elif tts_provider == "elevenlabs":
+        api_key = _get_elevenlabs_api_key()
+        if api_key:
+            # voice 參數在此 provider 當作 voice_id 使用（若非預設 "Kore"）
+            voice_id = voice if voice and voice != "Kore" else ELEVENLABS_DEFAULT_VOICE_ID
+            return await synthesize_elevenlabs(text, voice_id=voice_id, api_key=api_key)
 
     # web 或 fallback → 回 None，前端用 Web Speech
     return None
