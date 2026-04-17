@@ -45,7 +45,23 @@ def _git_head_tag() -> str:
     except (subprocess.SubprocessError, OSError) as exc:
         logger.warning("[version] git tag --points-at 失敗: %s", exc)
 
-    # HEAD 無 tag，fallback 到 describe
+    # HEAD 無 tag，fallback 到 describe（優先挑最近的 *-stable tag）
+    try:
+        result = subprocess.run(
+            ["git", "describe", "--tags", "--abbrev=0", "--match", "*-stable"],
+            cwd=str(install_root),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            tag = result.stdout.strip()
+            if tag:
+                return tag
+    except (subprocess.SubprocessError, OSError) as exc:
+        logger.warning("[version] git describe --match *-stable 失敗: %s", exc)
+
+    # 若找不到 stable tag，再 fallback 到任何最近的 tag
     try:
         result = subprocess.run(
             ["git", "describe", "--tags", "--abbrev=0"],
