@@ -9,7 +9,8 @@
  *
  * Server → Client:
  *   - {"type":"state","state":"idle|listening|thinking|speaking"}
- *   - {"type":"transcript","text":"..."}
+ *   - {"type":"transcript_partial","text":"...","seq":N}  — 即時 STT（可被覆蓋）
+ *   - {"type":"transcript","text":"..."}                   — STT 最終文字（final）
  *   - {"type":"llm_partial","text":"..."}  — 單句字幕（streaming）
  *   - {"type":"llm_response","text":"..."} — 完整字幕（結尾）
  *   - Binary frames（MP3 chunks）
@@ -24,7 +25,10 @@ export type TalkState = 'idle' | 'listening' | 'thinking' | 'speaking' | 'discon
 
 export interface TalkSocketCallbacks {
   onState?: (state: TalkState) => void
+  /** STT 最終文字（final commit 後一次性；streaming provider 可能在 audio_end 前到達） */
   onTranscript?: (text: string) => void
+  /** STT 即時文字（interim），`seq` 單調遞增供前端去重 / 覆蓋顯示 */
+  onTranscriptPartial?: (text: string, seq: number) => void
   onLlmPartial?: (text: string) => void
   onLlmResponse?: (text: string) => void
   onAudioEnd?: () => void
@@ -36,6 +40,7 @@ export interface TalkSocketCallbacks {
 type ServerMessageType =
   | 'state'
   | 'transcript'
+  | 'transcript_partial'
   | 'llm_partial'
   | 'llm_response'
   | 'audio_boundary'
@@ -46,6 +51,7 @@ interface ServerMessage {
   type: ServerMessageType
   state?: TalkState
   text?: string
+  seq?: number
   error?: string
 }
 
@@ -113,6 +119,9 @@ export function useTalkSocket(memberSlug: string, callbacks: TalkSocketCallbacks
         break
       case 'transcript':
         if (msg.text) callbacks.onTranscript?.(msg.text)
+        break
+      case 'transcript_partial':
+        if (msg.text) callbacks.onTranscriptPartial?.(msg.text, msg.seq ?? 0)
         break
       case 'llm_partial':
         if (msg.text) callbacks.onLlmPartial?.(msg.text)
@@ -226,6 +235,21 @@ export function useTalkSocket(memberSlug: string, callbacks: TalkSocketCallbacks
     return sendJson({ type: 'audio_end' })
   }
 
+  /** Streaming 模式：通知後端開始一段語音。前端接著持續 sendBinary PCM16 chunks。 */
+  function startAudioStream(format = 'pcm16;rate=16000'): boolean {
+    return sendJson({ type: 'audio_start', format })
+  }
+
+  /** Streaming 模式：送一個 PCM16 chunk（ArrayBuffer / Int16 buffer）。 */
+  function sendAudioChunk(buffer: ArrayBuffer): boolean {
+    return sendBinary(buffer)
+  }
+
+  /** Streaming 模式：通知後端語音結束（觸發 STT commit）。 */
+  function endAudioStream(): boolean {
+    return sendJson({ type: 'audio_end' })
+  }
+
   function sendText(text: string): boolean {
     const trimmed = text.trim()
     if (!trimmed) return false
@@ -252,5 +276,8 @@ export function useTalkSocket(memberSlug: string, callbacks: TalkSocketCallbacks
     disconnect,
     sendAudio,
     sendText,
+    startAudioStream,
+    sendAudioChunk,
+    endAudioStream,
   }
 }

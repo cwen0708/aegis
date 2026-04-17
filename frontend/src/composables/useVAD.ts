@@ -31,7 +31,8 @@ export interface UseVADOptions {
   onSpeechStart?: () => void
   onSpeechEnd?: (audio: VADRecordedAudio) => void
   onError?: (message: string) => void
-  /** 連續低於 threshold 多久判定為停頓（毫秒），預設 800ms */
+  /** 連續低於 threshold 多久判定為停頓（毫秒），預設 500ms
+   *  （streaming provider 會用自己的 endpointing，所以值比舊 900ms 小） */
   silenceDurationMs?: number
   /** RMS 音量閾值（0–1），預設 0.02 */
   threshold?: number
@@ -62,7 +63,7 @@ function errorMessage(e: unknown): string {
 }
 
 export function useVAD(options: UseVADOptions) {
-  const silenceDurationMs = options.silenceDurationMs ?? 800
+  const silenceDurationMs = options.silenceDurationMs ?? 500
   const threshold = options.threshold ?? 0.02
   const speechOnsetMs = options.speechOnsetMs ?? 100
   const minSpeechMs = options.minSpeechMs ?? 300
