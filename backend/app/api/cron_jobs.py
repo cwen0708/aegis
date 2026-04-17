@@ -30,6 +30,7 @@ class CronJobUpdate(BaseModel):
     is_enabled: Optional[bool] = None
     target_list_id: Optional[int] = None  # 0 = 清除（回到預設 Scheduled）
     api_url: Optional[str] = None         # 有值 → API 呼叫模式；空字串 = 清除
+    group: Optional[str] = None           # 分類群組（空字串 = 清除）
 
 class CronJobCreateRequest(BaseModel):
     project_id: int
@@ -39,6 +40,7 @@ class CronJobCreateRequest(BaseModel):
     system_instruction: Optional[str] = None
     prompt_template: str = ""
     target_list_id: Optional[int] = None  # 目標列表，None=Scheduled
+    group: Optional[str] = None           # 分類群組
 
 
 # ==========================================
@@ -70,7 +72,7 @@ def update_cron_job(
     registry = load_registry_from_db(session)
     enforcer = SyncEnforcer(registry)
 
-    _METADATA_FIELDS = {"api_url"}
+    _METADATA_FIELDS = {"api_url", "group"}
 
     all_changes = {
         k: v for k, v in update_data.model_dump().items()
@@ -97,6 +99,9 @@ def update_cron_job(
         job.target_list_id = approved["target_list_id"] if approved["target_list_id"] != 0 else None
     if "api_url" in approved:
         job.api_url = approved["api_url"]
+    if "group" in approved:
+        # 空字串視為清除（設回 NULL）
+        job.group = approved["group"] if approved["group"] else None
     # cron 表達式或啟用狀態改變時，重算下次執行時間
     if cron_changed or ("is_enabled" in approved):
         from app.core.cron_poller import _calculate_next_time, _get_system_timezone
@@ -143,6 +148,7 @@ def create_cron_job(data: CronJobCreateRequest, session: Session = Depends(get_s
         system_instruction=data.system_instruction,
         prompt_template=data.prompt_template,
         target_list_id=data.target_list_id,
+        group=data.group,
         next_scheduled_at=next_time,
     )
     session.add(job)
