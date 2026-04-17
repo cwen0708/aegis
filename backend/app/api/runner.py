@@ -3,7 +3,7 @@ import time
 import json as _json
 import re as _re
 from pathlib import PurePosixPath
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 from typing import Optional, Dict, Tuple
 from pydantic import BaseModel
@@ -208,8 +208,18 @@ class DirectiveRequest(BaseModel):
 
 @router.post("/internal/directive")
 async def internal_directive(req: DirectiveRequest):
-    """Worker 呼叫：廣播 directive 事件 → 前端"""
+    """Worker 呼叫：廣播 directive 事件 → 前端
+
+    已知 type 會做 payload schema 驗證（失敗 → 422）；
+    未知 type 為向後相容，照舊廣播。
+    """
+    from app.core.directives import validate_directive
     from app.core.ws_manager import broadcast_directive
+
+    ok, err = validate_directive(req.action, req.params)
+    if not ok:
+        raise HTTPException(status_code=422, detail=err)
+
     await broadcast_directive(req.action, req.params, req.card_id)
     return {"ok": True}
 
