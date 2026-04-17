@@ -39,8 +39,8 @@ from sqlmodel import Session, select
 
 from app.core.stt_stream import StreamingSTT, get_streaming_stt
 from app.core.tts import (
-    ELEVENLABS_DEFAULT_MODEL,
     ELEVENLABS_DEFAULT_VOICE_ID,
+    _get_talk_tts_model,
     synthesize_elevenlabs_stream,
 )
 from app.database import engine
@@ -287,6 +287,8 @@ async def _handle_turn(
     sentence_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
     full_response_parts: list[str] = []
     speaking_started = False
+    # 每輪解析一次 TTS 模型（允許 admin 中途切換 A/B 模型）
+    tts_model = _get_talk_tts_model()
 
     async def llm_producer() -> None:
         """從 LLM token stream 切句送入 sentence_queue。
@@ -361,7 +363,7 @@ async def _handle_turn(
                         sentence,
                         voice_id=voice_id,
                         api_key=api_key,
-                        model=ELEVENLABS_DEFAULT_MODEL,
+                        model=tts_model,
                     ):
                         await websocket.send_bytes(chunk)
                 except Exception as e:

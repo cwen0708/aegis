@@ -79,9 +79,17 @@ watch(portraitSrc, (url) => detectPortraitAspect(url), { immediate: true })
 const state = ref<TalkState>('idle')
 const lastTranscript = ref('')
 const lastLlmResponse = ref('')
+// Partial STT（可被後續 seq 覆蓋，final 時清空）
+const partialText = ref('')
+const partialSeq = ref(-1)
 const errorBanner = ref<string | null>(null)
 const textInput = ref('')
 const showTextInput = ref(false)
+
+function clearPartial() {
+  partialText.value = ''
+  partialSeq.value = -1
+}
 
 const stateLabel = computed(() => {
   switch (state.value) {
@@ -118,8 +126,17 @@ const talk = useTalkSocket(memberSlug.value, {
   onState: (s) => { state.value = s },
   onTranscript: (text) => {
     lastTranscript.value = text
+    // final 到達 → 清掉 partial 顯示
+    clearPartial()
     // 新一輪 → 清空上一輪字幕
     lastLlmResponse.value = ''
+  },
+  onTranscriptPartial: (text, seq) => {
+    // seq 單調遞增，舊封包忽略（防 out-of-order）
+    if (seq >= partialSeq.value) {
+      partialText.value = text
+      partialSeq.value = seq
+    }
   },
   onLlmPartial: (text) => {
     // 中文句子直接累加
@@ -207,6 +224,8 @@ async function onPressStart(e: Event) {
     setError('尚未連線伺服器')
     return
   }
+  // 新一輪錄音：清掉殘留的 partial 字幕
+  clearPartial()
   state.value = 'listening'
   await ptt.start()
 }
@@ -221,6 +240,8 @@ function onPressEnd(e: Event) {
 // ── VAD 自動斷句錄音 ──
 const vad = useVAD({
   onSpeechStart: () => {
+    // 新一輪語音：清掉殘留的 partial 字幕
+    clearPartial()
     state.value = 'listening'
   },
   onSpeechEnd: ({ buffer, mimeType }) => {
@@ -485,6 +506,14 @@ watch(memberSlug, async (slug) => {
 
       <!-- Subtitle / Dialog box (bottom right) -->
       <div class="absolute bottom-[132px] sm:bottom-[120px] right-2 left-2 sm:left-auto sm:right-6 sm:w-[480px] max-w-[calc(100vw-1rem)] z-10 space-y-2">
+        <!-- Partial（streaming STT 即時字幕，淡色斜體，final 到達後清掉） -->
+        <div
+          v-if="partialText && !lastTranscript"
+          class="bg-slate-900/40 backdrop-blur-sm border border-slate-500/30 rounded-lg px-4 py-2"
+        >
+          <div class="text-[10px] uppercase tracking-wider text-slate-400 mb-1">你正在說…</div>
+          <p class="text-slate-300 text-sm italic leading-relaxed">{{ partialText }}</p>
+        </div>
         <div
           v-if="lastTranscript"
           class="bg-slate-900/60 backdrop-blur-sm border border-sky-400/30 rounded-lg px-4 py-2"

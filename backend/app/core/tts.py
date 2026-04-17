@@ -213,7 +213,26 @@ async def synthesize_ttsmaker(text: str, voice_id: int = 1480, api_key: str = ""
 
 
 ELEVENLABS_DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # Rachel (公開示範 voice)
-ELEVENLABS_DEFAULT_MODEL = "eleven_multilingual_v2"
+# Flash v2.5 first-byte ~75ms vs multilingual_v2 ~400ms（Talk Phase 2）
+ELEVENLABS_DEFAULT_MODEL = "eleven_flash_v2_5"
+
+
+def _get_talk_tts_model() -> str:
+    """讀 SystemSetting.talk_tts_model 覆寫 TTS 模型（A/B testing）。
+
+    seed 預設為 `eleven_flash_v2_5`（Card 1）；缺設定時 fallback 常數。
+    """
+    try:
+        from sqlmodel import Session
+        from app.database import engine
+        from app.models.core import SystemSetting
+        with Session(engine) as session:
+            setting = session.get(SystemSetting, "talk_tts_model")
+            if setting and setting.value:
+                return setting.value
+    except Exception:
+        pass
+    return ELEVENLABS_DEFAULT_MODEL
 
 
 async def synthesize_elevenlabs(
