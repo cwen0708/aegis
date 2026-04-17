@@ -16,20 +16,20 @@
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Mic, Send, AlertTriangle, Ear, Hand } from 'lucide-vue-next'
+import { Mic, Send, AlertTriangle, Ear } from 'lucide-vue-next'
 import { getMemberBySlug, type MemberInfo } from '../services/api/members'
 import { assetUrl } from '../config'
 import { useTalkSocket, type TalkState } from '../composables/useTalkSocket'
 import { usePushToTalk } from '../composables/usePushToTalk'
 import { useVAD } from '../composables/useVAD'
 
-type TalkMode = 'ptt' | 'vad'
+type TalkMode = 'ptt' | 'vad' | 'text'
 const TALK_MODE_STORAGE_KEY = 'aegis.talk.mode'
 
 function loadTalkMode(): TalkMode {
   try {
     const v = localStorage.getItem(TALK_MODE_STORAGE_KEY)
-    if (v === 'ptt' || v === 'vad') return v
+    if (v === 'ptt' || v === 'vad' || v === 'text') return v
   } catch {
     // ignore (private mode / disabled storage)
   }
@@ -78,10 +78,30 @@ const lastTranscript = ref('')
 const lastLlmResponse = ref('')
 const errorBanner = ref<string | null>(null)
 const textInput = ref('')
-const showTextInput = ref(false)
+
+/**
+ * 有效狀態：融合前端 active 狀態（錄音中、VAD 傾聽中）與 WS 遠端狀態。
+ * 前端動作狀態優先（使用者一眼就看到自己的操作結果），遠端狀態次之。
+ */
+const effectiveState = computed<
+  'recording' | 'armed' | 'listening' | 'thinking' | 'speaking' | 'disconnected' | 'error' | 'idle'
+>(() => {
+  if (ptt.recording.value) return 'recording'
+  if (vad.isListening.value) {
+    return vad.isSpeaking.value ? 'listening' : 'armed'
+  }
+  if (state.value === 'listening') return 'listening'
+  if (state.value === 'thinking') return 'thinking'
+  if (state.value === 'speaking') return 'speaking'
+  if (state.value === 'disconnected') return 'disconnected'
+  if (state.value === 'error') return 'error'
+  return 'idle'
+})
 
 const stateLabel = computed(() => {
-  switch (state.value) {
+  switch (effectiveState.value) {
+    case 'recording': return '錄音中'
+    case 'armed': return '傾聽中…'
     case 'listening': return '聆聽中'
     case 'thinking': return '思考中'
     case 'speaking': return '回應中'
@@ -143,23 +163,6 @@ const ptt = usePushToTalk({
   onError: (msg) => setError(msg),
 })
 
-async function onPressStart(e: Event) {
-  e.preventDefault()
-  if (!talk.connected.value) {
-    setError('尚未連線伺服器')
-    return
-  }
-  state.value = 'listening'
-  await ptt.start()
-}
-
-function onPressEnd(e: Event) {
-  e.preventDefault()
-  if (ptt.recording.value) {
-    ptt.stop()
-  }
-}
-
 // ── VAD 自動斷句錄音 ──
 const vad = useVAD({
   onSpeechStart: () => {
@@ -175,33 +178,52 @@ const vad = useVAD({
   minSpeechMs: 300,
 })
 
-async function toggleVad() {
-  if (!talk.connected.value) {
-    setError('尚未連線伺服器')
-    return
-  }
-  if (vad.isListening.value) {
-    vad.stop()
-    if (state.value === 'listening') state.value = 'idle'
-  } else {
-    await vad.start()
-  }
-}
-
-function switchMode(target: TalkMode) {
-  if (target === mode.value) return
-  // 切換前停掉當前模式的錄音
+/**
+ * 停掉當前模式正在執行的工作（錄音／傾聽），保留模式值不動。
+ * 切換模式前先呼叫，避免兩個輸入源同時工作。
+ */
+function stopCurrentActivity() {
   if (mode.value === 'vad' && vad.isListening.value) vad.stop()
   if (mode.value === 'ptt' && ptt.recording.value) ptt.stop()
-  mode.value = target
   if (state.value === 'listening') state.value = 'idle'
 }
 
-// 麥克風周圍聲波圓圈：以 currentVolume（0–1）換算 scale（1.0–1.6）
-const volumeScale = computed(() => {
-  const v = Math.min(Math.max(vad.currentVolume.value, 0), 1)
-  return 1 + Math.min(v * 6, 0.6)
-})
+// 三個底部按鈕 = 模式切換 + 動作觸發
+async function toggleRecord() {
+  if (!talk.connected.value) { setError('尚未連線伺服器'); return }
+  // 正在錄 → 停止送出
+  if (mode.value === 'ptt' && ptt.recording.value) {
+    ptt.stop()
+    return
+  }
+  // 其他模式 → 先停、切到 ptt、開始錄
+  if (mode.value !== 'ptt') {
+    stopCurrentActivity()
+    mode.value = 'ptt'
+  }
+  state.value = 'listening'
+  await ptt.start()
+}
+
+async function toggleListen() {
+  if (!talk.connected.value) { setError('尚未連線伺服器'); return }
+  if (mode.value === 'vad' && vad.isListening.value) {
+    vad.stop()
+    if (state.value === 'listening') state.value = 'idle'
+    return
+  }
+  if (mode.value !== 'vad') {
+    stopCurrentActivity()
+    mode.value = 'vad'
+  }
+  await vad.start()
+}
+
+function toggleText() {
+  if (mode.value === 'text') return
+  stopCurrentActivity()
+  mode.value = 'text'
+}
 
 // 文字測試輸入
 function submitText() {
@@ -262,60 +284,8 @@ watch(memberSlug, async (slug) => {
 </script>
 
 <template>
-  <div class="talk-page fixed inset-0 z-[60] bg-gradient-to-b from-slate-900 via-slate-900 to-black overflow-hidden">
-    <!-- Top bar -->
-    <div class="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4 py-3">
-      <button
-        @click="goBack"
-        class="flex items-center gap-1 text-white/80 hover:text-white bg-slate-800/60 hover:bg-slate-700/80 backdrop-blur-sm rounded-lg px-3 py-2 transition-colors"
-      >
-        <ArrowLeft class="w-4 h-4" />
-        <span class="text-sm">返回</span>
-      </button>
-
-      <div class="flex items-center gap-2">
-        <span class="text-white font-bold text-lg" style="text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;">
-          {{ member?.name || memberSlug }}
-        </span>
-      </div>
-
-      <div class="flex items-center gap-2">
-        <!-- 模式切換 -->
-        <div class="flex items-center rounded-lg bg-slate-800/60 backdrop-blur-sm border border-slate-700 overflow-hidden text-xs">
-          <button
-            @click="switchMode('ptt')"
-            :class="[
-              'px-2.5 py-2 flex items-center gap-1 transition-colors',
-              mode === 'ptt' ? 'bg-emerald-600/80 text-white' : 'text-white/60 hover:text-white'
-            ]"
-            title="按住說話模式"
-          >
-            <Hand class="w-3.5 h-3.5" />
-            <span class="hidden sm:inline">按住</span>
-          </button>
-          <button
-            @click="switchMode('vad')"
-            :class="[
-              'px-2.5 py-2 flex items-center gap-1 transition-colors',
-              mode === 'vad' ? 'bg-emerald-600/80 text-white' : 'text-white/60 hover:text-white'
-            ]"
-            title="自動斷句（VAD）模式"
-          >
-            <Ear class="w-3.5 h-3.5" />
-            <span class="hidden sm:inline">傾聽</span>
-          </button>
-        </div>
-
-        <button
-          @click="showTextInput = !showTextInput"
-          class="text-white/70 hover:text-white bg-slate-800/60 hover:bg-slate-700/80 backdrop-blur-sm rounded-lg px-3 py-2 text-xs transition-colors"
-          :class="{ 'bg-emerald-600/80 text-white': showTextInput }"
-          title="切換文字測試輸入模式"
-        >
-          測試輸入
-        </button>
-      </div>
-    </div>
+  <div class="talk-page fixed z-40 top-16 bottom-0 left-0 right-0 sm:top-0 bg-gradient-to-b from-slate-900 via-slate-900 to-black overflow-hidden">
+    <!-- 頂部使用全局 mobile nav（64px），桌面版顯示 sidebar。此頁不再自繪 top bar。成員名稱見底部工具列。 -->
 
     <!-- Error banner -->
     <Transition name="fade">
@@ -350,8 +320,8 @@ watch(memberSlug, async (slug) => {
     <!-- Main content -->
     <template v-else-if="member">
       <!-- Portrait -->
-      <div class="absolute inset-0 flex items-center justify-center pt-16 pb-64 sm:pb-56 pointer-events-none">
-        <div class="relative h-full max-h-[70vh] aspect-[3/4] flex items-end justify-center">
+      <div class="absolute inset-0 flex items-end justify-center pointer-events-none">
+        <div class="relative h-full aspect-[3/4] max-w-full flex items-end justify-center">
           <template v-if="portraitSrc">
             <img
               :src="portraitSrc"
@@ -377,148 +347,139 @@ watch(memberSlug, async (slug) => {
         </div>
       </div>
 
-      <!-- State badge (below portrait) -->
-      <div class="absolute left-1/2 -translate-x-1/2 bottom-[260px] sm:bottom-[240px] z-10">
-        <div
-          class="flex items-center gap-2 bg-slate-900/70 backdrop-blur-sm border rounded-full px-4 py-1.5 text-sm"
-          :class="[
-            state === 'listening' ? 'border-sky-400/60 text-sky-200' :
-            state === 'thinking' ? 'border-amber-400/60 text-amber-200' :
-            state === 'speaking' ? 'border-emerald-400/60 text-emerald-200' :
-            state === 'error' ? 'border-red-400/60 text-red-200' :
-            state === 'disconnected' ? 'border-slate-500/60 text-slate-400' :
-            'border-slate-500/60 text-slate-300'
-          ]"
-        >
-          <span class="w-2 h-2 rounded-full"
-            :class="[
-              state === 'listening' ? 'bg-sky-400 animate-pulse' :
-              state === 'thinking' ? 'bg-amber-400 animate-pulse' :
-              state === 'speaking' ? 'bg-emerald-400 animate-pulse' :
-              state === 'error' ? 'bg-red-400' :
-              state === 'disconnected' ? 'bg-slate-500' :
-              'bg-slate-400'
-            ]"
-          />
-          {{ stateLabel }}
-        </div>
-      </div>
-
-      <!-- Subtitle / Dialog box (bottom right) -->
-      <div class="absolute bottom-[132px] sm:bottom-[120px] right-2 left-2 sm:left-auto sm:right-6 sm:w-[480px] max-w-[calc(100vw-1rem)] z-10 space-y-2">
+      <!-- 字幕區（壓在立繪上方，工具列上緣） -->
+      <div
+        v-if="lastTranscript || lastLlmResponse"
+        class="absolute left-2 right-2 bottom-[72px] z-10 space-y-2"
+      >
         <div
           v-if="lastTranscript"
-          class="bg-slate-900/60 backdrop-blur-sm border border-sky-400/30 rounded-lg px-4 py-2"
+          class="bg-slate-900/70 backdrop-blur-sm border border-sky-400/30 rounded-lg px-4 py-2"
         >
           <div class="text-[10px] uppercase tracking-wider text-sky-300 mb-1">你說</div>
-          <p class="text-white text-sm leading-relaxed">{{ lastTranscript }}</p>
+          <p class="text-white text-sm leading-relaxed line-clamp-2">{{ lastTranscript }}</p>
         </div>
         <div
           v-if="lastLlmResponse"
-          class="bg-slate-900/60 backdrop-blur-sm border border-emerald-400/30 rounded-lg px-4 py-2"
+          class="bg-slate-900/70 backdrop-blur-sm border border-emerald-400/30 rounded-lg px-4 py-2"
         >
           <div class="text-[10px] uppercase tracking-wider text-emerald-300 mb-1">
             {{ member.name }} 說
           </div>
-          <p class="text-white text-sm leading-relaxed">{{ lastLlmResponse }}</p>
+          <p class="text-white text-sm leading-relaxed line-clamp-3">{{ lastLlmResponse }}</p>
         </div>
       </div>
 
-      <!-- Bottom control area -->
-      <div class="absolute bottom-0 left-0 right-0 z-20 px-4 pb-6 pt-3 bg-gradient-to-t from-black/80 to-transparent">
-        <!-- Text input (test mode) -->
-        <Transition name="fade">
-          <div v-if="showTextInput" class="mb-3 flex items-center gap-2 max-w-2xl mx-auto">
-            <input
-              v-model="textInput"
-              @keydown.enter="submitText"
-              type="text"
-              placeholder="輸入文字測試（跳過 STT）"
-              class="flex-1 bg-slate-800/80 border border-slate-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-emerald-400"
-            />
+      <!-- 底部工具列：[● 名字·狀態] .... [錄音｜傾聽｜輸入] [頭像] -->
+      <div class="absolute left-0 right-0 bottom-0 z-20 h-16 bg-slate-900/85 backdrop-blur-md border-t border-slate-700/50 px-2 flex items-center gap-2">
+        <!-- 狀態徽章（成員名 · 狀態，顏色同步錄音/傾聽實際狀態） -->
+        <div
+          class="flex items-center gap-2 border rounded-full px-3 py-1.5 text-xs min-w-0 max-w-[50%]"
+          :class="[
+            effectiveState === 'recording' ? 'border-red-400/70 text-red-200 bg-red-500/10' :
+            effectiveState === 'listening' ? 'border-sky-400/70 text-sky-200 bg-sky-500/10' :
+            effectiveState === 'armed' ? 'border-sky-400/50 text-sky-300' :
+            effectiveState === 'thinking' ? 'border-amber-400/60 text-amber-200' :
+            effectiveState === 'speaking' ? 'border-emerald-400/60 text-emerald-200' :
+            effectiveState === 'error' ? 'border-red-400/60 text-red-200' :
+            effectiveState === 'disconnected' ? 'border-slate-500/60 text-slate-400' :
+            'border-slate-500/60 text-slate-300'
+          ]"
+        >
+          <span class="w-2 h-2 rounded-full shrink-0"
+            :class="[
+              effectiveState === 'recording' ? 'bg-red-400 animate-pulse' :
+              effectiveState === 'listening' ? 'bg-sky-400 animate-pulse' :
+              effectiveState === 'armed' ? 'bg-sky-400 animate-pulse' :
+              effectiveState === 'thinking' ? 'bg-amber-400 animate-pulse' :
+              effectiveState === 'speaking' ? 'bg-emerald-400 animate-pulse' :
+              effectiveState === 'error' ? 'bg-red-400' :
+              effectiveState === 'disconnected' ? 'bg-slate-500' :
+              'bg-slate-400'
+            ]"
+          />
+          <span class="truncate">{{ member.name }} · {{ stateLabel }}</span>
+        </div>
+
+        <div class="ml-auto flex items-center gap-1.5">
+          <!-- 互動三鈕：錄音（大）/ 傾聽 / 輸入 -->
+          <div class="flex items-center rounded-xl bg-slate-800/60 border border-slate-700 overflow-hidden text-sm shadow-lg">
+            <!-- 錄音（主要動作，視覺最顯眼） -->
             <button
-              @click="submitText"
-              :disabled="!textInput.trim() || !talk.connected.value"
-              class="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg p-2 transition-colors"
+              @click="toggleRecord"
+              :disabled="!talk.connected.value"
+              :class="[
+                'px-5 py-2.5 flex items-center gap-1.5 font-semibold transition-colors',
+                ptt.recording.value
+                  ? 'bg-red-500 text-white animate-pulse'
+                  : mode === 'ptt'
+                    ? 'bg-emerald-600/80 text-white'
+                    : 'text-white/70 hover:text-white hover:bg-slate-700/50 disabled:opacity-40'
+              ]"
+              :title="ptt.recording.value ? '點擊停止錄音' : '點擊開始錄音'"
+              aria-label="錄音"
+            >
+              <Mic class="w-5 h-5" />
+              <span>{{ ptt.recording.value ? '停止' : '錄音' }}</span>
+            </button>
+            <!-- 傾聽（VAD toggle） -->
+            <button
+              @click="toggleListen"
+              :disabled="!talk.connected.value"
+              :class="[
+                'px-3.5 py-2.5 flex items-center gap-1 transition-colors',
+                vad.isListening.value
+                  ? 'bg-sky-500 text-white animate-pulse'
+                  : mode === 'vad'
+                    ? 'bg-emerald-600/80 text-white'
+                    : 'text-white/70 hover:text-white hover:bg-slate-700/50 disabled:opacity-40'
+              ]"
+              :title="vad.isListening.value ? '點擊關閉傾聽' : '點擊開啟自動斷句傾聽'"
+              aria-label="傾聽"
+            >
+              <Ear class="w-4 h-4" />
+              <span class="hidden sm:inline">傾聽</span>
+            </button>
+            <!-- 文字輸入 -->
+            <button
+              @click="toggleText"
+              :class="[
+                'px-3.5 py-2.5 flex items-center gap-1 transition-colors',
+                mode === 'text' ? 'bg-emerald-600/80 text-white' : 'text-white/70 hover:text-white hover:bg-slate-700/50'
+              ]"
+              title="文字輸入模式"
+              aria-label="文字輸入"
             >
               <Send class="w-4 h-4" />
+              <span class="hidden sm:inline">輸入</span>
             </button>
           </div>
-        </Transition>
 
-        <!-- Mic button: Push-to-talk 或 VAD -->
-        <div class="flex items-center justify-center">
-          <!-- PTT 模式 -->
-          <button
-            v-if="mode === 'ptt'"
-            @mousedown="onPressStart"
-            @mouseup="onPressEnd"
-            @mouseleave="onPressEnd"
-            @touchstart.prevent="onPressStart"
-            @touchend.prevent="onPressEnd"
-            @touchcancel.prevent="onPressEnd"
-            :disabled="!talk.connected.value"
-            class="flex items-center justify-center gap-3 select-none transition-all rounded-full font-bold shadow-2xl"
-            :class="[
-              ptt.recording.value
-                ? 'bg-red-500 scale-110 shadow-red-500/50'
-                : talk.connected.value
-                  ? 'bg-emerald-600 hover:bg-emerald-500 active:scale-95'
-                  : 'bg-slate-700 text-slate-400 cursor-not-allowed',
-              'w-20 h-20 sm:w-24 sm:h-24 text-white',
-            ]"
-            :title="talk.connected.value ? '按住說話' : '尚未連線'"
-          >
-            <Mic class="w-8 h-8 sm:w-10 sm:h-10" />
-          </button>
-
-          <!-- VAD 模式：單擊 toggle -->
-          <div v-else class="relative flex items-center justify-center w-28 h-28 sm:w-32 sm:h-32">
-            <!-- 音量脈動圓圈（只在聆聽中且有聲音時顯示） -->
-            <span
-              v-if="vad.isListening.value"
-              class="vad-ring absolute inset-0 rounded-full pointer-events-none"
-              :class="vad.isSpeaking.value ? 'vad-ring-speaking' : 'vad-ring-listening'"
-              :style="{ transform: `scale(${volumeScale})` }"
-            />
-            <span
-              v-if="vad.isListening.value"
-              class="vad-ring-soft absolute inset-2 rounded-full pointer-events-none"
-            />
-            <button
-              @click="toggleVad"
-              :disabled="!talk.connected.value"
-              class="relative flex items-center justify-center select-none transition-all rounded-full font-bold shadow-2xl w-20 h-20 sm:w-24 sm:h-24 text-white"
-              :class="[
-                vad.isSpeaking.value
-                  ? 'bg-red-500 scale-105 shadow-red-500/50'
-                  : vad.isListening.value
-                    ? 'bg-sky-500 shadow-sky-500/40 animate-pulse-slow'
-                    : talk.connected.value
-                      ? 'bg-emerald-600 hover:bg-emerald-500 active:scale-95'
-                      : 'bg-slate-700 text-slate-400 cursor-not-allowed'
-              ]"
-              :title="
-                !talk.connected.value ? '尚未連線' :
-                vad.isListening.value ? '點擊關閉傾聽' : '點擊開啟傾聽模式'
-              "
-            >
-              <Ear v-if="vad.isListening.value && !vad.isSpeaking.value" class="w-8 h-8 sm:w-10 sm:h-10" />
-              <Mic v-else class="w-8 h-8 sm:w-10 sm:h-10" />
-            </button>
-          </div>
         </div>
-        <p class="text-center text-slate-400 text-xs mt-2">
-          <template v-if="mode === 'ptt'">
-            {{ ptt.recording.value ? '放開結束錄音…' : '按住說話' }}
-          </template>
-          <template v-else>
-            <template v-if="!vad.isListening.value">點擊開啟傾聽模式（自動斷句）</template>
-            <template v-else-if="vad.isSpeaking.value">偵測到語音…說完自動送出</template>
-            <template v-else>聆聽中（再按一次關閉）</template>
-          </template>
-        </p>
       </div>
+
+      <!-- 底部文字輸入框（僅測試模式，浮在工具列上方） -->
+      <Transition name="fade">
+        <div
+          v-if="mode === 'text'"
+          class="absolute bottom-[72px] left-2 right-2 sm:left-1/2 sm:-translate-x-1/2 sm:w-[480px] z-30 flex items-center gap-2"
+        >
+          <input
+            v-model="textInput"
+            @keydown.enter="submitText"
+            type="text"
+            placeholder="輸入文字測試（跳過 STT）"
+            class="flex-1 bg-slate-800/90 border border-slate-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-emerald-400"
+          />
+          <button
+            @click="submitText"
+            :disabled="!textInput.trim() || !talk.connected.value"
+            class="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg p-2 transition-colors"
+          >
+            <Send class="w-4 h-4" />
+          </button>
+        </div>
+      </Transition>
     </template>
   </div>
 </template>

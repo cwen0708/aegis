@@ -49,6 +49,7 @@ async function fetchRooms() {
 
 // 側邊欄收起
 const sidebarCollapsed = ref(localStorage.getItem('aegis-sidebar') === 'collapsed')
+const mobileDrawerOpen = ref(false)  // 手機版漢堡選單
 function toggleSidebar() {
   sidebarCollapsed.value = !sidebarCollapsed.value
   localStorage.setItem('aegis-sidebar', sidebarCollapsed.value ? 'collapsed' : 'expanded')
@@ -121,9 +122,9 @@ function navClass(path: string) {
 // 手機版底部導航
 const mobileNavItems = computed(() => {
   const items = [
+    { path: '/rooms', icon: LayoutGrid, label: '空間' },
     { path: '/kanban', icon: ListTodo, label: '看板' },
     { path: '/tasks', icon: Zap, label: '任務' },
-    { path: '/rooms', icon: Shield, label: 'Aegis', isCenter: true },
     { path: '/cron', icon: Clock, label: '排程' },
   ]
   if (canAccessSettings.value) {
@@ -143,8 +144,27 @@ function mobileNavClass(path: string) {
 <template>
   <div class="h-screen bg-slate-900 text-slate-100 font-sans flex overflow-hidden">
 
-    <!-- Sidebar (Desktop Only) -->
-    <aside v-if="!isMobile" :class="sidebarCollapsed ? 'w-14' : 'w-64'" class="bg-slate-800 border-r border-slate-700 flex flex-col transition-all duration-200">
+    <!-- Mobile Drawer Backdrop -->
+    <Transition name="backdrop">
+      <div
+        v-if="isMobile && mobileDrawerOpen"
+        @click="mobileDrawerOpen = false"
+        class="fixed inset-0 z-[70] bg-black/50 backdrop-blur-sm"
+      />
+    </Transition>
+
+    <!-- Sidebar (Desktop OR Mobile Drawer) -->
+    <Transition name="drawer">
+      <aside
+        v-if="!isMobile || mobileDrawerOpen"
+        :class="[
+          isMobile
+            ? 'fixed inset-y-0 left-0 z-[71] w-64 shadow-2xl'
+            : [sidebarCollapsed ? 'w-14' : 'w-64', 'transition-all duration-200']
+        ]"
+        class="bg-slate-800 border-r border-slate-700 flex flex-col"
+        @click.self="isMobile && (mobileDrawerOpen = false)"
+      >
       <!-- Logo Area -->
       <div class="h-16 flex items-center border-b border-slate-700" :class="sidebarCollapsed ? 'justify-center px-2' : 'px-6'">
         <div class="flex items-center gap-2 text-emerald-400">
@@ -301,54 +321,45 @@ function mobileNavClass(path: string) {
         </template>
       </div>
     </aside>
+    </Transition>
 
     <!-- Main Content -->
     <main class="flex-1 flex flex-col min-w-0 bg-slate-900 relative">
       <!-- Workspace with Background Glow -->
-      <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-emerald-900/20 via-slate-900 to-slate-900 pointer-events-none"></div>
+      <div class="absolute inset-0 z-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-emerald-900/20 via-slate-900 to-slate-900 pointer-events-none"></div>
 
-      <div class="flex-1 overflow-hidden relative z-0" :class="{ 'pb-14': isMobile }">
+      <div class="flex-1 overflow-hidden relative" :class="{ 'pt-16': isMobile }">
         <router-view v-if="settingsReady"></router-view>
       </div>
     </main>
 
-    <!-- Mobile Bottom Navigation -->
-    <nav v-if="isMobile" class="fixed bottom-0 left-0 right-0 z-50 bg-slate-800/95 backdrop-blur-lg border-t border-slate-700/50 safe-area-bottom" role="navigation" aria-label="主要導覽">
-      <div class="flex items-end justify-around px-2 pt-2 pb-2">
-        <template v-for="item in mobileNavItems" :key="item.path">
-          <!-- 中央空間按鈕（突出） -->
-          <router-link
-            v-if="item.isCenter"
-            :to="item.path"
-            class="flex flex-col items-center -mt-6"
-            :aria-label="item.label"
-            :aria-current="route.path === item.path ? 'page' : undefined"
-          >
-            <div
-              class="w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all"
-              :class="route.path === item.path
-                ? 'bg-emerald-500 text-white shadow-emerald-500/30'
-                : 'bg-slate-700 text-slate-300 hover:bg-slate-600'"
-            >
-              <component :is="item.icon" class="w-7 h-7" aria-hidden="true" />
-            </div>
-            <span class="text-[10px] mt-1" :class="route.path === item.path ? 'text-emerald-400' : 'text-slate-500'">
-              {{ item.label }}
-            </span>
-          </router-link>
+    <!-- Mobile Top Navigation -->
+    <nav v-if="isMobile" class="fixed top-0 left-0 right-0 z-50 h-16 bg-slate-800/95 backdrop-blur-lg border-b border-slate-700/50 safe-area-top" role="navigation" aria-label="主要導覽">
+      <div class="h-full flex items-center justify-between px-2">
+        <!-- Logo 按鈕：開漢堡選單 -->
+        <button
+          @click="mobileDrawerOpen = !mobileDrawerOpen"
+          class="flex items-center gap-1.5 px-3 h-full text-emerald-400 hover:bg-slate-700/50 transition-colors"
+          aria-label="開啟選單"
+        >
+          <Shield class="w-5 h-5" />
+          <span class="font-bold text-base">Aegis</span>
+        </button>
 
-          <!-- 一般導航項目 -->
-          <router-link
-            v-else
-            :to="item.path"
-            class="flex flex-col items-center py-1 px-3 min-w-[44px] min-h-[44px]"
-            :aria-label="item.label"
-            :aria-current="route.path === item.path ? 'page' : undefined"
-          >
-            <component :is="item.icon" class="w-5 h-5" :class="mobileNavClass(item.path)" aria-hidden="true" />
-            <span class="text-[10px] mt-1" :class="mobileNavClass(item.path)">{{ item.label }}</span>
-          </router-link>
-        </template>
+        <!-- 導航項目 -->
+        <div class="flex items-center h-full">
+          <template v-for="item in mobileNavItems" :key="item.path">
+            <router-link
+              :to="item.path"
+              class="flex flex-col items-center justify-center h-full px-2.5 min-w-[44px]"
+              :aria-label="item.label"
+              :aria-current="route.path === item.path ? 'page' : undefined"
+            >
+              <component :is="item.icon" class="w-4 h-4" :class="mobileNavClass(item.path)" aria-hidden="true" />
+              <span class="text-[10px] mt-0.5" :class="mobileNavClass(item.path)">{{ item.label }}</span>
+            </router-link>
+          </template>
+        </div>
       </div>
     </nav>
 
@@ -358,6 +369,27 @@ function mobileNavClass(path: string) {
 </template>
 
 <style scoped>
+/* Mobile drawer slide-in from left */
+.drawer-enter-active,
+.drawer-leave-active {
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+.drawer-enter-from,
+.drawer-leave-to {
+  transform: translateX(-100%);
+}
+
+/* Backdrop fade */
+.backdrop-enter-active,
+.backdrop-leave-active {
+  transition: opacity 220ms ease-out;
+}
+.backdrop-enter-from,
+.backdrop-leave-to {
+  opacity: 0;
+}
+
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
   height: 6px;
