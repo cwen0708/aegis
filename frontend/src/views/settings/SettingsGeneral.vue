@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Globe, Cpu, Save, Loader2, Lock, Sparkles, ShieldCheck, Github, CheckCircle2, Unplug, LogOut } from 'lucide-vue-next'
+import { Globe, Cpu, Save, Loader2, Lock, Sparkles, ShieldCheck, Github, CheckCircle2, Unplug, LogOut, Mic } from 'lucide-vue-next'
 import { useAegisStore } from '../../stores/aegis'
 import { useAuthStore } from '../../stores/auth'
 import { useAsyncOp } from '../../composables/useAsyncOperation'
@@ -75,6 +75,28 @@ const { loading, saving, run } = useAsyncOp()
 const requireLoginToView = ref(false)
 const ttsEnabled = ref(false)
 const ttsProvider = ref('web')
+
+// Talk Phase 2 — 語音對話設定
+const STT_PROVIDERS = ['gemini', 'elevenlabs', 'deepgram'] as const
+const TALK_TTS_MODELS = ['eleven_flash_v2_5', 'eleven_multilingual_v2'] as const
+type SttProvider = (typeof STT_PROVIDERS)[number]
+type TalkTtsModel = (typeof TALK_TTS_MODELS)[number]
+
+const talk = ref<{
+  stt_provider: SttProvider
+  talk_tts_model: TalkTtsModel
+  talk_bgm_enabled: boolean
+  /** 已儲存值（後端回傳可能為 masked `***xxxx`） */
+  deepgram_api_key_masked: string
+  /** 使用者新輸入的值；空字串代表保留原值、不覆寫 */
+  deepgram_api_key_new: string
+}>({
+  stt_provider: 'elevenlabs',
+  talk_tts_model: 'eleven_flash_v2_5',
+  talk_bgm_enabled: true,
+  deepgram_api_key_masked: '',
+  deepgram_api_key_new: '',
+})
 
 const form = ref({
   timezone: 'Asia/Taipei',
@@ -213,10 +235,36 @@ onMounted(async () => {
   requireLoginToView.value = store.settings.require_login_to_view === 'true'
   ttsEnabled.value = store.settings.tts_enabled === 'true'
   ttsProvider.value = store.settings.tts_provider || (store.settings.tts_gemini === 'true' ? 'gemini' : 'web')
+
+  // Talk Phase 2 設定讀取（各值有 fallback，對應 seed 的預設）
+  const sttSetting = store.settings.stt_provider ?? ''
+  talk.value.stt_provider = (STT_PROVIDERS as readonly string[]).includes(sttSetting)
+    ? (sttSetting as SttProvider)
+    : 'elevenlabs'
+  const ttsModelSetting = store.settings.talk_tts_model ?? ''
+  talk.value.talk_tts_model = (TALK_TTS_MODELS as readonly string[]).includes(ttsModelSetting)
+    ? (ttsModelSetting as TalkTtsModel)
+    : 'eleven_flash_v2_5'
+  // talk_bgm_enabled 預設 true（未設或非 'false' 都視為開啟）
+  talk.value.talk_bgm_enabled = store.settings.talk_bgm_enabled !== 'false'
+  talk.value.deepgram_api_key_masked = store.settings.deepgram_api_key || ''
+  talk.value.deepgram_api_key_new = ''
+
   loading.value = false
 })
 
 async function saveSettings() {
+  // 收集 Talk 設定；deepgram_api_key 僅在使用者填了新值時才送出，避免把 masked 值寫回
+  const talkPayload: Record<string, string> = {
+    stt_provider: talk.value.stt_provider,
+    talk_tts_model: talk.value.talk_tts_model,
+    talk_bgm_enabled: String(talk.value.talk_bgm_enabled),
+  }
+  const newDeepgramKey = talk.value.deepgram_api_key_new.trim()
+  if (newDeepgramKey) {
+    talkPayload.deepgram_api_key = newDeepgramKey
+  }
+
   await run(() => store.updateSettings({
     timezone: form.value.timezone,
     max_workstations: form.value.max_workstations,
@@ -225,7 +273,14 @@ async function saveSettings() {
     gemini_api_key: form.value.gemini_api_key,
     ttsmaker_api_key: form.value.ttsmaker_api_key,
     skill_confidence_threshold: String(form.value.skill_confidence_threshold),
+    ...talkPayload,
   }))
+
+  // 儲存成功後，若有新 key 已寫入，把 masked 置換掉並清空 new 欄位
+  if (newDeepgramKey) {
+    talk.value.deepgram_api_key_masked = store.settings.deepgram_api_key || ''
+    talk.value.deepgram_api_key_new = ''
+  }
 }
 </script>
 
@@ -510,6 +565,89 @@ async function saveSettings() {
             />
             <p class="text-[11px] text-slate-500 mt-0.5">免費額度每月約 5000 字。<a href="https://pro.ttsmaker.com/api-platform/api-key-list" target="_blank" class="text-violet-400 hover:underline">取得 API Key</a></p>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Talk 語音對話（Phase 2） -->
+    <div class="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
+      <div class="px-6 py-4 border-b border-slate-700/50">
+        <div class="flex items-center gap-2">
+          <Mic class="w-4 h-4 text-fuchsia-400" />
+          <h2 class="text-sm font-semibold text-slate-200">Talk 語音對話</h2>
+        </div>
+      </div>
+      <div class="p-6 space-y-4">
+        <!-- STT Provider -->
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1.5">即時語音辨識引擎（STT）</label>
+          <select
+            v-model="talk.stt_provider"
+            class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-fuchsia-500 outline-none text-sm"
+          >
+            <option value="elevenlabs">ElevenLabs Scribe v2（串流，預設）</option>
+            <option value="deepgram">Deepgram Nova-3（zh-TW 備援）</option>
+            <option value="gemini">Gemini 2.5 Flash（整段，最穩定）</option>
+          </select>
+          <p class="text-[11px] text-slate-500 mt-1">
+            預設 ElevenLabs 即時串流（~150ms latency），zh-TW 品質不佳時可切 Deepgram；Gemini 為整段轉錄保底。
+          </p>
+        </div>
+
+        <!-- Deepgram API Key -->
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1.5">Deepgram API Key</label>
+          <input
+            v-model="talk.deepgram_api_key_new"
+            type="password"
+            autocomplete="off"
+            :placeholder="talk.deepgram_api_key_masked ? `目前：${talk.deepgram_api_key_masked}（留空保留原值）` : '尚未設定'"
+            class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-fuchsia-500 outline-none text-sm font-mono"
+          />
+          <p class="text-[11px] text-slate-500 mt-1">
+            備援 STT provider 金鑰。留空代表不變更。可在
+            <a href="https://console.deepgram.com/" target="_blank" class="text-fuchsia-400 hover:underline">Deepgram Console</a> 取得。
+          </p>
+        </div>
+
+        <!-- Talk TTS 模型 -->
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1.5">Talk TTS 模型（ElevenLabs）</label>
+          <select
+            v-model="talk.talk_tts_model"
+            class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-fuchsia-500 outline-none text-sm"
+          >
+            <option value="eleven_flash_v2_5">Flash v2.5（低延遲 ~75ms，預設）</option>
+            <option value="eleven_multilingual_v2">Multilingual v2（音質優先）</option>
+          </select>
+          <p class="text-[11px] text-slate-500 mt-1">
+            語音對話使用的 TTS 模型。Flash 延遲最低、v2 音質較佳。
+          </p>
+        </div>
+
+        <!-- BGM 開關 -->
+        <div class="flex items-center justify-between">
+          <div>
+            <label class="block text-xs font-medium text-slate-400">長思考時播放背景音樂</label>
+            <p class="text-[11px] text-slate-500 mt-0.5">
+              AI 工具呼叫或長推理 3 秒以上時淡入 ambient BGM，TTS 一到自動 duck。
+            </p>
+          </div>
+          <button
+            type="button"
+            @click="talk.talk_bgm_enabled = !talk.talk_bgm_enabled"
+            :class="[
+              'relative w-11 h-6 rounded-full transition-colors shrink-0 ml-4',
+              talk.talk_bgm_enabled ? 'bg-fuchsia-500' : 'bg-slate-600'
+            ]"
+          >
+            <div
+              :class="[
+                'absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform shadow',
+                talk.talk_bgm_enabled ? 'left-5.5' : 'left-0.5'
+              ]"
+            ></div>
+          </button>
         </div>
       </div>
     </div>
