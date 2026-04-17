@@ -16,11 +16,33 @@
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Mic, Send, AlertTriangle } from 'lucide-vue-next'
+import { ArrowLeft, Mic, Send, AlertTriangle, Ear, Hand } from 'lucide-vue-next'
 import { getMemberBySlug, type MemberInfo } from '../services/api/members'
 import { assetUrl } from '../config'
 import { useTalkSocket, type TalkState } from '../composables/useTalkSocket'
 import { usePushToTalk } from '../composables/usePushToTalk'
+import { useVAD } from '../composables/useVAD'
+
+type TalkMode = 'ptt' | 'vad'
+const TALK_MODE_STORAGE_KEY = 'aegis.talk.mode'
+
+function loadTalkMode(): TalkMode {
+  try {
+    const v = localStorage.getItem(TALK_MODE_STORAGE_KEY)
+    if (v === 'ptt' || v === 'vad') return v
+  } catch {
+    // ignore (private mode / disabled storage)
+  }
+  return 'ptt'
+}
+
+function saveTalkMode(m: TalkMode): void {
+  try {
+    localStorage.setItem(TALK_MODE_STORAGE_KEY, m)
+  } catch {
+    // ignore
+  }
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -77,9 +99,18 @@ function setError(msg: string) {
 }
 
 // ── WebSocket ──
+// 句子級 streaming：onLlmPartial 即時累加字幕，onLlmResponse 在結尾覆蓋成完整版
 const talk = useTalkSocket(memberSlug.value, {
   onState: (s) => { state.value = s },
-  onTranscript: (text) => { lastTranscript.value = text },
+  onTranscript: (text) => {
+    lastTranscript.value = text
+    // 新一輪 → 清空上一輪字幕
+    lastLlmResponse.value = ''
+  },
+  onLlmPartial: (text) => {
+    // 中文句子直接累加
+    lastLlmResponse.value = (lastLlmResponse.value || '') + text
+  },
   onLlmResponse: (text) => { lastLlmResponse.value = text },
   onAudioEnd: () => {
     if (state.value === 'speaking') state.value = 'idle'
@@ -92,16 +123,23 @@ const talk = useTalkSocket(memberSlug.value, {
   onClose: () => { state.value = 'disconnected' },
 })
 
-// ── 錄音 ──
+// ── 錄音模式 ──
+const mode = ref<TalkMode>(loadTalkMode())
+
+watch(mode, (m) => saveTalkMode(m))
+
+function sendRecordedAudio(buffer: ArrayBuffer, mimeType: string) {
+  const ok = talk.sendAudio(buffer, mimeType)
+  if (!ok) {
+    setError('尚未連線，無法送出音訊')
+    return
+  }
+  state.value = 'thinking'
+}
+
+// ── Push-to-talk 錄音 ──
 const ptt = usePushToTalk({
-  onRecorded: ({ buffer, mimeType }) => {
-    const ok = talk.sendAudio(buffer, mimeType)
-    if (!ok) {
-      setError('尚未連線，無法送出音訊')
-      return
-    }
-    state.value = 'thinking'
-  },
+  onRecorded: ({ buffer, mimeType }) => sendRecordedAudio(buffer, mimeType),
   onError: (msg) => setError(msg),
 })
 
@@ -122,6 +160,49 @@ function onPressEnd(e: Event) {
   }
 }
 
+// ── VAD 自動斷句錄音 ──
+const vad = useVAD({
+  onSpeechStart: () => {
+    state.value = 'listening'
+  },
+  onSpeechEnd: ({ buffer, mimeType }) => {
+    sendRecordedAudio(buffer, mimeType)
+  },
+  onError: (msg) => setError(msg),
+  silenceDurationMs: 800,
+  threshold: 0.02,
+  speechOnsetMs: 100,
+  minSpeechMs: 300,
+})
+
+async function toggleVad() {
+  if (!talk.connected.value) {
+    setError('尚未連線伺服器')
+    return
+  }
+  if (vad.isListening.value) {
+    vad.stop()
+    if (state.value === 'listening') state.value = 'idle'
+  } else {
+    await vad.start()
+  }
+}
+
+function switchMode(target: TalkMode) {
+  if (target === mode.value) return
+  // 切換前停掉當前模式的錄音
+  if (mode.value === 'vad' && vad.isListening.value) vad.stop()
+  if (mode.value === 'ptt' && ptt.recording.value) ptt.stop()
+  mode.value = target
+  if (state.value === 'listening') state.value = 'idle'
+}
+
+// 麥克風周圍聲波圓圈：以 currentVolume（0–1）換算 scale（1.0–1.6）
+const volumeScale = computed(() => {
+  const v = Math.min(Math.max(vad.currentVolume.value, 0), 1)
+  return 1 + Math.min(v * 6, 0.6)
+})
+
 // 文字測試輸入
 function submitText() {
   const text = textInput.value.trim()
@@ -136,6 +217,7 @@ function submitText() {
     return
   }
   lastTranscript.value = text
+  lastLlmResponse.value = ''
   textInput.value = ''
   state.value = 'thinking'
 }
@@ -165,12 +247,14 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  if (vad.isListening.value) vad.stop()
   talk.disconnect()
 })
 
 // slug 變更時重新載入
 watch(memberSlug, async (slug) => {
   if (!slug) return
+  if (vad.isListening.value) vad.stop()
   talk.disconnect()
   await loadMember()
   if (member.value) talk.connect()
@@ -178,7 +262,7 @@ watch(memberSlug, async (slug) => {
 </script>
 
 <template>
-  <div class="talk-page fixed inset-0 bg-gradient-to-b from-slate-900 via-slate-900 to-black overflow-hidden">
+  <div class="talk-page fixed inset-0 z-[60] bg-gradient-to-b from-slate-900 via-slate-900 to-black overflow-hidden">
     <!-- Top bar -->
     <div class="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4 py-3">
       <button
@@ -195,14 +279,42 @@ watch(memberSlug, async (slug) => {
         </span>
       </div>
 
-      <button
-        @click="showTextInput = !showTextInput"
-        class="text-white/70 hover:text-white bg-slate-800/60 hover:bg-slate-700/80 backdrop-blur-sm rounded-lg px-3 py-2 text-xs transition-colors"
-        :class="{ 'bg-emerald-600/80 text-white': showTextInput }"
-        title="切換文字測試輸入模式"
-      >
-        測試輸入
-      </button>
+      <div class="flex items-center gap-2">
+        <!-- 模式切換 -->
+        <div class="flex items-center rounded-lg bg-slate-800/60 backdrop-blur-sm border border-slate-700 overflow-hidden text-xs">
+          <button
+            @click="switchMode('ptt')"
+            :class="[
+              'px-2.5 py-2 flex items-center gap-1 transition-colors',
+              mode === 'ptt' ? 'bg-emerald-600/80 text-white' : 'text-white/60 hover:text-white'
+            ]"
+            title="按住說話模式"
+          >
+            <Hand class="w-3.5 h-3.5" />
+            <span class="hidden sm:inline">按住</span>
+          </button>
+          <button
+            @click="switchMode('vad')"
+            :class="[
+              'px-2.5 py-2 flex items-center gap-1 transition-colors',
+              mode === 'vad' ? 'bg-emerald-600/80 text-white' : 'text-white/60 hover:text-white'
+            ]"
+            title="自動斷句（VAD）模式"
+          >
+            <Ear class="w-3.5 h-3.5" />
+            <span class="hidden sm:inline">傾聽</span>
+          </button>
+        </div>
+
+        <button
+          @click="showTextInput = !showTextInput"
+          class="text-white/70 hover:text-white bg-slate-800/60 hover:bg-slate-700/80 backdrop-blur-sm rounded-lg px-3 py-2 text-xs transition-colors"
+          :class="{ 'bg-emerald-600/80 text-white': showTextInput }"
+          title="切換文字測試輸入模式"
+        >
+          測試輸入
+        </button>
+      </div>
     </div>
 
     <!-- Error banner -->
@@ -334,9 +446,11 @@ watch(memberSlug, async (slug) => {
           </div>
         </Transition>
 
-        <!-- Push-to-talk button -->
+        <!-- Mic button: Push-to-talk 或 VAD -->
         <div class="flex items-center justify-center">
+          <!-- PTT 模式 -->
           <button
+            v-if="mode === 'ptt'"
             @mousedown="onPressStart"
             @mouseup="onPressEnd"
             @mouseleave="onPressEnd"
@@ -357,9 +471,52 @@ watch(memberSlug, async (slug) => {
           >
             <Mic class="w-8 h-8 sm:w-10 sm:h-10" />
           </button>
+
+          <!-- VAD 模式：單擊 toggle -->
+          <div v-else class="relative flex items-center justify-center w-28 h-28 sm:w-32 sm:h-32">
+            <!-- 音量脈動圓圈（只在聆聽中且有聲音時顯示） -->
+            <span
+              v-if="vad.isListening.value"
+              class="vad-ring absolute inset-0 rounded-full pointer-events-none"
+              :class="vad.isSpeaking.value ? 'vad-ring-speaking' : 'vad-ring-listening'"
+              :style="{ transform: `scale(${volumeScale})` }"
+            />
+            <span
+              v-if="vad.isListening.value"
+              class="vad-ring-soft absolute inset-2 rounded-full pointer-events-none"
+            />
+            <button
+              @click="toggleVad"
+              :disabled="!talk.connected.value"
+              class="relative flex items-center justify-center select-none transition-all rounded-full font-bold shadow-2xl w-20 h-20 sm:w-24 sm:h-24 text-white"
+              :class="[
+                vad.isSpeaking.value
+                  ? 'bg-red-500 scale-105 shadow-red-500/50'
+                  : vad.isListening.value
+                    ? 'bg-sky-500 shadow-sky-500/40 animate-pulse-slow'
+                    : talk.connected.value
+                      ? 'bg-emerald-600 hover:bg-emerald-500 active:scale-95'
+                      : 'bg-slate-700 text-slate-400 cursor-not-allowed'
+              ]"
+              :title="
+                !talk.connected.value ? '尚未連線' :
+                vad.isListening.value ? '點擊關閉傾聽' : '點擊開啟傾聽模式'
+              "
+            >
+              <Ear v-if="vad.isListening.value && !vad.isSpeaking.value" class="w-8 h-8 sm:w-10 sm:h-10" />
+              <Mic v-else class="w-8 h-8 sm:w-10 sm:h-10" />
+            </button>
+          </div>
         </div>
         <p class="text-center text-slate-400 text-xs mt-2">
-          {{ ptt.recording.value ? '放開結束錄音…' : '按住說話' }}
+          <template v-if="mode === 'ptt'">
+            {{ ptt.recording.value ? '放開結束錄音…' : '按住說話' }}
+          </template>
+          <template v-else>
+            <template v-if="!vad.isListening.value">點擊開啟傾聽模式（自動斷句）</template>
+            <template v-else-if="vad.isSpeaking.value">偵測到語音…說完自動送出</template>
+            <template v-else>聆聽中（再按一次關閉）</template>
+          </template>
         </p>
       </div>
     </template>
@@ -406,5 +563,34 @@ watch(memberSlug, async (slug) => {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+/* ── VAD 麥克風聲波視覺化 ── */
+.vad-ring {
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.25) 0%, rgba(56, 189, 248, 0) 70%);
+  transition: transform 80ms ease-out;
+  will-change: transform;
+}
+.vad-ring-speaking {
+  background: radial-gradient(circle, rgba(239, 68, 68, 0.35) 0%, rgba(239, 68, 68, 0) 70%);
+}
+.vad-ring-listening {
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.25) 0%, rgba(56, 189, 248, 0) 70%);
+}
+.vad-ring-soft {
+  border: 2px solid rgba(125, 211, 252, 0.25);
+  animation: vad-soft-pulse 2s ease-in-out infinite;
+}
+@keyframes vad-soft-pulse {
+  0%, 100% { opacity: 0.3; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.08); }
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 1.8s ease-in-out infinite;
+}
+@keyframes pulse-slow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.5); }
+  50% { box-shadow: 0 0 0 14px rgba(56, 189, 248, 0); }
 }
 </style>
