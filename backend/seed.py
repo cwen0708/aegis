@@ -411,6 +411,20 @@ def _sync_system_cron_jobs(session: Session):
         ))
 
     # GC 技術債掃描（每晚 2 點）
+    # 開發分支同步（dev worktree rebase onto main，每日台北 02:00）
+    if "開發分支同步" not in existing_crons:
+        cron_expr = "0 2 * * *"
+        crons_to_add.append(CronJob(
+            project_id=aegis.id,
+            name="開發分支同步",
+            description="每日台北 02:00 rebase dev worktree onto main。由 scripts/dev_rebase.py 獨立執行，與主更新流程解耦。預設關閉。",
+            cron_expression=cron_expr,
+            next_scheduled_at=_calculate_next_scheduled_at(cron_expr),
+            is_enabled=False,  # 預設關閉，由小良哥手動開啟
+            is_system=True,
+            api_url="script:dev_rebase",
+        ))
+
     if "GC 技術債掃描" not in existing_crons:
         cron_expr = "0 2 * * *"
         crons_to_add.append(CronJob(

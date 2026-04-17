@@ -152,6 +152,7 @@ def resolve_cron_url(job) -> str:
     - "worker" / "meeting" → /api/v1/cron-jobs/{id}/{action}
     - "/api/..." → 補上 host
     - "http://..." → 直接用
+    - "script:xxx" → 由 _execute_script_action 直接執行，此函式不會被呼叫
     """
     action = job.api_url or "worker"
     if action in KNOWN_ACTIONS:
@@ -160,7 +161,50 @@ def resolve_cron_url(job) -> str:
         return action
     if action.startswith("/"):
         return f"http://127.0.0.1:8899{action}"
+    if action.startswith("script:"):
+        raise ValueError("script: action 應由 _execute_script_action 處理，不走 HTTP")
     raise ValueError(f"未知 action: {action}")
+
+
+# 允許執行的 script 名稱白名單（避免任意 path injection）
+ALLOWED_SCRIPTS = {"dev_rebase", "hot_update"}
+
+
+async def _execute_script_action(session: Session, job, tz_name: str):
+    """script:xxx action: 直接執行 backend/scripts/xxx.py（detached，不阻塞 poller）。"""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    action = job.api_url or ""
+    script_name = action.split(":", 1)[1] if ":" in action else ""
+
+    if script_name not in ALLOWED_SCRIPTS:
+        logger.error("[Cron Poller] '%s': script '%s' 不在白名單", job.name, script_name)
+    else:
+        backend_dir = Path(__file__).resolve().parents[2]
+        script_path = backend_dir / "scripts" / f"{script_name}.py"
+        venv_python = backend_dir / "venv" / "bin" / "python"
+        python_cmd = str(venv_python) if venv_python.exists() else sys.executable
+
+        if not script_path.exists():
+            logger.error("[Cron Poller] '%s': 腳本不存在 %s", job.name, script_path)
+        else:
+            try:
+                subprocess.Popen(
+                    [python_cmd, str(script_path)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                logger.info("[Cron Poller] '%s' → script:%s → started", job.name, script_name)
+            except OSError as exc:
+                logger.error("[Cron Poller] '%s' 啟動 script 失敗: %s", job.name, exc)
+
+    next_time = _calculate_next_time(job.cron_expression, tz_name)
+    if next_time:
+        job.next_scheduled_at = next_time
+    session.commit()
 
 
 async def _execute_gc_action(session: Session, job, tz_name: str):
@@ -196,6 +240,11 @@ async def _execute_job(session: Session, job, tz_name: str):
     action = job.api_url or "worker"
     if action == "gc":
         await _execute_gc_action(session, job, tz_name)
+        return
+
+    # script:xxx action 啟動獨立 Python 腳本，不走 HTTP
+    if action.startswith("script:"):
+        await _execute_script_action(session, job, tz_name)
         return
 
     try:

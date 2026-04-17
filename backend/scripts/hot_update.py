@@ -195,23 +195,8 @@ def main():
             resume_worker()
             return 1
 
-        # 同步 dev worktree（AI 開發分支）到最新 main
-        DEV_WORKTREE = Path("/home/cwen0708/projects/Aegis-dev")
-        if DEV_WORKTREE.exists():
-            try:
-                # 先 fetch（共用 .git，main worktree 已 fetch 過）
-                # 再 rebase dev onto main
-                ret_rb, _, err_rb = run_command(
-                    ["git", "rebase", "main"], cwd=str(DEV_WORKTREE)
-                )
-                if ret_rb != 0:
-                    # rebase 衝突 → abort，保持 dev 不動（不影響部署）
-                    run_command(["git", "rebase", "--abort"], cwd=str(DEV_WORKTREE))
-                    print(f"[HotUpdate] Dev rebase conflict, skipped: {err_rb}")
-                else:
-                    print("[HotUpdate] Dev worktree rebased onto main")
-            except Exception as e:
-                print(f"[HotUpdate] Dev rebase failed: {e}")
+        # Dev worktree rebase 已抽出至 backend/scripts/dev_rebase.py
+        # 由獨立 CronJob「開發分支同步」每日排程執行，不再嵌於主更新流程
 
         update_status("building", 30, "正在安裝 Python 依賴...")
 
