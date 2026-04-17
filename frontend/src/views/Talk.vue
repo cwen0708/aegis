@@ -14,7 +14,7 @@
  * - iOS Safari 不支援 audio/webm;codecs=opus，已自動嘗試 audio/mp4 fallback
  *   （仍需伺服器端相應處理）
  */
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Mic, Send, AlertTriangle, Ear } from 'lucide-vue-next'
 import { getMemberBySlug, type MemberInfo } from '../services/api/members'
@@ -76,6 +76,18 @@ watch(portraitSrc, (url) => detectPortraitAspect(url), { immediate: true })
 const state = ref<TalkState>('idle')
 const lastTranscript = ref('')
 const lastLlmResponse = ref('')
+// AI 回覆字幕容器 — 用於 streaming 時自動捲到最新一段
+const llmResponseRef = ref<HTMLParagraphElement | null>(null)
+watch(lastLlmResponse, async () => {
+  await nextTick()
+  const el = llmResponseRef.value
+  if (!el) return
+  // 若使用者已手動捲上去（離底 > 40px），就不打擾；否則自動貼底
+  const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+  if (distanceFromBottom < 40) {
+    el.scrollTop = el.scrollHeight
+  }
+})
 const errorBanner = ref<string | null>(null)
 const textInput = ref('')
 
@@ -172,10 +184,11 @@ const vad = useVAD({
     sendRecordedAudio(buffer, mimeType)
   },
   onError: (msg) => setError(msg),
-  silenceDurationMs: 800,
-  threshold: 0.02,
-  speechOnsetMs: 100,
-  minSpeechMs: 300,
+  // 抗噪調校：提高閾值、延長 onset/min 長度，避免環境雜音與短促聲響誤判為說話
+  silenceDurationMs: 900,   // 停頓 0.9 秒才結束（中文字間較易誤切）
+  threshold: 0.04,          // RMS 閾值提高（0.02 → 0.04）抗背景噪音
+  speechOnsetMs: 220,       // 連續 220ms 才算開始（抗瞬時噪音）
+  minSpeechMs: 600,         // 短於 0.6 秒丟棄（減少單音節誤觸）
 })
 
 /**
@@ -347,26 +360,29 @@ watch(memberSlug, async (slug) => {
         </div>
       </div>
 
-      <!-- 字幕區（壓在立繪上方，工具列上緣） -->
+      <!-- 字幕區（壓在立繪上方，工具列上緣）。長文自動捲到最新一段 -->
       <div
         v-if="lastTranscript || lastLlmResponse"
-        class="absolute left-2 right-2 bottom-[72px] z-10 space-y-2"
+        class="absolute left-2 right-2 bottom-[72px] z-10 space-y-2 max-h-[55vh] flex flex-col"
       >
         <div
           v-if="lastTranscript"
-          class="bg-slate-900/70 backdrop-blur-sm border border-sky-400/30 rounded-lg px-4 py-2"
+          class="bg-slate-900/70 backdrop-blur-sm border border-sky-400/30 rounded-lg px-4 py-2 shrink-0"
         >
           <div class="text-[10px] uppercase tracking-wider text-sky-300 mb-1">你說</div>
           <p class="text-white text-sm leading-relaxed line-clamp-2">{{ lastTranscript }}</p>
         </div>
         <div
           v-if="lastLlmResponse"
-          class="bg-slate-900/70 backdrop-blur-sm border border-emerald-400/30 rounded-lg px-4 py-2"
+          class="bg-slate-900/70 backdrop-blur-sm border border-emerald-400/30 rounded-lg px-4 py-2 min-h-0 flex flex-col"
         >
-          <div class="text-[10px] uppercase tracking-wider text-emerald-300 mb-1">
+          <div class="text-[10px] uppercase tracking-wider text-emerald-300 mb-1 shrink-0">
             {{ member.name }} 說
           </div>
-          <p class="text-white text-sm leading-relaxed line-clamp-3">{{ lastLlmResponse }}</p>
+          <p
+            ref="llmResponseRef"
+            class="text-white text-sm leading-relaxed overflow-y-auto custom-scrollbar"
+          >{{ lastLlmResponse }}</p>
         </div>
       </div>
 
