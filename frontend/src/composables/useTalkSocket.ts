@@ -10,9 +10,11 @@
  * Server → Client:
  *   - {"type":"state","state":"idle|listening|thinking|speaking"}
  *   - {"type":"transcript","text":"..."}
- *   - {"type":"llm_response","text":"..."}
+ *   - {"type":"llm_partial","text":"..."}  — 單句字幕（streaming）
+ *   - {"type":"llm_response","text":"..."} — 完整字幕（結尾）
  *   - Binary frames（MP3 chunks）
- *   - {"type":"audio_end"}
+ *   - {"type":"audio_boundary"}            — 單句 TTS 結束（flush 播放）
+ *   - {"type":"audio_end"}                 — 全部 TTS 結束
  *   - {"type":"error","error":"..."}
  */
 import { ref, onUnmounted } from 'vue'
@@ -23,6 +25,7 @@ export type TalkState = 'idle' | 'listening' | 'thinking' | 'speaking' | 'discon
 export interface TalkSocketCallbacks {
   onState?: (state: TalkState) => void
   onTranscript?: (text: string) => void
+  onLlmPartial?: (text: string) => void
   onLlmResponse?: (text: string) => void
   onAudioEnd?: () => void
   onError?: (error: string) => void
@@ -30,8 +33,17 @@ export interface TalkSocketCallbacks {
   onClose?: () => void
 }
 
+type ServerMessageType =
+  | 'state'
+  | 'transcript'
+  | 'llm_partial'
+  | 'llm_response'
+  | 'audio_boundary'
+  | 'audio_end'
+  | 'error'
+
 interface ServerMessage {
-  type: 'state' | 'transcript' | 'llm_response' | 'audio_end' | 'error'
+  type: ServerMessageType
   state?: TalkState
   text?: string
   error?: string
@@ -42,7 +54,14 @@ export function useTalkSocket(memberSlug: string, callbacks: TalkSocketCallbacks
   const lastError = ref<string | null>(null)
 
   let ws: WebSocket | null = null
+  // 當前累積的 MP3 bytes（收到 audio_boundary 或 audio_end 時 flush 成一個 Blob）
   const audioChunks: Uint8Array[] = []
+  // Blob URL 播放佇列（單執行緒循序播放）
+  const playbackQueue: string[] = []
+  let isPlaying = false
+  let currentAudio: HTMLAudioElement | null = null
+  // audio_end 已送達但播放佇列還沒空 → 最後一段播完才觸發 onAudioEnd
+  let pendingFinalEnd = false
 
   function connect() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
@@ -95,11 +114,32 @@ export function useTalkSocket(memberSlug: string, callbacks: TalkSocketCallbacks
       case 'transcript':
         if (msg.text) callbacks.onTranscript?.(msg.text)
         break
+      case 'llm_partial':
+        if (msg.text) callbacks.onLlmPartial?.(msg.text)
+        break
       case 'llm_response':
         if (msg.text) callbacks.onLlmResponse?.(msg.text)
         break
+      case 'audio_boundary':
+        // 單句 TTS 結束 → flush 當前累積成一個 Blob 進 playback queue
+        flushChunksIntoQueue()
+        if (!isPlaying) playNext()
+        break
       case 'audio_end':
-        flushAudioAndPlay()
+        // 全部 TTS 結束 → flush 殘留 + 標記結束，最後一段播完才觸發 onAudioEnd
+        flushChunksIntoQueue()
+        pendingFinalEnd = true
+        if (!isPlaying) {
+          if (playbackQueue.length > 0) {
+            // 有未播的 Blob（剛 flush 進去）→ 開始播，播完才觸發 end
+            playNext()
+          } else {
+            // 佇列已空（例如空回應）→ 立刻觸發 end
+            pendingFinalEnd = false
+            callbacks.onAudioEnd?.()
+          }
+        }
+        // else: 正在播放，等 playNext 播完才觸發 end
         break
       case 'error':
         if (msg.error) {
@@ -110,13 +150,9 @@ export function useTalkSocket(memberSlug: string, callbacks: TalkSocketCallbacks
     }
   }
 
-  function flushAudioAndPlay() {
-    if (audioChunks.length === 0) {
-      callbacks.onAudioEnd?.()
-      return
-    }
-    // Concat Uint8Array chunks into a single ArrayBuffer to avoid TS BlobPart
-    // issues with SharedArrayBuffer-backed typed arrays.
+  function flushChunksIntoQueue() {
+    if (audioChunks.length === 0) return
+    // 把累積的 Uint8Array 合併成一個 ArrayBuffer，包成 Blob → 產生 URL 入佇列
     const totalLen = audioChunks.reduce((acc, c) => acc + c.byteLength, 0)
     const merged = new Uint8Array(new ArrayBuffer(totalLen))
     let offset = 0
@@ -127,20 +163,49 @@ export function useTalkSocket(memberSlug: string, callbacks: TalkSocketCallbacks
     audioChunks.length = 0
     const blob = new Blob([merged.buffer as ArrayBuffer], { type: 'audio/mpeg' })
     const url = URL.createObjectURL(blob)
+    playbackQueue.push(url)
+  }
+
+  function playNext() {
+    const url = playbackQueue.shift()
+    if (!url) {
+      isPlaying = false
+      currentAudio = null
+      if (pendingFinalEnd) {
+        pendingFinalEnd = false
+        callbacks.onAudioEnd?.()
+      }
+      return
+    }
+    isPlaying = true
     const audio = new Audio(url)
+    currentAudio = audio
     audio.onended = () => {
       URL.revokeObjectURL(url)
-      callbacks.onAudioEnd?.()
+      playNext()
     }
     audio.onerror = () => {
       URL.revokeObjectURL(url)
       callbacks.onError?.('音訊播放失敗')
-      callbacks.onAudioEnd?.()
+      playNext()
     }
     void audio.play().catch((e) => {
+      URL.revokeObjectURL(url)
       callbacks.onError?.(`音訊播放失敗：${e instanceof Error ? e.message : String(e)}`)
-      callbacks.onAudioEnd?.()
+      playNext()
     })
+  }
+
+  function stopPlayback() {
+    if (currentAudio) {
+      try { currentAudio.pause() } catch { /* noop */ }
+      currentAudio = null
+    }
+    for (const url of playbackQueue) URL.revokeObjectURL(url)
+    playbackQueue.length = 0
+    audioChunks.length = 0
+    isPlaying = false
+    pendingFinalEnd = false
   }
 
   function sendJson(data: Record<string, unknown>): boolean {
@@ -172,7 +237,7 @@ export function useTalkSocket(memberSlug: string, callbacks: TalkSocketCallbacks
       ws.close()
       ws = null
     }
-    audioChunks.length = 0
+    stopPlayback()
     connected.value = false
   }
 

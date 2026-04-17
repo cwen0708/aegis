@@ -1,5 +1,5 @@
 """
-Talk WebSocket Endpoint — 即時語音對話
+Talk WebSocket Endpoint — 即時語音對話（句子級 TTS streaming）
 
 Protocol（client ↔ server）：
   Client → Server:
@@ -11,18 +11,21 @@ Protocol（client ↔ server）：
   Server → Client:
     JSON {"type": "state", "state": "idle" | "listening" | "thinking" | "speaking"}
     JSON {"type": "transcript", "text": "..."}  — STT 結果
-    JSON {"type": "llm_response", "text": "..."} — AI 回覆文字
+    JSON {"type": "llm_partial", "text": "..."} — AI 每句回覆（字幕即時累加）
+    JSON {"type": "llm_response", "text": "..."} — AI 完整回覆文字（結尾一次）
     binary bytes                                  — TTS 音訊片段（MP3）
-    JSON {"type": "audio_end"}                  — TTS 完成
+    JSON {"type": "audio_boundary"}             — 單句 TTS 結束（前端 flush 播放）
+    JSON {"type": "audio_end"}                  — 全部 TTS 完成
     JSON {"type": "error", "error": "..."}      — 錯誤訊息
 
-流程：audio_end / text_input → STT → LLM（member agent）→ TTS streaming → audio_end
+流程：audio_end / text_input → STT → LLM streaming → 切句 → ElevenLabs TTS → WS
 """
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+import re
 from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -112,24 +115,71 @@ async def _stt_gemini(audio_bytes: bytes, mime_type: str = "audio/webm") -> str:
 
 
 # ────────────────────────────────────────
-# LLM — 呼叫既有 member agent（沿用 agent_chat 流程）
+# 切句邏輯 — 中英標點 streaming 分句
 # ────────────────────────────────────────
 
-async def _call_member_agent(member: Member, user_text: str) -> str:
-    """呼叫 member agent 取得回應。
+# 切句點：中文句號/問號/驚嘆號/分號、換行、英文句號（前後非數字）
+SENTENCE_SPLIT_RE = re.compile(r"([。！？；!?\n]|(?<!\d)\.(?!\d))")
 
-    沿用 `app.api.agent_chat.ask_member` 的底層路徑：
-    resolve_member_for_chat → ensure_chat_workspace → process_pool.send_message
+# 為避免 TTS 過度碎片化（例如每句 3~5 字），訂一個最短觸發長度
+MIN_SENTENCE_LEN = 6
+
+
+def split_sentences_streaming(buffer: str) -> tuple[list[str], str]:
+    """從串流 buffer 切出完整句子。
+
+    回傳: (完整句子列表, 剩餘未完成的尾端 buffer)
+    """
+    if not buffer:
+        return [], ""
+
+    parts = SENTENCE_SPLIT_RE.split(buffer)
+    sentences: list[str] = []
+    current = ""
+
+    for p in parts:
+        if p is None:
+            continue
+        if SENTENCE_SPLIT_RE.fullmatch(p):
+            # 是標點
+            current += p
+            stripped = current.strip()
+            if stripped and len(stripped) >= MIN_SENTENCE_LEN:
+                sentences.append(stripped)
+                current = ""
+            # 太短就繼續累積到下一句
+        else:
+            current += p
+
+    return sentences, current
+
+
+# ────────────────────────────────────────
+# LLM — 串流呼叫既有 member agent
+# ────────────────────────────────────────
+
+async def _stream_member_agent(
+    member: Member,
+    user_text: str,
+    on_token: "asyncio.Queue[Optional[str]]",
+) -> None:
+    """串流呼叫 member agent，每收到一段 assistant 文字就 put 到 queue。
+
+    底層 `process_pool.send_message` 提供 `on_line` callback，
+    從 worker thread 抽取 assistant 片段並透過 run_coroutine_threadsafe 轉回 event loop。
+    結束時 put None 作為哨兵。
     """
     from app.core.chat_workspace import ensure_chat_workspace
     from app.core.executor.context import resolve_member_for_chat
     from app.core.session_pool import process_pool
+    from app.core.stream_parsers import parse_stream_json_text
 
     ctx = resolve_member_for_chat(member.id)
     if not ctx.has_member:
+        await on_token.put(None)
         raise RuntimeError(f"成員 '{member.slug}' 無法載入")
 
-    chat_key = f"talk_{member.slug}"  # 不能用 ':'（Windows 路徑非法）
+    chat_key = f"talk_{member.slug}"
     ws_path = ensure_chat_workspace(
         member_slug=ctx.member_slug,
         chat_key=chat_key,
@@ -143,17 +193,32 @@ async def _call_member_agent(member: Member, user_text: str) -> str:
         "不要用 markdown、表格、列表等格式。"
     )
 
-    result = await asyncio.to_thread(
-        process_pool.send_message,
-        chat_key=chat_key,
-        message=prompt,
-        model=ctx.effective_model("chat"),
-        member_id=ctx.member_id,
-        auth_info=ctx.primary_auth,
-        cwd=ws_path,
-    )
+    loop = asyncio.get_running_loop()
 
-    return (result.get("output") or "").strip()
+    def _on_line(line: str) -> None:
+        text = parse_stream_json_text(line)
+        if text:
+            # 等 put 完成保證跨 thread 順序（無界 queue，成本極低）
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    on_token.put(text), loop
+                ).result(timeout=5)
+            except Exception as e:
+                logger.debug(f"[Talk] on_line put failed: {e}")
+
+    try:
+        await asyncio.to_thread(
+            process_pool.send_message,
+            chat_key=chat_key,
+            message=prompt,
+            model=ctx.effective_model("chat"),
+            member_id=ctx.member_id,
+            auth_info=ctx.primary_auth,
+            cwd=ws_path,
+            on_line=_on_line,
+        )
+    finally:
+        await on_token.put(None)
 
 
 # ────────────────────────────────────────
@@ -181,37 +246,127 @@ async def _handle_turn(
     voice_id: str,
     api_key: str,
 ) -> None:
-    """處理單輪對話：LLM → TTS streaming"""
-    await _send_state(websocket, "thinking")
-    try:
-        response_text = await _call_member_agent(member, user_text)
-    except Exception as e:
-        logger.error(f"[Talk] member agent failed: {e}")
-        await _send_error(websocket, f"AI 回應失敗: {e}")
-        await _send_state(websocket, "idle")
-        return
+    """處理單輪對話：LLM streaming → 切句 → TTS streaming → WS。
 
-    if not response_text:
+    Pipeline：
+      producer: LLM 串流 → buffer → split_sentences_streaming → sentence_queue
+      consumer: sentence_queue → synthesize_elevenlabs_stream → ws.send_bytes
+                每句結束後送 `audio_boundary`，前端 flush 播放。
+    """
+    await _send_state(websocket, "thinking")
+
+    token_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
+    sentence_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
+    full_response_parts: list[str] = []
+    speaking_started = False
+
+    async def llm_producer() -> None:
+        """從 LLM token stream 切句送入 sentence_queue。
+
+        Claude CLI stream-json 的 assistant 行每次是**增量 delta**（參考
+        runner.py 與 session_pool._read_until_result 的 result_text_parts.append
+        用法），直接附加到 buffer 切句即可。
+        """
+        buffer = ""
+        # 先啟動 LLM 串流任務（背景跑），這邊才消費 token_queue
+        llm_task = asyncio.create_task(
+            _stream_member_agent(member, user_text, token_queue)
+        )
+        try:
+            while True:
+                token = await token_queue.get()
+                if token is None:
+                    break
+                buffer += token
+                sentences, remaining = split_sentences_streaming(buffer)
+                for s in sentences:
+                    full_response_parts.append(s)
+                    await sentence_queue.put(s)
+                buffer = remaining
+
+            # LLM 結束：殘留 buffer 也送出
+            leftover = buffer.strip()
+            if leftover:
+                full_response_parts.append(leftover)
+                await sentence_queue.put(leftover)
+
+            # 確保底層任務完成（若已 put None 代表 _stream_member_agent 已退出）
+            try:
+                await llm_task
+            except Exception as e:
+                logger.warning(f"[Talk] LLM task failed: {e}")
+        except Exception as e:
+            logger.error(f"[Talk] LLM producer error: {e}")
+            try:
+                await _send_error(websocket, f"AI 回應失敗: {e}")
+            except Exception:
+                pass
+        finally:
+            await sentence_queue.put(None)
+
+    async def tts_consumer() -> None:
+        """從 sentence_queue 取句 → TTS stream → ws.send_bytes。"""
+        nonlocal speaking_started
+        try:
+            while True:
+                sentence = await sentence_queue.get()
+                if sentence is None:
+                    break
+                if not sentence.strip():
+                    continue
+
+                if not speaking_started:
+                    await _send_state(websocket, "speaking")
+                    speaking_started = True
+
+                # 字幕即時推送（選項 A：前端累加顯示）
+                try:
+                    await websocket.send_json(
+                        {"type": "llm_partial", "text": sentence}
+                    )
+                except Exception:
+                    pass
+
+                # TTS 單句 streaming
+                try:
+                    async for chunk in synthesize_elevenlabs_stream(
+                        sentence,
+                        voice_id=voice_id,
+                        api_key=api_key,
+                        model=ELEVENLABS_DEFAULT_MODEL,
+                    ):
+                        await websocket.send_bytes(chunk)
+                except Exception as e:
+                    logger.warning(f"[Talk] TTS stream error for sentence: {e}")
+                    continue
+
+                # 單句結束 → 前端 flush 播放（句子邊界）
+                try:
+                    await websocket.send_json({"type": "audio_boundary"})
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.error(f"[Talk] TTS consumer error: {e}")
+
+    # 同時跑 producer 與 consumer
+    await asyncio.gather(llm_producer(), tts_consumer(), return_exceptions=True)
+
+    full_text = "".join(full_response_parts).strip()
+    if not full_text:
         await _send_error(websocket, "AI 回應為空")
         await _send_state(websocket, "idle")
         return
 
-    await websocket.send_json({"type": "llm_response", "text": response_text})
-
-    await _send_state(websocket, "speaking")
+    # 結尾送完整 llm_response 作為最終字幕（前端可覆蓋 partial）
     try:
-        async for chunk in synthesize_elevenlabs_stream(
-            response_text,
-            voice_id=voice_id,
-            api_key=api_key,
-            model=ELEVENLABS_DEFAULT_MODEL,
-        ):
-            await websocket.send_bytes(chunk)
-    except Exception as e:
-        logger.error(f"[Talk] TTS streaming failed: {e}")
-        await _send_error(websocket, f"TTS 失敗: {e}")
+        await websocket.send_json({"type": "llm_response", "text": full_text})
+    except Exception:
+        pass
 
-    await websocket.send_json({"type": "audio_end"})
+    try:
+        await websocket.send_json({"type": "audio_end"})
+    except Exception:
+        pass
     await _send_state(websocket, "idle")
 
 
