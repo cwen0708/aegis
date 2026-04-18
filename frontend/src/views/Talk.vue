@@ -56,6 +56,14 @@ const member = ref<MemberInfo | null>(null)
 const loading = ref(true)
 const loadError = ref<string | null>(null)
 
+// STT provider：決定 PTT 走 MediaRecorder（gemini）還是 PCM16 streaming（elevenlabs/deepgram）
+type SttProvider = 'gemini' | 'elevenlabs' | 'deepgram'
+const sttProvider = ref<SttProvider>('gemini')
+const isStreamingStt = computed<boolean>(() => sttProvider.value !== 'gemini')
+
+/** streaming provider 下的前端送音 format（後端目前僅看 stt_provider，但協議保留這個欄位） */
+const PCM16_STREAM_FORMAT = 'pcm16;rate=16000'
+
 // 立繪比例偵測
 const portraitAspect = ref<'tall' | 'square'>('tall')
 function detectPortraitAspect(url: string | undefined) {
@@ -227,14 +235,46 @@ async function onPressStart(e: Event) {
   // 新一輪錄音：清掉殘留的 partial 字幕
   clearPartial()
   state.value = 'listening'
+
+  if (isStreamingStt.value) {
+    // Streaming provider（ElevenLabs / Deepgram）：先送 audio_start，再 PCM16 即時串流
+    const started = talk.startAudioStream(PCM16_STREAM_FORMAT)
+    if (!started) {
+      setError('尚未連線，無法送出音訊')
+      state.value = 'idle'
+      return
+    }
+    await ptt.startPCM16((chunk) => {
+      // chunk 已是 Int16Array.buffer（ArrayBuffer），直接以 binary frame 送
+      talk.sendAudioChunk(chunk)
+    })
+    return
+  }
+
+  // Gemini 路徑：MediaRecorder webm/opus 整段
   await ptt.start()
 }
 
 function onPressEnd(e: Event) {
   e.preventDefault()
-  if (ptt.recording.value) {
+  if (!ptt.recording.value) return
+
+  if (isStreamingStt.value) {
+    // Streaming：先停 worklet，再通知後端 commit + close STT session
     ptt.stop()
+    const ok = talk.endAudioStream()
+    if (!ok) {
+      setError('尚未連線，無法結束音訊')
+      state.value = 'idle'
+      return
+    }
+    // 後端 STT final 會觸發 transcript → thinking，這邊先樂觀切到 thinking
+    state.value = 'thinking'
+    return
   }
+
+  // Gemini：onstop 內會把整段 webm buffer 透過 sendRecordedAudio → audio_start+binary+audio_end
+  ptt.stop()
 }
 
 // ── VAD 自動斷句錄音 ──
@@ -261,6 +301,11 @@ async function toggleVad() {
     setError('尚未連線伺服器')
     return
   }
+  if (isStreamingStt.value) {
+    // Streaming provider 下不支援 VAD（MediaRecorder webm/opus 不能直接丟 PCM16 streaming 上游）
+    setError('目前 STT 為即時串流模式，請改用「按住」模式說話')
+    return
+  }
   if (vad.isListening.value) {
     vad.stop()
     if (state.value === 'listening') state.value = 'idle'
@@ -271,6 +316,10 @@ async function toggleVad() {
 
 function switchMode(target: TalkMode) {
   if (target === mode.value) return
+  if (target === 'vad' && isStreamingStt.value) {
+    setError('目前 STT 為即時串流模式，不支援自動斷句，請維持「按住」模式')
+    return
+  }
   // 切換前停掉當前模式的錄音
   if (mode.value === 'vad' && vad.isListening.value) vad.stop()
   if (mode.value === 'ptt' && ptt.recording.value) ptt.stop()
@@ -322,7 +371,13 @@ async function loadMember() {
   }
 }
 
-async function loadBgmSetting() {
+function coerceSttProvider(raw: string | undefined): SttProvider {
+  const v = (raw || '').trim().toLowerCase()
+  if (v === 'elevenlabs' || v === 'deepgram' || v === 'gemini') return v
+  return 'gemini'
+}
+
+async function loadTalkSettings() {
   try {
     const res = await fetch(`${config.apiUrl}/api/v1/settings`)
     if (!res.ok) return
@@ -330,15 +385,20 @@ async function loadBgmSetting() {
     if (data.talk_bgm_enabled === 'false') {
       bgm.setEnabled(false)
     }
+    sttProvider.value = coerceSttProvider(data.stt_provider)
+    // streaming provider 不支援 VAD 斷句（見 onVadStart/End 內的說明），強制切回 PTT
+    if (isStreamingStt.value && mode.value === 'vad') {
+      mode.value = 'ptt'
+    }
   } catch (err) {
-    console.warn('[Talk] load bgm setting failed', err)
+    console.warn('[Talk] load talk settings failed', err)
   }
 }
 
 onMounted(async () => {
   await loadMember()
-  // 並行載入 bgm 設定（不擋主流程）
-  void loadBgmSetting()
+  // 並行載入 bgm + stt_provider 設定（不擋主流程）
+  void loadTalkSettings()
   if (member.value) {
     talk.connect()
   }
@@ -395,11 +455,13 @@ watch(memberSlug, async (slug) => {
           </button>
           <button
             @click="switchMode('vad')"
+            :disabled="isStreamingStt"
             :class="[
               'px-2.5 py-2 flex items-center gap-1 transition-colors',
-              mode === 'vad' ? 'bg-emerald-600/80 text-white' : 'text-white/60 hover:text-white'
+              mode === 'vad' ? 'bg-emerald-600/80 text-white' : 'text-white/60 hover:text-white',
+              isStreamingStt ? 'opacity-40 cursor-not-allowed' : ''
             ]"
-            title="自動斷句（VAD）模式"
+            :title="isStreamingStt ? '即時串流 STT 不支援自動斷句，請用「按住」模式' : '自動斷句（VAD）模式'"
           >
             <Ear class="w-3.5 h-3.5" />
             <span class="hidden sm:inline">傾聽</span>
