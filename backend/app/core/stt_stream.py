@@ -22,6 +22,7 @@ import base64
 import json
 import logging
 from typing import Awaitable, Callable, Optional
+from urllib.parse import urlencode
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +129,16 @@ class ElevenLabsStreamingSTT(StreamingSTT):
         """建立 WS 連線並送 session 初始化設定。"""
         await self._open_ws()
 
+    def _build_ws_url(self) -> str:
+        """所有 session 設定放 URL query string（Eleven 不接受 client 端 session_config 訊息）。"""
+        params = {
+            "model_id": "scribe_v1",
+            "audio_format": _ELEVENLABS_PCM_FORMAT,
+            "language_code": self._language_code,
+            "commit_strategy": self._commit_strategy,
+        }
+        return f"{_ELEVENLABS_WS_URL}?{urlencode(params)}"
+
     async def _open_ws(self) -> None:
         try:
             from websockets.asyncio.client import connect
@@ -139,7 +150,7 @@ class ElevenLabsStreamingSTT(StreamingSTT):
         headers = [("xi-api-key", self._api_key)]
         try:
             self._ws = await connect(
-                _ELEVENLABS_WS_URL,
+                self._build_ws_url(),
                 additional_headers=headers,
                 ping_interval=20,
                 ping_timeout=20,
@@ -147,19 +158,6 @@ class ElevenLabsStreamingSTT(StreamingSTT):
             )
         except Exception as e:
             logger.warning("[STT] ElevenLabs connect failed: %s", e)
-            raise
-
-        # Session 初始化（audio_format / language / commit strategy）
-        init_msg = {
-            "message_type": "session_config",
-            "audio_format": _ELEVENLABS_PCM_FORMAT,
-            "language_code": self._language_code,
-            "commit_strategy": self._commit_strategy,
-        }
-        try:
-            await self._ws.send(json.dumps(init_msg))
-        except Exception as e:
-            logger.warning("[STT] ElevenLabs init send failed: %s", e)
             raise
 
         # 啟動接收迴圈
@@ -194,9 +192,13 @@ class ElevenLabsStreamingSTT(StreamingSTT):
             await self._ensure_reconnect()
 
     async def commit(self) -> None:
-        """顯式 commit：送一個標記 commit=true 的空 chunk 強制 provider 刷新 final。"""
+        """顯式 commit 刷 final。VAD 模式交給 upstream 自動斷句（避免空 chunk 被 reject）。"""
         if self._closed or self._ws is None:
             return
+        # VAD 模式：upstream 自己偵測靜音後自動 commit，client 不要干預
+        if self._commit_strategy == "vad":
+            return
+        # Manual 模式：送空 commit flag（需至少累積 0.3s 真實 audio，否則 upstream 會回 error，由 caller 自理）
         payload = {
             "message_type": _ELEVENLABS_CHUNK_MSG_TYPE,
             "audio_base_64": "",
