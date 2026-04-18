@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Play, Pause, Check, AlertCircle, CheckCircle2, XCircle, Timer, ChevronDown, ChevronRight, Zap, CalendarDays } from 'lucide-vue-next'
+import { ArrowLeft, Play, Pause, Check, AlertCircle, CheckCircle2, XCircle, Timer, ChevronDown, ChevronRight, Zap, CalendarDays, Tag } from 'lucide-vue-next'
+
+const GROUP_OPTIONS = ['派工', '風險分析', '訊息收集', 'Edge 巡檢', '站會 / 會議', '系統', 'ESS']
 import ParsedOutput from '../components/ParsedOutput.vue'
 import CronCalendar from '../components/CronCalendar.vue'
 import { useAegisStore } from '../stores/aegis'
@@ -187,6 +189,7 @@ function startEdit() {
     prompt_template: job.value.prompt_template,
     target_list_id: job.value.target_list_id || null,
     api_url: job.value.api_url || '',
+    group: job.value.group || '',
   }
   editing.value = true
   if (job.value.project_id) fetchStageLists(job.value.project_id)
@@ -309,6 +312,28 @@ watch(jobId, async () => {
             </div>
             <div>
               <label class="block text-xs font-medium text-slate-400 mb-1">
+                <Tag class="w-3 h-3 inline mr-1" />分組（選填）
+              </label>
+              <input v-model="editForm.group" type="text" placeholder="例如：風險分析、派工" list="group-options-detail"
+                class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 text-sm focus:ring-2 focus:ring-violet-500 outline-none">
+              <datalist id="group-options-detail">
+                <option v-for="g in GROUP_OPTIONS" :key="g" :value="g" />
+              </datalist>
+              <div class="flex flex-wrap gap-1.5 mt-2">
+                <button
+                  v-for="g in GROUP_OPTIONS"
+                  :key="g"
+                  type="button"
+                  @click="editForm.group = editForm.group === g ? '' : g"
+                  :class="[
+                    'px-2 py-0.5 rounded-full text-[10px] border transition-colors',
+                    editForm.group === g ? 'bg-violet-600/30 text-violet-300 border-violet-500/50' : 'text-slate-500 border-slate-600 hover:text-slate-300'
+                  ]"
+                >{{ g }}</button>
+              </div>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">
                 {{ editForm.api_url ? '請求內容（JSON）' : '提示詞模板' }}
               </label>
               <textarea v-model="editForm.prompt_template" rows="8" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 font-mono text-sm focus:ring-2 focus:ring-emerald-500 outline-none"></textarea>
@@ -334,6 +359,10 @@ watch(jobId, async () => {
             <div>
               <div class="text-[10px] text-slate-500 uppercase tracking-wider mb-1">目標列表</div>
               <div class="text-sm text-slate-200">{{ targetListName }}</div>
+            </div>
+            <div v-if="job.group">
+              <div class="text-[10px] text-slate-500 uppercase tracking-wider mb-1">分組</div>
+              <span class="px-2 py-0.5 rounded-full text-xs font-medium border bg-violet-600/20 text-violet-300 border-violet-500/30">{{ job.group }}</span>
             </div>
           </div>
           <div v-if="job.description" class="text-xs text-slate-400 mb-3">{{ job.description }}</div>

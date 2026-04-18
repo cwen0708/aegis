@@ -506,6 +506,28 @@ def _sync_default_sync_rules(session: Session):
         print("  - All default sync rules already exist.")
 
 
+def _sync_talk_phase2_settings(session: Session) -> None:
+    """Upsert Talk Phase 2 相關 SystemSetting（不覆蓋既有值）。
+
+    對應計畫 `~/.claude/plans/golden-jingling-galaxy.md` Step 1。
+    在 initial seeding 與後續 sync 兩條路徑都會被呼叫，確保升級時也會補上 key。
+    """
+    talk_defaults: list[tuple[str, str]] = [
+        ("stt_provider", "elevenlabs"),           # gemini / elevenlabs / deepgram
+        ("deepgram_api_key", ""),                 # fallback STT provider key
+        ("talk_bgm_enabled", "true"),             # 背景音樂開關
+        ("talk_tts_model", "eleven_flash_v2_5"),  # Talk TTS 模型覆寫
+    ]
+    added = 0
+    for key, default_value in talk_defaults:
+        if not session.get(SystemSetting, key):
+            session.add(SystemSetting(key=key, value=default_value))
+            added += 1
+    if added:
+        session.commit()
+        print(f"  - Added {added} Talk Phase 2 settings (stt/bgm/tts_model/deepgram_key)")
+
+
 def seed_data():
     init_db()
     with Session(engine) as session:
@@ -515,6 +537,7 @@ def seed_data():
             print("Database has existing data. Syncing...")
             _sync_system_cron_jobs(session)
             _sync_default_sync_rules(session)
+            _sync_talk_phase2_settings(session)
             print("Sync completed!")
             return
 
@@ -624,6 +647,9 @@ def seed_data():
         if not session.get(SystemSetting, "onestack_endpoint"):
             session.add(SystemSetting(key="onestack_endpoint", value="https://avioqoteujivjkpnvyyo.supabase.co/functions/v1/receive-suggestion"))
             print("  - Added onestack_endpoint setting")
+
+        # ── 2d-talk. Talk Phase 2 語音對話設定（跳過已存在）──
+        _sync_talk_phase2_settings(session)
 
         # ── 2e. 管理員設定（跳過已存在）──
         import os

@@ -213,7 +213,7 @@ def get_settings(session: Session = Depends(get_session)):
         result["max_workstations"] = result["max_concurrent_agents"]
     result.pop("max_concurrent_agents", None)
     # Mask 敏感 token（只顯示後 4 位）
-    for secret_key in ("github_pat",):
+    for secret_key in ("github_pat", "deepgram_api_key"):
         if secret_key in result and result[secret_key]:
             val = result[secret_key]
             result[secret_key] = f"***{val[-4:]}" if len(val) > 4 else "***"

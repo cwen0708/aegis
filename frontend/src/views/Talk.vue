@@ -18,10 +18,13 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Mic, Send, AlertTriangle, Ear } from 'lucide-vue-next'
 import { getMemberBySlug, type MemberInfo } from '../services/api/members'
-import { assetUrl } from '../config'
+import { assetUrl, config } from '../config'
 import { useTalkSocket, type TalkState } from '../composables/useTalkSocket'
 import { usePushToTalk } from '../composables/usePushToTalk'
 import { useVAD } from '../composables/useVAD'
+import { useAmbientBgm } from '../composables/useAmbientBgm'
+
+const THINKING_BGM_DELAY_MS = 3000
 
 type TalkMode = 'ptt' | 'vad' | 'text'
 const TALK_MODE_STORAGE_KEY = 'aegis.talk.mode'
@@ -88,6 +91,9 @@ watch(lastLlmResponse, async () => {
     el.scrollTop = el.scrollHeight
   }
 })
+// Partial STT（可被後續 seq 覆蓋，final 時清空）
+const partialText = ref('')
+const partialSeq = ref(-1)
 const errorBanner = ref<string | null>(null)
 const textInput = ref('')
 
@@ -110,6 +116,11 @@ const effectiveState = computed<
   return 'idle'
 })
 
+function clearPartial() {
+  partialText.value = ''
+  partialSeq.value = -1
+}
+
 const stateLabel = computed(() => {
   switch (effectiveState.value) {
     case 'recording': return '錄音中'
@@ -130,14 +141,34 @@ function setError(msg: string) {
   }, 5000)
 }
 
+// ── 背景音樂（AI thinking 時填補空白）──
+const bgm = useAmbientBgm()
+let thinkingBgmTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearThinkingBgmTimer() {
+  if (thinkingBgmTimer !== null) {
+    clearTimeout(thinkingBgmTimer)
+    thinkingBgmTimer = null
+  }
+}
+
 // ── WebSocket ──
 // 句子級 streaming：onLlmPartial 即時累加字幕，onLlmResponse 在結尾覆蓋成完整版
 const talk = useTalkSocket(memberSlug.value, {
   onState: (s) => { state.value = s },
   onTranscript: (text) => {
     lastTranscript.value = text
+    // final 到達 → 清掉 partial 顯示
+    clearPartial()
     // 新一輪 → 清空上一輪字幕
     lastLlmResponse.value = ''
+  },
+  onTranscriptPartial: (text, seq) => {
+    // seq 單調遞增，舊封包忽略（防 out-of-order）
+    if (seq >= partialSeq.value) {
+      partialText.value = text
+      partialSeq.value = seq
+    }
   },
   onLlmPartial: (text) => {
     // 中文句子直接累加
@@ -146,13 +177,55 @@ const talk = useTalkSocket(memberSlug.value, {
   onLlmResponse: (text) => { lastLlmResponse.value = text },
   onAudioEnd: () => {
     if (state.value === 'speaking') state.value = 'idle'
+    // TTS 結束：若仍在 thinking（多輪工具呼叫）→ resume；否則 stop
+    if (state.value === 'thinking') {
+      bgm.resume()
+    } else {
+      bgm.stop()
+    }
   },
   onError: (err) => {
     setError(err)
     state.value = 'error'
+    clearThinkingBgmTimer()
+    bgm.stop()
   },
   onOpen: () => { state.value = 'idle' },
   onClose: () => { state.value = 'disconnected' },
+})
+
+// 狀態變化 → BGM 控制
+// - thinking 持續 3 秒 → play（淡入）
+// - speaking → duck（TTS 音訊開始播放，降音量）
+// - idle/disconnected → stop
+watch(state, (next, prev) => {
+  // 進入 thinking → 排程 3 秒後 play
+  if (next === 'thinking' && prev !== 'thinking') {
+    clearThinkingBgmTimer()
+    thinkingBgmTimer = setTimeout(() => {
+      thinkingBgmTimer = null
+      if (state.value === 'thinking') {
+        bgm.play()
+      }
+    }, THINKING_BGM_DELAY_MS)
+    return
+  }
+
+  // 離開 thinking → 取消排程
+  if (prev === 'thinking' && next !== 'thinking') {
+    clearThinkingBgmTimer()
+  }
+
+  // 進入 speaking（TTS 播放）→ duck
+  if (next === 'speaking' && prev !== 'speaking') {
+    bgm.duck()
+    return
+  }
+
+  // 回到 idle / disconnected → stop
+  if (next === 'idle' || next === 'disconnected') {
+    bgm.stop()
+  }
 })
 
 // ── 錄音模式 ──
@@ -178,6 +251,8 @@ const ptt = usePushToTalk({
 // ── VAD 自動斷句錄音 ──
 const vad = useVAD({
   onSpeechStart: () => {
+    // 新一輪語音：清掉殘留的 partial 字幕
+    clearPartial()
     state.value = 'listening'
   },
   onSpeechEnd: ({ buffer, mimeType }) => {
@@ -203,6 +278,8 @@ function stopCurrentActivity() {
 
 // 三個底部按鈕 = 模式切換 + 動作觸發
 async function toggleRecord() {
+  // iOS Safari BGM 解鎖：必須在 user gesture 同步鏈第一行（不可在 await 後呼叫）
+  bgm.unlock()
   if (!talk.connected.value) { setError('尚未連線伺服器'); return }
   // 正在錄 → 停止送出
   if (mode.value === 'ptt' && ptt.recording.value) {
@@ -219,6 +296,8 @@ async function toggleRecord() {
 }
 
 async function toggleListen() {
+  // iOS Safari BGM 解鎖：同步鏈第一行
+  bgm.unlock()
   if (!talk.connected.value) { setError('尚未連線伺服器'); return }
   if (mode.value === 'vad' && vad.isListening.value) {
     vad.stop()
@@ -233,6 +312,8 @@ async function toggleListen() {
 }
 
 function toggleText() {
+  // iOS Safari BGM 解鎖：同步鏈第一行（切到文字也算 user gesture）
+  bgm.unlock()
   if (mode.value === 'text') return
   stopCurrentActivity()
   mode.value = 'text'
@@ -240,6 +321,8 @@ function toggleText() {
 
 // 文字測試輸入
 function submitText() {
+  // iOS Safari BGM 解鎖：同步鏈第一行（文字輸入也算 user gesture）
+  bgm.unlock()
   const text = textInput.value.trim()
   if (!text) return
   if (!talk.connected.value) {
@@ -274,14 +357,31 @@ async function loadMember() {
   }
 }
 
+async function loadBgmSetting() {
+  try {
+    const res = await fetch(`${config.apiUrl}/api/v1/settings`)
+    if (!res.ok) return
+    const data = await res.json() as Record<string, string>
+    if (data.talk_bgm_enabled === 'false') {
+      bgm.setEnabled(false)
+    }
+  } catch (err) {
+    console.warn('[Talk] load bgm setting failed', err)
+  }
+}
+
 onMounted(async () => {
   await loadMember()
+  // 並行載入 bgm 設定（不擋主流程）
+  void loadBgmSetting()
   if (member.value) {
     talk.connect()
   }
 })
 
 onUnmounted(() => {
+  clearThinkingBgmTimer()
+  bgm.stop()
   if (vad.isListening.value) vad.stop()
   talk.disconnect()
 })
@@ -362,9 +462,17 @@ watch(memberSlug, async (slug) => {
 
       <!-- 字幕區（壓在立繪上方，工具列上緣）。長文自動捲到最新一段 -->
       <div
-        v-if="lastTranscript || lastLlmResponse"
+        v-if="lastTranscript || lastLlmResponse || (partialText && !lastTranscript)"
         class="absolute left-2 right-2 bottom-[72px] z-10 space-y-2 max-h-[55vh] flex flex-col"
       >
+        <!-- Partial（streaming STT 即時字幕，淡色斜體，final 到達後清掉） -->
+        <div
+          v-if="partialText && !lastTranscript"
+          class="bg-slate-900/40 backdrop-blur-sm border border-slate-500/30 rounded-lg px-4 py-2 shrink-0"
+        >
+          <div class="text-[10px] uppercase tracking-wider text-slate-400 mb-1">你正在說…</div>
+          <p class="text-slate-300 text-sm italic leading-relaxed">{{ partialText }}</p>
+        </div>
         <div
           v-if="lastTranscript"
           class="bg-slate-900/70 backdrop-blur-sm border border-sky-400/30 rounded-lg px-4 py-2 shrink-0"

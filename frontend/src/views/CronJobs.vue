@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Clock, Play, Pause, Trash2, AlertCircle, Plus, X, Pencil, Zap } from 'lucide-vue-next'
+import { Clock, Play, Pause, Trash2, AlertCircle, Plus, X, Pencil, Zap, Tag } from 'lucide-vue-next'
 import { useAegisStore } from '../stores/aegis'
 import { useAuthStore } from '../stores/auth'
 import { apiClient } from '../services/api/client'
@@ -10,6 +10,9 @@ import { useResponsive } from '../composables/useResponsive'
 import { useProjectSelector } from '../composables/useProjectSelector'
 import PageHeader from '../components/PageHeader.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+
+// 預設分組選項
+const GROUP_OPTIONS = ['派工', '風險分析', '訊息收集', 'Edge 巡檢', '站會 / 會議', '系統', 'ESS']
 
 const { isMobile } = useResponsive()
 
@@ -22,6 +25,9 @@ const cronJobs = ref<any[]>([])
 const loading = ref(true)
 const cronPausedProjects = ref<number[]>([])
 
+// 分組過濾
+const selectedGroup = ref<string | null>(null)
+
 // Modal 狀態
 const showAddModal = ref(false)
 useEscapeKey(showAddModal, () => { showAddModal.value = false })
@@ -32,6 +38,7 @@ const newJobForm = ref({
   cron_expression: '0 0 * * *',
   prompt_template: '',
   target_list_id: null as number | null,
+  group: '',
 })
 
 // 取得指定專案的列表（供目標列表選擇器用）
@@ -69,7 +76,7 @@ const createCronJob = async () => {
     showAddModal.value = false
     store.addToast('排程已建立', 'success')
     await fetchCronJobs()
-    newJobForm.value = { project_id: null, name: '', description: '', cron_expression: '0 0 * * *', prompt_template: '', target_list_id: null }
+    newJobForm.value = { project_id: null, name: '', description: '', cron_expression: '0 0 * * *', prompt_template: '', target_list_id: null, group: '' }
   } catch (e) {
     store.addToast('建立排程失敗', 'error')
   }
@@ -142,15 +149,32 @@ async function toggleCron() {
 
 // 依選中專案篩選
 const filteredJobs = computed(() => {
-  const jobs = selectedProjectId.value
+  let jobs = selectedProjectId.value
     ? cronJobs.value.filter(j => j.project_id === selectedProjectId.value)
     : cronJobs.value
+  if (selectedGroup.value !== null) {
+    jobs = jobs.filter(j => (j.group || null) === selectedGroup.value)
+  }
   return [...jobs].sort((a, b) => {
     // 有下次執行時間的排前面，沒有的排最後
     if (!a.next_scheduled_at && !b.next_scheduled_at) return 0
     if (!a.next_scheduled_at) return 1
     if (!b.next_scheduled_at) return -1
     return a.next_scheduled_at.localeCompare(b.next_scheduled_at)
+  })
+})
+
+// 目前專案中所有出現的分組（動態）
+const availableGroups = computed(() => {
+  const base = selectedProjectId.value
+    ? cronJobs.value.filter(j => j.project_id === selectedProjectId.value)
+    : cronJobs.value
+  const groups = new Set<string | null>()
+  base.forEach(j => groups.add(j.group || null))
+  return Array.from(groups).sort((a, b) => {
+    if (a === null) return 1
+    if (b === null) return -1
+    return a.localeCompare(b)
   })
 })
 
@@ -247,14 +271,19 @@ const formatTime = (iso: string) => {
                 <div class="font-medium text-sm text-slate-100 truncate">{{ job.name }}</div>
                 <div v-if="job.description" class="text-xs text-slate-500 mt-0.5 line-clamp-2">{{ job.description }}</div>
               </div>
-              <span
-                :class="[
-                  'px-1.5 py-0.5 rounded text-[10px] font-bold border shrink-0',
-                  job.is_enabled ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-slate-700 text-slate-500 border-slate-600'
-                ]"
-              >
-                {{ job.is_enabled ? '啟用' : '停用' }}
-              </span>
+              <div class="flex items-center gap-1 shrink-0">
+                <span v-if="job.group" class="px-1.5 py-0.5 rounded-full text-[10px] font-medium border bg-violet-600/20 text-violet-300 border-violet-500/30">
+                  {{ job.group }}
+                </span>
+                <span
+                  :class="[
+                    'px-1.5 py-0.5 rounded text-[10px] font-bold border',
+                    job.is_enabled ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-slate-700 text-slate-500 border-slate-600'
+                  ]"
+                >
+                  {{ job.is_enabled ? '啟用' : '停用' }}
+                </span>
+              </div>
             </div>
             <div class="flex items-center gap-3 mt-2">
               <div class="flex items-center gap-1 text-blue-400 font-mono text-xs">
@@ -276,10 +305,32 @@ const formatTime = (iso: string) => {
           <span class="text-xs text-amber-400">此專案排程已暫停，排程不會自動執行</span>
         </div>
 
+        <!-- 分組過濾 chips -->
+        <div v-if="availableGroups.length > 1" class="flex items-center gap-2 px-6 py-2.5 border-b border-slate-700/50 flex-wrap">
+          <Tag class="w-3.5 h-3.5 text-slate-500 shrink-0" />
+          <button
+            @click="selectedGroup = null"
+            :class="[
+              'px-2.5 py-0.5 rounded-full text-[10px] font-medium border transition-colors',
+              selectedGroup === null ? 'bg-slate-600 text-slate-100 border-slate-500' : 'text-slate-500 border-slate-600 hover:border-slate-500 hover:text-slate-300'
+            ]"
+          >全部</button>
+          <button
+            v-for="g in availableGroups"
+            :key="g ?? '__ungrouped__'"
+            @click="selectedGroup = g"
+            :class="[
+              'px-2.5 py-0.5 rounded-full text-[10px] font-medium border transition-colors',
+              selectedGroup === g ? 'bg-violet-600/30 text-violet-300 border-violet-500/50' : 'text-slate-500 border-slate-600 hover:border-slate-500 hover:text-slate-300'
+            ]"
+          >{{ g ?? '未分組' }}</button>
+        </div>
+
         <table class="w-full text-left border-collapse">
           <thead>
             <tr class="text-slate-500 text-[10px] uppercase tracking-widest border-b border-slate-700/50">
               <th class="px-6 py-2.5 font-semibold">排程名稱</th>
+              <th class="px-6 py-2.5 font-semibold">分組</th>
               <th class="px-6 py-2.5 font-semibold">排程週期</th>
               <th class="px-6 py-2.5 font-semibold text-center">狀態</th>
               <th class="px-6 py-2.5 font-semibold">下次執行</th>
@@ -291,6 +342,12 @@ const formatTime = (iso: string) => {
               <td class="px-6 py-3 cursor-pointer" @click="router.push(`/cron/${job.id}`)">
                 <div class="font-medium text-sm text-slate-100 hover:text-emerald-400 transition-colors">{{ job.name }}</div>
                 <div v-if="job.description" class="text-xs text-slate-500 mt-0.5 truncate max-w-xs">{{ job.description }}</div>
+              </td>
+              <td class="px-6 py-3">
+                <span v-if="job.group" class="px-2 py-0.5 rounded-full text-[10px] font-medium border bg-violet-600/20 text-violet-300 border-violet-500/30">
+                  {{ job.group }}
+                </span>
+                <span v-else class="text-[10px] text-slate-600">-</span>
               </td>
               <td class="px-6 py-3">
                 <div class="flex items-center gap-2 text-blue-400 font-mono text-sm">
@@ -402,6 +459,28 @@ const formatTime = (iso: string) => {
               <option v-for="sl in projectStageLists" :key="sl.id" :value="sl.id">{{ sl.name }}</option>
             </select>
             <p class="text-[10px] text-slate-500 mt-1">指定卡片建立後要放入的列表，會依該列表的行為設定執行</p>
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">分組（選填）</label>
+            <div class="flex gap-2">
+              <input v-model="newJobForm.group" type="text" placeholder="例如：風險分析、派工" list="group-options" class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:ring-2 focus:ring-violet-500 outline-none text-sm">
+              <datalist id="group-options">
+                <option v-for="g in GROUP_OPTIONS" :key="g" :value="g" />
+              </datalist>
+            </div>
+            <div class="flex flex-wrap gap-1.5 mt-2">
+              <button
+                v-for="g in GROUP_OPTIONS"
+                :key="g"
+                type="button"
+                @click="newJobForm.group = newJobForm.group === g ? '' : g"
+                :class="[
+                  'px-2 py-0.5 rounded-full text-[10px] border transition-colors',
+                  newJobForm.group === g ? 'bg-violet-600/30 text-violet-300 border-violet-500/50' : 'text-slate-500 border-slate-600 hover:text-slate-300'
+                ]"
+              >{{ g }}</button>
+            </div>
           </div>
 
           <div>

@@ -5,12 +5,15 @@ Protocol（client ↔ server）：
   Client → Server:
     JSON {"type": "audio_start"}                — 開始錄音
     binary bytes                                  — 音訊資料片段（audio_start 後）
+      * Gemini 路徑：webm/opus 整段；audio_end 後一次性轉錄
+      * ElevenLabs/Deepgram：PCM16 16kHz mono chunk（由前端 AudioWorklet 產生）
     JSON {"type": "audio_end"}                  — 結束錄音、觸發推論
     JSON {"type": "text_input", "text": "..."}  — 直接送文字（跳過 STT）
 
   Server → Client:
     JSON {"type": "state", "state": "idle" | "listening" | "thinking" | "speaking"}
-    JSON {"type": "transcript", "text": "..."}  — STT 結果
+    JSON {"type": "transcript_partial", "text": "...", "seq": N}  — 即時 STT（可被覆蓋）
+    JSON {"type": "transcript", "text": "..."}  — STT 最終結果（final）
     JSON {"type": "llm_partial", "text": "..."} — AI 每句回覆（字幕即時累加）
     JSON {"type": "llm_response", "text": "..."} — AI 完整回覆文字（結尾一次）
     binary bytes                                  — TTS 音訊片段（MP3）
@@ -18,7 +21,10 @@ Protocol（client ↔ server）：
     JSON {"type": "audio_end"}                  — 全部 TTS 完成
     JSON {"type": "error", "error": "..."}      — 錯誤訊息
 
-流程：audio_end / text_input → STT → LLM streaming → 切句 → ElevenLabs TTS → WS
+流程：
+  - gemini：audio_end 整段 → _stt_gemini → LLM streaming → 切句 → TTS → WS
+  - elevenlabs/deepgram：binary PCM chunk → streaming STT → partial/final
+    → final 立即 kickoff LLM（不等 audio_end）→ 切句 → TTS → WS
 """
 from __future__ import annotations
 
@@ -31,9 +37,10 @@ from typing import Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlmodel import Session, select
 
+from app.core.stt_stream import StreamingSTT, get_streaming_stt
 from app.core.tts import (
-    ELEVENLABS_DEFAULT_MODEL,
     ELEVENLABS_DEFAULT_VOICE_ID,
+    _get_talk_tts_model,
     synthesize_elevenlabs_stream,
 )
 from app.database import engine
@@ -41,6 +48,10 @@ from app.models.core import Member, SystemSetting
 
 router = APIRouter(tags=["talk"])
 logger = logging.getLogger(__name__)
+
+
+# 預設 STT provider（Card 1 seed 已設 elevenlabs）
+_DEFAULT_STT_PROVIDER = "elevenlabs"
 
 
 # ────────────────────────────────────────
@@ -58,6 +69,23 @@ def _get_elevenlabs_api_key() -> Optional[str]:
 def _get_gemini_api_key() -> Optional[str]:
     with Session(engine) as session:
         setting = session.get(SystemSetting, "gemini_api_key")
+        if setting and setting.value:
+            return setting.value
+    return None
+
+
+def _get_stt_provider() -> str:
+    """讀 SystemSetting.stt_provider，預設 elevenlabs。"""
+    with Session(engine) as session:
+        setting = session.get(SystemSetting, "stt_provider")
+        if setting and setting.value:
+            return setting.value.strip().lower()
+    return _DEFAULT_STT_PROVIDER
+
+
+def _get_deepgram_api_key() -> Optional[str]:
+    with Session(engine) as session:
+        setting = session.get(SystemSetting, "deepgram_api_key")
         if setting and setting.value:
             return setting.value
     return None
@@ -259,6 +287,8 @@ async def _handle_turn(
     sentence_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
     full_response_parts: list[str] = []
     speaking_started = False
+    # 每輪解析一次 TTS 模型（允許 admin 中途切換 A/B 模型）
+    tts_model = _get_talk_tts_model()
 
     async def llm_producer() -> None:
         """從 LLM token stream 切句送入 sentence_queue。
@@ -333,7 +363,7 @@ async def _handle_turn(
                         sentence,
                         voice_id=voice_id,
                         api_key=api_key,
-                        model=ELEVENLABS_DEFAULT_MODEL,
+                        model=tts_model,
                     ):
                         await websocket.send_bytes(chunk)
                 except Exception as e:
@@ -370,6 +400,42 @@ async def _handle_turn(
     await _send_state(websocket, "idle")
 
 
+async def _build_streaming_stt(provider: str) -> Optional[StreamingSTT]:
+    """依 provider 建立 streaming STT；失敗回 None 讓 caller fallback。"""
+    if provider == "gemini":
+        return None
+    try:
+        keys = {
+            "elevenlabs": _get_elevenlabs_api_key() or "",
+            "deepgram": _get_deepgram_api_key() or "",
+        }
+        stt = get_streaming_stt(provider, api_keys=keys)
+    except ValueError as e:
+        logger.warning("[Talk] streaming STT disabled: %s", e)
+        return None
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[Talk] streaming STT build failed: %s", e)
+        return None
+
+    if stt is None:
+        return None
+
+    try:
+        await stt.start()
+    except NotImplementedError as e:
+        logger.warning("[Talk] provider %s not implemented: %s", provider, e)
+        return None
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[Talk] streaming STT start failed: %s", e)
+        try:
+            await stt.close()
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+
+    return stt
+
+
 @router.websocket("/ws/talk/{member_slug}")
 async def talk_ws(websocket: WebSocket, member_slug: str) -> None:
     await websocket.accept()
@@ -393,12 +459,78 @@ async def talk_ws(websocket: WebSocket, member_slug: str) -> None:
         await websocket.close()
         return
 
+    provider = _get_stt_provider()
     logger.info(
-        f"[Talk] connected member={member_slug} voice_id={voice_id}"
+        f"[Talk] connected member={member_slug} voice_id={voice_id} stt={provider}"
     )
     await _send_state(websocket, "idle")
 
-    audio_buffer = bytearray()
+    # Streaming 狀態（每輪重建）
+    audio_buffer = bytearray()  # gemini 路徑用
+    stt: Optional[StreamingSTT] = None
+    stt_provider: str = provider  # 本輪實際使用（可能因失敗降級為 gemini）
+    final_text_holder: dict[str, str] = {"text": ""}
+    llm_kickoff_task: Optional[asyncio.Task[None]] = None
+
+    def _reset_turn_state() -> None:
+        nonlocal audio_buffer, final_text_holder, llm_kickoff_task
+        audio_buffer = bytearray()
+        final_text_holder = {"text": ""}
+        llm_kickoff_task = None
+
+    async def _cleanup_stt() -> None:
+        nonlocal stt
+        if stt is not None:
+            try:
+                await stt.close()
+            except Exception as e:  # noqa: BLE001
+                logger.debug("[Talk] stt.close ignored: %s", e)
+            stt = None
+
+    async def _kickoff_llm_with_text(user_text: str) -> None:
+        """STT final → 送 transcript + _handle_turn。"""
+        try:
+            await websocket.send_json({"type": "transcript", "text": user_text})
+        except Exception as e:  # noqa: BLE001
+            logger.debug("[Talk] send transcript failed: %s", e)
+            return
+        await _handle_turn(websocket, member, user_text, voice_id, api_key)
+
+    def _make_partial_cb():
+        async def _cb(text: str, seq: int) -> None:
+            try:
+                await websocket.send_json(
+                    {"type": "transcript_partial", "text": text, "seq": seq}
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.debug("[Talk] partial send failed: %s", e)
+        return _cb
+
+    def _make_final_cb():
+        async def _cb(text: str) -> None:
+            nonlocal llm_kickoff_task
+            cleaned = (text or "").strip()
+            if not cleaned:
+                return
+            final_text_holder["text"] = cleaned
+            # LLM 只踢一次；後續 final 片段覆蓋文字但不再開新任務
+            if llm_kickoff_task is None:
+                llm_kickoff_task = asyncio.create_task(
+                    _kickoff_llm_with_text(cleaned),
+                    name="talk-llm-kickoff",
+                )
+        return _cb
+
+    def _make_error_cb():
+        async def _cb(message: str) -> None:
+            try:
+                await websocket.send_json(
+                    {"type": "error", "error": "stt_upstream_error"}
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.debug("[Talk] error send failed: %s", e)
+            logger.warning("[Talk] STT upstream error: %s", message)
+        return _cb
 
     try:
         while True:
@@ -410,7 +542,15 @@ async def talk_ws(websocket: WebSocket, member_slug: str) -> None:
 
             # 二進位音訊片段
             if msg.get("bytes") is not None:
-                audio_buffer.extend(msg["bytes"])
+                chunk = msg["bytes"]
+                if stt is not None:
+                    try:
+                        await stt.send_chunk(chunk)
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("[Talk] send_chunk failed: %s", e)
+                else:
+                    # gemini 整段路徑
+                    audio_buffer.extend(chunk)
                 continue
 
             text = msg.get("text")
@@ -426,12 +566,58 @@ async def talk_ws(websocket: WebSocket, member_slug: str) -> None:
             event_type = data.get("type")
 
             if event_type == "audio_start":
-                audio_buffer = bytearray()
+                # 前一輪殘留清掉（保險）
+                _reset_turn_state()
+                await _cleanup_stt()
+
+                # streaming provider：立刻建 session；失敗則降級 gemini
+                if stt_provider in ("elevenlabs", "deepgram"):
+                    stt = await _build_streaming_stt(stt_provider)
+                    if stt is None:
+                        logger.info(
+                            "[Talk] fallback to gemini (streaming provider init failed)"
+                        )
+                        await _send_error(websocket, "stt_upstream_error")
+                    else:
+                        stt.on_partial = _make_partial_cb()
+                        stt.on_final = _make_final_cb()
+                        stt.on_error = _make_error_cb()
+
                 await _send_state(websocket, "listening")
                 continue
 
             if event_type == "audio_end":
-                # 處理錄好的音訊
+                # Streaming 路徑：commit + close；LLM 可能已被 final 踢了
+                if stt is not None:
+                    try:
+                        await stt.commit()
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("[Talk] stt.commit failed: %s", e)
+
+                    # 等一個短窗口讓 final 回來（避免 audio_end 後立即關 ws）
+                    try:
+                        await asyncio.wait_for(
+                            _wait_for_final(final_text_holder), timeout=2.0
+                        )
+                    except asyncio.TimeoutError:
+                        logger.info("[Talk] final transcript timeout after commit")
+
+                    await _cleanup_stt()
+
+                    # 沒踢過 LLM（例如 final 沒到）→ 顯式報錯
+                    if llm_kickoff_task is None:
+                        await _send_error(websocket, "STT 失敗或無語音內容")
+                        await _send_state(websocket, "idle")
+                    else:
+                        # 等 LLM 任務跑完（若已在跑）
+                        try:
+                            await llm_kickoff_task
+                        except Exception as e:  # noqa: BLE001
+                            logger.debug("[Talk] llm task await: %s", e)
+                    _reset_turn_state()
+                    continue
+
+                # Gemini 整段路徑（向後相容）
                 raw_audio = bytes(audio_buffer)
                 audio_buffer = bytearray()
                 mime_type = data.get("mime_type") or "audio/webm"
@@ -455,6 +641,7 @@ async def talk_ws(websocket: WebSocket, member_slug: str) -> None:
                 await _handle_turn(
                     websocket, member, user_text, voice_id, api_key
                 )
+                _reset_turn_state()
                 continue
 
             if event_type == "text_input":
@@ -478,7 +665,14 @@ async def talk_ws(websocket: WebSocket, member_slug: str) -> None:
         except Exception:
             pass
     finally:
+        await _cleanup_stt()
         try:
             await websocket.close()
         except Exception:
             pass
+
+
+async def _wait_for_final(holder: dict[str, str]) -> None:
+    """Poll helper — commit 後等 final 回來（跑滿 timeout 由 caller 控制）。"""
+    while not holder.get("text"):
+        await asyncio.sleep(0.05)

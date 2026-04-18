@@ -1,0 +1,28 @@
+# 最小 ClawTeam 團隊模板範例。
+# 結構：[template] 為根節點，內含 leader（單一）、agents（陣列）、tasks（陣列）。
+
+[template]
+name = "sample"
+description = "最小團隊模板範例，示範 leader + 2 agents + 1 task 的骨架。"
+command = ["claude"]
+backend = "tmux"
+
+[template.leader]
+name = "leader"
+type = "general-purpose"
+task = "協調整個團隊，確保 {goal} 被達成。"
+
+[[template.agents]]
+name = "researcher"
+type = "general-purpose"
+task = "針對 {topic} 做前置研究並彙整來源。"
+
+[[template.agents]]
+name = "implementer"
+type = "general-purpose"
+task = "依 researcher 的結論實作 {feature}。"
+
+[[template.tasks]]
+subject = "啟動討論"
+description = "leader 開場，交付研究主題給 researcher。"
+owner = "leader"
