@@ -99,17 +99,6 @@ function clearPartial() {
   partialSeq.value = -1
 }
 
-const stateLabel = computed(() => {
-  switch (state.value) {
-    case 'listening': return '聆聽中'
-    case 'thinking': return '思考中'
-    case 'speaking': return '回應中'
-    case 'disconnected': return '未連線'
-    case 'error': return '錯誤'
-    default: return '待命中'
-  }
-})
-
 function setError(msg: string) {
   errorBanner.value = msg
   setTimeout(() => {
@@ -308,6 +297,109 @@ const vad = useVAD({
   threshold: 0.02,
   speechOnsetMs: 100,
   minSpeechMs: 300,
+})
+
+/**
+ * 衍生狀態（effectiveState）— 把 `state` + 使用者輸入動作合成出 9 種 UI 狀態：
+ * - disconnected / error / idle：來自 state
+ * - recording：PTT 正在錄音
+ * - armed：VAD 已啟動但還沒偵測到說話（streaming 免持 idle / gemini VAD idle）
+ * - listening：streaming session 開著、VAD 偵測中且未說話（綠 ring）
+ * - speaking-user：VAD 偵測到使用者正在說話（紅脈衝，barge-in / VAD 正收音）
+ * - thinking / speaking：AI 思考 / TTS 回應
+ *
+ * 對照表見 golden-jingling-galaxy.md Step 4。
+ */
+type EffectiveState =
+  | 'disconnected'
+  | 'error'
+  | 'idle'
+  | 'recording'
+  | 'armed'
+  | 'listening'
+  | 'speaking-user'
+  | 'thinking'
+  | 'speaking'
+
+const effectiveState = computed<EffectiveState>(() => {
+  if (state.value === 'disconnected') return 'disconnected'
+  if (state.value === 'error') return 'error'
+  if (state.value === 'speaking') return 'speaking'
+  if (state.value === 'thinking') return 'thinking'
+  // PTT 錄音 → recording
+  if (ptt.recording.value && mode.value === 'ptt') return 'recording'
+  // VAD 聆聽中且偵測到說話 → speaking-user（紅脈衝）
+  if (vad.isListening.value && vad.isSpeaking.value) return 'speaking-user'
+  // listening state（免持 session 開著但尚未說話，或 gemini VAD 啟動中）
+  if (state.value === 'listening') {
+    // streaming 免持：VAD 運作中但安靜 → listening（綠）
+    if (handsFreeActive.value) return 'listening'
+    // gemini VAD：偵測器啟動中、等待說話 → armed（淡綠）
+    if (vad.isListening.value) return 'armed'
+    return 'listening'
+  }
+  // VAD 啟動但 state 仍 idle（罕見 race）→ armed
+  if (vad.isListening.value) return 'armed'
+  return 'idle'
+})
+
+const stateLabel = computed(() => {
+  switch (effectiveState.value) {
+    case 'disconnected': return '未連線'
+    case 'error': return '錯誤'
+    case 'recording': return '錄音中'
+    case 'armed': return '聆聽中'
+    case 'listening': return '聆聽中'
+    case 'speaking-user': return '你說話中'
+    case 'thinking': return '思考中'
+    case 'speaking': return '回應中'
+    default: return '待命中'
+  }
+})
+
+/** 狀態環顏色（Tailwind ring class，套在 portrait 外圍圓環） */
+const stateRingClass = computed(() => {
+  switch (effectiveState.value) {
+    case 'disconnected': return 'ring-slate-500/40'
+    case 'error': return 'ring-red-500/70 animate-pulse'
+    case 'recording': return 'ring-sky-500/70 animate-pulse'
+    case 'armed': return 'ring-emerald-300/60'
+    case 'listening': return 'ring-emerald-500/70'
+    case 'speaking-user': return 'ring-red-500/80 animate-pulse'
+    case 'thinking': return 'ring-amber-400/70 animate-pulse'
+    case 'speaking': return 'ring-purple-500/70 animate-pulse'
+    default: return 'ring-slate-500/40'
+  }
+})
+
+/** 狀態徽章配色（邊框 + 文字）*/
+const stateBadgeClass = computed(() => {
+  switch (effectiveState.value) {
+    case 'disconnected': return 'border-slate-500/60 text-slate-400'
+    case 'error': return 'border-red-400/60 text-red-200'
+    case 'recording': return 'border-sky-400/60 text-sky-200'
+    case 'armed': return 'border-emerald-300/60 text-emerald-200'
+    case 'listening': return 'border-emerald-400/60 text-emerald-200'
+    case 'speaking-user': return 'border-red-400/70 text-red-200'
+    case 'thinking': return 'border-amber-400/60 text-amber-200'
+    case 'speaking': return 'border-purple-400/60 text-purple-200'
+    default: return 'border-slate-500/60 text-slate-300'
+  }
+})
+
+/** 徽章指示燈 */
+const stateDotClass = computed(() => {
+  switch (effectiveState.value) {
+    case 'disconnected': return 'bg-slate-500'
+    case 'error': return 'bg-red-400'
+    case 'recording': return 'bg-sky-400 animate-pulse'
+    case 'armed': return 'bg-emerald-300'
+    case 'listening': return 'bg-emerald-400'
+    case 'speaking-user': return 'bg-red-400 animate-pulse'
+    case 'thinking': return 'bg-amber-400 animate-pulse'
+    case 'speaking': return 'bg-purple-400 animate-pulse'
+    default: return 'bg-slate-400'
+  }
 })
 
 /** 免持模式 — 進入：建立 streaming session + detectionOnly VAD */
@@ -518,10 +610,11 @@ watch(memberSlug, async (slug) => {
               'px-2.5 py-2 flex items-center gap-1 transition-colors',
               mode === 'ptt' ? 'bg-emerald-600/80 text-white' : 'text-white/60 hover:text-white'
             ]"
-            title="按住說話模式"
+            title="錄音 — 點擊開始 / 再點停止"
+            aria-label="切換到錄音模式"
           >
             <Hand class="w-3.5 h-3.5" />
-            <span class="hidden sm:inline">按住</span>
+            <span class="hidden sm:inline">錄音</span>
           </button>
           <button
             @click="switchMode('vad')"
@@ -529,7 +622,8 @@ watch(memberSlug, async (slug) => {
               'px-2.5 py-2 flex items-center gap-1 transition-colors',
               mode === 'vad' ? 'bg-emerald-600/80 text-white' : 'text-white/60 hover:text-white',
             ]"
-            :title="isStreamingStt ? '免持對話 — 一次進入持續聆聽' : '自動斷句（VAD）模式'"
+            :title="isStreamingStt ? '免持對話 — 持續聆聽，講完 AI 自動回應' : '傾聽中 — 自動斷句'"
+            :aria-label="isStreamingStt ? '切換到免持對話模式' : '切換到自動斷句模式'"
           >
             <Ear class="w-3.5 h-3.5" />
             <span class="hidden sm:inline">傾聽</span>
@@ -607,29 +701,34 @@ watch(memberSlug, async (slug) => {
         </div>
       </div>
 
-      <!-- State badge (below portrait) -->
-      <div class="absolute left-1/2 -translate-x-1/2 bottom-[260px] sm:bottom-[240px] z-10">
+      <!--
+        狀態環 + 徽章（一體，放在立繪下方、麥克風上方）
+        - 6 色 ring 以 effectiveState 驅動，涵蓋 9 個子狀態（armed/listening/speaking-user 共享部分配色）
+        - role="status" aria-live="polite" 讓螢幕閱讀器即時讀出狀態變化
+        - :aria-label 帶入中文 stateLabel，徽章本身也顯示文字給視覺使用者
+      -->
+      <div
+        class="absolute left-1/2 -translate-x-1/2 bottom-[260px] sm:bottom-[240px] z-10 flex flex-col items-center gap-2"
+        role="status"
+        aria-live="polite"
+        :aria-label="`目前狀態：${stateLabel}`"
+      >
+        <!-- 狀態環（portrait 基座的視覺錨點；用 ring utility 在圓形容器外圍畫環） -->
         <div
-          class="flex items-center gap-2 bg-slate-900/70 backdrop-blur-sm border rounded-full px-4 py-1.5 text-sm"
-          :class="[
-            state === 'listening' ? 'border-sky-400/60 text-sky-200' :
-            state === 'thinking' ? 'border-amber-400/60 text-amber-200' :
-            state === 'speaking' ? 'border-emerald-400/60 text-emerald-200' :
-            state === 'error' ? 'border-red-400/60 text-red-200' :
-            state === 'disconnected' ? 'border-slate-500/60 text-slate-400' :
-            'border-slate-500/60 text-slate-300'
-          ]"
+          class="w-14 h-14 rounded-full bg-slate-900/50 backdrop-blur-sm ring-4 ring-offset-2 ring-offset-slate-900/30 flex items-center justify-center transition-all duration-300"
+          :class="stateRingClass"
         >
-          <span class="w-2 h-2 rounded-full"
-            :class="[
-              state === 'listening' ? 'bg-sky-400 animate-pulse' :
-              state === 'thinking' ? 'bg-amber-400 animate-pulse' :
-              state === 'speaking' ? 'bg-emerald-400 animate-pulse' :
-              state === 'error' ? 'bg-red-400' :
-              state === 'disconnected' ? 'bg-slate-500' :
-              'bg-slate-400'
-            ]"
+          <span
+            class="w-3 h-3 rounded-full"
+            :class="stateDotClass"
+            aria-hidden="true"
           />
+        </div>
+        <!-- 徽章（文字狀態） -->
+        <div
+          class="flex items-center gap-2 bg-slate-900/70 backdrop-blur-sm border rounded-full px-4 py-1 text-xs"
+          :class="stateBadgeClass"
+        >
           {{ stateLabel }}
         </div>
       </div>
@@ -705,7 +804,8 @@ watch(memberSlug, async (slug) => {
                   : 'bg-slate-700 text-slate-400 cursor-not-allowed',
               'w-20 h-20 sm:w-24 sm:h-24 text-white',
             ]"
-            :title="talk.connected.value ? '按住說話' : '尚未連線'"
+            :title="talk.connected.value ? '錄音 — 點擊開始 / 再點停止' : '尚未連線'"
+            :aria-label="ptt.recording.value ? '停止錄音' : '開始錄音'"
           >
             <Mic class="w-8 h-8 sm:w-10 sm:h-10" />
           </button>
@@ -739,7 +839,11 @@ watch(memberSlug, async (slug) => {
               :title="
                 !talk.connected.value ? '尚未連線' :
                 vad.isListening.value ? (isStreamingStt ? '停止免持對話' : '點擊關閉傾聽')
-                                      : (isStreamingStt ? '免持對話 — 一次進入持續聆聽' : '點擊開啟傾聽模式')
+                                      : (isStreamingStt ? '免持對話 — 持續聆聽，講完 AI 自動回應' : '傾聽中 — 自動斷句')
+              "
+              :aria-label="
+                vad.isListening.value ? '關閉傾聽'
+                                      : (isStreamingStt ? '開啟免持對話' : '開啟傾聽模式')
               "
             >
               <Ear v-if="vad.isListening.value && !vad.isSpeaking.value" class="w-8 h-8 sm:w-10 sm:h-10" />
