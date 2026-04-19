@@ -132,7 +132,7 @@ class ElevenLabsStreamingSTT(StreamingSTT):
     def _build_ws_url(self) -> str:
         """所有 session 設定放 URL query string（Eleven 不接受 client 端 session_config 訊息）。"""
         params = {
-            "model_id": "scribe_v1",
+            "model_id": "scribe_v2_realtime",
             "audio_format": _ELEVENLABS_PCM_FORMAT,
             "language_code": self._language_code,
             "commit_strategy": self._commit_strategy,
@@ -180,9 +180,12 @@ class ElevenLabsStreamingSTT(StreamingSTT):
             if self._ws is None:
                 return
 
+        # Eleven AsyncAPI 規定 input_audio_chunk required fields:
+        # message_type / audio_base_64 / commit / sample_rate（缺任一會 1008 invalid_request）
         payload = {
             "message_type": _ELEVENLABS_CHUNK_MSG_TYPE,
             "audio_base_64": base64.b64encode(pcm_bytes).decode("ascii"),
+            "commit": False,
             "sample_rate": self._sample_rate,
         }
         try:
