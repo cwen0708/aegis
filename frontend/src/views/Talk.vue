@@ -5,9 +5,9 @@
  * 功能：
  * - 載入成員資料（by slug）
  * - WebSocket 連線 /api/v1/ws/talk/{slug}
- * - 按住說話（push-to-talk）錄音 → 送 WebSocket
- * - 顯示狀態徽章（idle/listening/thinking/speaking）
- * - 字幕區（transcript + llm_response）
+ * - 錄音 / 傾聽 / 文字三模式工具列；VAD 免持支援 barge-in
+ * - 顯示狀態徽章（9 子狀態，6 色狀態環）
+ * - 字幕區（transcript + llm_response，AI 回覆長文自動捲到最新一段）
  * - 測試模式：文字輸入直送 text_input
  *
  * 已知限制：
@@ -105,42 +105,10 @@ const partialSeq = ref(-1)
 const errorBanner = ref<string | null>(null)
 const textInput = ref('')
 
-/**
- * 有效狀態：融合前端 active 狀態（錄音中、VAD 傾聽中）與 WS 遠端狀態。
- * 前端動作狀態優先（使用者一眼就看到自己的操作結果），遠端狀態次之。
- */
-const effectiveState = computed<
-  'recording' | 'armed' | 'listening' | 'thinking' | 'speaking' | 'disconnected' | 'error' | 'idle'
->(() => {
-  if (ptt.recording.value) return 'recording'
-  if (vad.isListening.value) {
-    return vad.isSpeaking.value ? 'listening' : 'armed'
-  }
-  if (state.value === 'listening') return 'listening'
-  if (state.value === 'thinking') return 'thinking'
-  if (state.value === 'speaking') return 'speaking'
-  if (state.value === 'disconnected') return 'disconnected'
-  if (state.value === 'error') return 'error'
-  return 'idle'
-})
-
 function clearPartial() {
   partialText.value = ''
   partialSeq.value = -1
 }
-
-const stateLabel = computed(() => {
-  switch (effectiveState.value) {
-    case 'recording': return '錄音中'
-    case 'armed': return '傾聽中…'
-    case 'listening': return '聆聽中'
-    case 'thinking': return '思考中'
-    case 'speaking': return '回應中'
-    case 'disconnected': return '未連線'
-    case 'error': return '錯誤'
-    default: return '待命中'
-  }
-})
 
 function setError(msg: string) {
   errorBanner.value = msg
@@ -256,15 +224,31 @@ const ptt = usePushToTalk({
   onError: (msg) => setError(msg),
 })
 
-// ── VAD 自動斷句錄音 ──
+// ── VAD / 免持對話 ──
+// - gemini provider：VAD 自己收音訊（MediaRecorder），onSpeechEnd 整段送
+// - streaming provider（elevenlabs/deepgram）：VAD 只做偵測（detectionOnly），
+//   PCM16 由 usePushToTalk.startPCM16 持續送 WS；Eleven server VAD 自動切句。
+//   VAD 的角色變成 barge-in：TTS 播放中偵測到使用者說話 → duck BGM + 清 TTS 佇列。
+
+// 免持模式下是否仍在 PCM16 streaming（用於清理判斷）
+const handsFreeActive = ref(false)
+
 const vad = useVAD({
   onSpeechStart: () => {
     // 新一輪語音：清掉殘留的 partial 字幕
     clearPartial()
+    // Barge-in：若 TTS 正在播放（speaking）→ duck BGM + 清 playbackQueue 打斷
+    if (state.value === 'speaking') {
+      bgm.duck()
+      talk.clearPlaybackQueue()
+    }
     state.value = 'listening'
   },
-  onSpeechEnd: ({ buffer, mimeType }) => {
-    sendRecordedAudio(buffer, mimeType)
+  onSpeechEnd: (audio) => {
+    // detectionOnly 模式 audio 為 undefined — Eleven server 自己 commit，前端啥都不做
+    if (!audio) return
+    // gemini 整段路徑：一如以往把 buffer 送到後端
+    sendRecordedAudio(audio.buffer, audio.mimeType)
   },
   onError: (msg) => setError(msg),
   // 抗噪調校：提高閾值、延長 onset/min 長度，避免環境雜音與短促聲響誤判為說話
@@ -275,11 +259,156 @@ const vad = useVAD({
 })
 
 /**
- * 停掉當前模式正在執行的工作（錄音／傾聽），保留模式值不動。
+ * 衍生狀態（effectiveState）— 把 `state` + 使用者輸入動作合成出 9 種 UI 狀態：
+ * - disconnected / error / idle：來自 state
+ * - recording：PTT 正在錄音
+ * - armed：VAD 已啟動但還沒偵測到說話（streaming 免持 idle / gemini VAD idle）
+ * - listening：streaming session 開著、VAD 偵測中且未說話（綠 ring）
+ * - speaking-user：VAD 偵測到使用者正在說話（紅脈衝，barge-in / VAD 正收音）
+ * - thinking / speaking：AI 思考 / TTS 回應
+ *
+ * 對照表見 golden-jingling-galaxy.md Step 4。
+ */
+type EffectiveState =
+  | 'disconnected'
+  | 'error'
+  | 'idle'
+  | 'recording'
+  | 'armed'
+  | 'listening'
+  | 'speaking-user'
+  | 'thinking'
+  | 'speaking'
+
+const effectiveState = computed<EffectiveState>(() => {
+  if (state.value === 'disconnected') return 'disconnected'
+  if (state.value === 'error') return 'error'
+  if (state.value === 'speaking') return 'speaking'
+  if (state.value === 'thinking') return 'thinking'
+  // PTT 錄音 → recording
+  if (ptt.recording.value && mode.value === 'ptt') return 'recording'
+  // VAD 聆聽中且偵測到說話 → speaking-user（紅脈衝）
+  if (vad.isListening.value && vad.isSpeaking.value) return 'speaking-user'
+  // listening state（免持 session 開著但尚未說話，或 gemini VAD 啟動中）
+  if (state.value === 'listening') {
+    // streaming 免持：VAD 運作中但安靜 → listening（綠）
+    if (handsFreeActive.value) return 'listening'
+    // gemini VAD：偵測器啟動中、等待說話 → armed（淡綠）
+    if (vad.isListening.value) return 'armed'
+    return 'listening'
+  }
+  // VAD 啟動但 state 仍 idle（罕見 race）→ armed
+  if (vad.isListening.value) return 'armed'
+  return 'idle'
+})
+
+const stateLabel = computed(() => {
+  switch (effectiveState.value) {
+    case 'disconnected': return '未連線'
+    case 'error': return '錯誤'
+    case 'recording': return '錄音中'
+    case 'armed': return '聆聽中'
+    case 'listening': return '聆聽中'
+    case 'speaking-user': return '你說話中'
+    case 'thinking': return '思考中'
+    case 'speaking': return '回應中'
+    default: return '待命中'
+  }
+})
+
+/** 狀態環顏色（Tailwind ring class，套在 portrait 外圍圓環） */
+const stateRingClass = computed(() => {
+  switch (effectiveState.value) {
+    case 'disconnected': return 'ring-slate-500/40'
+    case 'error': return 'ring-red-500/70 animate-pulse'
+    case 'recording': return 'ring-sky-500/70 animate-pulse'
+    case 'armed': return 'ring-emerald-300/60'
+    case 'listening': return 'ring-emerald-500/70'
+    case 'speaking-user': return 'ring-red-500/80 animate-pulse'
+    case 'thinking': return 'ring-amber-400/70 animate-pulse'
+    case 'speaking': return 'ring-purple-500/70 animate-pulse'
+    default: return 'ring-slate-500/40'
+  }
+})
+
+/** 狀態徽章配色（邊框 + 文字）*/
+const stateBadgeClass = computed(() => {
+  switch (effectiveState.value) {
+    case 'disconnected': return 'border-slate-500/60 text-slate-400'
+    case 'error': return 'border-red-400/60 text-red-200'
+    case 'recording': return 'border-sky-400/60 text-sky-200'
+    case 'armed': return 'border-emerald-300/60 text-emerald-200'
+    case 'listening': return 'border-emerald-400/60 text-emerald-200'
+    case 'speaking-user': return 'border-red-400/70 text-red-200'
+    case 'thinking': return 'border-amber-400/60 text-amber-200'
+    case 'speaking': return 'border-purple-400/60 text-purple-200'
+    default: return 'border-slate-500/60 text-slate-300'
+  }
+})
+
+/** 徽章指示燈 */
+const stateDotClass = computed(() => {
+  switch (effectiveState.value) {
+    case 'disconnected': return 'bg-slate-500'
+    case 'error': return 'bg-red-400'
+    case 'recording': return 'bg-sky-400 animate-pulse'
+    case 'armed': return 'bg-emerald-300'
+    case 'listening': return 'bg-emerald-400'
+    case 'speaking-user': return 'bg-red-400 animate-pulse'
+    case 'thinking': return 'bg-amber-400 animate-pulse'
+    case 'speaking': return 'bg-purple-400 animate-pulse'
+    default: return 'bg-slate-400'
+  }
+})
+
+/** 免持模式 — 進入：建立 streaming session + detectionOnly VAD */
+async function enterHandsFreeStreaming(): Promise<boolean> {
+  // 1) 建 audio_start session
+  const started = talk.startAudioStream(PCM16_STREAM_FORMAT)
+  if (!started) {
+    setError('尚未連線，無法進入免持模式')
+    return false
+  }
+  // 2) 啟動 PCM16 持續送 chunk（session 直到離開才 endAudioStream）
+  try {
+    await ptt.startPCM16((chunk) => {
+      talk.sendAudioChunk(chunk)
+    })
+  } catch (e) {
+    setError(`免持模式初始化失敗：${e instanceof Error ? e.message : String(e)}`)
+    talk.endAudioStream()
+    return false
+  }
+  // 3) 啟動 detectionOnly VAD（只做 barge-in 偵測，threshold 拉高抗 TTS 回饋）
+  await vad.start({ detectionOnly: true, threshold: 0.08 })
+  handsFreeActive.value = true
+  state.value = 'listening'
+  return true
+}
+
+/** 免持模式 — 離開：停 VAD + 停 PCM16 + endAudioStream */
+function exitHandsFreeStreaming() {
+  if (vad.isListening.value) vad.stop()
+  if (ptt.recording.value) ptt.stop()
+  if (handsFreeActive.value) {
+    talk.endAudioStream()
+    handsFreeActive.value = false
+  }
+  if (state.value === 'listening') state.value = 'idle'
+}
+
+/**
+ * 停掉當前模式正在執行的工作（錄音／傾聽／免持），保留模式值不動。
  * 切換模式前先呼叫，避免兩個輸入源同時工作。
  */
 function stopCurrentActivity() {
-  if (mode.value === 'vad' && vad.isListening.value) vad.stop()
+  if (mode.value === 'vad') {
+    if (handsFreeActive.value) {
+      exitHandsFreeStreaming()
+    } else if (vad.isListening.value) {
+      vad.stop()
+    }
+  }
   if (mode.value === 'ptt' && ptt.recording.value) ptt.stop()
   if (state.value === 'listening') state.value = 'idle'
 }
@@ -340,21 +469,28 @@ async function toggleListen() {
   // iOS Safari BGM 解鎖：同步鏈第一行
   bgm.unlock()
   if (!talk.connected.value) { setError('尚未連線伺服器'); return }
+  // 已在 VAD / 免持中 → 關閉
   if (mode.value === 'vad' && vad.isListening.value) {
-    vad.stop()
-    if (state.value === 'listening') state.value = 'idle'
-    return
-  }
-  if (isStreamingStt.value) {
-    // Streaming provider 下不支援 VAD（MediaRecorder webm/opus 不能直接丟 PCM16 streaming 上游）
-    setError('目前 STT 為即時串流模式，請改用「錄音」模式說話')
+    if (handsFreeActive.value) {
+      exitHandsFreeStreaming()
+    } else {
+      vad.stop()
+      if (state.value === 'listening') state.value = 'idle'
+    }
     return
   }
   if (mode.value !== 'vad') {
     stopCurrentActivity()
     mode.value = 'vad'
   }
-  await vad.start()
+  // 清掉殘留
+  clearPartial()
+  // 進入模式：streaming 走免持（detectionOnly VAD + 常駐 PCM16）；gemini 走舊 VAD
+  if (isStreamingStt.value) {
+    await enterHandsFreeStreaming()
+  } else {
+    await vad.start()
+  }
 }
 
 function toggleText() {
@@ -418,10 +554,8 @@ async function loadTalkSettings() {
       bgm.setEnabled(false)
     }
     sttProvider.value = coerceSttProvider(data.stt_provider)
-    // streaming provider 不支援 VAD 斷句（見 onVadStart/End 內的說明），強制切回 PTT
-    if (isStreamingStt.value && mode.value === 'vad') {
-      mode.value = 'ptt'
-    }
+    // streaming provider 下「傾聽」即「免持對話」（detectionOnly VAD + 常駐 PCM16）
+    // 不再強制切回 PTT
   } catch (err) {
     console.warn('[Talk] load talk settings failed', err)
   }
@@ -439,14 +573,22 @@ onMounted(async () => {
 onUnmounted(() => {
   clearThinkingBgmTimer()
   bgm.stop()
-  if (vad.isListening.value) vad.stop()
+  if (handsFreeActive.value) {
+    exitHandsFreeStreaming()
+  } else if (vad.isListening.value) {
+    vad.stop()
+  }
   talk.disconnect()
 })
 
 // slug 變更時重新載入
 watch(memberSlug, async (slug) => {
   if (!slug) return
-  if (vad.isListening.value) vad.stop()
+  if (handsFreeActive.value) {
+    exitHandsFreeStreaming()
+  } else if (vad.isListening.value) {
+    vad.stop()
+  }
   talk.disconnect()
   await loadMember()
   if (member.value) talk.connect()
@@ -551,33 +693,24 @@ watch(memberSlug, async (slug) => {
         </div>
       </div>
 
-      <!-- 底部工具列：[● 名字·狀態] .... [錄音｜傾聽｜輸入] [頭像] -->
+      <!--
+        底部工具列：[● 名字·狀態（6 色狀態環配 stateRingClass/stateBadgeClass/stateDotClass）] ... [錄音｜傾聽｜輸入]
+        - role="status" aria-live="polite" 讓螢幕閱讀器即時讀出狀態變化
+        - :aria-label 帶入中文 stateLabel，徽章本身也顯示文字給視覺使用者
+      -->
       <div class="absolute left-0 right-0 bottom-0 z-20 h-16 bg-slate-900/85 backdrop-blur-md border-t border-slate-700/50 px-2 flex items-center gap-2">
-        <!-- 狀態徽章（成員名 · 狀態，顏色同步錄音/傾聽實際狀態） -->
+        <!-- 狀態徽章（成員名 · 狀態，6 色依 effectiveState 同步 9 個子狀態） -->
         <div
-          class="flex items-center gap-2 border rounded-full px-3 py-1.5 text-xs min-w-0 max-w-[50%]"
-          :class="[
-            effectiveState === 'recording' ? 'border-red-400/70 text-red-200 bg-red-500/10' :
-            effectiveState === 'listening' ? 'border-sky-400/70 text-sky-200 bg-sky-500/10' :
-            effectiveState === 'armed' ? 'border-sky-400/50 text-sky-300' :
-            effectiveState === 'thinking' ? 'border-amber-400/60 text-amber-200' :
-            effectiveState === 'speaking' ? 'border-emerald-400/60 text-emerald-200' :
-            effectiveState === 'error' ? 'border-red-400/60 text-red-200' :
-            effectiveState === 'disconnected' ? 'border-slate-500/60 text-slate-400' :
-            'border-slate-500/60 text-slate-300'
-          ]"
+          class="flex items-center gap-2 border rounded-full px-3 py-1.5 text-xs min-w-0 max-w-[50%] ring-2 ring-offset-1 ring-offset-slate-900/60 transition-all duration-300"
+          :class="[stateBadgeClass, stateRingClass]"
+          role="status"
+          aria-live="polite"
+          :aria-label="`目前狀態：${stateLabel}`"
         >
-          <span class="w-2 h-2 rounded-full shrink-0"
-            :class="[
-              effectiveState === 'recording' ? 'bg-red-400 animate-pulse' :
-              effectiveState === 'listening' ? 'bg-sky-400 animate-pulse' :
-              effectiveState === 'armed' ? 'bg-sky-400 animate-pulse' :
-              effectiveState === 'thinking' ? 'bg-amber-400 animate-pulse' :
-              effectiveState === 'speaking' ? 'bg-emerald-400 animate-pulse' :
-              effectiveState === 'error' ? 'bg-red-400' :
-              effectiveState === 'disconnected' ? 'bg-slate-500' :
-              'bg-slate-400'
-            ]"
+          <span
+            class="w-2 h-2 rounded-full shrink-0"
+            :class="stateDotClass"
+            aria-hidden="true"
           />
           <span class="truncate">{{ member.name }} · {{ stateLabel }}</span>
         </div>
@@ -597,27 +730,34 @@ watch(memberSlug, async (slug) => {
                     ? 'bg-emerald-600/80 text-white'
                     : 'text-white/70 hover:text-white hover:bg-slate-700/50 disabled:opacity-40'
               ]"
-              :title="ptt.recording.value ? '點擊停止錄音' : '點擊開始錄音'"
+              :title="ptt.recording.value ? '錄音 — 點擊停止' : '錄音 — 點擊開始 / 再點停止'"
               aria-label="錄音"
             >
               <Mic class="w-5 h-5" />
               <span>{{ ptt.recording.value ? '停止' : '錄音' }}</span>
             </button>
-            <!-- 傾聽（VAD toggle） -->
+            <!-- 傾聽（VAD toggle — streaming provider 下為「免持對話」） -->
             <button
               @click="toggleListen"
-              :disabled="!talk.connected.value || isStreamingStt"
+              :disabled="!talk.connected.value"
               :class="[
                 'px-3.5 py-2.5 flex items-center gap-1 transition-colors',
                 vad.isListening.value
                   ? 'bg-sky-500 text-white animate-pulse'
                   : mode === 'vad'
                     ? 'bg-emerald-600/80 text-white'
-                    : 'text-white/70 hover:text-white hover:bg-slate-700/50 disabled:opacity-40',
-                isStreamingStt ? 'opacity-40 cursor-not-allowed' : ''
+                    : 'text-white/70 hover:text-white hover:bg-slate-700/50 disabled:opacity-40'
               ]"
-              :title="isStreamingStt ? '即時串流 STT 不支援自動斷句，請用「錄音」模式' : (vad.isListening.value ? '點擊關閉傾聽' : '點擊開啟自動斷句傾聽')"
-              aria-label="傾聽"
+              :title="
+                vad.isListening.value
+                  ? (isStreamingStt ? '停止免持對話' : '點擊關閉傾聽')
+                  : (isStreamingStt ? '免持對話 — 持續聆聽，講完 AI 自動回應' : '傾聽 — 自動斷句')
+              "
+              :aria-label="
+                vad.isListening.value
+                  ? '關閉傾聽'
+                  : (isStreamingStt ? '開啟免持對話' : '開啟傾聽模式')
+              "
             >
               <Ear class="w-4 h-4" />
               <span class="hidden sm:inline">傾聽</span>
@@ -636,7 +776,6 @@ watch(memberSlug, async (slug) => {
               <span class="hidden sm:inline">輸入</span>
             </button>
           </div>
-
         </div>
       </div>
 

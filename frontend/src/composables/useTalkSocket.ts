@@ -217,6 +217,14 @@ export function useTalkSocket(memberSlug: string, callbacks: TalkSocketCallbacks
     pendingFinalEnd = false
   }
 
+  /**
+   * 中斷目前 TTS 播放並清空佇列（用於 barge-in — 使用者在 AI 說話中打斷）。
+   * 與 stopPlayback() 相同，但公開給外部呼叫。
+   */
+  function clearPlaybackQueue() {
+    stopPlayback()
+  }
+
   function sendJson(data: Record<string, unknown>): boolean {
     if (!ws || ws.readyState !== WebSocket.OPEN) return false
     ws.send(JSON.stringify(data))
@@ -279,5 +287,6 @@ export function useTalkSocket(memberSlug: string, callbacks: TalkSocketCallbacks
     startAudioStream,
     sendAudioChunk,
     endAudioStream,
+    clearPlaybackQueue,
   }
 }
