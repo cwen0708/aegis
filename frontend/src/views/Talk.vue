@@ -277,15 +277,31 @@ function onPressEnd(e: Event) {
   ptt.stop()
 }
 
-// ── VAD 自動斷句錄音 ──
+// ── VAD / 免持對話 ──
+// - gemini provider：VAD 自己收音訊（MediaRecorder），onSpeechEnd 整段送
+// - streaming provider（elevenlabs/deepgram）：VAD 只做偵測（detectionOnly），
+//   PCM16 由 usePushToTalk.startPCM16 持續送 WS；Eleven server VAD 自動切句。
+//   VAD 的角色變成 barge-in：TTS 播放中偵測到使用者說話 → duck BGM + 清 TTS 佇列。
+
+// 免持模式下是否仍在 PCM16 streaming（用於清理判斷）
+const handsFreeActive = ref(false)
+
 const vad = useVAD({
   onSpeechStart: () => {
     // 新一輪語音：清掉殘留的 partial 字幕
     clearPartial()
+    // Barge-in：若 TTS 正在播放（speaking）→ duck BGM + 清 playbackQueue 打斷
+    if (state.value === 'speaking') {
+      bgm.duck()
+      talk.clearPlaybackQueue()
+    }
     state.value = 'listening'
   },
-  onSpeechEnd: ({ buffer, mimeType }) => {
-    sendRecordedAudio(buffer, mimeType)
+  onSpeechEnd: (audio) => {
+    // detectionOnly 模式 audio 為 undefined — Eleven server 自己 commit，前端啥都不做
+    if (!audio) return
+    // gemini 整段路徑：一如以往把 buffer 送到後端
+    sendRecordedAudio(audio.buffer, audio.mimeType)
   },
   onError: (msg) => setError(msg),
   silenceDurationMs: 800,
@@ -294,6 +310,42 @@ const vad = useVAD({
   minSpeechMs: 300,
 })
 
+/** 免持模式 — 進入：建立 streaming session + detectionOnly VAD */
+async function enterHandsFreeStreaming(): Promise<boolean> {
+  // 1) 建 audio_start session
+  const started = talk.startAudioStream(PCM16_STREAM_FORMAT)
+  if (!started) {
+    setError('尚未連線，無法進入免持模式')
+    return false
+  }
+  // 2) 啟動 PCM16 持續送 chunk（session 直到離開才 endAudioStream）
+  try {
+    await ptt.startPCM16((chunk) => {
+      talk.sendAudioChunk(chunk)
+    })
+  } catch (e) {
+    setError(`免持模式初始化失敗：${e instanceof Error ? e.message : String(e)}`)
+    talk.endAudioStream()
+    return false
+  }
+  // 3) 啟動 detectionOnly VAD（只做 barge-in 偵測，threshold 拉高抗 TTS 回饋）
+  await vad.start({ detectionOnly: true, threshold: 0.08 })
+  handsFreeActive.value = true
+  state.value = 'listening'
+  return true
+}
+
+/** 免持模式 — 離開：停 VAD + 停 PCM16 + endAudioStream */
+function exitHandsFreeStreaming() {
+  if (vad.isListening.value) vad.stop()
+  if (ptt.recording.value) ptt.stop()
+  if (handsFreeActive.value) {
+    talk.endAudioStream()
+    handsFreeActive.value = false
+  }
+  if (state.value === 'listening') state.value = 'idle'
+}
+
 async function toggleVad() {
   // iOS Safari BGM 解鎖：同步鏈第一行
   bgm.unlock()
@@ -301,14 +353,24 @@ async function toggleVad() {
     setError('尚未連線伺服器')
     return
   }
-  if (isStreamingStt.value) {
-    // Streaming provider 下不支援 VAD（MediaRecorder webm/opus 不能直接丟 PCM16 streaming 上游）
-    setError('目前 STT 為即時串流模式，請改用「按住」模式說話')
+
+  // 已在 VAD / 免持模式中 → 關閉
+  if (vad.isListening.value) {
+    if (isStreamingStt.value) {
+      exitHandsFreeStreaming()
+    } else {
+      vad.stop()
+      if (state.value === 'listening') state.value = 'idle'
+    }
     return
   }
-  if (vad.isListening.value) {
-    vad.stop()
-    if (state.value === 'listening') state.value = 'idle'
+
+  // 清掉殘留
+  clearPartial()
+
+  // 進入模式：streaming 走免持；gemini 走舊 VAD
+  if (isStreamingStt.value) {
+    await enterHandsFreeStreaming()
   } else {
     await vad.start()
   }
@@ -316,12 +378,14 @@ async function toggleVad() {
 
 function switchMode(target: TalkMode) {
   if (target === mode.value) return
-  if (target === 'vad' && isStreamingStt.value) {
-    setError('目前 STT 為即時串流模式，不支援自動斷句，請維持「按住」模式')
-    return
-  }
   // 切換前停掉當前模式的錄音
-  if (mode.value === 'vad' && vad.isListening.value) vad.stop()
+  if (mode.value === 'vad' && vad.isListening.value) {
+    if (isStreamingStt.value) {
+      exitHandsFreeStreaming()
+    } else {
+      vad.stop()
+    }
+  }
   if (mode.value === 'ptt' && ptt.recording.value) ptt.stop()
   mode.value = target
   if (state.value === 'listening') state.value = 'idle'
@@ -386,10 +450,8 @@ async function loadTalkSettings() {
       bgm.setEnabled(false)
     }
     sttProvider.value = coerceSttProvider(data.stt_provider)
-    // streaming provider 不支援 VAD 斷句（見 onVadStart/End 內的說明），強制切回 PTT
-    if (isStreamingStt.value && mode.value === 'vad') {
-      mode.value = 'ptt'
-    }
+    // streaming provider 下「傾聽」即「免持對話」（detectionOnly VAD + 常駐 PCM16）
+    // 不再強制切回 PTT
   } catch (err) {
     console.warn('[Talk] load talk settings failed', err)
   }
@@ -407,14 +469,22 @@ onMounted(async () => {
 onUnmounted(() => {
   clearThinkingBgmTimer()
   bgm.stop()
-  if (vad.isListening.value) vad.stop()
+  if (handsFreeActive.value) {
+    exitHandsFreeStreaming()
+  } else if (vad.isListening.value) {
+    vad.stop()
+  }
   talk.disconnect()
 })
 
 // slug 變更時重新載入
 watch(memberSlug, async (slug) => {
   if (!slug) return
-  if (vad.isListening.value) vad.stop()
+  if (handsFreeActive.value) {
+    exitHandsFreeStreaming()
+  } else if (vad.isListening.value) {
+    vad.stop()
+  }
   talk.disconnect()
   await loadMember()
   if (member.value) talk.connect()
@@ -455,13 +525,11 @@ watch(memberSlug, async (slug) => {
           </button>
           <button
             @click="switchMode('vad')"
-            :disabled="isStreamingStt"
             :class="[
               'px-2.5 py-2 flex items-center gap-1 transition-colors',
               mode === 'vad' ? 'bg-emerald-600/80 text-white' : 'text-white/60 hover:text-white',
-              isStreamingStt ? 'opacity-40 cursor-not-allowed' : ''
             ]"
-            :title="isStreamingStt ? '即時串流 STT 不支援自動斷句，請用「按住」模式' : '自動斷句（VAD）模式'"
+            :title="isStreamingStt ? '免持對話 — 一次進入持續聆聽' : '自動斷句（VAD）模式'"
           >
             <Ear class="w-3.5 h-3.5" />
             <span class="hidden sm:inline">傾聽</span>
@@ -670,7 +738,8 @@ watch(memberSlug, async (slug) => {
               ]"
               :title="
                 !talk.connected.value ? '尚未連線' :
-                vad.isListening.value ? '點擊關閉傾聽' : '點擊開啟傾聽模式'
+                vad.isListening.value ? (isStreamingStt ? '停止免持對話' : '點擊關閉傾聽')
+                                      : (isStreamingStt ? '免持對話 — 一次進入持續聆聽' : '點擊開啟傾聽模式')
               "
             >
               <Ear v-if="vad.isListening.value && !vad.isSpeaking.value" class="w-8 h-8 sm:w-10 sm:h-10" />
@@ -683,9 +752,13 @@ watch(memberSlug, async (slug) => {
             {{ ptt.recording.value ? '放開結束錄音…' : '按住說話' }}
           </template>
           <template v-else>
-            <template v-if="!vad.isListening.value">點擊開啟傾聽模式（自動斷句）</template>
-            <template v-else-if="vad.isSpeaking.value">偵測到語音…說完自動送出</template>
-            <template v-else>聆聽中（再按一次關閉）</template>
+            <template v-if="!vad.isListening.value">
+              {{ isStreamingStt ? '點擊開啟免持對話（持續聆聽）' : '點擊開啟傾聽模式（自動斷句）' }}
+            </template>
+            <template v-else-if="vad.isSpeaking.value">偵測到語音…</template>
+            <template v-else>
+              {{ isStreamingStt ? '免持中（再按一次停止）' : '聆聽中（再按一次關閉）' }}
+            </template>
           </template>
         </p>
       </div>

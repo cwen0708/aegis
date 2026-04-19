@@ -513,8 +513,12 @@ async def talk_ws(websocket: WebSocket, member_slug: str) -> None:
             if not cleaned:
                 return
             final_text_holder["text"] = cleaned
-            # LLM 只踢一次；後續 final 片段覆蓋文字但不再開新任務
-            if llm_kickoff_task is None:
+            # 單輪 PTT 模式：LLM 只踢一次；後續 final 片段覆蓋文字不開新任務。
+            # 免持（hands-free）模式：前端不送 audio_end，Eleven 自動 commit 多句。
+            # 前一輪 task 已完成 → 允許踢下一輪，實現多輪對話。
+            if llm_kickoff_task is None or llm_kickoff_task.done():
+                # 清理已完成的上輪 final_text，避免 _wait_for_final 被舊文字卡住
+                # （前端若切回 PTT 模式且送 audio_end 時才會用到 _wait_for_final）
                 llm_kickoff_task = asyncio.create_task(
                     _kickoff_llm_with_text(cleaned),
                     name="talk-llm-kickoff",

@@ -29,7 +29,8 @@ export interface VADRecordedAudio {
 
 export interface UseVADOptions {
   onSpeechStart?: () => void
-  onSpeechEnd?: (audio: VADRecordedAudio) => void
+  /** 說話結束 callback。detectionOnly=true 時 buffer 為 undefined（只做偵測，不收音訊）。 */
+  onSpeechEnd?: (audio?: VADRecordedAudio) => void
   onError?: (message: string) => void
   /** 連續低於 threshold 多久判定為停頓（毫秒），預設 500ms
    *  （streaming provider 會用自己的 endpointing，所以值比舊 900ms 小） */
@@ -40,6 +41,8 @@ export interface UseVADOptions {
   speechOnsetMs?: number
   /** 單次錄音最短時長（毫秒），短於此值視為噪音丟棄，預設 300ms */
   minSpeechMs?: number
+  /** 只做語音偵測，不建立 MediaRecorder / 不收音訊。用於免持模式下 barge-in 偵測。 */
+  detectionOnly?: boolean
 }
 
 const PREFERRED_MIME_TYPES = [
@@ -62,11 +65,26 @@ function errorMessage(e: unknown): string {
   return typeof e === 'string' ? e : '未知錯誤'
 }
 
+export interface VADStartOptions {
+  /** 本次 start 的 detectionOnly 覆寫值（不傳則用建構時的 options.detectionOnly） */
+  detectionOnly?: boolean
+  /** 本次 start 的 threshold 覆寫值 */
+  threshold?: number
+  /** 本次 start 的 silenceDurationMs 覆寫值 */
+  silenceDurationMs?: number
+}
+
 export function useVAD(options: UseVADOptions) {
-  const silenceDurationMs = options.silenceDurationMs ?? 500
-  const threshold = options.threshold ?? 0.02
+  const defaultSilenceDurationMs = options.silenceDurationMs ?? 500
+  const defaultThreshold = options.threshold ?? 0.02
   const speechOnsetMs = options.speechOnsetMs ?? 100
   const minSpeechMs = options.minSpeechMs ?? 300
+  const defaultDetectionOnly = options.detectionOnly ?? false
+
+  // 可由 start(overrides) 覆寫 — 每次 start 重設
+  let silenceDurationMs = defaultSilenceDurationMs
+  let threshold = defaultThreshold
+  let detectionOnly = defaultDetectionOnly
 
   const isListening = ref(false)
   const isSpeaking = ref(false)
@@ -114,6 +132,14 @@ export function useVAD(options: UseVADOptions) {
   }
 
   function beginRecordingSegment() {
+    // detectionOnly 模式：無 MediaRecorder，只標記 speaking + 呼 callback
+    if (detectionOnly) {
+      if (isSpeaking.value) return
+      speechStartedAt = performance.now()
+      isSpeaking.value = true
+      options.onSpeechStart?.()
+      return
+    }
     if (!mediaRecorder || mediaRecorder.state !== 'inactive') return
     chunks = []
     speechStartedAt = performance.now()
@@ -127,6 +153,22 @@ export function useVAD(options: UseVADOptions) {
   }
 
   function endRecordingSegment() {
+    // detectionOnly 模式：直接收掉 speaking flag + 呼 onSpeechEnd（buffer=undefined）
+    if (detectionOnly) {
+      if (!isSpeaking.value) return
+      const duration = speechStartedAt !== null ? performance.now() - speechStartedAt : 0
+      const shouldDiscard = duration < minSpeechMs
+      isSpeaking.value = false
+      speechStartedAt = null
+      if (!shouldDiscard) {
+        try {
+          options.onSpeechEnd?.(undefined)
+        } catch (e) {
+          setError(`語音偵測回呼失敗：${errorMessage(e)}`)
+        }
+      }
+      return
+    }
     if (!mediaRecorder || mediaRecorder.state === 'inactive') return
     try {
       mediaRecorder.stop()
@@ -181,18 +223,30 @@ export function useVAD(options: UseVADOptions) {
     rafId = requestAnimationFrame(monitorVolume)
   }
 
-  async function start(): Promise<void> {
+  async function start(overrides?: VADStartOptions): Promise<void> {
     if (isListening.value) return
     lastError.value = null
 
-    const mime = pickMimeType()
-    if (!mime) {
+    // 套用 overrides（覆寫本次 session 的行為）
+    detectionOnly = overrides?.detectionOnly ?? defaultDetectionOnly
+    threshold = overrides?.threshold ?? defaultThreshold
+    silenceDurationMs = overrides?.silenceDurationMs ?? defaultSilenceDurationMs
+
+    // detectionOnly 下不需要 MediaRecorder mime 檢查
+    const mime = detectionOnly ? '' : pickMimeType()
+    if (!detectionOnly && !mime) {
       setError('此瀏覽器不支援錄音（MediaRecorder）')
       return
     }
 
     try {
-      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      // 加 echoCancellation 避免 TTS 回饋誤觸 VAD（尤其 detectionOnly barge-in 場景）
+      mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      })
     } catch (e) {
       setError(`麥克風存取失敗：${errorMessage(e)}`)
       return
@@ -217,47 +271,50 @@ export function useVAD(options: UseVADOptions) {
       return
     }
 
-    try {
-      mediaRecorder = new MediaRecorder(mediaStream, { mimeType: mime })
-    } catch (e) {
-      setError(`MediaRecorder 初始化失敗：${errorMessage(e)}`)
-      cleanup()
-      return
-    }
-
-    activeMime = mime
-
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data && e.data.size > 0) chunks.push(e.data)
-    }
-
-    mediaRecorder.onstop = async () => {
-      const shouldDiscard = discardNextStop
-      discardNextStop = false
+    // detectionOnly 模式：跳過 MediaRecorder 建立 — 只做音量偵測
+    if (!detectionOnly) {
       try {
-        if (!shouldDiscard) {
-          const blob = new Blob(chunks, { type: activeMime })
-          if (blob.size > 0) {
-            const buffer = await blob.arrayBuffer()
-            options.onSpeechEnd?.({ buffer, mimeType: activeMime })
+        mediaRecorder = new MediaRecorder(mediaStream, { mimeType: mime as string })
+      } catch (e) {
+        setError(`MediaRecorder 初始化失敗：${errorMessage(e)}`)
+        cleanup()
+        return
+      }
+
+      activeMime = mime as string
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) chunks.push(e.data)
+      }
+
+      mediaRecorder.onstop = async () => {
+        const shouldDiscard = discardNextStop
+        discardNextStop = false
+        try {
+          if (!shouldDiscard) {
+            const blob = new Blob(chunks, { type: activeMime })
+            if (blob.size > 0) {
+              const buffer = await blob.arrayBuffer()
+              options.onSpeechEnd?.({ buffer, mimeType: activeMime })
+            }
+          }
+        } catch (e) {
+          setError(`錄音資料處理失敗：${errorMessage(e)}`)
+        } finally {
+          chunks = []
+          isSpeaking.value = false
+          speechStartedAt = null
+          // stop() 已被呼叫且不再監聽 → 最終清理
+          if (!isListening.value) {
+            cleanup()
           }
         }
-      } catch (e) {
-        setError(`錄音資料處理失敗：${errorMessage(e)}`)
-      } finally {
-        chunks = []
-        isSpeaking.value = false
-        speechStartedAt = null
-        // stop() 已被呼叫且不再監聽 → 最終清理
-        if (!isListening.value) {
-          cleanup()
-        }
       }
-    }
 
-    mediaRecorder.onerror = (event) => {
-      const err = (event as unknown as { error?: Error }).error
-      setError(`錄音發生錯誤：${err?.message || '未知'}`)
+      mediaRecorder.onerror = (event) => {
+        const err = (event as unknown as { error?: Error }).error
+        setError(`錄音發生錯誤：${err?.message || '未知'}`)
+      }
     }
 
     isListening.value = true
@@ -277,6 +334,12 @@ export function useVAD(options: UseVADOptions) {
       rafId = null
     }
     clearSilenceTimer()
+
+    // detectionOnly：沒有 MediaRecorder，直接清理（不 fire onSpeechEnd，因為是主動關閉）
+    if (detectionOnly) {
+      cleanup()
+      return
+    }
 
     // 如果正在錄音，先嘗試送出當下這段
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
