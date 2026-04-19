@@ -132,7 +132,7 @@ class ElevenLabsStreamingSTT(StreamingSTT):
     def _build_ws_url(self) -> str:
         """所有 session 設定放 URL query string（Eleven 不接受 client 端 session_config 訊息）。"""
         params = {
-            "model_id": "scribe_v1",
+            "model_id": "scribe_v2_realtime",
             "audio_format": _ELEVENLABS_PCM_FORMAT,
             "language_code": self._language_code,
             "commit_strategy": self._commit_strategy,
