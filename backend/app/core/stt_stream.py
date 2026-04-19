@@ -180,9 +180,12 @@ class ElevenLabsStreamingSTT(StreamingSTT):
             if self._ws is None:
                 return
 
+        # Eleven AsyncAPI 規定 input_audio_chunk required fields:
+        # message_type / audio_base_64 / commit / sample_rate（缺任一會 1008 invalid_request）
         payload = {
             "message_type": _ELEVENLABS_CHUNK_MSG_TYPE,
             "audio_base_64": base64.b64encode(pcm_bytes).decode("ascii"),
+            "commit": False,
             "sample_rate": self._sample_rate,
         }
         try:
