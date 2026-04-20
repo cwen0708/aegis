@@ -215,6 +215,13 @@ from app.core.executor.context import resolve_member_for_task, MemberContext
 # ==========================================
 # 卡片狀態更新
 # ==========================================
+def _is_card_already_success(card_id: int) -> bool:
+    """檢查 cardindex DB 狀態是否已 success，避免無腦 fallback 誤判重跑。"""
+    with Session(engine) as session:
+        idx = session.get(CardIndex, card_id)
+        return bool(idx and idx.status == "success")
+
+
 def update_card_status(card_id: int, new_status: str, append_content: str = ""):
     """更新卡片狀態（MD 檔 + DB）"""
     with Session(engine) as session:
@@ -1232,6 +1239,10 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
     used_auth: dict = {}
     for attempt_idx, (acct_provider, acct_model, acct_auth, acct_name) in enumerate(accounts_list):
         if attempt_idx > 0:
+            # Bug #13145 修復：DB 已 success 就不要 fallback（subprocess 被 SIGTERM 可能 exit != 0 但任務已成功）
+            if _is_card_already_success(idx.card_id):
+                logger.info(f"[Worker] Card {idx.card_id}: already success in DB, skip fallback")
+                break
             logger.info(f"[Worker] Card {idx.card_id}: fallback → '{acct_name}' (priority={attempt_idx})")
             task_emitter.emit_output(f"\n⚠️ 主帳號失敗，切換至備用帳號: {acct_name}\n")
 
@@ -1266,37 +1277,41 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
     # Provider Failover — 所有帳號都失敗時，嘗試備援 provider（最多 1 次）
     # 超時不做 failover（不是帳號問題）
     if result and result["status"] not in ("success", "timeout"):
-        failover_chain = get_failover_chain(primary_provider)
-        for fo_provider in failover_chain:
-            fo_model = get_failover_model(fo_provider)
-            if not fo_model:
-                continue
-            logger.info(f"[Worker] Card {idx.card_id}: provider failover → {fo_provider} ({fo_model})")
-            task_emitter.emit_output(f"\n🔄 Provider failover: {primary_provider} → {fo_provider} ({fo_model})\n")
+        # Bug #13145 修復：DB 已 success 就不要 provider failover（subprocess 被 SIGTERM 可能 exit != 0 但任務已成功）
+        if _is_card_already_success(idx.card_id):
+            logger.info(f"[Worker] Card {idx.card_id}: already success in DB, skip provider failover")
+        else:
+            failover_chain = get_failover_chain(primary_provider)
+            for fo_provider in failover_chain:
+                fo_model = get_failover_model(fo_provider)
+                if not fo_model:
+                    continue
+                logger.info(f"[Worker] Card {idx.card_id}: provider failover → {fo_provider} ({fo_model})")
+                task_emitter.emit_output(f"\n🔄 Provider failover: {primary_provider} → {fo_provider} ({fo_model})\n")
 
-            result = run_task(
-                card_id=idx.card_id,
-                project_path=effective_cwd,
-                prompt=effective_prompt,
-                phase=list_name.upper(),
-                forced_provider=fo_provider,
-                forced_model=fo_model,
-                card_title=idx.title,
-                project_name=project_name,
-                member_id=member_id,
-                auth_info={},
-                resume_session_id=_resume_session_id if is_chat_mode else None,
-                emitter=task_emitter,
-            )
+                result = run_task(
+                    card_id=idx.card_id,
+                    project_path=effective_cwd,
+                    prompt=effective_prompt,
+                    phase=list_name.upper(),
+                    forced_provider=fo_provider,
+                    forced_model=fo_model,
+                    card_title=idx.title,
+                    project_name=project_name,
+                    member_id=member_id,
+                    auth_info={},
+                    resume_session_id=_resume_session_id if is_chat_mode else None,
+                    emitter=task_emitter,
+                )
 
-            if result["status"] == "success":
-                used_provider = fo_provider
-                used_model = fo_model
-                used_auth = {}
-                logger.info(f"[Worker] Card {idx.card_id}: succeeded with provider failover → {fo_provider}")
-                break
+                if result["status"] == "success":
+                    used_provider = fo_provider
+                    used_model = fo_model
+                    used_auth = {}
+                    logger.info(f"[Worker] Card {idx.card_id}: succeeded with provider failover → {fo_provider}")
+                    break
 
-            logger.warning(f"[Worker] Card {idx.card_id}: provider failover '{fo_provider}' failed (exit={result.get('exit_code')})")
+                logger.warning(f"[Worker] Card {idx.card_id}: provider failover '{fo_provider}' failed (exit={result.get('exit_code')})")
 
     # Ralph Loop：多輪迭代（max_rounds > 1 且 AI 回傳 loop:continue）
     if (
