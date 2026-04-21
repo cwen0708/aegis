@@ -50,30 +50,30 @@ def detect_model_mention(prompt: str) -> Optional[str]:
     """偵測 prompt 中是否明確指定模型名稱。
 
     策略：**只有明確前綴詞**（用/use/--model=/model:）後接合法 model family
-    才觸發，避免設備 UUID（如 `inv_O6_jXHT7o3gbYvmgbyZ` 的 `o3` substring）
-    被誤判為「用戶指定 o3 model」。
+    才觸發。遍歷所有匹配位置，跳過 candidate 不在白名單的（例如 TDEngine 表名
+    `model:inv_XXX`），直到找到合法 family；避免單點匹配失敗導致整段意圖遺漏。
 
     例：
       ✓ "請用 opus 來分析" → "opus"
       ✓ "use sonnet" → "sonnet"
       ✓ "--model gemini-pro" → "gemini-pro"
+      ✓ "model: inv_XXX use opus" → "opus"（第一個匹配不合法，繼續找第二個）
       ✗ "inv_O6_jXHT7o3gbYvmgbyZ" → None（無前綴詞）
 
     注意：本函式在階段 2 將被移除，改走 Card.purpose / StageList.default_tier
     顯式路由。此版本是階段 0+ 的治本救火版。
     """
-    context_match = re.search(
+    pattern = re.compile(
         r'(?:請?用|use|採用|使用|--model[=\s]+|model[=\s:]+)\s*([a-zA-Z0-9_\-\.]+)',
-        prompt,
         re.IGNORECASE,
     )
-    if not context_match:
-        return None
-    candidate = context_match.group(1).lower()
-    if candidate in FAMILY_TIER:
-        return candidate
-    if candidate in FAMILY_ALIASES and candidate not in FAMILY_TIER:
-        return FAMILY_ALIASES[candidate]
+    for match in pattern.finditer(prompt):
+        candidate = match.group(1).lower()
+        if candidate in FAMILY_TIER:
+            return candidate
+        if candidate in FAMILY_ALIASES and candidate not in FAMILY_TIER:
+            return FAMILY_ALIASES[candidate]
+        # 候選 token 不是合法 model，繼續找下一個匹配
     return None
 
 

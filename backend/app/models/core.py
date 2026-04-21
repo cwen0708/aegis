@@ -127,7 +127,7 @@ class CronLog(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     cron_job_id: int = Field(index=True)        # 來自哪個排程
     cron_job_name: str = ""                      # 排程名稱（快照）
-    card_id: int = Field(default=0)              # 當時的卡片 ID（已刪除但留記錄）
+    card_id: int = Field(default=0, index=True)  # 當時的卡片 ID（已刪除但留記錄）；index 給 /cards/{id}/cost 查詢
     card_title: str = ""
     project_id: int = Field(default=0, index=True)
     project_name: str = ""
