@@ -98,6 +98,13 @@ def _migrate_db():
             cur.execute("ALTER TABLE tasklog ADD COLUMN output TEXT DEFAULT ''")
             logger.info("[Migration] Added 'output' column to tasklog")
 
+        # CronLog 加 delivery_error 欄位（區分 agent 錯誤與投遞失敗）
+        try:
+            cur.execute("ALTER TABLE cronlog ADD COLUMN delivery_error TEXT DEFAULT ''")
+            logger.info("[Migration] Added 'delivery_error' column to cronlog")
+        except Exception:
+            pass
+
         # StageList: OneStack → Inbound 改名
         renamed = cur.execute(
             "UPDATE stagelist SET name = 'Inbound' WHERE name = 'OneStack'"

@@ -345,8 +345,11 @@ def save_cron_log(cron_job_id: int, cron_job_name: str, card_id: int, card_title
                   project_id: int, project_name: str, provider: str,
                   member_id: Optional[int], status: str, output: str,
                   error_message: str, prompt_snapshot: str, token_info: Dict[str, Any],
-                  stage_action: str = ""):
-    """儲存排程執行記錄到 CronLog"""
+                  stage_action: str = "", delivery_error: str = ""):
+    """儲存排程執行記錄到 CronLog
+
+    error_message = agent 執行錯誤；delivery_error = 投遞失敗（Telegram/Webhook）。
+    """
     try:
         with Session(engine) as session:
             log = CronLog(
@@ -362,6 +365,7 @@ def save_cron_log(cron_job_id: int, cron_job_name: str, card_id: int, card_title
                 status=status,
                 output=output,
                 error_message=error_message,
+                delivery_error=delivery_error,
                 prompt_snapshot=prompt_snapshot,
                 duration_ms=token_info.get("duration_ms", 0),
                 input_tokens=token_info.get("input_tokens", 0),

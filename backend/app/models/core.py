@@ -136,7 +136,8 @@ class CronLog(SQLModel, table=True):
     member_id: Optional[int] = Field(default=None)
     status: str = ""                             # success / error / timeout
     output: str = Field(default="")              # AI 完整輸出
-    error_message: str = Field(default="")       # 錯誤訊息
+    error_message: str = Field(default="")       # error_message = agent 錯誤；delivery_error = 投遞失敗（Telegram/Webhook）
+    delivery_error: str = Field(default="", sa_column_kwargs={"server_default": ""})
     prompt_snapshot: str = Field(default="")     # 當次實際送出的 prompt（快照）
     duration_ms: int = Field(default=0)
     input_tokens: int = Field(default=0)
