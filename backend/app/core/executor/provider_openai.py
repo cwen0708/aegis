@@ -36,6 +36,11 @@ class OpenAIProvider(BaseProvider):
         mcp_config_path: Optional[str] = None,
         resume_session_id: Optional[str] = None,
     ) -> Tuple[List[str], bool]:
+        # 配對校驗：即使直接呼叫 OpenAIProvider（繞過 providers.build_command），
+        # 也擋掉跨家錯配（例如 claude-opus-4-6 被塞給 OpenAI CLI）
+        from app.core.model_registry import validate_provider_model
+        validate_provider_model("openai", model)
+
         resolved_model = model or self._meta.default_model
         cmd = ["python", "backend/scripts/openai_stream_chat.py", "--model", resolved_model]
         return cmd, True  # prompt 從 stdin 傳入

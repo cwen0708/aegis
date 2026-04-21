@@ -98,6 +98,21 @@ def _migrate_db():
             cur.execute("ALTER TABLE tasklog ADD COLUMN output TEXT DEFAULT ''")
             logger.info("[Migration] Added 'output' column to tasklog")
 
+        # CronLog 加 delivery_error 欄位（區分 agent 錯誤與投遞失敗）
+        try:
+            cur.execute("ALTER TABLE cronlog ADD COLUMN delivery_error TEXT DEFAULT ''")
+            logger.info("[Migration] Added 'delivery_error' column to cronlog")
+        except Exception:
+            pass
+
+        # CronLog.card_id 索引（加速 /cards/{id}/cost 的 actual_model 查詢）
+        # ORM 層 Field(index=True) 只對新建 DB 生效；既存 DB 需手動 CREATE INDEX
+        try:
+            cur.execute("CREATE INDEX IF NOT EXISTS ix_cronlog_card_id ON cronlog(card_id)")
+            logger.info("[Migration] Ensured CronLog.card_id index")
+        except Exception as e:
+            logger.warning(f"[Migration] Failed to create ix_cronlog_card_id: {e}")
+
         # StageList: OneStack → Inbound 改名
         renamed = cur.execute(
             "UPDATE stagelist SET name = 'Inbound' WHERE name = 'OneStack'"
