@@ -88,6 +88,68 @@ FAILOVER_DEFAULT_MODEL: dict[str, str] = {
 
 
 # ============================================================
+# Provider-Model 白名單（每家 AI CLI 能接受的 model 清單）
+# ============================================================
+# 目的：擋掉「把 OpenAI 的 o3 塞給 Claude CLI」這類跨家錯配。
+# 每個 provider 列出它能接受的完整 model id + CLI 短別名。
+PROVIDER_MODEL_MATRIX: dict[str, frozenset[str]] = {
+    "claude": frozenset({
+        # 完整 id
+        "claude-opus-4-6", "claude-opus-4",
+        "claude-sonnet-4-6", "claude-sonnet-4", "claude-sonnet-3-5",
+        "claude-haiku-4-5", "claude-haiku-3",
+        # Claude CLI 短別名（--model opus / sonnet / haiku）
+        "opus", "sonnet", "haiku",
+    }),
+    "gemini": frozenset({
+        "gemini-2.5-pro-preview", "gemini-2.0-flash",
+        "gemini-1.5-pro", "gemini-3.1-pro-preview",
+        "gemini-flash", "gemini-2.5-flash",
+    }),
+    "openai": frozenset({
+        "gpt-4o", "gpt-4o-mini", "o3",
+    }),
+    "ollama": frozenset({
+        "llama3.1:8b", "llama3.1:70b", "llama3:8b",
+    }),
+}
+
+
+class IncompatibleModelError(ValueError):
+    """Model 不屬於指定 provider 的合法清單。配置錯誤，不應 retry。"""
+
+    def __init__(self, provider: str, model: str) -> None:
+        self.provider = provider
+        self.model = model
+        allowed = sorted(PROVIDER_MODEL_MATRIX.get(provider, frozenset()))
+        super().__init__(
+            f"Model '{model}' is not allowed for provider '{provider}'. "
+            f"Allowed: {allowed}"
+        )
+
+
+def validate_provider_model(provider: str, model: str) -> None:
+    """檢查 (provider, model) 配對是否合法。
+
+    - 空 model 視為合法（讓 cmd builder 套用自己的預設）
+    - 未知 provider 視為合法（不擋自訂 provider）
+    - 不合法 → raise IncompatibleModelError
+    """
+    if not model:
+        return
+    allowed = PROVIDER_MODEL_MATRIX.get(provider)
+    if allowed is None:
+        return
+    if model not in allowed:
+        raise IncompatibleModelError(provider, model)
+
+
+def list_models_by_provider(provider: str) -> list[str]:
+    """回傳 provider 的合法 model 清單（sorted）。未知 provider 回傳空 list。"""
+    return sorted(PROVIDER_MODEL_MATRIX.get(provider, frozenset()))
+
+
+# ============================================================
 # 工具函式
 # ============================================================
 

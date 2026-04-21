@@ -72,7 +72,15 @@ def build_command(
 
     Returns:
         (cmd_parts, stdin_prompt) — 命令列表和是否需要 stdin 傳 prompt
+
+    Raises:
+        IncompatibleModelError: model 不屬於該 provider 的合法清單（config bug，不該 retry）
     """
+    # 配對校驗：擋掉「o3 塞給 Claude CLI」這類跨家錯配
+    # 空 model 跳過（各 builder 會套自己的預設）
+    from app.core.model_registry import validate_provider_model
+    validate_provider_model(provider, model)
+
     config = PROVIDERS.get(provider, PROVIDERS["claude"])
     cmd = list(config["cmd_base"])
 

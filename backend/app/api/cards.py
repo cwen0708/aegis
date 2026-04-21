@@ -972,13 +972,37 @@ def get_card_broadcast_logs(card_id: int, session: Session = Depends(get_session
 
 @router.get("/cards/{card_id}/cost")
 def get_card_cost(card_id: int, session: Session = Depends(get_session)):
-    """取得卡片的累計 token 使用量和預估費用"""
+    """取得卡片的累計 token 使用量、預估費用，以及 intended vs actual provider/model。
+
+    actual_* 欄位取自最近一次 CronLog（真正呼叫了哪家 AI），用於偵測靜默降級。
+    若 actual != intended，前端應顯示降級警告而非「成功」。
+    """
+    from app.models.core import CronLog
     idx = session.get(CardIndex, card_id)
     if not idx:
         raise HTTPException(status_code=404, detail="Card not found")
+
+    # 取最近一次實際執行紀錄（single source of truth for actual_*）
+    last_log = session.exec(
+        select(CronLog)
+        .where(CronLog.card_id == card_id)
+        .order_by(CronLog.id.desc())
+    ).first()
+
+    intended_model = idx.model or None
+    actual_provider = last_log.provider if last_log else None
+    actual_model = last_log.model if last_log else None
+    downgraded = bool(
+        intended_model and actual_model and actual_model != intended_model
+    )
+
     return {
         "card_id": card_id,
         "total_input_tokens": idx.total_input_tokens,
         "total_output_tokens": idx.total_output_tokens,
         "estimated_cost_usd": idx.estimated_cost_usd,
+        "intended_model": intended_model,
+        "actual_provider": actual_provider,
+        "actual_model": actual_model,
+        "downgraded": downgraded,
     }

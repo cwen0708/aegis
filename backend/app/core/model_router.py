@@ -47,19 +47,33 @@ def get_failover_model(provider: str) -> str:
 
 
 def detect_model_mention(prompt: str) -> Optional[str]:
-    """偵測 prompt 中是否直接提到模型名稱（用戶明確指定）。
+    """偵測 prompt 中是否明確指定模型名稱。
 
-    例如：「請用 opus 來分析」「use sonnet」「haiku 就好」「用 gemini-pro」
-    按 tier 高→低檢查，優先匹配高階模型。
+    策略：**只有明確前綴詞**（用/use/--model=/model:）後接合法 model family
+    才觸發，避免設備 UUID（如 `inv_O6_jXHT7o3gbYvmgbyZ` 的 `o3` substring）
+    被誤判為「用戶指定 o3 model」。
+
+    例：
+      ✓ "請用 opus 來分析" → "opus"
+      ✓ "use sonnet" → "sonnet"
+      ✓ "--model gemini-pro" → "gemini-pro"
+      ✗ "inv_O6_jXHT7o3gbYvmgbyZ" → None（無前綴詞）
+
+    注意：本函式在階段 2 將被移除，改走 Card.purpose / StageList.default_tier
+    顯式路由。此版本是階段 0+ 的治本救火版。
     """
-    lower = prompt.lower()
-    for model in _PROMPT_MODEL_NAMES:
-        if model in lower:
-            return model
-    # 也檢查別名
-    for alias, family in FAMILY_ALIASES.items():
-        if alias in lower and alias not in FAMILY_TIER:
-            return family
+    context_match = re.search(
+        r'(?:請?用|use|採用|使用|--model[=\s]+|model[=\s:]+)\s*([a-zA-Z0-9_\-\.]+)',
+        prompt,
+        re.IGNORECASE,
+    )
+    if not context_match:
+        return None
+    candidate = context_match.group(1).lower()
+    if candidate in FAMILY_TIER:
+        return candidate
+    if candidate in FAMILY_ALIASES and candidate not in FAMILY_TIER:
+        return FAMILY_ALIASES[candidate]
     return None
 
 
