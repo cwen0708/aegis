@@ -16,6 +16,7 @@ from app.core.model_registry import (
     IncompatibleModelError,
     PROVIDER_MODEL_MATRIX,
     list_models_by_provider,
+    resolve_model_for_provider_tier,
     validate_provider_model,
 )
 
@@ -355,3 +356,71 @@ class TestValidateProviderModel:
             validate_provider_model("claude", "gpt-5-turbo")
         assert "opus" in str(exc.value)
         assert "gpt-5-turbo" in str(exc.value)
+
+
+class TestResolveModelForProviderTier:
+    """resolve_model_for_provider_tier — 跨 provider tier-aware 映射。
+
+    回歸 worker.py:1273-1276 的 bug：routed family 短名被塞給錯的 provider。
+    """
+
+    def test_claude_returns_short_alias(self) -> None:
+        """Claude 回短別名（CLI 用）。"""
+        assert resolve_model_for_provider_tier("claude", 3) == "opus"
+        assert resolve_model_for_provider_tier("claude", 2) == "sonnet"
+        assert resolve_model_for_provider_tier("claude", 1) == "haiku"
+
+    def test_gemini_returns_full_id(self) -> None:
+        """Gemini 回完整 model id，不是短名。"""
+        m3 = resolve_model_for_provider_tier("gemini", 3)
+        m1 = resolve_model_for_provider_tier("gemini", 1)
+        assert m3.startswith("gemini-")
+        assert m1.startswith("gemini-")
+        # 回傳值必須是白名單內的合法 pair
+        validate_provider_model("gemini", m3)
+        validate_provider_model("gemini", m1)
+
+    def test_openai_returns_full_id(self) -> None:
+        m3 = resolve_model_for_provider_tier("openai", 3)
+        m2 = resolve_model_for_provider_tier("openai", 2)
+        m1 = resolve_model_for_provider_tier("openai", 1)
+        for m in (m3, m2, m1):
+            validate_provider_model("openai", m)  # 必須合法
+        assert m3 == "o3"
+        assert m2 == "gpt-4o"
+        assert m1 == "gpt-4o-mini"
+
+    def test_tier_aware_cross_provider_mapping_regression(self) -> None:
+        """回歸：accounts_list 有 claude+gemini+openai 三家，tier=3 時每家各自映射。
+
+        這是 architect 抓到的 Ralph Loop bug 的核心防線：
+        以前 resolve_model 回 "opus" 後直接套給 gemini account 會 raise
+        IncompatibleModelError；現在每家用自己的 tier 3 model。
+        """
+        mixed_accounts = [("claude", "", {}, "a"), ("gemini", "", {}, "b"), ("openai", "", {}, "c")]
+        tier = 3
+        remapped = [
+            (provider, resolve_model_for_provider_tier(provider, tier), auth, name)
+            for provider, _, auth, name in mixed_accounts
+        ]
+        # 每個 pair 都必須通過 validate（不會有跨家錯配）
+        for provider, model, _, _ in remapped:
+            validate_provider_model(provider, model)
+        # 明確 tier 3 對應：claude=opus, gemini=pro 家族, openai=o3
+        assert remapped[0][1] == "opus"
+        assert "pro" in remapped[1][1]
+        assert remapped[2][1] == "o3"
+
+    def test_unknown_tier_fallback(self) -> None:
+        """未知 tier（-1/0）fallback 到 provider task 預設。"""
+        r = resolve_model_for_provider_tier("openai", -1)
+        # 不一定合法（預設可能為空字串），但不能崩
+        assert isinstance(r, str)
+
+    def test_unknown_provider_returns_empty(self) -> None:
+        """未知 provider 不拋錯，回空字串。"""
+        assert resolve_model_for_provider_tier("some-custom", 3) == ""
+
+    def test_claude_tier_fallback_to_sonnet(self) -> None:
+        """Claude 遇到 out-of-range tier (e.g. 99) 應 fallback sonnet，不爆。"""
+        assert resolve_model_for_provider_tier("claude", 99) == "sonnet"

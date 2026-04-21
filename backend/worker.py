@@ -106,6 +106,7 @@ API_BASE = "http://127.0.0.1:8899/api/v1"
 MAX_WORKSTATIONS = 3  # 預設，啟動時從 DB 讀取
 MAX_RETRY_ATTEMPTS = 3  # 自動重試上限
 DEFAULT_TASK_TIMEOUT = 3600  # 任務執行時間上限（秒），預設 60 分鐘
+STALE_RUNNING_TIMEOUT = 3900  # running 卡視為死卡的閾值（秒）= task timeout + 5 分鐘 buffer
 
 # Provider 設定統一由 executor 管理
 from app.core.executor import PROVIDERS, build_command
@@ -190,15 +191,48 @@ def get_running_count() -> int:
 
 
 def is_member_busy(member_id: int) -> bool:
-    """檢查成員是否正在執行其他任務"""
+    """檢查成員是否正在執行其他任務（updated_at 超過 STALE_RUNNING_TIMEOUT 的 running 卡視為死卡，不算忙）"""
     if not member_id:
         return False
+    stale_before = datetime.now() - timedelta(seconds=STALE_RUNNING_TIMEOUT)
     with Session(engine) as session:
         stmt = select(CardIndex).where(
             CardIndex.status == "running",
-            CardIndex.member_id == member_id
+            CardIndex.member_id == member_id,
+            CardIndex.updated_at > stale_before,
         )
         return session.exec(stmt).first() is not None
+
+
+def reap_stale_running_cards() -> int:
+    """回收超過 STALE_RUNNING_TIMEOUT 還是 running 的死卡（thread 靜默死亡遺留）。
+    回傳回收的卡片數。"""
+    stale_before = datetime.now() - timedelta(seconds=STALE_RUNNING_TIMEOUT)
+    reaped = 0
+    try:
+        with Session(engine) as session:
+            stale = session.exec(
+                select(CardIndex).where(
+                    CardIndex.status == "running",
+                    CardIndex.updated_at < stale_before,
+                )
+            ).all()
+            for idx in stale:
+                idx.status = "failed"
+                idx.updated_at = datetime.now()
+                session.add(idx)
+                orm_card = session.get(Card, idx.card_id)
+                if orm_card:
+                    orm_card.status = "failed"
+                    orm_card.updated_at = datetime.now()
+                    session.add(orm_card)
+                reaped += 1
+                logger.warning(f"[Worker] Reaped stale running card {idx.card_id}: {idx.title!r}")
+            if reaped:
+                session.commit()
+    except Exception as e:
+        logger.warning(f"[Worker] reap_stale_running_cards failed: {e}")
+    return reaped
 
 
 def get_pending_cards() -> list:
@@ -1082,6 +1116,26 @@ def _post_task_hooks(idx, result, new_status, token_info, card_data, project_nam
     _post_task_hooks_impl(idx, result, new_status, token_info, card_data, project_name, member_id, member_slug, workspace_dir, cron_job_id)
 
 
+def _execute_card_task_safe(idx, list_name, stage_list, ctx: "MemberContext"):
+    """Thread entry：包住 _execute_card_task，任何 uncaught exception 都把卡片標 failed。
+    防止 daemon thread 靜默死亡導致卡片永遠 running。"""
+    try:
+        _execute_card_task(idx, list_name, stage_list, ctx)
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        logger.error(f"[Worker] Thread crashed on card {idx.card_id}: {e}\n{tb}")
+        try:
+            update_card_status(
+                idx.card_id,
+                "failed",
+                f"\n\n---\n\n### Thread Crash\n{e}\n```\n{tb[:2000]}\n```",
+            )
+            broadcast_event("task_failed", {"card_id": idx.card_id, "reason": f"thread crash: {e}"})
+        except Exception as inner:
+            logger.error(f"[Worker] Failed to mark card {idx.card_id} as failed after crash: {inner}")
+
+
 def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
     """在 thread 中執行單張卡片任務（含 fallback、結果處理、清理）"""
     # 從 MemberContext 解構（內部程式碼向後相容）
@@ -1216,11 +1270,26 @@ def _execute_card_task(idx, list_name, stage_list, ctx: MemberContext):
         member_model = accounts_list[0][1] if accounts_list else ""
         routed_model = resolve_model(card_tags, effective_prompt, member_model=member_model)
         if routed_model:
-            accounts_list = [
-                (provider, routed_model, auth, name)
-                for provider, _model, auth, name in accounts_list
-            ]
-            logger.info(f"[Worker] Card {idx.card_id}: model route → {routed_model} (member default: {member_model})")
+            # Tier-aware 跨 provider 映射：若 routed_model 是 family 短名（opus/sonnet/
+            # haiku/gemini-pro 等），每個 account 依其 provider 換成對應 tier 的合法 model，
+            # 避免「claude 短名 `opus` 被塞給 gemini account」這類跨家錯配。
+            from app.core.model_registry import (
+                get_tier as _get_tier,
+                resolve_model_for_provider_tier as _resolve_for_tier,
+            )
+            routed_tier = _get_tier(routed_model)
+            if routed_tier > 0:
+                accounts_list = [
+                    (provider, _resolve_for_tier(provider, routed_tier), auth, name)
+                    for provider, _model, auth, name in accounts_list
+                ]
+            else:
+                # Tier 不可識別（例如 tag=M1→ollama、M2→openai），保留原 routed 字串
+                accounts_list = [
+                    (provider, routed_model, auth, name)
+                    for provider, _model, auth, name in accounts_list
+                ]
+            logger.info(f"[Worker] Card {idx.card_id}: model route → {routed_model} (tier={routed_tier}, member default: {member_model})")
 
     # Prompt Hardening：附加安全規則提醒，防止長對話稀釋安全限制
     from app.core.prompt_hardening import harden_prompt
@@ -1500,9 +1569,9 @@ def process_pending_cards():
         mark_card_running(idx.card_id, ctx.member_id)
         logger.info(f"[Worker] Processing card {idx.card_id}: {idx.title} (threaded)")
 
-        # 在獨立 thread 中執行任務
+        # 在獨立 thread 中執行任務（safe wrapper 兜住 uncaught exception）
         t = threading.Thread(
-            target=_execute_card_task,
+            target=_execute_card_task_safe,
             args=(idx, list_name, stage_list, ctx),
             name=f"card-{idx.card_id}",
             daemon=True,
@@ -1578,6 +1647,7 @@ def main():
             if is_worker_paused():
                 pass  # 靜默跳過
             else:
+                reap_stale_running_cards()  # 先清死卡，避免 is_member_busy 誤判
                 auto_activate_idle_cards()
                 process_pending_cards()
 
