@@ -3,8 +3,9 @@ import pytest
 from unittest.mock import patch, MagicMock
 from app.hooks import (
     Hook, TaskContext, StreamEvent,
-    collect_hooks, run_hooks, run_on_stream,
+    collect_hooks, run_hooks, run_on_stream, run_on_exit,
 )
+from app.core.executor.exit_reason import ExitReason
 
 
 # ════════════════════════════════════════
@@ -128,6 +129,61 @@ class TestRunHooks:
 
         run_hooks(TaskContext(card_id=1), [BadHook(), GoodHook()])
         assert received == [1]
+
+
+# ════════════════════════════════════════
+# run_on_exit (on_exit)
+# ════════════════════════════════════════
+
+class TestOnExit:
+    def test_default_on_exit_is_noop(self):
+        Hook().on_exit(TaskContext())  # 不拋例外
+
+    def test_task_context_exit_reason_default_empty(self):
+        assert TaskContext().exit_reason == ""
+
+    def test_run_on_exit_dispatches_to_all_hooks(self):
+        class _Rec(Hook):
+            def __init__(self):
+                self.got = None
+
+            def on_exit(self, ctx):
+                self.got = ctx.exit_reason
+
+        h1, h2 = _Rec(), _Rec()
+        ctx = TaskContext(exit_reason="normal")
+        run_on_exit([h1, h2], ctx)
+        assert h1.got == "normal"
+        assert h2.got == "normal"
+
+    def test_run_on_exit_swallows_exception(self):
+        received = []
+
+        class BadHook(Hook):
+            def on_exit(self, ctx):
+                raise RuntimeError("boom")
+
+        class GoodHook(Hook):
+            def on_exit(self, ctx):
+                received.append(ctx.exit_reason)
+
+        run_on_exit([BadHook(), GoodHook()], TaskContext(exit_reason="crashed"))
+        assert received == ["crashed"]
+
+    def test_run_on_exit_accepts_all_six_reasons(self):
+        class _Rec(Hook):
+            def __init__(self):
+                self.got = []
+
+            def on_exit(self, ctx):
+                self.got.append(ctx.exit_reason)
+
+        rec = _Rec()
+        for reason in ExitReason:
+            run_on_exit([rec], TaskContext(exit_reason=reason.value))
+        assert rec.got == [
+            "normal", "crashed", "killed", "truncated", "quarantined", "user_cancelled",
+        ]
 
 
 # ════════════════════════════════════════

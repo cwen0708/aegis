@@ -46,6 +46,7 @@ class TaskContext:
     output: str = ""
     provider: str = ""
     exit_code: int = 0
+    exit_reason: str = ""      # ExitReason.value — "normal"/"crashed"/"killed"/"truncated"/"quarantined"/"user_cancelled"
     token_info: dict = field(default_factory=dict)
     confidence_score: float = 0.0  # 0.0-1.0，評估 skill 模板的可靠性
 
@@ -74,6 +75,10 @@ class Hook:
 
     def on_complete(self, ctx: TaskContext) -> None:
         """POST — 任務完成後（預設不做事）"""
+        pass
+
+    def on_exit(self, ctx: TaskContext) -> None:
+        """EXIT — 任務退出階段（帶結構化 exit_reason，預設不做事）"""
         pass
 
 
@@ -147,6 +152,15 @@ def run_on_stream(hooks: list[Hook], event: StreamEvent) -> None:
             hook.on_stream(event)
         except Exception as e:
             logger.warning(f"[Hook] {type(hook).__name__}.on_stream failed: {e}")
+
+
+def run_on_exit(hooks: list[Hook], ctx: TaskContext) -> None:
+    """EXIT — 分發退出事件給所有 Hook，吞住各 Hook exception 不擴散"""
+    for hook in hooks:
+        try:
+            hook.on_exit(ctx)
+        except Exception as e:
+            logger.warning(f"[Hook] {type(hook).__name__}.on_exit failed: {e}")
 
 
 def run_hooks(ctx: TaskContext, hooks: list[Hook] = None) -> None:
