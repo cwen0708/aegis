@@ -15,6 +15,7 @@ import {
   preloadTilesets, buildTilesetInfos, renderObjectLayer,
   type TilesetInfo,
 } from './tilesetRegistry'
+import { HudState, hudConfigFromState } from './memberHud'
 
 // 角色縮放：舊房間 ZOOM=3，Room2 地圖較小所以縮 60%
 const ZOOM = 2
@@ -46,6 +47,7 @@ export default class Room2Scene extends Phaser.Scene {
   private workSlots: TiledWorkSlot[] = []
   private characterSprites: Map<string, Phaser.GameObjects.Container> = new Map()
   private bubbleContainers: Map<number, Phaser.GameObjects.Container> = new Map()
+  private hudContainers: Map<number, Phaser.GameObjects.Container> = new Map()
   private memberCharLoaded: Set<number> = new Set()
   private memberSpriteUrls: Map<number, string> = new Map()
   private memberSpriteScales: Map<number, number> = new Map()
@@ -662,6 +664,52 @@ export default class Room2Scene extends Phaser.Scene {
     return null
   }
 
+  // ── HUD Overlay（ReAct 狀態氣泡） ─────────────────────────────
+  //
+  // Public API：未來 step 3 由 WebSocket 事件呼叫（目前無訂閱）。
+  // 不修改傳入的 Map；狀態變更時先 destroy 舊 container 再重建。
+
+  updateHuds(huds: Map<number, HudState>) {
+    // 移除不存在的 HUD
+    this.hudContainers.forEach((c, id) => {
+      if (!huds.has(id)) { c.destroy(); this.hudContainers.delete(id) }
+    })
+
+    huds.forEach((state, memberId) => {
+      const existing = this.hudContainers.get(memberId)
+      if (existing) {
+        const prev = existing.getData('hudState') as HudState | undefined
+        if (prev && prev.status === state.status && prev.step === state.step) return
+        existing.destroy()
+        this.hudContainers.delete(memberId)
+      }
+
+      const pos = this._findChar(memberId)
+      if (!pos) return
+
+      const cfg = hudConfigFromState(state)
+      const hud = this.add.container(pos.x, pos.y - CHAR_LEGACY_W * 2 * ZOOM - 30)
+      hud.setDepth(999)
+      hud.setData('hudState', { member_id: state.member_id, status: state.status, step: state.step })
+
+      const t = this.add.text(0, 0, cfg.text, {
+        fontFamily: '"Press Start 2P"', fontSize: '14px', color: '#ffffff',
+      }).setOrigin(0.5, 0.5)
+
+      const bw = t.width + 10
+      const bh = t.height + 6
+      const bg = this.add.graphics()
+      bg.fillStyle(0x1a1a2e, 0.92)
+      bg.fillRect(-bw / 2, -bh / 2, bw, bh)
+      bg.lineStyle(1, cfg.color, 1.0)
+      bg.strokeRect(-bw / 2, -bh / 2, bw, bh)
+
+      hud.add([bg, t])
+      hud.setAlpha(cfg.opacity)
+      this.hudContainers.set(memberId, hud)
+    })
+  }
+
   update() {
     // 泡泡跟隨角色
     this.bubbleContainers.forEach((bubble, memberId) => {
@@ -669,6 +717,15 @@ export default class Room2Scene extends Phaser.Scene {
       if (pos) {
         bubble.x = pos.x
         bubble.y = pos.y - CHAR_LEGACY_W * 2 * ZOOM - 6
+      }
+    })
+
+    // HUD 跟隨角色（在 bubble 上方 24px）
+    this.hudContainers.forEach((hud, memberId) => {
+      const pos = this._findChar(memberId)
+      if (pos) {
+        hud.x = pos.x
+        hud.y = pos.y - CHAR_LEGACY_W * 2 * ZOOM - 30
       }
     })
   }
