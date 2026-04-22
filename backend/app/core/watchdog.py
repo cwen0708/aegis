@@ -89,6 +89,24 @@ class WatchdogState(str, Enum):
     RESTART = "restart"
 
 
+class LifecycleState(str, Enum):
+    """進程生命週期狀態（6 個）。"""
+    STARTING = "starting"
+    RUNNING = "running"
+    DEGRADED = "degraded"
+    SUSPECTED = "suspected"
+    RESTARTING = "restarting"
+    CRASHED = "crashed"
+
+
+class HealthState(str, Enum):
+    """進程健康狀態（4 個）。"""
+    HEALTHY = "healthy"
+    STALE = "stale"
+    UNRESPONSIVE = "unresponsive"
+    DEAD = "dead"
+
+
 @dataclass
 class CardWatchdogState:
     """單張卡片的 Watchdog 狀態追蹤。"""
@@ -99,6 +117,8 @@ class CardWatchdogState:
     retry_count: int = 0
     cooldown_until: float = 0.0
     entered_suspected_at: Optional[float] = None
+    lifecycle: LifecycleState = LifecycleState.RUNNING
+    health: HealthState = HealthState.HEALTHY
 
 
 @dataclass
