@@ -271,6 +271,17 @@ def _build_task_md(
         memories_text = "\n".join([f"- {m['content']}" for m in task_memories])
         memories_section = f"\n## 相關過往經驗\n{memories_text}\n"
 
+    # skills section（空 index 時完全不輸出段落，避免留空白標題）
+    skills_section = ""
+    if member_slug:
+        try:
+            from app.core.skill_index import load_skill_index, render_skill_list
+            index = load_skill_index(member_slug, install_root=_INSTALL_ROOT)
+            if index:
+                skills_section = "\n" + render_skill_list(index) + "\n"
+        except Exception as e:
+            logger.warning("Failed to load skill index for %s: %s", member_slug, e)
+
     return f"""# 工作目錄
 你的工作目錄（cwd）是臨時工作區，專案檔案已透過 symlink 連結進來。
 可以直接用相對路徑操作（如 backend/worker.py），改動會直接反映在專案目錄。
@@ -288,7 +299,7 @@ git 操作在此目錄中可直接執行（.git 已連結）。
 {memory_path}
 - short-term/ 短期記憶（近期任務摘要）
 - long-term/ 長期記憶（累積的經驗與模式）
-需要回憶時可以去讀取。{memories_section}
+需要回憶時可以去讀取。{memories_section}{skills_section}
 {stage_section}
 {"# 完成條件（Acceptance Criteria）\n" + acceptance_criteria + "\n\n" if acceptance_criteria else ""}# 本次任務
 {card_content}
