@@ -127,3 +127,79 @@ def build_review_request(
         diff_summary=diff_summary,
         changed_files=changed_files,
     )
+
+
+# ── PRM Gate 多數決審查面板（P2-SH-18 step 1，純函式資料模型，未接線） ─
+
+
+@dataclass(frozen=True)
+class ReviewPanel:
+    """多數決審查面板 — 多個 reviewer 平行投票
+
+    Attributes:
+        source_member_id: 產出方 member ID
+        reviewer_member_ids: 參與投票的 reviewer member ID 清單（不可變 tuple）
+        required_approvals: 通過所需的最少贊成票數（例如 3 取 2）
+        scope: 審查範圍
+    """
+
+    source_member_id: str
+    reviewer_member_ids: tuple[str, ...]
+    required_approvals: int
+    scope: ReviewScope
+
+
+@dataclass(frozen=True)
+class Vote:
+    """單一 reviewer 的投票結果"""
+
+    reviewer_member_id: str
+    approved: bool
+    comment: str = ""
+
+
+@dataclass(frozen=True)
+class VoteTally:
+    """計票結果
+
+    Attributes:
+        approved: 是否達到 required_approvals 門檻
+        approval_count: 贊成票數
+        rejection_count: 反對票數
+        votes: 原始投票（依 reviewer_member_id 字典序排序）
+    """
+
+    approved: bool
+    approval_count: int
+    rejection_count: int
+    votes: tuple[Vote, ...]
+
+
+def tally_votes(
+    votes: tuple[Vote, ...], required_approvals: int,
+) -> VoteTally:
+    """多數決計票 — 純函式，不接線、不寫 DB、不呼叫外部。
+
+    規則：
+    - approval_count = 所有 v.approved 為 True 的票數
+    - approved = approval_count >= required_approvals
+    - 回傳 votes 以 reviewer_member_id 字典序排序（確保可比較）
+    - 重複 reviewer_member_id 視為錯誤 → raise ValueError
+    """
+    seen: set[str] = set()
+    for v in votes:
+        if v.reviewer_member_id in seen:
+            raise ValueError(
+                f"duplicate reviewer_member_id: {v.reviewer_member_id}",
+            )
+        seen.add(v.reviewer_member_id)
+
+    ordered = tuple(sorted(votes, key=lambda v: v.reviewer_member_id))
+    approval_count = sum(1 for v in ordered if v.approved)
+    rejection_count = len(ordered) - approval_count
+    return VoteTally(
+        approved=approval_count >= required_approvals,
+        approval_count=approval_count,
+        rejection_count=rejection_count,
+        votes=ordered,
+    )
