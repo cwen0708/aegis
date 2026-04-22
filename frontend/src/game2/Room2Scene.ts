@@ -15,7 +15,7 @@ import {
   preloadTilesets, buildTilesetInfos, renderObjectLayer,
   type TilesetInfo,
 } from './tilesetRegistry'
-import { HudState, hudConfigFromState } from './memberHud'
+import { hudConfigFromState, type HudState } from './memberHud'
 
 // 角色縮放：舊房間 ZOOM=3，Room2 地圖較小所以縮 60%
 const ZOOM = 2

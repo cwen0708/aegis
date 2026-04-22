@@ -1,5 +1,7 @@
 import { hudConfigFromState } from '../memberHud'
 
+declare const process: { exit(code: number): never }
+
 function assertEqual<T>(actual: T, expected: T, name: string) {
   const ok = JSON.stringify(actual) === JSON.stringify(expected)
   console.log(ok ? `[PASS] ${name}` : `[FAIL] ${name}: got ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`)
