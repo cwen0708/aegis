@@ -9,22 +9,28 @@ from typing import Dict, Any, List, Optional, Tuple
 import urllib.request
 import ssl
 
+from app.core.http_retry import parse_retry_after
+
 logger = logging.getLogger(__name__)
 
 CREDS_FILE = Path.home() / ".claude" / ".credentials.json"
 PROFILES_DIR = Path.home() / ".claude-profiles"
 
-# per-account 快取：{ cache_key: (timestamp, data) }
-_usage_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+# per-account 快取：{ cache_key: (timestamp, data, cooldown_until) }
+# cooldown_until 為 Unix epoch；0.0 表示未設定冷卻（來自 429 Retry-After）
+_usage_cache: Dict[str, Tuple[float, Optional[Dict[str, Any]], float]] = {}
 CACHE_TTL = 120  # 秒：同一帳號 120 秒內不重複查詢
 
 
 def _fetch_usage(token: str, cache_key: str = "") -> Optional[Dict[str, Any]]:
     """用 OAuth token 查詢 Anthropic usage API，帶 TTL 快取避免 429"""
-    # TTL 快取：最近查過就直接回傳
+    # TTL / cooldown 快取：最近查過或仍在 Retry-After 冷卻期就直接回傳
     if cache_key and cache_key in _usage_cache:
-        ts, cached = _usage_cache[cache_key]
-        if time.time() - ts < CACHE_TTL:
+        ts, cached, cooldown_until = _usage_cache[cache_key]
+        now = time.time()
+        if now < cooldown_until:
+            return cached
+        if now - ts < CACHE_TTL:
             return cached
 
     try:
@@ -40,18 +46,42 @@ def _fetch_usage(token: str, cache_key: str = "") -> Optional[Dict[str, Any]]:
         resp = urllib.request.urlopen(req, context=ctx, timeout=10)
         result = json.loads(resp.read())
         if cache_key:
-            _usage_cache[cache_key] = (time.time(), result)
+            _usage_cache[cache_key] = (time.time(), result, 0.0)
         return result
     except urllib.error.HTTPError as e:
-        ts = datetime.now().strftime("%H:%M:%S")
-        if e.code == 429 and cache_key and cache_key in _usage_cache:
-            logger.info(f"[{ts}] [Claude Usage] 429 for {cache_key}, using cached data")
-            return _usage_cache[cache_key][1]
-        logger.warning(f"[{ts}] [Claude Usage] API query failed: {e}")
+        ts_log = datetime.now().strftime("%H:%M:%S")
+        if e.code == 429 and cache_key:
+            retry_after = _extract_retry_after(e)
+            if retry_after is not None:
+                if cache_key in _usage_cache:
+                    prev_ts, prev_data, _ = _usage_cache[cache_key]
+                else:
+                    prev_ts, prev_data = time.time(), None
+                _usage_cache[cache_key] = (prev_ts, prev_data, time.time() + retry_after)
+                logger.info(
+                    f"[{ts_log}] [Claude Usage] 429 for {cache_key}, "
+                    f"cooldown {retry_after:.0f}s, using cached data"
+                )
+                return prev_data
+            if cache_key in _usage_cache:
+                logger.info(f"[{ts_log}] [Claude Usage] 429 for {cache_key}, using cached data")
+                return _usage_cache[cache_key][1]
+        logger.warning(f"[{ts_log}] [Claude Usage] API query failed: {e}")
         return None
     except Exception as e:
-        ts = datetime.now().strftime("%H:%M:%S")
-        logger.warning(f"[{ts}] [Claude Usage] API query failed: {e}")
+        ts_log = datetime.now().strftime("%H:%M:%S")
+        logger.warning(f"[{ts_log}] [Claude Usage] API query failed: {e}")
+        return None
+
+
+def _extract_retry_after(err: urllib.error.HTTPError) -> Optional[float]:
+    """從 HTTPError 抽 Retry-After header 並解析（缺欄位 / 無法解析 → None）"""
+    try:
+        hdrs = getattr(err, "headers", None)
+        if hdrs is None:
+            return None
+        return parse_retry_after(hdrs.get("Retry-After"))
+    except Exception:
         return None
 
 

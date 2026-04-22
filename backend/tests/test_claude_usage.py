@@ -159,14 +159,14 @@ class TestFetchUsage:
 
     @patch("app.core.claude_usage.urllib.request.urlopen")
     def test_cache_hit_no_request(self, mock_urlopen):
-        _usage_cache["acct1"] = (time.time(), {"cached": True})
+        _usage_cache["acct1"] = (time.time(), {"cached": True}, 0.0)
         result = _fetch_usage("tok", cache_key="acct1")
         assert result == {"cached": True}
         mock_urlopen.assert_not_called()
 
     @patch("app.core.claude_usage.urllib.request.urlopen")
     def test_cache_expired_refetch(self, mock_urlopen):
-        _usage_cache["acct1"] = (time.time() - CACHE_TTL - 1, {"old": True})
+        _usage_cache["acct1"] = (time.time() - CACHE_TTL - 1, {"old": True}, 0.0)
         mock_urlopen.return_value = self._mock_response({"new": True})
         result = _fetch_usage("tok", cache_key="acct1")
         assert result == {"new": True}
@@ -174,7 +174,7 @@ class TestFetchUsage:
 
     @patch("app.core.claude_usage.urllib.request.urlopen")
     def test_429_with_cache_fallback(self, mock_urlopen):
-        _usage_cache["acct1"] = (time.time() - CACHE_TTL - 1, {"stale": True})
+        _usage_cache["acct1"] = (time.time() - CACHE_TTL - 1, {"stale": True}, 0.0)
         mock_urlopen.side_effect = urllib.error.HTTPError(
             url="", code=429, msg="Too Many Requests", hdrs=None, fp=None
         )
