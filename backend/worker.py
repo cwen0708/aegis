@@ -112,6 +112,7 @@ STALE_RUNNING_TIMEOUT = 3900  # running 卡視為死卡的閾值（秒）= task 
 from app.core.executor import PROVIDERS, build_command
 from app.core.executor.providers import get_provider_config, get_provider
 from app.core.executor.emitter import clean_ansi as _clean_ansi
+from app.core.executor.exit_reason import enrich_result_with_exit_reason
 
 
 # ==========================================
@@ -810,13 +811,13 @@ def run_task_pty_windows(
                         output = "".join(output_lines)
                         duration_ms = int((time.time() - start_time) * 1000)
                         save_task_log(card_id, card_title, project_name, provider_name, member_id, "timeout", output, {"duration_ms": duration_ms})
-                        return {
+                        return enrich_result_with_exit_reason({
                             "status": "timeout",
                             "output": output,
                             "provider": provider_name,
                             "exit_code": -1,
                             "token_info": {"duration_ms": duration_ms},
-                        }
+                        })
 
                     chunk = pty_process.read(512)
                     if chunk:
@@ -939,13 +940,13 @@ def run_task_pty_windows(
 
     save_task_log(card_id, card_title, project_name, provider_name, member_id, status, actual_output, token_info)
 
-    return {
+    return enrich_result_with_exit_reason({
         "status": status,
         "output": actual_output,
         "provider": provider_name,
         "exit_code": exit_code,
         "token_info": token_info,
-    }
+    })
 
 
 def run_task_subprocess(
@@ -1017,13 +1018,13 @@ def run_task_subprocess(
                     output = "".join(output_lines)
                     duration_ms = int((time.time() - start_time) * 1000)
                     save_task_log(card_id, card_title, project_name, provider_name, member_id, "timeout", output, {"duration_ms": duration_ms})
-                    return {
+                    return enrich_result_with_exit_reason({
                         "status": "timeout",
                         "output": output,
                         "provider": provider_name,
                         "exit_code": -1,
                         "token_info": {"duration_ms": duration_ms},
-                    }
+                    })
 
         proc.wait()
 
@@ -1061,13 +1062,13 @@ def run_task_subprocess(
 
         save_task_log(card_id, card_title, project_name, provider_name, member_id, status, actual_output, token_info)
 
-        return {
+        return enrich_result_with_exit_reason({
             "status": status,
             "output": actual_output,
             "provider": provider_name,
             "exit_code": proc.returncode,
             "token_info": token_info,
-        }
+        })
 
     except Exception as e:
         logger.exception(f"[Task {card_id}] Subprocess execution failed: {e}")
