@@ -87,3 +87,29 @@ async def restart_channels():
         return {"status": "ok", "message": f"已重啟 {count} 個頻道", "active_channels": count}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/channels/{channel_name}/start")
+async def start_channel(channel_name: str):
+    """啟動單一頻道（已 running 時冪等 no-op）"""
+    from app.channels import channel_manager
+    try:
+        ok = await channel_manager.start_channel(channel_name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    if not ok:
+        raise HTTPException(status_code=400, detail=f"Unknown or unregistered channel: {channel_name}")
+    return {"status": "ok", "channel": channel_name, "action": "started"}
+
+
+@router.post("/channels/{channel_name}/stop")
+async def stop_channel(channel_name: str):
+    """停止單一頻道"""
+    from app.channels import channel_manager
+    try:
+        ok = await channel_manager.stop_channel(channel_name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    if not ok:
+        raise HTTPException(status_code=400, detail=f"Unknown or unregistered channel: {channel_name}")
+    return {"status": "ok", "channel": channel_name, "action": "stopped"}

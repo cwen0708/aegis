@@ -160,6 +160,75 @@ class ChannelManager:
         """取得所有頻道實例（供 webhook 使用）"""
         return list(self.channels.values())
 
+    async def start_channel(self, name: str) -> bool:
+        """
+        啟動單一已註冊頻道
+
+        Args:
+            name: 頻道名稱（對應 ChannelBase.PLATFORM）
+
+        Returns:
+            True 代表成功啟動或已在運行；False 代表未知 channel
+        """
+        channel = self.channels.get(name)
+        if channel is None:
+            logger.warning(f"[Manager] start_channel: unknown channel '{name}'")
+            return False
+
+        # 已有 outbound task 視為已啟動，冪等 no-op
+        existing = self._outbound_tasks.get(name)
+        if existing and not existing.done():
+            logger.info(f"[Manager] start_channel: '{name}' already running, skip")
+            return True
+
+        # 確保 _running 為 True，outbound loop 才不會立即結束
+        self._running = True
+
+        try:
+            await channel.start()
+            self._outbound_tasks[name] = asyncio.create_task(
+                self._outbound_loop(channel)
+            )
+            logger.info(f"[Manager] Channel started: {name}")
+            return True
+        except Exception as e:
+            logger.error(f"[Manager] Failed to start {name}: {e}")
+            return False
+
+    async def stop_channel(self, name: str) -> bool:
+        """
+        停止單一頻道（cancel outbound task、呼叫 channel.stop()）
+
+        Args:
+            name: 頻道名稱
+
+        Returns:
+            True 代表成功停止；False 代表未知 channel
+        """
+        channel = self.channels.get(name)
+        if channel is None:
+            logger.warning(f"[Manager] stop_channel: unknown channel '{name}'")
+            return False
+
+        # 先取消 outbound task
+        task = self._outbound_tasks.pop(name, None)
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.warning(f"[Manager] outbound task for '{name}' ended with: {e}")
+
+        try:
+            await channel.stop()
+            logger.info(f"[Manager] Channel stopped: {name}")
+            return True
+        except Exception as e:
+            logger.error(f"[Manager] Failed to stop {name}: {e}")
+            return False
+
     async def restart_all(self):
         """重啟所有頻道（停止 → 清空 → 重新載入 → 啟動）"""
         logger.info("[Manager] Restarting all channels...")
